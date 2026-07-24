@@ -499,6 +499,7 @@ version = "0.0.1"
 source = { editable = "." }
 dependencies = [
     { name = "pandas" },
+    { name = "pyyaml" },
 ]
 
 [package.optional-dependencies]
@@ -515,6 +516,7 @@ requires-dist = [
     { name = "pandas", specifier = ">=2.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.7" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
 ]
 provides-extras = ["dev"]

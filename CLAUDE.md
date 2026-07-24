@@ -43,13 +43,18 @@ adding code, and extend them rather than working around them:
 **Package layout — one home per concern; don't let things pile up flat in `portia/`:**
 
 - `portia/core/` — shared seams: `io.py` (loading) · `serialize.py` (compact JSON evidence)
-- `portia/checks/` — the deterministic checks layer: `profiling.py`, `join.py`; entity-res next.
-  A check + its `render_*` live together; add new checks here in that shape.
+- `portia/checks/` — the deterministic checks layer (read-only **diagnosis**): `profiling.py`,
+  `join.py`; entity-res next. A check + its `render_*` live together; add new checks in that shape.
+- `portia/ops/` — the execution layer (**produces** data): `join.py`'s `apply_join`. Every op
+  returns an `OpResult` (frame + unsuppressable provenance/drop report). Same swap seam as checks.
+- `portia/spec.py` — the durable, git-diffable **spec**: sources + decided steps + `expect`;
+  `run_spec` re-executes and detects drift. The residue that makes this a product, not a script.
 - `portia/fixtures/` — kept mock data (a builder per module, registered in `__init__`)
-- `portia/cli/` — play surfaces: `python -m portia.cli.<tool>` (e.g. `portia.cli.profile`)
+- `portia/cli/` — play surfaces: `python -m portia.cli.<tool>` (e.g. `profile`, `join`, `run`)
 
-Rule of thumb: **`core` = reused everywhere, `checks` = the analysis, `cli` = human edge.** A new
-file that's none of these probably belongs in one of them, not loose in `portia/`.
+Rule of thumb: **`core` = reused everywhere · `checks` = diagnosis · `ops` = execution ·
+`spec` = the durable artifact · `cli` = human edge.** A new file that's none of these probably
+belongs in one of them, not loose in `portia/`.
 
 ## Branching — never work on `main` directly
 

@@ -1,0 +1,22 @@
+# Example portia spec. Paths are relative to the project root (run from there):
+#   uv run python -m portia.cli.run specs/sales_join.yaml
+#
+# The `expect` block records what the join report predicted when this decision
+# was made. Change a source and re-run to watch drift get caught.
+version: 1
+
+sources:
+  orders: data/mock/sales_orders.csv
+  customers: data/mock/sales_customers.csv
+
+steps:
+  - id: orders_with_customers
+    op: join
+    left: orders
+    right: customers
+    keys: [customer_id]   # `keys`, not `on`: `on` is a reserved boolean in YAML
+    how: left             # decision: keep every order, even unmatched ones
+    expect:
+      result_rows: 10
+      left_dropped: 0
+      right_dropped: 1
