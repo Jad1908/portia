@@ -6,8 +6,8 @@ Add a new fixture: write its builder in a module here and register it in
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import pandas as pd
 

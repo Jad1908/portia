@@ -31,8 +31,11 @@ def messy_customers(n: int = 40, seed: int = 7) -> pd.DataFrame:
     names[1] = names[2] = names[0]
 
     amounts = [
-        (f" {round(float(rng.uniform(10, 9999)), 2)} " if i % 5 == 0
-         else f"{round(float(rng.uniform(10, 9999)), 2)}")
+        (
+            f" {round(float(rng.uniform(10, 9999)), 2)} "
+            if i % 5 == 0
+            else f"{round(float(rng.uniform(10, 9999)), 2)}"
+        )
         for i in range(n)
     ]
     amounts[3] = amounts[2]  # one repeated amount -> not unique

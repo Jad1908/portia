@@ -13,8 +13,9 @@ checks layer").
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import pandas as pd
 
@@ -29,8 +30,7 @@ def load_frame(path: str | Path, **kwargs: Any) -> pd.DataFrame:
     if loader is None:
         supported = ", ".join(sorted(_LOADERS))
         raise ValueError(
-            f"unsupported data format {path.suffix!r} for {path.name} "
-            f"(supported: {supported})"
+            f"unsupported data format {path.suffix!r} for {path.name} (supported: {supported})"
         )
     return loader(path, **kwargs)
 

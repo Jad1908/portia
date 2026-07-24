@@ -27,8 +27,8 @@ from pandas.api import types as ptypes
 
 from portia.core.serialize import round_float, to_jsonable
 
-SAMPLE_KEYS = 5       # example unmatched keys shown per side
-LOW_COVERAGE = 0.5    # left match rate below this -> "low_overlap"
+SAMPLE_KEYS = 5  # example unmatched keys shown per side
+LOW_COVERAGE = 0.5  # left match rate below this -> "low_overlap"
 
 
 def join_report(
@@ -65,7 +65,7 @@ def join_report(
     dropped_left = L["null_rows"] + int(left_only["l"].sum())
     dropped_right = R["null_rows"] + int(right_only["r"].sum())
 
-    max_left_fanout = int(shared["r"].max()) if len(shared) else 0   # one left row -> up to N right
+    max_left_fanout = int(shared["r"].max()) if len(shared) else 0  # one left row -> up to N right
     max_right_fanout = int(shared["l"].max()) if len(shared) else 0
 
     relationship = _relationship(L["unique"], R["unique"])
@@ -92,20 +92,41 @@ def join_report(
         "fan_out": {
             "max_left_to_right": max_left_fanout,
             "max_right_to_left": max_right_fanout,
-            "result_per_matched_left": round_float(inner_rows / matched_left) if matched_left else 0.0,
+            "result_per_matched_left": round_float(inner_rows / matched_left)
+            if matched_left
+            else 0.0,
         },
         # Row conservation across every join type — the drop report. left/right
         # dropped = distinct rows from that side that don't survive the join.
         "joins": {
-            "inner": {"result_rows": inner_rows, "left_dropped": dropped_left, "right_dropped": dropped_right},
-            "left": {"result_rows": inner_rows + dropped_left, "left_dropped": 0, "right_dropped": dropped_right},
-            "right": {"result_rows": inner_rows + dropped_right, "left_dropped": dropped_left, "right_dropped": 0},
-            "outer": {"result_rows": inner_rows + dropped_left + dropped_right, "left_dropped": 0, "right_dropped": 0},
+            "inner": {
+                "result_rows": inner_rows,
+                "left_dropped": dropped_left,
+                "right_dropped": dropped_right,
+            },
+            "left": {
+                "result_rows": inner_rows + dropped_left,
+                "left_dropped": 0,
+                "right_dropped": dropped_right,
+            },
+            "right": {
+                "result_rows": inner_rows + dropped_right,
+                "left_dropped": dropped_left,
+                "right_dropped": 0,
+            },
+            "outer": {
+                "result_rows": inner_rows + dropped_left + dropped_right,
+                "left_dropped": 0,
+                "right_dropped": 0,
+            },
         },
     }
     report["flags"] = _flags(
-        report, dropped_left=dropped_left, dropped_right=dropped_right,
-        inner_rows=inner_rows, null_keys=L["null_rows"] + R["null_rows"],
+        report,
+        dropped_left=dropped_left,
+        dropped_right=dropped_right,
+        inner_rows=inner_rows,
+        null_keys=L["null_rows"] + R["null_rows"],
         max_fanout=max(max_left_fanout, max_right_fanout),
     )
     return report

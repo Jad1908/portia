@@ -22,8 +22,8 @@ from portia.core.serialize import round_float, to_jsonable
 
 # Tunables. Kept as module constants so the thresholds behind each flag are one
 # obvious place to read and change, not scattered magic numbers.
-SAMPLE_VALUES = 3          # example non-null values shown per column
-HIGH_NULL_RATE = 0.5       # >= this null rate -> "high_null"
+SAMPLE_VALUES = 3  # example non-null values shown per column
+HIGH_NULL_RATE = 0.5  # >= this null rate -> "high_null"
 HIGH_CARDINALITY_RATE = 0.9  # distinct/non-null >= this on text -> "high_cardinality"
 
 
@@ -73,8 +73,9 @@ def _profile_column(s: pd.Series, *, sample_values: int) -> dict:
         col["max"] = to_jsonable(non_null.max())
         col["mean"] = round_float(float(non_null.mean()))
 
-    col["flags"] = _flags(s, non_null, n=n, n_null=n_null, n_non_null=n_non_null,
-                          n_distinct=n_distinct)
+    col["flags"] = _flags(
+        s, non_null, n=n, n_null=n_null, n_non_null=n_non_null, n_distinct=n_distinct
+    )
     return col
 
 
@@ -102,8 +103,9 @@ def _infer_semantic(s: pd.Series, non_null: pd.Series) -> str:
     return "text" if distinct_rate >= HIGH_CARDINALITY_RATE else "categorical"
 
 
-def _flags(s: pd.Series, non_null: pd.Series, *, n: int, n_null: int,
-           n_non_null: int, n_distinct: int) -> list[str]:
+def _flags(
+    s: pd.Series, non_null: pd.Series, *, n: int, n_null: int, n_non_null: int, n_distinct: int
+) -> list[str]:
     flags: list[str] = []
 
     if n_non_null == 0:
@@ -163,8 +165,10 @@ def render_text(profile: dict) -> str:
     for c in profile["columns"]:
         head = f"  {c['name']}  [{c['inferred']}/{c['dtype']}]"
         lines.append(head)
-        stats = (f"    nulls {c['n_null']} ({c['null_rate']:.0%})   "
-                 f"distinct {c['n_distinct']} ({c['distinct_rate']:.0%})")
+        stats = (
+            f"    nulls {c['n_null']} ({c['null_rate']:.0%})   "
+            f"distinct {c['n_distinct']} ({c['distinct_rate']:.0%})"
+        )
         lines.append(stats)
         if "min" in c:
             lines.append(f"    range {c['min']} … {c['max']}   mean {c['mean']}")
