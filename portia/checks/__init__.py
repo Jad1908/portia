@@ -1,11 +1,13 @@
 """The deterministic checks layer.
 
 Each check is a small pure function `check(inputs) -> structured evidence dict`
-built on `portia.core`. Add new checks (join_report, entity resolution, …) as
-modules here. Rendering for humans lives at the edge (see the check's
-`render_*` and `portia.cli`), never inside a check.
+built on `portia.core`. Add new checks (entity resolution, …) as modules here.
+Rendering for humans lives at the edge — each module has its own `render_text`;
+import it from the module (e.g. `portia.checks.join.render_text`), never inside
+a check.
 """
 
-from portia.checks.profiling import profile_frame, profile_path, render_text
+from portia.checks.join import join_report
+from portia.checks.profiling import profile_frame, profile_path
 
-__all__ = ["profile_frame", "profile_path", "render_text"]
+__all__ = ["profile_frame", "profile_path", "join_report"]
