@@ -45,8 +45,9 @@ adding code, and extend them rather than working around them:
 - `portia/core/` — shared seams: `io.py` (loading) · `serialize.py` (compact JSON evidence)
 - `portia/checks/` — the deterministic checks layer (read-only **diagnosis**): `profiling.py`,
   `join.py`; entity-res next. A check + its `render_*` live together; add new checks in that shape.
-- `portia/ops/` — the execution layer (**produces** data): `join.py`'s `apply_join`. Every op
-  returns an `OpResult` (frame + unsuppressable provenance/drop report). Same swap seam as checks.
+- `portia/ops/` — the execution layer (**produces** data): `apply_join`, `apply_normalize`
+  (coerce/clean columns). Every op returns an `OpResult` (frame + unsuppressable provenance
+  report). Same swap seam as checks.
 - `portia/planner.py` — the **decide** layer: turns a diagnosis into ranked decisions (what to
   ask, with suggested defaults + quantified impact) and a proposed spec step; refuses on blockers.
   The deterministic skeleton the copilot later plugs into.
