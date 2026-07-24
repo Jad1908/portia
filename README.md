@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="the-portia-spider.jpg" alt="portia" width="280">
+  <img src="assets/the-portia-spider.jpg" alt="portia" width="280">
   <h1>portia</h1>
   <p><strong>Start catching the bugs in your data.</strong></p>
 </div>
