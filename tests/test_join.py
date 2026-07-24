@@ -28,8 +28,8 @@ def test_result_rows_by_join_type(report):
     # inner = Σ mult_left*mult_right over shared keys
     #       = 1000:1*1 + 1001:2*2 + 1002:2*1 + 1003:1*1 = 8
     assert report["joins"]["inner"]["result_rows"] == 8
-    assert report["joins"]["left"]["result_rows"] == 10   # + 2 unmatched left
-    assert report["joins"]["right"]["result_rows"] == 9   # + 1 unmatched right
+    assert report["joins"]["left"]["result_rows"] == 10  # + 2 unmatched left
+    assert report["joins"]["right"]["result_rows"] == 9  # + 1 unmatched right
     assert report["joins"]["outer"]["result_rows"] == 11  # + both
 
 
@@ -37,7 +37,7 @@ def test_inner_join_silently_drops_left_rows(report):
     # order 9005 (customer 7777, orphan) + order 9006 (null key) = 2 dropped.
     inner = report["joins"]["inner"]
     assert inner["left_dropped"] == 2
-    assert inner["right_dropped"] == 1   # customer 1004 has no orders
+    assert inner["right_dropped"] == 1  # customer 1004 has no orders
     assert "left_rows_dropped" in report["flags"]
 
 
@@ -55,8 +55,8 @@ def test_overlap_and_samples(report):
     ov = report["overlap"]
     assert ov["n_shared_keys"] == 4
     assert ov["n_left_only_keys"] == 1 and ov["n_right_only_keys"] == 1
-    assert ov["left_coverage"] == 0.75   # 6 of 8 order rows match
-    assert to_jsonable_ok(ov["sample_left_only"])   # 7777 present, JSON-safe
+    assert ov["left_coverage"] == 0.75  # 6 of 8 order rows match
+    assert to_jsonable_ok(ov["sample_left_only"])  # 7777 present, JSON-safe
 
 
 def to_jsonable_ok(values) -> bool:

@@ -10,6 +10,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+    "ruff>=0.6",
+    "mypy>=1.10",
+    "pre-commit>=3.7",
 ]
 
 [build-system]
@@ -21,3 +24,23 @@ packages = ["portia"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# Deliberately not the whole catalogue — the useful, low-noise core:
+# pyflakes (F), pycodestyle (E/W), import sorting (I), pyupgrade (UP),
+# bugbear (B, catches real footguns). No docstring/annotation mandates.
+select = ["E", "W", "F", "I", "UP", "B"]
+ignore = ["E501"]  # line length is the formatter's job, not a lint error
+
+[tool.mypy]
+# No python_version pin — mypy uses the running interpreter, so it parses the
+# installed numpy/pandas stubs (which use 3.12+ syntax) without choking.
+# Lenient on purpose: type things where it helps, don't fight pandas.
+ignore_missing_imports = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+# Not enabled (kept un-strict): disallow_untyped_defs, strict, etc.
