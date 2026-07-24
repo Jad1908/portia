@@ -49,8 +49,9 @@ adding code, and extend them rather than working around them:
   (coerce/clean columns). Every op returns an `OpResult` (frame + unsuppressable provenance
   report). Same swap seam as checks.
 - `portia/planner.py` — the **decide** layer: turns a diagnosis into ranked decisions (what to
-  ask, with suggested defaults + quantified impact) and a proposed spec step; refuses on blockers.
-  The deterministic skeleton the copilot later plugs into.
+  ask, with suggested defaults + quantified impact) and a proposed multi-step plan. On a key
+  dtype mismatch it inserts `normalize`/`to_string` remediation steps and re-diagnoses, rather
+  than dead-ending. The deterministic skeleton the copilot later plugs into.
 - `portia/spec.py` — the durable, git-diffable **spec**: sources + decided steps + `expect`;
   `run_spec` re-executes and detects drift. The residue that makes this a product, not a script.
 - `portia/fixtures/` — kept mock data (a builder per module, registered in `__init__`)
