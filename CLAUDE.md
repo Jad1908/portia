@@ -19,6 +19,38 @@ stack, and product vision. Read them every session, before proposing changes or 
   effort; keep loops token-lean (compact profiles/schemas, never raw data).
 - **Don't start building without agreed direction.** Ask before large scaffolding.
 
+## Code conventions — built to scale, DRY from the start
+
+We will build *many* tools and checks. They must **compose**, not accumulate into spaghetti with
+ten different ways to do the same thing. These seams are non-negotiable; respect them before
+adding code, and extend them rather than working around them:
+
+- **One way to load data.** All file reading goes through **`portia.core.io.load_frame`**
+  (dispatches by format). Never call `pd.read_csv`/`read_parquet` in a tool, check, notebook, or
+  CLI — register new formats in `core/io.py`, once. This is also the pandas → DuckDB/Snowflake seam.
+- **One way to emit evidence.** Checks return **compact, JSON-serializable dicts** built with
+  **`portia.core.serialize`** (`to_jsonable`, `round_float`, `to_json`). Never hand-roll
+  numpy→python coercion or float rounding — `int64` isn't JSON-serializable and `NaN` isn't valid JSON.
+- **Checks are small, pure functions**: `check(inputs) -> structured evidence dict`. Deterministic
+  in, structured out. **No printing, no human-formatting, no side effects inside a check** —
+  rendering for humans/CLI/UI lives at the edge (e.g. `render_text`, the `python -m …` entrypoints).
+- **Compute stays behind the checks layer** so pandas → DuckDB/Snowflake is a swap, not a rewrite
+  (see `TECH_STACK.md`).
+- **Reuse before you add.** Before writing a helper, look for an existing one. Shared helpers live
+  in a shared module; never copy-paste a utility across tools.
+- **Named constants, not magic numbers** — thresholds live as module constants in one obvious place.
+
+**Package layout — one home per concern; don't let things pile up flat in `portia/`:**
+
+- `portia/core/` — shared seams: `io.py` (loading) · `serialize.py` (compact JSON evidence)
+- `portia/checks/` — the deterministic checks layer: `profiling.py` today; `join`, entity-res next.
+  A check + its `render_*` live together; add new checks here in that shape.
+- `portia/fixtures/` — kept mock data (a builder per module, registered in `__init__`)
+- `portia/cli/` — play surfaces: `python -m portia.cli.<tool>` (e.g. `portia.cli.profile`)
+
+Rule of thumb: **`core` = reused everywhere, `checks` = the analysis, `cli` = human edge.** A new
+file that's none of these probably belongs in one of them, not loose in `portia/`.
+
 ## Branching — never work on `main` directly
 
 Unless the user explicitly says otherwise for a given change:
