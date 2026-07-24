@@ -8,7 +8,8 @@ sources, re-executes the steps, and reports **drift** — where today's result
 diverges from what the spec expected (docs/PLAN.md, "readable diff on drift").
 
 Format is intentionally minimal; its schema is meant to *emerge* from real runs,
-so resist over-specifying it. Today one op exists: ``join``.
+so resist over-specifying it. Ops so far: ``join`` and ``normalize`` (the latter
+takes an ``input`` + ``transforms``, so a workflow can clean a column then join).
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ import pandas as pd
 import yaml
 
 from portia.core.io import load_frame
-from portia.ops import apply_join
+from portia.ops import apply_join, apply_normalize
 
 
 @dataclass
@@ -94,6 +95,8 @@ def _run_step(step: dict, frames: dict[str, pd.DataFrame]) -> StepResult:
             left_on=step.get("left_on"),
             right_on=step.get("right_on"),
         )
+    elif op == "normalize":
+        out = apply_normalize(frames[step["input"]], step["transforms"])
     else:
         raise ValueError(f"unknown op {op!r} in step {step.get('id')!r}")
 
@@ -148,22 +151,36 @@ def join_step(
 
 
 def render_text(results: list[StepResult]) -> str:
-    """Human-readable run summary for the CLI."""
+    """Human-readable run summary for the CLI — one block per step, by op."""
     lines = []
     for r in results:
-        p = r.provenance
-        lines.append(f"[{r.id}]  {r.op}  ({p.get('relationship', '')})")
-        lines.append(
-            f"    {p['input_rows']['left']} ⋈ {p['input_rows']['right']} "
-            f"= {p['result_rows']} rows  "
-            f"(left dropped {p['left_dropped']}, right dropped {p['right_dropped']})"
-        )
-        if p["flags"]:
-            lines.append(f"    ⚑ {', '.join(p['flags'])}")
+        lines.append(f"[{r.id}]  {r.op}")
+        lines.extend(_render_step(r))
         if r.has_drift:
             for key, d in r.drift.items():
                 lines.append(f"    ⚠ DRIFT {key}: expected {d['expected']}, got {d['actual']}")
-        else:
+        elif r.provenance.get("op") == "join":
             lines.append("    ✓ matches spec")
         lines.append("")
     return "\n".join(lines)
+
+
+def _render_step(r: StepResult) -> list[str]:
+    p = r.provenance
+    if r.op == "join":
+        return [
+            f"    {p['input_rows']['left']} ⋈ {p['input_rows']['right']} "
+            f"= {p['result_rows']} rows  ({p['relationship']}; "
+            f"left dropped {p['left_dropped']}, right dropped {p['right_dropped']})",
+            *([f"    ⚑ {', '.join(p['flags'])}"] if p["flags"] else []),
+        ]
+    if r.op == "normalize":
+        changes = ", ".join(
+            f"{t['column']}:{t['op']}" + (f"(failed {t['n_failed']})" if t.get("n_failed") else "")
+            for t in p["transforms"]
+        )
+        return [
+            f"    {p['input_rows']} rows  —  {changes}",
+            *([f"    ⚑ {', '.join(p['flags'])}"] if p["flags"] else []),
+        ]
+    return [f"    {p}"]
