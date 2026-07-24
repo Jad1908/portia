@@ -12,6 +12,7 @@ from typing import Callable
 import pandas as pd
 
 from portia.fixtures.customers import messy_customers
+from portia.fixtures.sales import sales_customers, sales_orders
 
 # Repo-root/data/mock — kept on disk (see .gitignore). parents[2] = repo root
 # from portia/fixtures/__init__.py.
@@ -20,9 +21,11 @@ DEFAULT_DIR = Path(__file__).resolve().parents[2] / "data" / "mock"
 # name -> builder. The single place fixtures are registered.
 _FIXTURES: dict[str, Callable[[], pd.DataFrame]] = {
     "messy_customers": messy_customers,
+    "sales_customers": sales_customers,
+    "sales_orders": sales_orders,
 }
 
-__all__ = ["messy_customers", "write_fixtures", "DEFAULT_DIR"]
+__all__ = ["messy_customers", "sales_customers", "sales_orders", "write_fixtures", "DEFAULT_DIR"]
 
 
 def write_fixtures(directory: Path | str = DEFAULT_DIR) -> list[Path]:

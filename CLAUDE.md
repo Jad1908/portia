@@ -43,7 +43,7 @@ adding code, and extend them rather than working around them:
 **Package layout — one home per concern; don't let things pile up flat in `portia/`:**
 
 - `portia/core/` — shared seams: `io.py` (loading) · `serialize.py` (compact JSON evidence)
-- `portia/checks/` — the deterministic checks layer: `profiling.py` today; `join`, entity-res next.
+- `portia/checks/` — the deterministic checks layer: `profiling.py`, `join.py`; entity-res next.
   A check + its `render_*` live together; add new checks here in that shape.
 - `portia/fixtures/` — kept mock data (a builder per module, registered in `__init__`)
 - `portia/cli/` — play surfaces: `python -m portia.cli.<tool>` (e.g. `portia.cli.profile`)
