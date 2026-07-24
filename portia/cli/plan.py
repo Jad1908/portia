@@ -52,8 +52,14 @@ def main() -> None:
     out = Path(args.out)
     spec = load_spec(out) if out.exists() else None
     sources = {left_name: args.left, right_name: args.right}
-    save_spec(add_step(spec, proposal.step, sources), out)
-    print(f"\nrecorded step '{step_id}' → {out}")
+    # Record the whole plan — any remediation steps, then the join. Sources are
+    # registered once; intermediate step outputs are referenced by id.
+    for i, step in enumerate(proposal.steps):
+        spec = add_step(spec, step, sources if i == 0 else {})
+    assert spec is not None  # a plan always has at least the join step
+    save_spec(spec, out)
+    n = len(proposal.steps)
+    print(f"\nrecorded {n} step{'s' if n > 1 else ''} (→ '{step_id}') to {out}")
 
 
 if __name__ == "__main__":

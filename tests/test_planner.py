@@ -3,6 +3,7 @@ and refuses to propose when there's a blocker."""
 
 import pandas as pd
 
+from portia.core.io import load_frame
 from portia.fixtures import sales_customers, sales_orders
 from portia.planner import propose_join_step
 from portia.spec import add_step, run_spec
@@ -38,15 +39,36 @@ def test_decisions_ranked_by_impact():
     assert order.index("join_type") < order.index("null_keys")
 
 
-def test_dtype_mismatch_is_a_blocker():
+def test_dtype_mismatch_is_remediated_not_blocked():
+    # string vs numeric keys -> planner inserts to_string normalize steps.
     left = pd.DataFrame({"k": ["1", "2", "3"], "v": [1, 2, 3]})
     right = pd.DataFrame({"k": [1, 2, 3], "w": [9, 8, 7]})
     p = propose_join_step(left, right, step_id="j", left_name="l", right_name="r", on="k")
-    assert p.blocked is True
-    blocker = next(d for d in p.decisions if d.severity == "blocker")
-    assert blocker.topic == "key_dtype"
-    # blockers rank first
-    assert p.decisions[0].severity == "blocker"
+    assert p.blocked is False
+    # plan is: normalize left keys, normalize right keys, then join.
+    assert [s["op"] for s in p.steps] == ["normalize", "normalize", "join"]
+    assert p.steps[-1]["left"] == "l_keys" and p.steps[-1]["right"] == "r_keys"
+    # the coercion is surfaced, not silent.
+    dtype = next(d for d in p.decisions if d.topic == "key_dtype")
+    assert dtype.severity == "warning"
+
+
+def test_remediated_plan_runs_and_joins(tmp_path):
+    # The 'x' keeps the right key column as text through CSV load, so the
+    # dtype mismatch is real; after to_string, "1"/"2" match.
+    pd.DataFrame({"k": [1, 2, 3], "v": [10, 20, 30]}).to_csv(tmp_path / "l.csv", index=False)
+    pd.DataFrame({"k": ["1", "2", "x"], "w": [9, 8, 7]}).to_csv(tmp_path / "r.csv", index=False)
+
+    left, right = load_frame(tmp_path / "l.csv"), load_frame(tmp_path / "r.csv")
+    p = propose_join_step(left, right, step_id="joined", left_name="l", right_name="r", on="k")
+    assert p.blocked is False
+
+    spec = None
+    for i, step in enumerate(p.steps):
+        spec = add_step(spec, step, {"l": "l.csv", "r": "r.csv"} if i == 0 else {})
+    results = run_spec(spec, base_dir=tmp_path)
+    assert results[-1].provenance["result_rows"] >= 2  # "1" and "2" now match
+    assert results[-1].has_drift is False
 
 
 def test_clean_join_recommends_inner_with_minimal_decisions():

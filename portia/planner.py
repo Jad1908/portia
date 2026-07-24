@@ -1,4 +1,4 @@
-"""Turn a diagnosis into decisions + a proposed spec step (the 'decide' layer).
+"""Turn a diagnosis into decisions + a proposed plan (the 'decide' layer).
 
 This is the bridge from `checks` (what's wrong) to `spec` (what we decided). It
 takes the join report and produces:
@@ -8,10 +8,13 @@ takes the join report and produces:
   quantified stake. This is the deterministic answer to PLAN.md's open problem
   "when to ask vs decide": the engine decides *what* to ask; a copilot will later
   *phrase* it and collect the answer.
-- a **proposed spec step** using the suggested answers.
+- a **proposed plan** — an ordered list of spec steps using the suggested answers.
 
-It **refuses to propose** when a blocker is present (e.g. key dtype mismatch —
-the '123' vs 123 silent-miss): never silently record the wrong thing.
+When a key dtype mismatch would otherwise block the join (the '123' vs 123
+silent-miss), it doesn't dead-end: it **inserts `normalize`/`to_string` steps to
+coerce the keys**, then re-diagnoses on the coerced data so the recorded
+expectations are correct. The coercion is surfaced as a decision, not done
+silently.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ from dataclasses import dataclass, field
 import pandas as pd
 
 from portia.checks.join import join_report
+from portia.ops import apply_normalize
 from portia.spec import join_step
 
 _SEVERITY_RANK = {"blocker": 0, "warning": 1, "info": 2}
@@ -38,9 +42,14 @@ class Decision:
 
 @dataclass
 class Proposal:
-    step: dict
+    steps: list[dict]  # the ordered plan: [normalize…, join]
     decisions: list[Decision] = field(default_factory=list)
     diagnosis: dict = field(default_factory=dict)
+
+    @property
+    def step(self) -> dict:
+        """The join step — the last, and (barring remediation) only step."""
+        return self.steps[-1]
 
     @property
     def blocked(self) -> bool:
@@ -58,21 +67,60 @@ def propose_join_step(
     left_on: str | None = None,
     right_on: str | None = None,
 ) -> Proposal:
-    """Diagnose the join, rank the decisions, and propose a spec step."""
+    """Diagnose the join, remediate a key dtype mismatch if needed, and propose
+    the ordered plan of spec steps plus the ranked decisions."""
     diagnosis = join_report(left, right, on=on, left_on=left_on, right_on=right_on)
-    decisions = _rank(_decisions(diagnosis))
-    how = _recommend_how(diagnosis)
-    step = join_step(
-        step_id,
-        left=left_name,
-        right=right_name,
-        how=how,
-        report=diagnosis,
-        on=on,
-        left_on=left_on,
-        right_on=right_on,
+    steps: list[dict] = []
+    join_left, join_right = left_name, right_name
+    dtype_remediated = False
+
+    if "key_dtype_mismatch" in diagnosis["flags"]:
+        lkeys, rkeys = _key_cols(on, left_on, right_on)
+        left = _coerce_keys(left, lkeys)
+        right = _coerce_keys(right, rkeys)
+        join_left, join_right = f"{left_name}_keys", f"{right_name}_keys"
+        steps.append(_normalize_step(join_left, left_name, lkeys))
+        steps.append(_normalize_step(join_right, right_name, rkeys))
+        # Re-diagnose on the coerced data so the join's expectations are correct.
+        diagnosis = join_report(left, right, on=on, left_on=left_on, right_on=right_on)
+        dtype_remediated = True
+
+    decisions = _rank(_decisions(diagnosis, dtype_remediated=dtype_remediated))
+    steps.append(
+        join_step(
+            step_id,
+            left=join_left,
+            right=join_right,
+            how=_recommend_how(diagnosis),
+            report=diagnosis,
+            on=on,
+            left_on=left_on,
+            right_on=right_on,
+        )
     )
-    return Proposal(step=step, decisions=decisions, diagnosis=diagnosis)
+    return Proposal(steps=steps, decisions=decisions, diagnosis=diagnosis)
+
+
+def _coerce_keys(df: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
+    return apply_normalize(df, [{"column": c, "op": "to_string"} for c in keys]).frame
+
+
+def _normalize_step(step_id: str, input_name: str, keys: list[str]) -> dict:
+    return {
+        "id": step_id,
+        "op": "normalize",
+        "input": input_name,
+        "transforms": [{"column": c, "op": "to_string"} for c in keys],
+    }
+
+
+def _key_cols(on, left_on, right_on) -> tuple[list[str], list[str]]:
+    if on is not None:
+        cols = [on] if isinstance(on, str) else list(on)
+        return cols, cols
+    lk = [left_on] if isinstance(left_on, str) else list(left_on)
+    rk = [right_on] if isinstance(right_on, str) else list(right_on)
+    return lk, rk
 
 
 def _recommend_how(diagnosis: dict) -> str:
@@ -81,13 +129,28 @@ def _recommend_how(diagnosis: dict) -> str:
     return "left" if diagnosis["joins"]["inner"]["left_dropped"] > 0 else "inner"
 
 
-def _decisions(diagnosis: dict) -> list[Decision]:
+def _decisions(diagnosis: dict, *, dtype_remediated: bool = False) -> list[Decision]:
     inner = diagnosis["joins"]["inner"]
     dropped_left = inner["left_dropped"]
     flags = diagnosis["flags"]
     decisions: list[Decision] = []
 
-    if "key_dtype_mismatch" in flags:
+    if dtype_remediated:
+        # The mismatch was auto-fixed; surface it so it isn't done silently.
+        decisions.append(
+            Decision(
+                topic="key_dtype",
+                severity="warning",
+                question=(
+                    "keys had mismatched types — added a to_string coercion so they can join; "
+                    "confirm these are the right keys"
+                ),
+                options=["accept_coercion", "choose_other_keys"],
+                suggested="accept_coercion",
+                impact_rows=diagnosis["left"]["n_rows"],
+            )
+        )
+    elif "key_dtype_mismatch" in flags:  # defensive: unremediated mismatch is a blocker
         lk, rk = diagnosis["key_dtypes"]["left"], diagnosis["key_dtypes"]["right"]
         decisions.append(
             Decision(
@@ -159,14 +222,17 @@ _MARKERS = {"blocker": "⛔", "warning": "⚠", "info": "ℹ"}
 
 def render_text(proposal: Proposal) -> str:
     """Human-readable proposal for the CLI."""
-    step = proposal.step
-    keys = step.get("keys", f"{step.get('left_on')}={step.get('right_on')}")
-    lines = [
-        f"proposed step '{step['id']}':  {step['left']} ⋈ {step['right']}  "
-        f"on {keys}  →  how={step['how']}",
-        "",
-        "decisions (most impactful first):",
-    ]
+    lines = ["proposed plan:"]
+    for s in proposal.steps:
+        if s["op"] == "normalize":
+            cols = ", ".join(t["column"] for t in s["transforms"])
+            lines.append(f"  • normalize {s['input']} → {s['id']}  (to_string: {cols})")
+        else:
+            keys = s.get("keys", f"{s.get('left_on')}={s.get('right_on')}")
+            lines.append(
+                f"  • join {s['left']} ⋈ {s['right']} on {keys}  →  how={s['how']}  [id: {s['id']}]"
+            )
+    lines += ["", "decisions (most impactful first):"]
     for d in proposal.decisions:
         lines.append(f"  {_MARKERS[d.severity]} [{d.topic}] {d.question}")
         lines.append(
@@ -174,7 +240,7 @@ def render_text(proposal: Proposal) -> str:
         )
     lines.append("")
     if proposal.blocked:
-        lines.append("⛔ BLOCKED — resolve the blocker(s) above before this step can be recorded.")
+        lines.append("⛔ BLOCKED — resolve the blocker(s) above before this can be recorded.")
     else:
         lines.append("→ ready to record with the suggested answers.")
     return "\n".join(lines)
