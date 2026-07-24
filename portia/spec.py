@@ -49,6 +49,19 @@ def save_spec(spec: dict, path: str | Path) -> None:
         yaml.safe_dump(spec, f, sort_keys=False, default_flow_style=False)
 
 
+def add_step(spec: dict | None, step: dict, sources: dict[str, str]) -> dict:
+    """Append a step to a spec (creating one if needed), registering its sources.
+
+    Pure — returns a new dict. Used to record a proposed step incrementally,
+    building a multi-step workflow one decision at a time.
+    """
+    spec = dict(spec or {})
+    spec.setdefault("version", 1)
+    spec["sources"] = {**(spec.get("sources") or {}), **sources}
+    spec["steps"] = [*(spec.get("steps") or []), step]
+    return spec
+
+
 def run_spec(spec: dict, *, base_dir: str | Path = ".") -> list[StepResult]:
     """Load the sources, execute the steps in order, and detect drift per step.
 
