@@ -1,0 +1,41 @@
+customer_id,name,country,signup_amount,notes,source,legacy_col,mixed_ref
+1000,Firm A0,US, 6254.08 ,note 0,import_v2,,0
+1001,Firm A0,FR,8972.27,,import_v2,,ref-1
+1002,Firm A0,UK,7758.32,,import_v2,,2
+1003,Firm D3,UK,7758.32,note 3,import_v2,,ref-3
+1004,Firm E4,DE,3008.36,,import_v2,,4
+1005,Firm F5,US, 8735.93 ,,import_v2,,ref-5
+1006,Firm G6,UK,62.6,note 6,import_v2,,6
+1007,Firm H7,UK,8213.25,,import_v2,,ref-7
+1008,Firm I8,US,7971.93,,import_v2,,8
+1009,Firm J9,US,4684.2,note 9,import_v2,,ref-9
+1010,Firm K10,DE, 3036.99 ,,import_v2,,10
+1011,Firm L11,US,N/A,,import_v2,,ref-11
+1012,Firm M12,FR,2555.89,note 12,import_v2,,12
+1013,Firm N13,DE,4455.87,,import_v2,,ref-13
+1014,Firm O14,DE,5049.93,,import_v2,,14
+1015,Firm P15,US, 5538.89 ,note 15,import_v2,,ref-15
+1016,Firm Q16,US,9954.05,,import_v2,,16
+1017,Firm R17,US,7927.9,,import_v2,,ref-17
+1018,Firm S18,US,6224.95,note 18,import_v2,,18
+1019,Firm T19,UK,9888.72,,import_v2,,ref-19
+1020,Firm U20,US, 2160.72 ,,import_v2,,20
+1021,Firm V21,FR,1610.36,note 21,import_v2,,ref-21
+1022,Firm W22,US,6128.66,,import_v2,,22
+1023,Firm X23,US,448.94,,import_v2,,ref-23
+1024,Firm Y24,DE,366.41,note 24,import_v2,,24
+1025,Firm Z25,DE, 5153.22 ,,import_v2,,ref-25
+1026,Firm A26,US,4666.93,,import_v2,,26
+1027,Firm B27,FR,pending,note 27,import_v2,,ref-27
+1028,Firm C28,US,6295.34,,import_v2,,28
+1029,Firm D29,FR,5145.52,,import_v2,,ref-29
+1030,Firm E30,DE, 4973.27 ,note 30,import_v2,,30
+1031,Firm F31,DE,2482.43,,import_v2,,ref-31
+1032,Firm G32,FR,127.81,,import_v2,,32
+1033,Firm H33,UK,1931.91,note 33,import_v2,,ref-33
+1034,Firm I34,FR,6922.71,,import_v2,,34
+1035,Firm J35,FR, 2013.86 ,,import_v2,,ref-35
+1036,Firm K36,US,3701.3,note 36,import_v2,,36
+1037,Firm L37,UK,47.3,,import_v2,,ref-37
+1038,Firm M38,FR,8301.35,,import_v2,,38
+1039,Firm N39,US,1552.91,note 39,import_v2,,ref-39
