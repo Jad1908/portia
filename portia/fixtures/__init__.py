@@ -12,6 +12,7 @@ from pathlib import Path
 import pandas as pd
 
 from portia.fixtures.customers import messy_customers
+from portia.fixtures.hotels import city_events, hotels, otb
 from portia.fixtures.sales import sales_customers, sales_orders
 
 # Repo-root/data/mock — kept on disk (see .gitignore). parents[2] = repo root
@@ -23,9 +24,22 @@ _FIXTURES: dict[str, Callable[[], pd.DataFrame]] = {
     "messy_customers": messy_customers,
     "sales_customers": sales_customers,
     "sales_orders": sales_orders,
+    # the hotel forecasting project — see portia/fixtures/hotels.py
+    "hotels": hotels,
+    "otb": otb,
+    "city_events": city_events,
 }
 
-__all__ = ["messy_customers", "sales_customers", "sales_orders", "write_fixtures", "DEFAULT_DIR"]
+__all__ = [
+    "DEFAULT_DIR",
+    "city_events",
+    "hotels",
+    "messy_customers",
+    "otb",
+    "sales_customers",
+    "sales_orders",
+    "write_fixtures",
+]
 
 
 def write_fixtures(directory: Path | str = DEFAULT_DIR) -> list[Path]:
