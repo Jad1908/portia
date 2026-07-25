@@ -69,9 +69,21 @@ def _profile_column(s: pd.Series, *, sample_values: int) -> dict:
     }
 
     if ptypes.is_numeric_dtype(s) and not ptypes.is_bool_dtype(s) and n_non_null:
+        # describe()-style stats: shape + spread, so the agent can reason about a
+        # numeric column without seeing it (skew, outliers, tight-vs-spread).
+        q = non_null.quantile([0.25, 0.5, 0.75])
         col["min"] = to_jsonable(non_null.min())
         col["max"] = to_jsonable(non_null.max())
         col["mean"] = round_float(float(non_null.mean()))
+        col["std"] = round_float(float(non_null.std())) if n_non_null > 1 else None
+        col["q25"] = to_jsonable(q.loc[0.25])
+        col["median"] = to_jsonable(q.loc[0.5])
+        col["q75"] = to_jsonable(q.loc[0.75])
+    elif n_non_null and not ptypes.is_bool_dtype(s):
+        # describe()'s 'top'/'freq' for non-numeric columns: the modal value.
+        counts = non_null.value_counts()
+        col["top"] = to_jsonable(counts.index[0])
+        col["top_freq"] = int(counts.iloc[0])
 
     col["flags"] = _flags(
         s, non_null, n=n, n_null=n_null, n_non_null=n_non_null, n_distinct=n_distinct
@@ -171,7 +183,13 @@ def render_text(profile: dict) -> str:
         )
         lines.append(stats)
         if "min" in c:
-            lines.append(f"    range {c['min']} … {c['max']}   mean {c['mean']}")
+            lines.append(
+                f"    range {c['min']} … {c['max']}   mean {c['mean']}   "
+                f"median {c['median']}   std {c['std']}"
+            )
+            lines.append(f"    quartiles {c['q25']} / {c['median']} / {c['q75']}")
+        if "top" in c:
+            lines.append(f"    most common: {c['top']!r} ×{c['top_freq']}")
         lines.append(f"    e.g. {c['samples']}")
         if c["flags"]:
             lines.append(f"    ⚑ {', '.join(c['flags'])}")
