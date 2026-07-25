@@ -16,7 +16,7 @@ from typing import Any
 
 from claude_agent_sdk import ToolAnnotations, create_sdk_mcp_server, tool
 
-from portia.agent import handlers
+from portia.agent import handlers, prompts
 from portia.core.serialize import to_json
 
 SERVER_NAME = "portia"
@@ -42,9 +42,7 @@ def _failed(exc: Exception) -> dict[str, Any]:
 
 @tool(
     "get_context",
-    "Re-read the project context, groups and source index. You ALREADY HAVE this "
-    "in your system prompt — call it only to pick up changes made during this "
-    "session, such as after a source is indexed or interpreted.",
+    prompts.tool("get_context"),
     {},
     annotations=_READ_ONLY,
 )
@@ -57,11 +55,7 @@ async def get_context(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     "describe_source",
-    "One source's semantic map: its summary, every column name, the role recorded "
-    "for it, and its quality flags — no statistics. Cheap. This is usually enough "
-    "to judge whether a source is relevant, which columns could be keys, and how "
-    "two sources might relate. Start here when you need more than the one-line "
-    "index in your system prompt.",
+    prompts.tool("describe_source"),
     {"source": str},
     annotations=_READ_ONLY,
 )
@@ -74,12 +68,7 @@ async def describe_source(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     "profile_source",
-    "One source's full measured facts: per-column dtype, null rate, distinct "
-    "count, min/max, quartiles, sample values and quality flags. Expensive — the "
-    "detailed rung. Call it when you need the actual numbers (interpreting a "
-    "source, judging whether a key is usable, quantifying a data-quality "
-    "problem), not to browse. These facts are unranked; deciding which matter is "
-    "your job.",
+    prompts.tool("profile_source"),
     {"source": str},
     annotations=_READ_ONLY,
 )
@@ -92,11 +81,7 @@ async def profile_source(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     "set_group",
-    "Record that several sources belong together, and the context they share — "
-    "same vendor and the same quirks, one system's export, the tables that make "
-    "up one workflow. Use it when you learn something true of a set of sources "
-    "that no single source's entry can hold. The group's context then travels "
-    "with all of them.",
+    prompts.tool("set_group"),
     {
         "type": "object",
         "properties": {
@@ -128,11 +113,7 @@ async def set_group(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     "set_interpretation",
-    "Record what a source IS: a short prose summary, and a role for each column "
-    "(e.g. identifier, measure, timestamp, category, free_text). This is durable "
-    "— it becomes the project's memory and is what a future session reads instead "
-    "of re-deriving. Writes judgment only; it never alters a measured fact. "
-    "Pass 'summary', 'roles' (a column->role object), or both.",
+    prompts.tool("set_interpretation"),
     {
         "type": "object",
         "properties": {
@@ -167,12 +148,7 @@ async def set_interpretation(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     "join_findings",
-    "Measure what joining two sources on given keys would actually do: key overlap "
-    "and coverage, the relationship (1:1 / 1:many / many:many), fan-out, how many "
-    "rows each join type would produce and drop — plus example unmatched rows, "
-    "null-key rows, and worst fan-out keys. Call this BEFORE deciding anything "
-    "about a merge. The findings are unranked: whether a dropped row matters is "
-    "your call, not the check's.",
+    prompts.tool("join_findings"),
     {
         "type": "object",
         "properties": {
@@ -209,21 +185,7 @@ async def join_findings(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     "record_step",
-    "Append a decided step to the spec — the durable, re-runnable record of what "
-    "was done to the data and why. The step is a dict: 'id', 'op' ('join' or "
-    "'normalize'), the op's fields, an 'expect' block of provenance values you "
-    "predict, and a 'rationale' explaining the decision. "
-    "STEPS CHAIN: a step's output is stored under its 'id', and a later step may "
-    "name that id as its 'left', 'right' or 'input' to receive the resulting "
-    "table. That is how multi-hop work is built — join A to B, then join THAT "
-    "result to C. You do not need an external tool for this. "
-    "join fields: 'left', 'right', 'keys' (or 'left_on'/'right_on' when the key "
-    "columns are named differently), 'how'. Note 'keys', not 'on' — 'on' is a "
-    "reserved boolean in YAML. "
-    "normalize fields: 'input', and 'transforms' as a list of "
-    "{'column': <name>, 'op': 'strip'|'lower'|'to_numeric'|'to_string'} — the key "
-    "is 'op', not 'transform'. "
-    "Base 'expect' on what the check measured; run_spec will hold you to it.",
+    prompts.tool("record_step"),
     {
         "type": "object",
         "properties": {
@@ -243,10 +205,7 @@ async def record_step(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     "run_spec",
-    "Re-execute a spec and report what each step actually did, plus drift against "
-    "its 'expect' block. Use it to check your own work right after recording a "
-    "step: if the numbers disagree with what you predicted, say so rather than "
-    "quietly adjusting the expectation.",
+    prompts.tool("run_spec"),
     {"spec_path": str},
     annotations=_READ_ONLY,
 )

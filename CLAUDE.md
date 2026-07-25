@@ -47,6 +47,18 @@ adding code, and extend them rather than working around them:
   rendering for humans/CLI/UI lives at the edge (e.g. `render_text`, the `python -m …` entrypoints).
 - **Compute stays behind the checks layer** so pandas → DuckDB/Snowflake is a swap, not a rewrite
   (see `TECH_STACK.md`).
+- **One home for prompts — inline prompt text is forbidden.** Every string the model reads lives
+  in **`portia/agent/prompts/`** as markdown and is loaded with `prompts.load` / `prompts.tool` /
+  `prompts.task`. Never write instruction text into a Python string — not a module constant, not a
+  `@tool` description, not an f-string, not "just this once". This is enforced:
+  `tests/test_agent_prompts.py` fails on any non-docstring string literal over 200 characters
+  anywhere in `portia/`, and separately on any `@tool` that doesn't take its description from a
+  file. Docstrings are exempt — they're written for us, not the model.
+  *Why it's a rule and not a preference:* `record_step`'s description once lost a sentence saying
+  steps chain, and the copilot concluded portia couldn't express a two-hop join and told the user
+  to go use dbt instead. Prompt text is the least stable, most performance-sensitive part of the
+  system; it has to be diffable and reviewable as prose. (Schema *field* labels like
+  `"Indexed source name"` stay inline — see `prompts/README.md` for that boundary.)
 - **Reuse before you add.** Before writing a helper, look for an existing one. Shared helpers live
   in a shared module; never copy-paste a utility across tools.
 - **Named constants, not magic numbers** — thresholds live as module constants in one obvious place.
@@ -67,7 +79,9 @@ adding code, and extend them rather than working around them:
   the SDK meets the engine · `context.py` = the L1 project brief · `events.py` = SDK messages
   normalized to portia events (the seam the UI sits on) · `ask.py` = intercepts `AskUserQuestion`
   so decisions reach the human · `session.py` = the options block + client lifecycle ·
-  `prompts/copilot.md` = the system prompt as prose. Requires the `agent` extra.
+  `prompts/` = **every instruction the model reads** — L0 system prompt, the L1 brief
+  template, one file per tool description, one per CLI task. Nothing the copilot reads is
+  embedded in a Python string; see `prompts/README.md`. Requires the `agent` extra.
   - **No built-in filesystem or shell tools**, so it physically cannot read raw data — its whole
     view is the checks' evidence.
   - **Context arrives in layers, cheapest first.** L0 how-to-work + L1 *this project* (prose,

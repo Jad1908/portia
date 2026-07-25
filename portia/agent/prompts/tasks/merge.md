@@ -1,0 +1,2 @@
+<!-- placeholders: {left}, {right}, {spec} -->
+I want to merge {left!r} and {right!r} into one table I can trust. Read the project context and both sources, work out the join, and measure what it would actually do. Surface anything I should decide rather than picking for me — dropped rows, duplicate keys, fan-out. Then record the decision as a step in {spec!r} with an `expect` block and a `rationale`, and run the spec to check the numbers came out the way you predicted.

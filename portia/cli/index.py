@@ -22,24 +22,9 @@ import asyncio
 import sys
 from pathlib import Path
 
+from portia.agent import prompts
 from portia.catalog import index_source, init_project, load_catalog, render_source
 from portia.core.io import supported_suffixes
-
-INTERPRET = (
-    "These sources were just indexed: {names}. Interpret each one: record what "
-    "the data is and a role for every column. Then, if any of them clearly belong "
-    "together — same system, same vendor, one workflow — record that as a group "
-    "with the context they share. Ask me only about something the project "
-    "description leaves genuinely ambiguous."
-)
-
-ASK_FOR_CONTEXT = """\
-No project context yet — portia needs it before it can read your data.
-
-Describe this project in a few lines: what the work is, what these files are for,
-what you're trying to produce. Not the data's schema — the *why*. This is what
-lets the copilot tell a customer key from a postcode.
-"""
 
 
 def resolve(target: str) -> list[Path]:
@@ -73,7 +58,7 @@ def ensure_project_context(portia_dir: str) -> None:
             'Run once interactively, or pass --init "…".'
         )
 
-    print(ASK_FOR_CONTEXT)
+    print(prompts.load("tasks/ask_for_context"))
     lines: list[str] = []
     print("  (finish with an empty line)")
     while (line := input("  > ").rstrip()) or not lines:
@@ -125,7 +110,7 @@ def main() -> None:
     print()
     asyncio.run(
         run_and_render(
-            INTERPRET.format(names=", ".join(repr(n) for n in names)),
+            prompts.task("index_batch", names=", ".join(repr(n) for n in names)),
             model=args.model or DEFAULT_MODEL,
             cwd=".",
             portia_dir=args.dir,

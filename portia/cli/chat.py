@@ -16,7 +16,7 @@ import argparse
 import asyncio
 from typing import Any
 
-from portia.agent import events
+from portia.agent import events, prompts
 
 # --- rendering (formatting lives at the edge, never in the engine) -----------
 
@@ -89,22 +89,6 @@ async def confirm_write(tool_name: str, tool_input: dict) -> bool:
 
 # --- entrypoint --------------------------------------------------------------
 
-INTERPRET = (
-    "Interpret the source {source!r}. Read the project context and this source's "
-    "facts, then record what the data is: a prose summary and a role for every "
-    "column. Ask me only if the project context leaves something genuinely "
-    "ambiguous that would change what you write."
-)
-
-MERGE = (
-    "I want to merge {left!r} and {right!r} into one table I can trust. Read the "
-    "project context and both sources, work out the join, and measure what it "
-    "would actually do. Surface anything I should decide rather than picking for "
-    "me — dropped rows, duplicate keys, fan-out. Then record the decision as a "
-    "step in {spec!r} with an `expect` block and a `rationale`, and run the spec "
-    "to check the numbers came out the way you predicted."
-)
-
 
 async def run_and_render(prompt: str, *, model: str, cwd: str, portia_dir: str) -> None:
     """Drive one copilot turn and render its events. Shared with `cli.index`."""
@@ -143,9 +127,10 @@ def main() -> None:
     from portia.agent.session import DEFAULT_MODEL
 
     if args.command == "interpret":
-        prompt = INTERPRET.format(source=args.source)
+        prompt = prompts.task("interpret", source=args.source)
     elif args.command == "merge":
-        prompt = MERGE.format(
+        prompt = prompts.task(
+            "merge",
             left=args.left,
             right=args.right,
             spec=args.spec or f"specs/{args.left}.yaml",
