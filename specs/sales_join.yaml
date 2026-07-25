@@ -16,6 +16,10 @@ steps:
     right: customers
     keys: [customer_id]   # `keys`, not `on`: `on` is a reserved boolean in YAML
     how: left             # decision: keep every order, even unmatched ones
+    rationale: >-
+      left, not inner: 2 orders reference customers missing from the dimension
+      table (and 1 has a null key). An inner join would silently drop real
+      orders — surfaced by join_findings, so we keep them as unmatched.
     expect:
       result_rows: 10
       left_dropped: 0
