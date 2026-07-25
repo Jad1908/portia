@@ -28,6 +28,11 @@ infrastructure and frontend surface, stay in Python wherever we can, and keep th
   (`isna`, `nunique`, `describe`, dtypes), join row-conservation and fan-out (`merge` +
   `groupby`/`value_counts`), duplicate detection (`duplicated`). You build the whole local phase
   in what you already know.
+- **DuckDB — for scale, and now also for the escape hatch.** *Decided 2026-07-25: agent-authored
+  custom steps are DuckDB SQL, which makes DuckDB a core dependency earlier than "only for scale"
+  below anticipated. Reasoning in `BACKLOG.md` → "The escape hatch"; the short version is that SQL
+  is the only option that keeps the spec reviewable in a PR, keeps the filesystem/network away
+  from the agent, stays stable across versions, and survives the pandas → DuckDB → Snowflake seam.*
 - **DuckDB only for scale.** pandas has one hard limit — it loads everything into RAM — and the
   product's premise is data too big to eyeball / too big to be local. DuckDB is the local answer:
   `pip install duckdb`, **embedded (no server)**, reads larger-than-memory CSV/Parquet, and

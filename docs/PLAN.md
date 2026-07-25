@@ -55,6 +55,18 @@ the interactive copilot loop over it (the questions-and-insights UX, emitting a 
 a decision stream) → the surface where those questions are asked and answered. The interactive
 layer is **core, not deferred**; its shape is still to be designed (the user's vision).
 
+**Where we are (2026-07-25).** The engine is built (`checks`, `ops`, `spec`, `catalog`) and so is
+the copilot loop (`portia/agent/` — in-process MCP server, layered context, `AskUserQuestion`
+routed to a human, spec writing, chat CLI). **It does not yet work well enough to trust:** on the
+hotel fixture it ships a training table missing an entire data source and calls it done. Read
+**`EVALUATION.md`** before building on top of it — that is the honest state of play, and it names
+which failures are engine defects and which are the verification loop not existing yet.
+
+Next, in order: the **verification loop** (code measures the output, the agent judges) and the
+**escape hatch** (DuckDB SQL — decided; see `BACKLOG.md`), which is deliberately built *before*
+more ops so that what the agent reaches for tells us which ops to promote. The three-panel surface
+stays deferred until the loop is trustworthy.
+
 ## Budget & model discipline
 
 Claude **Pro only** — no API budget, no Max. Turned into a principle: **develop on a cheaper,

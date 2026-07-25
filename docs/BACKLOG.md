@@ -32,10 +32,25 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
 
 ## Spec — the durable artifact
 
-- **Escape-hatch language (open decision).** How custom steps are expressed. Options: (a) **DuckDB
-  SQL-first** + a narrow Python escape — reproducible, reviewable, matches the scale story
-  *(leaning here)*; (b) **captured Python** pure-functions — maximally expressive, harder to make
-  reproducible/reviewable; (c) **both, first-class**. Whatever wins, the provenance harness wraps it.
+- **The escape hatch — DuckDB SQL. Decided 2026-07-25; not yet built.** The agent authors a
+  `SELECT` against the named frames; the step is captured verbatim and wrapped by the same
+  provenance harness as any other op. **Build this before writing more ops** (`filter`, `coerce`,
+  `dedupe`, `impute`): writing them now means designing an API for a user we haven't watched, and
+  what the agent reaches for in the hatch is what tells us which ops deserve promotion.
+  Why SQL over captured Python: the spec's whole claim is being reviewable in a PR, and a 40-line
+  pandas function in YAML isn't; arbitrary Python hands back the filesystem and network access
+  that `session.py` deliberately withholds; SQL semantics are stable across versions where pandas'
+  are not (`BACKLOG` already flagged environment pinning as unsolved for captured Python); and it
+  is the only option that survives the pandas → DuckDB → Snowflake seam instead of needing a
+  rewrite per step. The cost is real — stats-heavy transforms will be awkward — **and that
+  friction is the instrument**: an expressive hatch is a worse measuring device because it has no
+  gradient. Consequence to record: DuckDB becomes a core dependency, earlier than
+  `TECH_STACK.md`'s "only for scale" anticipated.
+  **The line this moves:** an agent authoring transforms is the agent authoring analysis, which
+  the project has forbidden. What preserves the guarantee is that a custom step is captured
+  verbatim, measured by the same harness, and is a *step* rather than a hidden reasoning act — so
+  the rule tightens to **the agent may author a transform; it may never author a number.** Put
+  that in `CLAUDE.md` when the hatch ships.
 - **Structured `evidence` field** — beyond free-text `rationale`: the key numbers that justified a
   decision (`{skew: 2.3, n_outliers: 40}`), so drift can later check whether the *reason* still holds.
 - **Decision lifecycle** — a clean `accept`/re-baseline command (update `expect` intentionally,
@@ -60,9 +75,18 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
   declaration still matches a real run — so it can't rot silently.*
 - ~~**Context flow**~~ — *shipped: L0+L1 composed into the system prompt (`agent/context.py`), the
   L2/L3 split (`describe_source` / `profile_source`), groups wired end to end, first-run stdin
-  prompt, and bulk index+interpret in one session. Verified by behaviour change: the same merge
-  that recommended a **left** join context-blind recommends **inner** with the project brief
-  present, quoting the user's own billing constraint.*
+  prompt, and bulk index+interpret in one session.* **Shipped but NOT validated** — the demo that
+  appeared to prove it used a brief that stated the answer outright. See `EVALUATION.md` → "A
+  retracted result". The plumbing is right; the evidence was not.
+- **The verification loop** — the copilot currently declares success on a table missing an entire
+  source (`EVALUATION.md` → Current state). After an op runs, **code** computes post-conditions on
+  the output frame — reuse `checks.profiling.profile_frame`, not `describe()`/`head()`, which
+  would hand it raw rows and break the token-lean guarantee — and the agent judges those
+  measurements. It must be able to fail in a way the agent didn't author: asked "was that good?"
+  it says yes every time. Specifics earned the hard way: `no_matches` is a **hard stop**, not an
+  advisory flag; a recorded step is **immutable** (the agent tried to rewrite `expect` to match
+  reality and was blocked only by accident); hard iteration cap, then escalate to the human rather
+  than loop.
 - **Brief growth at scale** — L1 is ~30 tokens per source. Fine at 3, unproven at 50; the source
   index will need to become searchable or group-scoped rather than exhaustive.
 - **One tidy home for every injected instruction.** Prompt text currently lives in five places:
