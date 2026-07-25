@@ -7,6 +7,8 @@ stack, and product vision. Read them every session, before proposing changes or 
 - `docs/TECH_STACK.md` — the tech stack and the reasoning behind it
 - `docs/VISION.md` — product vision & UI flows (the three-panel app)
 - `docs/brief.md` — the original working brief (foundational context)
+- `docs/BACKLOG.md` — parking lot of deferred ideas, by stream. Not required reading; scan it when
+  picking the next thing to build, and **add to it whenever we postpone something mid-work.**
 
 ## How we work here
 
