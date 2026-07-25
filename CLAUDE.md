@@ -3,7 +3,9 @@
 **Before doing any work in this repo, read these docs.** They define the project's direction,
 stack, and product vision. Read them every session, before proposing changes or writing code:
 
-- `docs/PLAN.md` — direction: vision, non-negotiables, build order, open problems
+- `docs/PLAN.md` — direction: vision, non-negotiables, build order, **where we are now**
+- `docs/EVALUATION.md` — how we measure the copilot, and its **current honest score**. Read this
+  before trusting any claim that a part of the loop works; it also records a result we retracted.
 - `docs/TECH_STACK.md` — the tech stack and the reasoning behind it
 - `docs/VISION.md` — product vision & UI flows (the three-panel app)
 - `docs/brief.md` — the original working brief (foundational context)
