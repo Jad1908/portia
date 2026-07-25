@@ -1,0 +1,8 @@
+city_name,event_date,event_name,expected_attendance
+Paris,2026-06-12,Tech Summit,15000
+ paris,2026-06-12,Marathon,40000
+Barcelona,2026-06-12,Mobile Congress,90000
+Amsterdam,2026-06-12,Canal Festival,25000
+Amsterdam,2026-06-12,Design Week,12000
+Lyon,2026-06-12,Food Fair,8000
+Barcelona,2026-06-13,Mobile Congress,90000

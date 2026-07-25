@@ -1,0 +1,116 @@
+# Answer key for the hotel forecasting fixture.
+#
+# This file is the asset. The harness around it is cheap; deciding what "right"
+# means is the expensive part, and it has to be written by a human who knows the
+# domain — there is no free oracle for any of it (see docs/BACKLOG.md).
+#
+# `brief` is the ONLY context the copilot gets. It states the domain and the
+# goal and says nothing about keys, join paths, or granularity. If a brief ever
+# needs to mention a column name to make a task solvable, the brief is leaking
+# the answer and the test is measuring reading comprehension instead of
+# inference.
+
+brief: >-
+  I'm working on a revenue forecasting project for a hotel company. We build
+  models at the granularity of individual hotels. We have a few data sources:
+  the on-the-books bookings, information about external events, and reference
+  information about the hotels themselves. I want one table I can train on.
+
+sources: [hotels, otb, city_events]
+
+# --- what a correct reading looks like -------------------------------------
+
+join_path:
+  # Bookings reach events only *through* the hotel dimension. `otb` has no city
+  # column at all, so an agent that inspects only otb and city_events finds no
+  # join and must reason its way to the bridge.
+  - from: otb
+    to: hotels
+    on: {left: hotel_id, right: hotel_id}
+  - from: hotels
+    to: city_events
+    on: {left: city, right: city_name} # differently named, must be matched by meaning
+    also_on: {left: stay_date, right: event_date} # from the otb side, after the first hop
+
+grain:
+  # The forecasting grain the brief asks for. Events are city-level, so joining
+  # them in without aggregating changes the grain of the training table.
+  target: one row per hotel per stay_date
+  hazard: city_events is city-level, not hotel-level
+
+# --- traps, and whether missing one is fatal --------------------------------
+
+must_surface:
+  - id: event_fan_out
+    fatal: true
+    what: >-
+      Amsterdam has two events on 2026-06-12 (Canal Festival, Design Week).
+      Joining otb to city_events on city+date multiplies those booking rows and
+      double-counts revenue. The result still looks plausible, which is what
+      makes it the worst failure here. Visible in the raw data.
+    correct_handling: >-
+      Aggregate events to one row per city+date before joining (a count, or a
+      summed/max attendance), or otherwise avoid multiplying booking rows.
+
+  - id: city_spelling
+    fatal: true
+    what: >-
+      city_events has " paris" (leading space, lowercase) where hotels has
+      "Paris". A join without normalizing silently drops that event.
+    correct_handling: normalize case and whitespace on both sides before joining
+
+  - id: fan_out_created_by_cleaning
+    fatal: true
+    depends_on: city_spelling
+    what: >-
+      Once the Paris spelling is normalized, Paris ALSO has two events that day
+      (Tech Summit, Marathon) — a fan-out that did not exist in the raw data.
+      An agent that cleans and then immediately joins double-counts Paris.
+    correct_handling: >-
+      Re-run the check after normalizing, before joining. This is the trap that
+      only a verify-after-acting loop catches; scored separately from
+      event_fan_out so a failure to normalize doesn't mask it.
+
+  - id: orphan_booking
+    fatal: false
+    what: booking B0011 references hotel_id H999, which is not in hotels
+    correct_handling: surfaced as a decision, not silently dropped
+
+  - id: hotel_without_bookings
+    fatal: false
+    what: H005 (Canal View) has no otb rows — newly opened
+    correct_handling: noted; matters for whether the join is inner or left
+
+  - id: city_without_hotels
+    fatal: false
+    what: Lyon has an event but no hotels — unusable external data
+    correct_handling: noted as expected, not treated as an error
+
+# --- judgement calls: no single right answer, but a right *shape* -----------
+
+should_ask_about:
+  # Genuinely the user's call: the brief does not determine these, and answering
+  # them wrong changes the training table materially. Asking is correct; deciding
+  # silently is the failure.
+  - how to handle the two revenue outliers (B0012 at 52000, B0013 at 61500 —
+    roughly 20x typical). A group booking and a probable data-entry error look
+    identical in the data.
+  - whether hotels with no bookings should appear in the training table as zeros
+    or be excluded
+  - how to represent multiple same-day events per city once aggregated
+
+should_not_ask_about:
+  # Answerable from the checks alone. Asking here is noise, and a copilot that
+  # asks about everything is worse than useless.
+  - which columns are the join keys (derivable from the profiles)
+  - how many rows each join type produces (join_findings measures it)
+  - whether city needs normalizing (the flags say so)
+
+# --- scoring ----------------------------------------------------------------
+
+pass_criteria:
+  - found both hops of join_path, with city <-> city_name matched by meaning
+  - surfaced every must_surface entry marked fatal, before recording a step
+  - recorded a spec that runs clean (no drift)
+  - asked about at least one should_ask_about topic
+  - asked about none of the should_not_ask_about topics
