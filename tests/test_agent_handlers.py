@@ -9,10 +9,11 @@ a tool result breaks the loop at runtime with no useful error.
 import json
 
 import pytest
+import yaml
 
 from portia.agent import handlers
 from portia.catalog import index_source, init_project
-from portia.fixtures import messy_customers
+from portia.fixtures import messy_customers, sales_customers, sales_orders
 
 
 @pytest.fixture
@@ -23,6 +24,23 @@ def project(tmp_path):
     d = tmp_path / ".portia"
     init_project("we run EU events and reconcile vendor signups", portia_dir=d)
     index_source(csv, portia_dir=d)
+    return str(d)
+
+
+@pytest.fixture
+def sales(tmp_path, monkeypatch):
+    """Two indexed sources built to fire: an orphan key, a null key, a dup key.
+
+    Runs from ``tmp_path`` so the spec's relative source paths resolve the way
+    they would in a real project.
+    """
+    monkeypatch.chdir(tmp_path)
+    sales_orders().to_csv("orders.csv", index=False)
+    sales_customers().to_csv("customers.csv", index=False)
+    d = tmp_path / ".portia"
+    init_project("order reconciliation", portia_dir=d)
+    index_source("orders.csv", portia_dir=d)
+    index_source("customers.csv", portia_dir=d)
     return str(d)
 
 
@@ -92,3 +110,122 @@ def test_set_interpretation_records_judgment(project):
 def test_set_interpretation_rejects_an_empty_write(project):
     with pytest.raises(ValueError, match="nothing to record"):
         handlers.set_interpretation("customers", portia_dir=project)
+
+
+# --- the merge loop ---------------------------------------------------------
+
+
+def test_join_findings_surfaces_the_problems_without_ranking_them(sales):
+    out = handlers.join_findings("orders", "customers", keys=["customer_id"], portia_dir=sales)
+    json.dumps(out)
+
+    report, evidence = out["report"], out["evidence"]
+    # the facts the fixtures are built to expose
+    assert report["overlap"]["n_left_only_keys"] == 1  # orphan 7777
+    assert report["left"]["n_null_keys"] == 1
+    assert not report["right"]["unique_keys"]  # customer 1001 is duplicated
+    assert "fan_out" in report["flags"]
+    # example rows, so the human can see what would be dropped
+    assert evidence["unmatched_left_rows"] and evidence["null_key_left_rows"]
+
+    # facts only — the check never says which of these matters
+    assert not {"score", "priority", "impact", "recommendation"} & set(report)
+
+
+def test_record_step_writes_a_runnable_spec_and_registers_sources(sales, tmp_path):
+    out = handlers.record_step(
+        "specs/orders.yaml",
+        {
+            "id": "orders_with_customers",
+            "op": "join",
+            "left": "orders",
+            "right": "customers",
+            "keys": ["customer_id"],
+            "how": "left",
+            "rationale": "keep unmatched orders rather than silently dropping them",
+            "expect": {"result_rows": 10, "left_dropped": 0},
+        },
+        portia_dir=sales,
+    )
+    json.dumps(out)
+
+    doc = yaml.safe_load((tmp_path / "specs" / "orders.yaml").read_text())
+    assert doc["sources"] == {"orders": "orders.csv", "customers": "customers.csv"}
+    assert doc["steps"][0]["how"] == "left"
+
+    # and it actually runs, with the prediction holding
+    run = handlers.run_spec("specs/orders.yaml")
+    json.dumps(run)
+    assert run["has_drift"] is False
+    assert run["steps"][0]["provenance"]["result_rows"] == 10
+
+
+def test_run_spec_reports_drift_rather_than_hiding_it(sales):
+    handlers.record_step(
+        "specs/orders.yaml",
+        {
+            "id": "j",
+            "op": "join",
+            "left": "orders",
+            "right": "customers",
+            "keys": ["customer_id"],
+            "how": "left",
+            "expect": {"result_rows": 999},  # a prediction that won't hold
+        },
+        portia_dir=sales,
+    )
+    run = handlers.run_spec("specs/orders.yaml")
+    assert run["has_drift"] is True
+    assert run["steps"][0]["drift"]["result_rows"] == {"expected": 999, "actual": 10}
+
+
+@pytest.mark.parametrize(
+    ("step", "message"),
+    [
+        ({"op": "join", "left": "orders", "right": "customers"}, "needs an 'id'"),
+        ({"id": "x", "op": "frobnicate"}, "unknown op"),
+        ({"id": "x", "op": "join", "left": "orders"}, "needs right"),
+        ({"id": "x", "op": "join", "left": "orders", "right": "customers"}, "needs 'keys'"),
+        ({"id": "x", "op": "normalize", "input": "orders"}, "needs transforms"),
+    ],
+)
+def test_record_step_rejects_a_malformed_step(sales, step, message):
+    """Validation is code's job; what the step *says* is the agent's."""
+    with pytest.raises(ValueError, match=message):
+        handlers.record_step("specs/orders.yaml", step, portia_dir=sales)
+
+
+def test_record_step_rejects_an_expect_on_a_field_the_op_never_reports(sales):
+    """Regression: an invented `expect` key drifts forever and teaches you to ignore drift.
+
+    A real run produced `expect: {left_rows_kept: 8, right_rows_joined: 5, ...}`
+    — none of which a join reports — then explained the resulting drift away as
+    "nominal". Which fields to assert is judgment; whether a field *exists* is a
+    fact, so it's checked here rather than hoped for in the prompt.
+    """
+    with pytest.raises(ValueError, match="never reports"):
+        handlers.record_step(
+            "specs/orders.yaml",
+            {
+                "id": "x",
+                "op": "join",
+                "left": "orders",
+                "right": "customers",
+                "keys": ["customer_id"],
+                "expect": {"result_rows": 10, "left_rows_kept": 8},
+            },
+            portia_dir=sales,
+        )
+
+
+def test_record_step_rejects_a_duplicate_id(sales):
+    step = {
+        "id": "dup",
+        "op": "join",
+        "left": "orders",
+        "right": "customers",
+        "keys": ["customer_id"],
+    }
+    handlers.record_step("specs/orders.yaml", step, portia_dir=sales)
+    with pytest.raises(ValueError, match="already in this spec"):
+        handlers.record_step("specs/orders.yaml", dict(step), portia_dir=sales)

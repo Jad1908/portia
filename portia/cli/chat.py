@@ -96,6 +96,15 @@ INTERPRET = (
     "ambiguous that would change what you write."
 )
 
+MERGE = (
+    "I want to merge {left!r} and {right!r} into one table I can trust. Read the "
+    "project context and both sources, work out the join, and measure what it "
+    "would actually do. Surface anything I should decide rather than picking for "
+    "me — dropped rows, duplicate keys, fan-out. Then record the decision as a "
+    "step in {spec!r} with an `expect` block and a `rationale`, and run the spec "
+    "to check the numbers came out the way you predicted."
+)
+
 
 async def _run(prompt: str, *, model: str, cwd: str) -> None:
     from portia.agent import session
@@ -119,6 +128,11 @@ def main() -> None:
     interpret = sub.add_parser("interpret", help="have the copilot read what a source is")
     interpret.add_argument("source", help="name of an indexed source (its file stem)")
 
+    merge = sub.add_parser("merge", help="have the copilot work out a join between two sources")
+    merge.add_argument("left", help="name of an indexed source")
+    merge.add_argument("right", help="name of an indexed source")
+    merge.add_argument("--spec", default=None, help="spec to write to (default: specs/<left>.yaml)")
+
     freeform = sub.add_parser("ask", help="ask the copilot anything about the project")
     freeform.add_argument("prompt", help="what to ask")
 
@@ -126,7 +140,16 @@ def main() -> None:
 
     from portia.agent.session import DEFAULT_MODEL
 
-    prompt = INTERPRET.format(source=args.source) if args.command == "interpret" else args.prompt
+    if args.command == "interpret":
+        prompt = INTERPRET.format(source=args.source)
+    elif args.command == "merge":
+        prompt = MERGE.format(
+            left=args.left,
+            right=args.right,
+            spec=args.spec or f"specs/{args.left}.yaml",
+        )
+    else:
+        prompt = args.prompt
     if args.dir != ".portia":
         prompt += f"\n\n(The catalog directory for this project is {args.dir!r}.)"
 

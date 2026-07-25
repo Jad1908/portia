@@ -22,10 +22,43 @@ turns them into a tool result the agent can react to.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
-from portia import catalog
+from portia import catalog, spec
+from portia.checks.join import join_findings as _join_findings
 from portia.checks.profiling import profile_path
+from portia.core.io import load_frame
+
+#: Ops the spec knows how to execute, and what each step must carry. Validation
+#: only — which op to *use* is the agent's call.
+_REQUIRED_FIELDS = {
+    "join": ("left", "right"),
+    "normalize": ("input", "transforms"),
+}
+
+#: What each op actually reports, and therefore the only things an ``expect``
+#: block can assert against. An expectation on a field the op never emits drifts
+#: forever — ``_drift`` compares it to ``None`` on every run — which trains
+#: everyone to ignore drift. *Which* of these to assert is judgment; whether a
+#: field exists at all is a fact, so it gets checked here rather than hoped for
+#: in the prompt. Keep in sync with the ops' provenance dicts.
+_EXPECTABLE = {
+    "join": {
+        "flags",
+        "how",
+        "input_rows",
+        "keys",
+        "left_dropped",
+        "matches_prediction",
+        "op",
+        "predicted_rows",
+        "relationship",
+        "result_rows",
+        "right_dropped",
+    },
+    "normalize": {"flags", "input_rows", "op", "transforms"},
+}
 
 
 def get_context(portia_dir: str = catalog.DEFAULT_DIR) -> dict:
@@ -102,6 +135,132 @@ def set_interpretation(
         "summary_written": summary is not None,
         "roles_written": sorted(roles or {}),
     }
+
+
+# --- the merge loop ---------------------------------------------------------
+
+
+def join_findings(
+    left: str,
+    right: str,
+    keys: list[str] | None = None,
+    left_on: list[str] | None = None,
+    right_on: list[str] | None = None,
+    portia_dir: str = catalog.DEFAULT_DIR,
+) -> dict:
+    """What joining two sources on these keys would actually do — plus the rows.
+
+    Returns key-level facts (overlap, coverage, relationship, fan-out, and the
+    row counts each `how` would produce) *and* example rows: the unmatched ones,
+    the null-key ones, the worst fan-out keys. Nothing here is ranked or scored.
+    Whether a dropped row is a catastrophe or a non-event depends on the goal,
+    which only you have.
+
+    Call this **before** deciding anything about a merge.
+    """
+    return _join_findings(
+        _frame(left, portia_dir),
+        _frame(right, portia_dir),
+        on=keys,
+        left_on=left_on,
+        right_on=right_on,
+    )
+
+
+def record_step(
+    spec_path: str,
+    step: dict,
+    portia_dir: str = catalog.DEFAULT_DIR,
+) -> dict:
+    """Append a decided step to the spec — the durable residue of this session.
+
+    The step carries the decision (`op`, keys, `how`), an `expect` block stating
+    what you predict the numbers will be, and a `rationale` saying *why*. The
+    `expect` is what makes it falsifiable later: `run_spec` re-executes and
+    reports drift against it. State what the check told you, not what you hope.
+
+    Validation and serialization happen here, in code. The *content* is yours.
+    """
+    path = Path(spec_path)
+    doc: dict[str, Any] = (
+        spec.load_spec(path) if path.exists() else {"version": 1, "sources": {}, "steps": []}
+    )
+    sources: dict[str, str] = doc.setdefault("sources", {})
+    steps: list[dict] = doc.setdefault("steps", [])
+
+    _validate_step(step, existing=steps)
+    for ref in _source_refs(step, known_steps={s["id"] for s in steps}):
+        sources[ref] = _source_path(ref, portia_dir)
+
+    steps.append(step)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    spec.save_spec(doc, path)
+    return {"spec": str(path), "step_id": step["id"], "n_steps": len(steps)}
+
+
+def run_spec(spec_path: str) -> dict:
+    """Re-execute a spec and report what each step actually did, plus any drift.
+
+    Use it to check your own work: record a step, run it, and see whether the
+    numbers match what you predicted. Drift is a disagreement between the spec's
+    `expect` and today's result — not necessarily an error, but always worth
+    surfacing rather than smoothing over.
+    """
+    results = spec.run_spec(spec.load_spec(spec_path))
+    return {
+        "spec": spec_path,
+        "steps": [
+            {"id": r.id, "op": r.op, "provenance": r.provenance, "drift": r.drift} for r in results
+        ],
+        "has_drift": any(r.has_drift for r in results),
+    }
+
+
+# --- internals --------------------------------------------------------------
+
+
+def _frame(source: str, portia_dir: str):
+    """Load an indexed source. All reading goes through ``core.io.load_frame``."""
+    return load_frame(_source_path(source, portia_dir))
+
+
+def _source_path(source: str, portia_dir: str) -> str:
+    cat = catalog.load_catalog(portia_dir)
+    entry = cat["sources"].get(source)
+    if entry is None:
+        known = ", ".join(cat["sources"]) or "(none indexed)"
+        raise ValueError(f"no indexed source {source!r} — have: {known}")
+    return str(entry["source"])
+
+
+def _validate_step(step: dict, *, existing: list[dict]) -> None:
+    if not step.get("id"):
+        raise ValueError("step needs an 'id'")
+    if step["id"] in {s["id"] for s in existing}:
+        raise ValueError(f"step id {step['id']!r} is already in this spec — pick another")
+
+    op = step.get("op")
+    if op not in _REQUIRED_FIELDS:
+        raise ValueError(f"unknown op {op!r} — have: {', '.join(_REQUIRED_FIELDS)}")
+    missing = [f for f in _REQUIRED_FIELDS[op] if not step.get(f)]
+    if missing:
+        raise ValueError(f"{op} step needs {', '.join(missing)}")
+    if op == "join" and not (step.get("keys") or (step.get("left_on") and step.get("right_on"))):
+        raise ValueError("join step needs 'keys', or both 'left_on' and 'right_on'")
+
+    unknown = sorted(set(step.get("expect") or {}) - _EXPECTABLE[op])
+    if unknown:
+        raise ValueError(
+            f"expect refers to {', '.join(repr(u) for u in unknown)}, which {op} never "
+            f"reports — so it would drift on every run. Assert only measured fields: "
+            f"{', '.join(sorted(_EXPECTABLE[op]))}"
+        )
+
+
+def _source_refs(step: dict, *, known_steps: set[str]) -> list[str]:
+    """Source names the step reads, minus anything produced by an earlier step."""
+    refs = [step.get(field) for field in ("left", "right", "input")]
+    return [r for r in refs if r and r not in known_steps]
 
 
 def _is_interpreted(entry: dict) -> bool:

@@ -110,6 +110,90 @@ async def set_interpretation(args: dict[str, Any]) -> dict[str, Any]:
         return _failed(exc)
 
 
+@tool(
+    "join_findings",
+    "Measure what joining two sources on given keys would actually do: key overlap "
+    "and coverage, the relationship (1:1 / 1:many / many:many), fan-out, how many "
+    "rows each join type would produce and drop — plus example unmatched rows, "
+    "null-key rows, and worst fan-out keys. Call this BEFORE deciding anything "
+    "about a merge. The findings are unranked: whether a dropped row matters is "
+    "your call, not the check's.",
+    {
+        "type": "object",
+        "properties": {
+            "left": {"type": "string", "description": "Indexed source name"},
+            "right": {"type": "string", "description": "Indexed source name"},
+            "keys": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Key column(s) present in both sources",
+            },
+            "left_on": {"type": "array", "items": {"type": "string"}},
+            "right_on": {"type": "array", "items": {"type": "string"}},
+            "portia_dir": {"type": "string"},
+        },
+        "required": ["left", "right"],
+    },
+    annotations=_READ_ONLY,
+)
+async def join_findings(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return _ok(
+            handlers.join_findings(
+                args["left"],
+                args["right"],
+                keys=args.get("keys"),
+                left_on=args.get("left_on"),
+                right_on=args.get("right_on"),
+                **_dir(args),
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        return _failed(exc)
+
+
+@tool(
+    "record_step",
+    "Append a decided step to the spec — the durable, re-runnable record of what "
+    "was done to the data and why. The step is a dict: 'id', 'op' ('join' or "
+    "'normalize'), the op's fields (join: 'left', 'right', 'keys' or "
+    "'left_on'/'right_on', 'how'; normalize: 'input', 'transforms'), an 'expect' "
+    "block of provenance values you predict, and a 'rationale' explaining the "
+    "decision. Base 'expect' on what the check measured — run_spec will hold you "
+    "to it. Note 'keys', not 'on' ('on' is a reserved boolean in YAML).",
+    {
+        "type": "object",
+        "properties": {
+            "spec_path": {"type": "string", "description": "e.g. specs/orders.yaml"},
+            "step": {"type": "object", "description": "The step to append"},
+            "portia_dir": {"type": "string"},
+        },
+        "required": ["spec_path", "step"],
+    },
+)
+async def record_step(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return _ok(handlers.record_step(args["spec_path"], args["step"], **_dir(args)))
+    except Exception as exc:  # noqa: BLE001
+        return _failed(exc)
+
+
+@tool(
+    "run_spec",
+    "Re-execute a spec and report what each step actually did, plus drift against "
+    "its 'expect' block. Use it to check your own work right after recording a "
+    "step: if the numbers disagree with what you predicted, say so rather than "
+    "quietly adjusting the expectation.",
+    {"spec_path": str},
+    annotations=_READ_ONLY,
+)
+async def run_spec(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return _ok(handlers.run_spec(args["spec_path"]))
+    except Exception as exc:  # noqa: BLE001
+        return _failed(exc)
+
+
 def _dir(args: dict[str, Any]) -> dict[str, str]:
     """Pass ``portia_dir`` through only when the caller set it, so handler defaults win."""
     return {"portia_dir": args["portia_dir"]} if args.get("portia_dir") else {}
@@ -117,8 +201,8 @@ def _dir(args: dict[str, Any]) -> dict[str, str]:
 
 #: Read-only checks — safe to auto-approve. Writes are listed separately so the
 #: session can route them through the permission flow instead.
-READ_TOOLS = [get_context, profile_source]
-WRITE_TOOLS = [set_interpretation]
+READ_TOOLS = [get_context, profile_source, join_findings, run_spec]
+WRITE_TOOLS = [set_interpretation, record_step]
 
 ALL_TOOLS = [*READ_TOOLS, *WRITE_TOOLS]
 

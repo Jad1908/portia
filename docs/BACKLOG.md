@@ -50,10 +50,14 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
 
 ## Agent — the "decide" layer (the copilot)
 
-- ~~**The copilot loop**~~ — *plumbing shipped (`portia/agent/`, branch `agent-loop`): in-process
-  MCP server over the checks/catalog, `AskUserQuestion` routed to the human, event stream, chat CLI.
-  Proven on the indexing task.* **Remaining: the join copilot** — `join_findings` + `record_step` +
-  `run_spec` as tools, so it orchestrates ops and writes decisions + rationale to the spec.
+- ~~**The copilot loop**~~ — *shipped (`portia/agent/`, branch `agent-loop`): in-process MCP server
+  over the checks/catalog/spec, `AskUserQuestion` routed to the human, event stream, chat CLI.
+  Proven end-to-end on both flows — `interpret` writes the catalog read, `merge` measures a join,
+  asks which trade-off to take, and writes a spec step whose `expect` block `run_spec` verifies
+  clean.*
+- **`expect` vocabulary is hand-maintained** — `handlers._EXPECTABLE` lists each op's provenance
+  keys so an invented expectation is rejected at write time. It must be updated whenever an op's
+  provenance changes; derive it from the ops instead once there are more than a few.
 - **Multi-turn chat** — `session.run` is one turn per invocation today; hold the `ClaudeSDKClient`
   open for follow-ups and wire `interrupt()`.
 - **Don't reconstruct rows from samples** — asked for raw data the agent politely assembles a
@@ -61,10 +65,10 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
   outright.
 - **Sandbox data access** — hand the agent's code-execution a clean handle to the loaded frames so it
   can run read-only ad-hoc analysis (the imputation-shape question). Ephemeral; verdict → `rationale`.
-- ~~**Pro-auth verification**~~ — *partly answered 2026-07-25: the SDK authenticates off the local
-  Claude Code login with no `ANTHROPIC_API_KEY` set.* **Still open: how it meters** — the reported
-  `total_cost_usd` is a token-count estimate, not proof of billing; check the API console's usage.
-  See `PLAN.md` → "Auth posture" for what portia does and doesn't claim about this.
+- ~~**Pro-auth verification**~~ — *answered 2026-07-25: the SDK drives a bundled Claude Code binary,
+  so it authenticates off the local login and meters against the **subscription** (confirmed against
+  real Haiku usage). The budget principle holds.* See `PLAN.md` → "Auth posture" for what portia
+  does and doesn't claim about this — the posture is unchanged by the good news.
 - **Don't re-ask what's decided** — the agent asks only about what the spec hasn't answered; drift
   can re-open a specific decision. (Best shaped by real use, per the user.)
 

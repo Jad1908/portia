@@ -62,11 +62,12 @@ smaller model at low effort.** If it works there, the *engine* is good, not the 
 flagship is a ceiling check / upgrade, never a dependency. Keep every loop **token-lean** (the
 agent sees compact profiles and schemas, never raw data).
 
-**Auth — verified 2026-07-25 (`claude-agent-sdk` 0.2.128).** A `query()` with no
-`ANTHROPIC_API_KEY` in the environment succeeds: the SDK's bundled Claude Code binary resolves the
-existing local login. *Still open:* whether that draws subscription quota or API credits — the
-`total_cost_usd` the SDK reports is a token-count estimate, not proof of billing; check the API
-console's usage to settle it.
+**Auth — verified 2026-07-25 (`claude-agent-sdk` 0.2.128). The budget principle holds.** The SDK
+is not an API client: it ships a Claude Code binary (`_bundled/claude`) and drives it as a
+subprocess, so it authenticates exactly as an interactive Claude Code session does — off the local
+login, no `ANTHROPIC_API_KEY` involved. Confirmed against real usage: runs show up as **Haiku
+consumption on the subscription**, and no API billing exists to draw on. The `total_cost_usd` the
+SDK reports is Claude Code's `/cost` estimate (tokens × list price), not a charge.
 
 **Auth posture — deliberately not a portia feature.** The SDK docs say *"unless previously
 approved, Anthropic does not allow third party developers to offer claude.ai login or rate limits
