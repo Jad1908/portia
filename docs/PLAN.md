@@ -67,7 +67,11 @@ exposes to the Agent SDK, and how they meter against limits.
 
 - **When to ask vs. decide.** A copilot that asks 200 questions is useless — ask only about what
   matters, prioritized by impact (rows affected × materiality), and suggest good defaults so
-  answering is cheap.
+  answering is cheap. **Crucial: this prioritizing/defaulting is the _agent's_ judgment (it has the
+  project context and goal), NOT a deterministic module.** We tried a deterministic "planner" that
+  ranked decisions and suggested answers in code, and reversed it — it bakes context-free judgment
+  into code that fails on hard problems at scale. The engine surfaces facts + example rows
+  generously; the agent ranks, frames, and asks. See `CLAUDE.md` → "facts vs judgment".
 - **The correctness oracle.** Where a check has ground truth, assert it; where it's a judgement
   call, the copilot asks rather than guessing — and records the answer so it isn't re-litigated.
 - **Good suggested resolutions** — unit conversions, fill strategies, match thresholds — so the
