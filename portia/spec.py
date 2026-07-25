@@ -1,11 +1,15 @@
 """The durable spec — the residue that makes this a product, not a script.
 
 A spec is plain YAML: named ``sources`` and an ordered list of ``steps``. Each
-step records the *resolved decision* (op, keys, ``how``) plus an ``expect`` block
-capturing what the check predicted when the decision was made. It is
-git-diffable, reviewable in a PR, and re-runnable: ``run_spec`` reloads the
-sources, re-executes the steps, and reports **drift** — where today's result
-diverges from what the spec expected (docs/PLAN.md, "readable diff on drift").
+step records the *resolved decision* (op, keys, ``how``), an ``expect`` block
+capturing what the check predicted, and an optional ``rationale`` — the **why**
+behind the decision. The rationale is the *conclusion* of any one-off analysis
+the agent ran to decide (e.g. "right-skewed, skew 2.3 → impute median"); the
+analysis code itself is throwaway reasoning and never a step, but its verdict is
+kept here so the recipe is **self-justifying**, not just reproducible — the
+auditability the product sells (docs/brief.md §6). It is git-diffable, reviewable
+in a PR, and re-runnable: ``run_spec`` reloads the sources, re-executes the steps,
+and reports **drift** — where today's result diverges from the spec's ``expect``.
 
 Format is intentionally minimal; its schema is meant to *emerge* from real runs,
 so resist over-specifying it. Ops so far: ``join`` and ``normalize`` (the latter
@@ -31,6 +35,7 @@ class StepResult:
     provenance: dict
     drift: dict = field(default_factory=dict)
     frame: pd.DataFrame | None = None
+    rationale: str | None = None  # the recorded "why" — documentation, not executed
 
     @property
     def has_drift(self) -> bool:
@@ -92,6 +97,7 @@ def _run_step(step: dict, frames: dict[str, pd.DataFrame]) -> StepResult:
         provenance=out.provenance,
         drift=_drift(step.get("expect"), out.provenance),
         frame=out.frame,
+        rationale=step.get("rationale"),
     )
 
 
@@ -111,6 +117,8 @@ def render_text(results: list[StepResult]) -> str:
     for r in results:
         lines.append(f"[{r.id}]  {r.op}")
         lines.extend(_render_step(r))
+        if r.rationale:
+            lines.append(f"    ↳ why: {r.rationale}")
         if r.has_drift:
             for key, d in r.drift.items():
                 lines.append(f"    ⚠ DRIFT {key}: expected {d['expected']}, got {d['actual']}")

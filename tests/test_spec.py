@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 
 from portia.fixtures import sales_customers, sales_orders
-from portia.spec import load_spec, run_spec, save_spec
+from portia.spec import load_spec, render_text, run_spec, save_spec
 
 
 @pytest.fixture
@@ -50,6 +50,21 @@ def test_drift_detected_when_source_changes(project):
     r = run_spec(spec, base_dir=tmp_path)[0]
     assert r.has_drift is True
     assert r.drift["result_rows"] == {"expected": 10, "actual": 11}
+
+
+def test_rationale_is_carried_and_rendered(project):
+    tmp_path, spec = project
+    spec["steps"][0]["rationale"] = "left join: keep unmatched orders rather than drop them"
+    r = run_spec(spec, base_dir=tmp_path)[0]
+    assert r.rationale == "left join: keep unmatched orders rather than drop them"
+    assert "why:" in render_text([r])
+
+
+def test_rationale_is_optional(project):
+    tmp_path, spec = project  # no rationale on the step
+    r = run_spec(spec, base_dir=tmp_path)[0]
+    assert r.rationale is None
+    assert "why:" not in render_text([r])
 
 
 def test_spec_yaml_round_trips(tmp_path):
