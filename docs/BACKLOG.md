@@ -159,6 +159,12 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
 
 ## Core / infra
 
+- **README says nothing about auth — a decision awaiting the user, not an oversight.** `PLAN.md`
+  → "Auth posture" settles what portia *does* (no auth code, ever) but not what the README
+  *claims*. Naming the API key as the supported path is the safe posture; saying nothing is also
+  neutral and is where it stands today. It is product positioning on the exact point the user
+  cares about, so it is theirs to call — **don't quietly write it either way**. One line, whichever
+  it is.
 - **More loaders** — Parquet (and beyond) in `core/io._LOADERS`; one line each.
 - **CI** — run the hooks + tests on each PR. *Declined for now (2026-07); revisit if collaborators join.*
 

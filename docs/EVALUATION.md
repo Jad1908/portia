@@ -110,6 +110,22 @@ delivered a plausible table missing an entire data source.
 
 ---
 
+## The biggest untested thing: whether the questions are any good
+
+**Nobody has ever driven the copilot interactively.** Every run so far piped `yes y`, so the
+agent received `"y"` as its answer to every question it asked. The questions were generated and
+rendered correctly — the mechanical path works — but whether they are *good* questions, whether
+it asks at the right moments, and how it behaves when a human **disagrees** with it is entirely
+unmeasured.
+
+That is the product thesis. `PLAN.md` says it outright: *"the questions-and-insights UX **is** the
+product"*. Everything measured so far is the engine around it.
+
+So the highest-value hour available is not building anything: it is sitting down with
+`python -m portia.cli.chat` on the hotel fixture and actually arguing with it. Push back on a
+recommendation. Give a vague answer. Tell it something that contradicts the data. None of that is
+gradeable by the answer key, and none of it needs to be — the failure modes will be obvious.
+
 ## A retracted result
 
 An earlier demo claimed the context layer was proven: the same merge that recommended a *left*
