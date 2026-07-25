@@ -60,8 +60,25 @@ layer is **core, not deferred**; its shape is still to be designed (the user's v
 Claude **Pro only** — no API budget, no Max. Turned into a principle: **develop on a cheaper,
 smaller model at low effort.** If it works there, the *engine* is good, not the model; the
 flagship is a ceiling check / upgrade, never a dependency. Keep every loop **token-lean** (the
-agent sees compact profiles and schemas, never raw data). To verify: which models Pro auth
-exposes to the Agent SDK, and how they meter against limits.
+agent sees compact profiles and schemas, never raw data).
+
+**Auth — verified 2026-07-25 (`claude-agent-sdk` 0.2.128). The budget principle holds.** The SDK
+is not an API client: it ships a Claude Code binary (`_bundled/claude`) and drives it as a
+subprocess, so it authenticates exactly as an interactive Claude Code session does — off the local
+login, no `ANTHROPIC_API_KEY` involved. Confirmed against real usage: runs show up as **Haiku
+consumption on the subscription**, and no API billing exists to draw on. The `total_cost_usd` the
+SDK reports is Claude Code's `/cost` estimate (tokens × list price), not a charge.
+
+**Auth posture — deliberately not a portia feature.** The SDK docs say *"unless previously
+approved, Anthropic does not allow third party developers to offer claude.ai login or rate limits
+for their products"*, and SDK use is governed by the **Commercial** Terms while a Pro subscription
+sits under the Consumer Terms. The prohibited act is *offering* claude.ai login as part of a
+product — not a developer using their own account. So portia writes **zero auth code**: no auth env
+vars, no proxying, no detection. Auth resolves inside the bundled binary, so there is no
+"compatibility" to build or withhold; the code is identical either way. Keep the README neutral —
+name the API key as the supported path, don't advertise subscription auth, and don't design around
+subscription rate limits. Ask Anthropic (the docs' "unless previously approved" is the invitation)
+before portia has users or is promoted as subscription-powered.
 
 ## What we'll have to solve
 

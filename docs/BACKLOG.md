@@ -50,13 +50,56 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
 
 ## Agent — the "decide" layer (the copilot)
 
-- **The copilot loop** (Claude Agent SDK) — reads the checks' evidence, does the judgement (what's
-  material, what to ask, how to frame it), orchestrates the ops, writes decisions + rationale to the
-  spec. This is where "decide" lives; deliberately not a deterministic module.
+- ~~**The copilot loop**~~ — *shipped (`portia/agent/`, branch `agent-loop`): in-process MCP server
+  over the checks/catalog/spec, `AskUserQuestion` routed to the human, event stream, chat CLI.
+  Proven end-to-end on both flows — `interpret` writes the catalog read, `merge` measures a join,
+  asks which trade-off to take, and writes a spec step whose `expect` block `run_spec` verifies
+  clean.*
+- ~~**`expect` vocabulary is hand-maintained**~~ — *fixed: each op declares `PROVENANCE_KEYS` next
+  to the code that emits them, `handlers._EXPECTABLE` reads those, and each op's tests assert the
+  declaration still matches a real run — so it can't rot silently.*
+- ~~**Context flow**~~ — *shipped: L0+L1 composed into the system prompt (`agent/context.py`), the
+  L2/L3 split (`describe_source` / `profile_source`), groups wired end to end, first-run stdin
+  prompt, and bulk index+interpret in one session. Verified by behaviour change: the same merge
+  that recommended a **left** join context-blind recommends **inner** with the project brief
+  present, quoting the user's own billing constraint.*
+- **Brief growth at scale** — L1 is ~30 tokens per source. Fine at 3, unproven at 50; the source
+  index will need to become searchable or group-scoped rather than exhaustive.
+- **One tidy home for every injected instruction.** Prompt text currently lives in five places:
+  `agent/prompts/copilot.md` (L0), the brief template in `agent/context.py`, **every tool
+  description inline in `agent/tools.py`**, and the task prompts in `cli/chat.py` and
+  `cli/index.py`. Tool descriptions are the highest-leverage, most performance-sensitive text in
+  the system — the hotel run failed because one of them omitted a sentence — and they're buried in
+  decorators. Move them all under `agent/prompts/` so wording can be diffed, reviewed and A/B'd
+  without touching code, with a test that every tool resolves a description (no silent fallback).
+- **Run log + the metrics that need no labels.** Write each run's events (`agent/events.py`) to
+  JSONL, one line per event, and compute with pandas: which disclosure rungs were pulled and in
+  what order, tokens and turns per decision, how often it asked, drift rate on recorded specs.
+  ~30 lines, no infrastructure. Be honest about what these are: **cost and behaviour descriptors,
+  not correctness** — only the answer keys make a number mean anything.
+- **Langfuse, once the JSONL hurts.** Its job is browsing a run's timeline when debugging why one
+  went sideways, not computing the metrics above. Free either way (self-host via Docker, or the
+  cloud Hobby tier: 50k units/month, 30-day retention, 2 seats). The SDK drives Claude Code as a
+  *subprocess*, so client auto-instrumentation sees nothing — `events.py` is the only sane
+  emission point, which is also why the JSONL is not throwaway work.
+- **Generated data has nowhere to live.** `run_spec --write` dumps `<step-id>.csv` and nothing
+  knows it exists. Needs: a **code-owned** layout (`outputs/` at the project root for the data —
+  users open these in Excel — index entry in `.portia/`), auto-profiling (free) but **not**
+  auto-interpretation (a model turn per run), and `derived_from: <spec>#<step>` so a generated
+  table can't be mistaken for source data. Path convention is not judgment: if every project
+  invents its own tree nothing can find anything and the GUI's left panel has no stable view.
+  This is what makes `VISION.md`'s workflow chaining safe.
+- **Multi-turn chat** — `session.run` is one turn per invocation today; hold the `ClaudeSDKClient`
+  open for follow-ups and wire `interrupt()`.
+- **Don't reconstruct rows from samples** — asked for raw data the agent politely assembles a
+  plausible table from `samples` and hedges. Honest, but consider whether the prompt should refuse
+  outright.
 - **Sandbox data access** — hand the agent's code-execution a clean handle to the loaded frames so it
   can run read-only ad-hoc analysis (the imputation-shape question). Ephemeral; verdict → `rationale`.
-- **Pro-auth verification** — confirm which models Claude Pro exposes to the Agent SDK and how they
-  meter (open question in `PLAN.md`); the whole budget discipline rides on this.
+- ~~**Pro-auth verification**~~ — *answered 2026-07-25: the SDK drives a bundled Claude Code binary,
+  so it authenticates off the local login and meters against the **subscription** (confirmed against
+  real Haiku usage). The budget principle holds.* See `PLAN.md` → "Auth posture" for what portia
+  does and doesn't claim about this — the posture is unchanged by the good news.
 - **Don't re-ask what's decided** — the agent asks only about what the spec hasn't answered; drift
   can re-open a specific decision. (Best shaped by real use, per the user.)
 
@@ -65,8 +108,11 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
 *Substrate built (`catalog.py`): project context + groups + per-source Layer 1 prose / Layer 2
 column roles + facts; facts refresh, judgment preserved. Remaining:*
 
-- **Semantic interpretation** — the agent rewrites the auto-drafted `summary` and fills column
-  `role`s using the project context (needs the agent). Today they're deterministic placeholders/slots.
+- ~~**Semantic interpretation**~~ — *shipped: `catalog.set_interpretation` + the agent's
+  `interpret` flow. The agent now writes `summary` and column `role`s from the project context.*
+- **Role vocabulary** — the agent invents role names per run (`attribute` vs `category`,
+  `unused` vs `dropped`). Fine while we learn what roles are useful; revisit once real use shows
+  which ones carry weight, and only then consider constraining them.
 - **Broad "how sources interact" model** — likely joins / relationships across sources (the
   context-aware end goal). Deferred as too early — forge convictions via the UI first.
 - **Groups in use** — `groups` are stored but nothing consumes them yet; wire group context into

@@ -43,12 +43,20 @@ not a gadget — a place you actually work.
 
 ## Flow — starting in a new directory
 
-1. **Project context prompt.** On opening a new directory, the user is asked to describe the
-   **project in a few lines** — the *global* project, not necessarily the data.
+1. **Project context prompt — decided, and load-bearing.** On opening a new directory the user
+   describes the **project in a few lines** — the *global* project, not necessarily the data. This
+   is **one of the most important parts of the whole product**: it is the context that makes a
+   column's meaning decidable, and without it the copilot's judgment is generic.
+   - **GUI: a mandatory front panel.** The user fills it in before being allowed to do anything
+     else in the project. Not a dismissible prompt, not a settings field found later.
+   - **CLI: prompted on stdin** the first time a command runs in an uninitialized directory.
 2. **Add data manually + index.** The user adds CSVs by hand. Each added CSV is **indexed**:
-   - a **deterministic metadata analysis** runs (profiling — this is the engine's checks layer), and
+   - a **deterministic metadata analysis** runs (profiling — this is the engine's checks layer).
+     This is free and **always happens**, and
    - the **model writes a short report** on *what it thinks this data is*, based on that metadata
-     analysis **plus** the project context provided.
+     analysis **plus** the project context provided. This costs a model turn, so it is
+     **on by default but opt-out-able** — **GUI: a toggle** on the data-selection panel;
+     **CLI: `--no-interpret`**.
 3. **User can correct it.** The user can open that per-file interpretation/metadata and **edit it
    manually** if the model misunderstood something. (Corrections are durable decisions.)
 4. **Group files + group context.** Files can be **grouped**, with **additional context attached
@@ -89,7 +97,9 @@ not a gadget — a place you actually work.
 - **Meaning of an arrow:** data dependency? execution order? lineage/provenance? Some combination?
 - **Run semantics:** full run vs. partial/step-level run; caching of unchanged steps; what "run"
   does to already-answered decisions.
-- **Indexing:** what "indexed" concretely means and where that index lives.
+- ~~**Indexing:** what "indexed" concretely means and where that index lives.~~ *Decided: deterministic
+  profiling (always, free) + a model-written interpretation (default on, opt-out), stored in
+  `.portia/` — see the flow above.*
 - **Editing interpretations:** how manual corrections to a file's metadata/interpretation are
   stored and fed back into the model's future reasoning.
 - **Grouping:** is a group just shared context, or does it also constrain/scope workflows?

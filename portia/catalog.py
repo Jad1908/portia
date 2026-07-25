@@ -2,8 +2,9 @@
 
 Sibling of the spec (which records *what we did to it*). Lives in ``.portia/``:
 
-- ``project.yaml`` — the global project context (your words), defined groups, and
-  a registry of indexed sources.
+- ``project.yaml`` — the global project context (your words), defined groups
+  (``{name, context, sources}`` — sources that belong together, plus the context
+  they share), and a registry of indexed sources.
 - ``sources/<name>.yaml`` — per source, two layers:
     * **Layer 1** ``summary`` — a short prose read of what this data is.
     * **Layer 2** ``columns`` — per column, a ``role`` slot plus the facts the
@@ -11,9 +12,10 @@ Sibling of the spec (which records *what we did to it*). Lives in ``.portia/``:
 
 This is the agent's **memory**: at scale it never sees raw data, only this
 context, so a downstream task/agent loads the catalog instead of re-profiling and
-re-explaining. Today the agent doesn't exist, so ``summary`` is auto-drafted from
-the facts (a plain restatement, not a semantic read) and every ``role`` is an
-empty slot — both are placeholders the agent/user fill later.
+re-explaining. ``index_source`` auto-drafts ``summary`` from the facts (a plain
+restatement, not a semantic read) and leaves every ``role`` empty; those are
+placeholders until ``set_interpretation`` writes the real read — by the agent
+(``portia/agent/``) or by you, editing the YAML directly.
 
 **The update rule (facts vs judgment):** re-indexing *refreshes the deterministic
 facts* but *preserves the prose and roles* — so your corrections are never
@@ -73,6 +75,82 @@ def index_source(
     _write(src_file, _source_entry(str(data_path), profile, existing))
     _register(d, name)
     return src_file
+
+
+def set_interpretation(
+    name: str,
+    *,
+    summary: str | None = None,
+    roles: dict[str, str] | None = None,
+    portia_dir: str | Path = DEFAULT_DIR,
+) -> Path:
+    """Author the *judgment* half of a source entry: prose ``summary`` and column ``role``s.
+
+    The mirror of ``index_source``: that one refreshes facts and preserves judgment,
+    this one writes judgment and never touches a fact. Fields left as ``None`` are
+    left alone, so a caller can set roles without restating the summary.
+
+    This is what the agent calls once it has read the facts and the project context
+    — the deterministic side has no business deciding what a column *means*.
+    """
+    src_file = Path(portia_dir) / "sources" / f"{name}.yaml"
+    if not src_file.exists():
+        raise ValueError(f"no catalog entry for {name!r} — index it first ({src_file})")
+
+    entry = _read(src_file)
+    if summary is not None:
+        entry["summary"] = summary
+    for col, role in (roles or {}).items():
+        match = next((c for c in entry.get("columns", []) if c["name"] == col), None)
+        if match is None:
+            known = ", ".join(c["name"] for c in entry.get("columns", []))
+            raise ValueError(f"no such column {col!r} in {name!r} (have: {known})")
+        match["role"] = role
+
+    _write(src_file, entry)
+    return src_file
+
+
+def set_group(
+    name: str,
+    *,
+    context: str | None = None,
+    sources: list[str] | None = None,
+    portia_dir: str | Path = DEFAULT_DIR,
+) -> Path:
+    """Define (or update) a group of sources that belong together, with its own context.
+
+    A group is judgment — "these three tables are external event data, they share
+    a vendor's quirks" — attached to a set of sources. It carries context the
+    per-source entries can't: how the sources relate, where they came from, what
+    they're for together. That context travels with every source in the group.
+
+    Fields left as ``None`` are left alone, so context and membership can be set
+    independently.
+    """
+    d = Path(portia_dir)
+    proj_file = d / "project.yaml"
+    data: dict[str, Any] = _read(proj_file) if proj_file.exists() else {}
+    data.setdefault("project", "")
+    data.setdefault("sources", {})
+    groups: list[dict] = data.setdefault("groups", [])
+
+    for src in sources or []:
+        if src not in data["sources"]:
+            known = ", ".join(data["sources"]) or "(none indexed)"
+            raise ValueError(f"no indexed source {src!r} — have: {known}")
+
+    group = next((g for g in groups if g.get("name") == name), None)
+    if group is None:
+        group = {"name": name, "context": "", "sources": []}
+        groups.append(group)
+    if context is not None:
+        group["context"] = context
+    if sources is not None:
+        group["sources"] = sources
+
+    _write(proj_file, data)
+    return proj_file
 
 
 def load_catalog(portia_dir: str | Path = DEFAULT_DIR) -> dict:
