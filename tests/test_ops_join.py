@@ -35,3 +35,16 @@ def test_provenance_is_json_serializable():
 def test_bad_how_raises():
     with pytest.raises(ValueError, match="how must be one of"):
         apply_join(pd.DataFrame({"k": [1]}), pd.DataFrame({"k": [1]}), how="cross", on="k")
+
+
+def test_provenance_keys_declaration_matches_reality():
+    """The declaration a spec's `expect` is validated against must not rot.
+
+    `agent.handlers` rejects an expectation on a field this op never reports, so
+    a stale declaration would either allow a forever-drifting expectation or
+    reject a valid one. Both are silent; this test isn't.
+    """
+    from portia.ops.join import PROVENANCE_KEYS
+
+    result = apply_join(sales_orders(), sales_customers(), on="customer_id", how="left")
+    assert set(result.provenance) == set(PROVENANCE_KEYS)

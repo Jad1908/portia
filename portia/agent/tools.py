@@ -42,9 +42,9 @@ def _failed(exc: Exception) -> dict[str, Any]:
 
 @tool(
     "get_context",
-    "Read the project's context and the list of indexed data sources. "
-    "Call this first, before anything else — it carries the human's description "
-    "of the project, which is what makes a column's meaning decidable.",
+    "Re-read the project context, groups and source index. You ALREADY HAVE this "
+    "in your system prompt — call it only to pick up changes made during this "
+    "session, such as after a source is indexed or interpreted.",
     {},
     annotations=_READ_ONLY,
 )
@@ -56,17 +56,72 @@ async def get_context(args: dict[str, Any]) -> dict[str, Any]:
 
 
 @tool(
+    "describe_source",
+    "One source's semantic map: its summary, every column name, the role recorded "
+    "for it, and its quality flags — no statistics. Cheap. This is usually enough "
+    "to judge whether a source is relevant, which columns could be keys, and how "
+    "two sources might relate. Start here when you need more than the one-line "
+    "index in your system prompt.",
+    {"source": str},
+    annotations=_READ_ONLY,
+)
+async def describe_source(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return _ok(handlers.describe_source(args["source"], **_dir(args)))
+    except Exception as exc:  # noqa: BLE001
+        return _failed(exc)
+
+
+@tool(
     "profile_source",
-    "Get everything the deterministic checks found about one source: per-column "
-    "dtype, null rate, distinct count, sample values and quality flags, plus any "
-    "interpretation already recorded. Call this before interpreting a source. "
-    "These facts are unranked — deciding which of them matter is your job.",
+    "One source's full measured facts: per-column dtype, null rate, distinct "
+    "count, min/max, quartiles, sample values and quality flags. Expensive — the "
+    "detailed rung. Call it when you need the actual numbers (interpreting a "
+    "source, judging whether a key is usable, quantifying a data-quality "
+    "problem), not to browse. These facts are unranked; deciding which matter is "
+    "your job.",
     {"source": str},
     annotations=_READ_ONLY,
 )
 async def profile_source(args: dict[str, Any]) -> dict[str, Any]:
     try:
         return _ok(handlers.profile_source(args["source"], **_dir(args)))
+    except Exception as exc:  # noqa: BLE001
+        return _failed(exc)
+
+
+@tool(
+    "set_group",
+    "Record that several sources belong together, and the context they share — "
+    "same vendor and the same quirks, one system's export, the tables that make "
+    "up one workflow. Use it when you learn something true of a set of sources "
+    "that no single source's entry can hold. The group's context then travels "
+    "with all of them.",
+    {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "Short group name"},
+            "context": {"type": "string", "description": "What these share, in prose"},
+            "sources": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Indexed source names in the group",
+            },
+            "portia_dir": {"type": "string"},
+        },
+        "required": ["name"],
+    },
+)
+async def set_group(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return _ok(
+            handlers.set_group(
+                args["name"],
+                context=args.get("context"),
+                sources=args.get("sources"),
+                **_dir(args),
+            )
+        )
     except Exception as exc:  # noqa: BLE001
         return _failed(exc)
 
@@ -201,8 +256,8 @@ def _dir(args: dict[str, Any]) -> dict[str, str]:
 
 #: Read-only checks — safe to auto-approve. Writes are listed separately so the
 #: session can route them through the permission flow instead.
-READ_TOOLS = [get_context, profile_source, join_findings, run_spec]
-WRITE_TOOLS = [set_interpretation, record_step]
+READ_TOOLS = [get_context, describe_source, profile_source, join_findings, run_spec]
+WRITE_TOOLS = [set_interpretation, set_group, record_step]
 
 ALL_TOOLS = [*READ_TOOLS, *WRITE_TOOLS]
 

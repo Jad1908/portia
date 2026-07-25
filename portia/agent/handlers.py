@@ -29,6 +29,8 @@ from portia import catalog, spec
 from portia.checks.join import join_findings as _join_findings
 from portia.checks.profiling import profile_path
 from portia.core.io import load_frame
+from portia.ops import join as join_op
+from portia.ops import normalize as normalize_op
 
 #: Ops the spec knows how to execute, and what each step must carry. Validation
 #: only — which op to *use* is the agent's call.
@@ -42,31 +44,24 @@ _REQUIRED_FIELDS = {
 #: forever — ``_drift`` compares it to ``None`` on every run — which trains
 #: everyone to ignore drift. *Which* of these to assert is judgment; whether a
 #: field exists at all is a fact, so it gets checked here rather than hoped for
-#: in the prompt. Keep in sync with the ops' provenance dicts.
+#: in the prompt.
+#:
+#: Sourced from the ops themselves, so adding an op means declaring its keys
+#: once, next to the code that emits them — and each op's tests assert the
+#: declaration still matches a real run.
 _EXPECTABLE = {
-    "join": {
-        "flags",
-        "how",
-        "input_rows",
-        "keys",
-        "left_dropped",
-        "matches_prediction",
-        "op",
-        "predicted_rows",
-        "relationship",
-        "result_rows",
-        "right_dropped",
-    },
-    "normalize": {"flags", "input_rows", "op", "transforms"},
+    "join": join_op.PROVENANCE_KEYS,
+    "normalize": normalize_op.PROVENANCE_KEYS,
 }
 
 
 def get_context(portia_dir: str = catalog.DEFAULT_DIR) -> dict:
-    """The project's memory, compact: prose context, groups, and a source index.
+    """Re-read the project's L1 context: prose, groups, and the source index.
 
-    Per-source detail is deliberately *not* included — one line each, so the
-    agent can see the shape of the project cheaply and then pull the sources it
-    actually needs via ``profile_source``.
+    You already have this — it is in your system prompt. Call it only to pick up
+    changes made *during* this session, e.g. after indexing or interpreting a
+    source. Per-source detail is deliberately absent; climb to ``describe_source``
+    for that.
     """
     cat = catalog.load_catalog(portia_dir)
     return {
@@ -84,8 +79,33 @@ def get_context(portia_dir: str = catalog.DEFAULT_DIR) -> dict:
     }
 
 
+def describe_source(source: str, portia_dir: str = catalog.DEFAULT_DIR) -> dict:
+    """L2 — one source's *semantic* map: what it is and what its columns mean.
+
+    Summary, column names, the role recorded for each, and its quality flags —
+    but no statistics. This is usually enough to decide whether a source is
+    relevant, which columns could be keys, and how two sources might relate.
+    Reach for ``profile_source`` only when you need the numbers themselves.
+    """
+    entry = _entry(source, portia_dir)
+    return {
+        "source": entry["source"],
+        "summary": entry.get("summary", ""),
+        "candidate_keys": entry.get("candidate_keys", []),
+        "columns": [
+            {
+                "name": col["name"],
+                "role": col.get("role"),
+                "inferred": col.get("inferred"),
+                "flags": col.get("flags", []),
+            }
+            for col in entry.get("columns", [])
+        ],
+    }
+
+
 def profile_source(source: str, portia_dir: str = catalog.DEFAULT_DIR) -> dict:
-    """Everything the checks found about one source, plus any existing read of it.
+    """L3 — everything the checks measured about one source, plus any read of it.
 
     Facts come **fresh from the profiling check**, not from the catalog's stored
     slice. The catalog trims what it keeps (median/std/top) because it's storage;
@@ -96,12 +116,7 @@ def profile_source(source: str, portia_dir: str = catalog.DEFAULT_DIR) -> dict:
     ``summary`` and each column's ``role`` come from the catalog: whatever
     judgment has been recorded so far, empty until someone writes it.
     """
-    cat = catalog.load_catalog(portia_dir)
-    entry = cat["sources"].get(source)
-    if entry is None:
-        known = ", ".join(cat["sources"]) or "(none indexed)"
-        raise ValueError(f"no indexed source {source!r} — have: {known}")
-
+    entry = _entry(source, portia_dir)
     profile = profile_path(entry["source"])
     roles = {c["name"]: c.get("role") for c in entry.get("columns", [])}
     return {
@@ -135,6 +150,26 @@ def set_interpretation(
         "summary_written": summary is not None,
         "roles_written": sorted(roles or {}),
     }
+
+
+def set_group(
+    name: str,
+    context: str | None = None,
+    sources: list[str] | None = None,
+    portia_dir: str = catalog.DEFAULT_DIR,
+) -> dict:
+    """Record that some sources belong together, and the context they share.
+
+    Use it when sources have something in common that no single source's entry
+    can express — same vendor and the same quirks, one system's export, the
+    tables that make up one workflow. That shared context then travels with all
+    of them.
+    """
+    if context is None and sources is None:
+        raise ValueError("nothing to record — pass a context, sources, or both")
+
+    catalog.set_group(name, context=context, sources=sources, portia_dir=portia_dir)
+    return {"group": name, "context_written": context is not None, "sources": sources or []}
 
 
 # --- the merge loop ---------------------------------------------------------
@@ -224,13 +259,17 @@ def _frame(source: str, portia_dir: str):
     return load_frame(_source_path(source, portia_dir))
 
 
-def _source_path(source: str, portia_dir: str) -> str:
+def _entry(source: str, portia_dir: str) -> dict:
     cat = catalog.load_catalog(portia_dir)
     entry = cat["sources"].get(source)
     if entry is None:
         known = ", ".join(cat["sources"]) or "(none indexed)"
         raise ValueError(f"no indexed source {source!r} — have: {known}")
-    return str(entry["source"])
+    return dict(entry)
+
+
+def _source_path(source: str, portia_dir: str) -> str:
+    return str(_entry(source, portia_dir)["source"])
 
 
 def _validate_step(step: dict, *, existing: list[dict]) -> None:

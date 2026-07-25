@@ -19,6 +19,26 @@ from portia.ops.base import OpResult
 
 HOWS = ("inner", "left", "right", "outer")
 
+#: Every field this op reports. Declared so a spec's ``expect`` block can be
+#: validated against what the op *actually* measures — an expectation on a field
+#: that doesn't exist drifts on every run and teaches everyone to ignore drift.
+#: `tests/test_ops_join.py` asserts this matches a real run, so it can't rot.
+PROVENANCE_KEYS = frozenset(
+    {
+        "op",
+        "how",
+        "keys",
+        "relationship",
+        "input_rows",
+        "result_rows",
+        "predicted_rows",
+        "matches_prediction",
+        "left_dropped",
+        "right_dropped",
+        "flags",
+    }
+)
+
 
 def apply_join(
     left: pd.DataFrame,

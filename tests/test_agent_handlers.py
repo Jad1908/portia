@@ -229,3 +229,51 @@ def test_record_step_rejects_a_duplicate_id(sales):
     handlers.record_step("specs/orders.yaml", step, portia_dir=sales)
     with pytest.raises(ValueError, match="already in this spec"):
         handlers.record_step("specs/orders.yaml", dict(step), portia_dir=sales)
+
+
+# --- progressive disclosure -------------------------------------------------
+
+
+def test_describe_source_is_the_cheap_semantic_rung(project):
+    """L2 carries meaning, not measurements — that's what makes it cheap."""
+    from portia.agent import handlers as h
+
+    described = h.describe_source("customers", project)
+    json.dumps(described)
+
+    col = next(c for c in described["columns"] if c["name"] == "signup_amount")
+    assert set(col) == {"name", "role", "inferred", "flags"}
+    assert "numeric_stored_as_text" in col["flags"]
+
+    # L3 is strictly richer — the rungs must actually differ, or the ladder is theatre
+    profiled = next(
+        c for c in h.profile_source("customers", project)["columns"] if c["name"] == "signup_amount"
+    )
+    assert set(col) < set(profiled)
+    assert "samples" in profiled and "samples" not in col
+
+
+def test_set_group_records_shared_context_and_membership(project):
+    out = handlers.set_group(
+        "vendor_feed",
+        context="Everything the vendor sends us, same export quirks.",
+        sources=["customers"],
+        portia_dir=project,
+    )
+    json.dumps(out)
+
+    ctx = handlers.get_context(project)
+    group = ctx["groups"][0]
+    assert group["name"] == "vendor_feed"
+    assert group["sources"] == ["customers"]
+    assert "export quirks" in group["context"]
+
+
+def test_set_group_rejects_an_unindexed_source(project):
+    with pytest.raises(ValueError, match="no indexed source"):
+        handlers.set_group("g", sources=["nope"], portia_dir=project)
+
+
+def test_set_group_rejects_an_empty_write(project):
+    with pytest.raises(ValueError, match="nothing to record"):
+        handlers.set_group("g", portia_dir=project)

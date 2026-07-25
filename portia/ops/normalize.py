@@ -18,6 +18,10 @@ from portia.ops.base import OpResult
 
 SAMPLE_FAILED = 5
 
+#: Every field this op reports — see ``ops.join.PROVENANCE_KEYS`` for why.
+#: `tests/test_ops_normalize.py` asserts this matches a real run.
+PROVENANCE_KEYS = frozenset({"op", "input_rows", "transforms", "flags"})
+
 
 def apply_normalize(df: pd.DataFrame, transforms: list[dict]) -> OpResult:
     """Apply an ordered list of column transforms, returning the new frame +

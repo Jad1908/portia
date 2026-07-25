@@ -106,7 +106,8 @@ MERGE = (
 )
 
 
-async def _run(prompt: str, *, model: str, cwd: str) -> None:
+async def run_and_render(prompt: str, *, model: str, cwd: str, portia_dir: str) -> None:
+    """Drive one copilot turn and render its events. Shared with `cli.index`."""
     from portia.agent import session
 
     async for event in session.run(
@@ -115,6 +116,7 @@ async def _run(prompt: str, *, model: str, cwd: str) -> None:
         confirm=confirm_write,
         model=model,
         cwd=cwd,
+        portia_dir=portia_dir,
     ):
         render(event)
 
@@ -150,10 +152,9 @@ def main() -> None:
         )
     else:
         prompt = args.prompt
-    if args.dir != ".portia":
-        prompt += f"\n\n(The catalog directory for this project is {args.dir!r}.)"
-
-    asyncio.run(_run(prompt, model=args.model or DEFAULT_MODEL, cwd="."))
+    asyncio.run(
+        run_and_render(prompt, model=args.model or DEFAULT_MODEL, cwd=".", portia_dir=args.dir)
+    )
 
 
 if __name__ == "__main__":

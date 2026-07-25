@@ -109,3 +109,11 @@ def test_normalize_then_join_in_a_spec(tmp_path):
     joined = results[-1]
     assert joined.provenance["result_rows"] == 2  # a1, a2 match after lowercasing
     assert joined.has_drift is False
+
+
+def test_provenance_keys_declaration_matches_reality():
+    """See the twin in test_ops_join.py — the declaration must not rot."""
+    from portia.ops.normalize import PROVENANCE_KEYS
+
+    result = apply_normalize(messy_customers(), [{"column": "signup_amount", "op": "strip"}])
+    assert set(result.provenance) == set(PROVENANCE_KEYS)

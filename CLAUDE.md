@@ -62,12 +62,20 @@ adding code, and extend them rather than working around them:
 - `portia/agent/` — the **decide layer, as an agent rather than a module** (Claude Agent SDK).
   `handlers.py` = the callable surface as pure `(args) -> jsonable dict` functions, no SDK import,
   testable without it · `tools.py` = `@tool` wrappers + the in-process MCP server, the only place
-  the SDK meets the engine · `events.py` = SDK messages normalized to portia events (the seam the
-  UI sits on) · `ask.py` = intercepts `AskUserQuestion` so decisions reach the human · `session.py`
-  = the options block + client lifecycle · `prompts/copilot.md` = the system prompt as prose.
-  **The agent is configured with no built-in filesystem or shell tools**, so it physically cannot
-  read raw data — its whole view is the checks' evidence. Do not add a code layer that ranks
-  decisions or suggests answers — see "facts vs judgment" above. Requires the `agent` extra.
+  the SDK meets the engine · `context.py` = the L1 project brief · `events.py` = SDK messages
+  normalized to portia events (the seam the UI sits on) · `ask.py` = intercepts `AskUserQuestion`
+  so decisions reach the human · `session.py` = the options block + client lifecycle ·
+  `prompts/copilot.md` = the system prompt as prose. Requires the `agent` extra.
+  - **No built-in filesystem or shell tools**, so it physically cannot read raw data — its whole
+    view is the checks' evidence.
+  - **Context arrives in layers, cheapest first.** L0 how-to-work + L1 *this project* (prose,
+    groups, one-line source index) are **composed into the system prompt** — pushed, not fetched,
+    because a tool the agent *may* call is one it will sometimes skip, and skipping the project
+    context makes its judgment generic. Everything above is pull-based and the agent decides when
+    to climb: L2 `describe_source` (meaning, no stats) → L3 `profile_source` (full facts) →
+    L4 `join_findings`. **Adding a tool means placing it on that ladder and saying so in its
+    description** — the description is what teaches the model when to climb.
+  - Do not add a code layer that ranks decisions or suggests answers — see "facts vs judgment".
 - **Durable artifacts** (git-diffable YAML, the residue that makes this a product, not a script):
   - `portia/spec.py` — the **spec** (*what we did to the data*): sources + decided steps + `expect`
     + `rationale`; `run_spec` re-executes and detects drift.

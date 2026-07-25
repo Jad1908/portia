@@ -16,7 +16,8 @@ from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
 
-from portia.agent import ask, events, tools
+from portia import catalog
+from portia.agent import ask, context, events, tools
 
 #: The model is a config knob, never a hard dependency (docs/PLAN.md). We develop
 #: on a small one on purpose: if the loop works here, the *engine* is good.
@@ -25,10 +26,23 @@ DEFAULT_MODEL = "claude-haiku-4-5"
 PROMPT_PATH = Path(__file__).parent / "prompts" / "copilot.md"
 
 
+def build_system_prompt(portia_dir: str = catalog.DEFAULT_DIR) -> str:
+    """L0 (how to work) + L1 (this project), composed into one system prompt.
+
+    The project brief goes here rather than into the user's turn on purpose: it
+    is operator-provided context, so it should carry operator authority, and
+    putting it in the prompt makes its presence structural. A tool the agent
+    *may* call is a tool it will sometimes skip — and the one it skipped in
+    testing was the project context, which left its judgment generic.
+    """
+    return f"{PROMPT_PATH.read_text()}\n\n---\n\n{context.build_brief(portia_dir)}"
+
+
 def build_options(
     *,
     model: str = DEFAULT_MODEL,
     cwd: str | Path | None = None,
+    portia_dir: str = catalog.DEFAULT_DIR,
     can_use_tool: Callable[..., Any] | None = None,
 ) -> Any:
     """Assemble ``ClaudeAgentOptions`` for a portia session."""
@@ -36,7 +50,7 @@ def build_options(
 
     return ClaudeAgentOptions(
         model=model,
-        system_prompt={"type": "file", "path": str(PROMPT_PATH)},
+        system_prompt=build_system_prompt(portia_dir),
         # The agent gets NO built-in filesystem or shell tools. It therefore
         # *cannot* open a CSV — its only view of the data is the compact evidence
         # dicts the checks layer returns. That's "the model never eyeballs the
@@ -74,6 +88,7 @@ async def run(
     confirm: ask.ConfirmFn,
     model: str = DEFAULT_MODEL,
     cwd: str | Path | None = None,
+    portia_dir: str = catalog.DEFAULT_DIR,
 ) -> AsyncIterator[events.Event]:
     """Run one copilot turn, yielding portia events as they happen.
 
@@ -93,6 +108,7 @@ async def run(
     options = build_options(
         model=model,
         cwd=cwd,
+        portia_dir=portia_dir,
         can_use_tool=ask.build_can_use_tool(answer=answer, confirm=confirm, emit=pending.append),
     )
 

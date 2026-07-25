@@ -55,9 +55,16 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
   Proven end-to-end on both flows — `interpret` writes the catalog read, `merge` measures a join,
   asks which trade-off to take, and writes a spec step whose `expect` block `run_spec` verifies
   clean.*
-- **`expect` vocabulary is hand-maintained** — `handlers._EXPECTABLE` lists each op's provenance
-  keys so an invented expectation is rejected at write time. It must be updated whenever an op's
-  provenance changes; derive it from the ops instead once there are more than a few.
+- ~~**`expect` vocabulary is hand-maintained**~~ — *fixed: each op declares `PROVENANCE_KEYS` next
+  to the code that emits them, `handlers._EXPECTABLE` reads those, and each op's tests assert the
+  declaration still matches a real run — so it can't rot silently.*
+- ~~**Context flow**~~ — *shipped: L0+L1 composed into the system prompt (`agent/context.py`), the
+  L2/L3 split (`describe_source` / `profile_source`), groups wired end to end, first-run stdin
+  prompt, and bulk index+interpret in one session. Verified by behaviour change: the same merge
+  that recommended a **left** join context-blind recommends **inner** with the project brief
+  present, quoting the user's own billing constraint.*
+- **Brief growth at scale** — L1 is ~30 tokens per source. Fine at 3, unproven at 50; the source
+  index will need to become searchable or group-scoped rather than exhaustive.
 - **Multi-turn chat** — `session.run` is one turn per invocation today; hold the `ClaudeSDKClient`
   open for follow-ups and wire `interrupt()`.
 - **Don't reconstruct rows from samples** — asked for raw data the agent politely assembles a
