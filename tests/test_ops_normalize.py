@@ -117,3 +117,16 @@ def test_provenance_keys_declaration_matches_reality():
 
     result = apply_normalize(messy_customers(), [{"column": "signup_amount", "op": "strip"}])
     assert set(result.provenance) == set(PROVENANCE_KEYS)
+
+
+def test_transform_ops_declaration_matches_the_dispatch():
+    """Callers validate steps against this list, so it must not drift."""
+    import pytest as _pytest
+
+    from portia.ops.normalize import TRANSFORM_OPS
+
+    df = messy_customers()
+    for op in TRANSFORM_OPS:  # every declared op is accepted
+        apply_normalize(df, [{"column": "signup_amount", "op": op}])
+    with _pytest.raises(ValueError, match="unknown transform op"):
+        apply_normalize(df, [{"column": "signup_amount", "op": "nope"}])

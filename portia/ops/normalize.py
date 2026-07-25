@@ -22,6 +22,12 @@ SAMPLE_FAILED = 5
 #: `tests/test_ops_normalize.py` asserts this matches a real run.
 PROVENANCE_KEYS = frozenset({"op", "input_rows", "transforms", "flags"})
 
+#: The transforms a step may ask for. Declared next to the dispatch so callers
+#: can validate a step *before* it is written to a spec, rather than discovering
+#: a typo when the spec is re-run months later. `tests/test_ops_normalize.py`
+#: asserts this matches what `_TRANSFORMS_dispatch` actually accepts.
+TRANSFORM_OPS = frozenset({"strip", "lower", "to_numeric", "to_string"})
+
 
 def apply_normalize(df: pd.DataFrame, transforms: list[dict]) -> OpResult:
     """Apply an ordered list of column transforms, returning the new frame +

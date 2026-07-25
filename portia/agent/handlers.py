@@ -214,6 +214,10 @@ def record_step(
     `expect` is what makes it falsifiable later: `run_spec` re-executes and
     reports drift against it. State what the check told you, not what you hope.
 
+    **Steps chain.** A step's output is registered under its ``id``, so a later
+    step may name it as ``left``, ``right`` or ``input`` and receive that frame.
+    Multi-hop work is built this way — join A to B, then join *that result* to C.
+
     Validation and serialization happen here, in code. The *content* is yours.
     """
     path = Path(spec_path)
@@ -223,9 +227,16 @@ def record_step(
     sources: dict[str, str] = doc.setdefault("sources", {})
     steps: list[dict] = doc.setdefault("steps", [])
 
+    step_ids = {s["id"] for s in steps}
     _validate_step(step, existing=steps)
-    for ref in _source_refs(step, known_steps={s["id"] for s in steps}):
-        sources[ref] = _source_path(ref, portia_dir)
+    for ref in _source_refs(step, known_steps=step_ids):
+        try:
+            sources[ref] = _source_path(ref, portia_dir)
+        except ValueError as exc:
+            # It's neither an indexed source nor an earlier step. Say both, or the
+            # caller assumes chaining is unsupported rather than mistyped.
+            known = ", ".join(sorted(step_ids)) or "(none yet)"
+            raise ValueError(f"{exc}. Earlier steps you can chain from: {known}") from exc
 
     steps.append(step)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -287,6 +298,9 @@ def _validate_step(step: dict, *, existing: list[dict]) -> None:
     if op == "join" and not (step.get("keys") or (step.get("left_on") and step.get("right_on"))):
         raise ValueError("join step needs 'keys', or both 'left_on' and 'right_on'")
 
+    if op == "normalize":
+        _validate_transforms(step["transforms"])
+
     unknown = sorted(set(step.get("expect") or {}) - _EXPECTABLE[op])
     if unknown:
         raise ValueError(
@@ -294,6 +308,31 @@ def _validate_step(step: dict, *, existing: list[dict]) -> None:
             f"reports — so it would drift on every run. Assert only measured fields: "
             f"{', '.join(sorted(_EXPECTABLE[op]))}"
         )
+
+
+def _validate_transforms(transforms: Any) -> None:
+    """Check each transform's shape, not just that the list exists.
+
+    Regression: a step was written with ``{"column": ..., "transform": "strip"}``
+    instead of ``"op"``. It validated, was accepted, and only failed with a bare
+    ``KeyError`` when the spec was re-run — which for a durable artifact could
+    have been months later. Validating the container and not its contents is the
+    same mistake as accepting an ``expect`` key no op reports.
+    """
+    if not isinstance(transforms, list):
+        raise ValueError("normalize: 'transforms' must be a list")
+    known = ", ".join(sorted(normalize_op.TRANSFORM_OPS))
+    for i, t in enumerate(transforms):
+        if not isinstance(t, dict):
+            raise ValueError(f"normalize: transform {i} must be an object")
+        if not t.get("column"):
+            raise ValueError(f"normalize: transform {i} needs a 'column'")
+        chosen = t.get("op")
+        if not chosen:
+            extra = " (did you mean 'op'?)" if "transform" in t else ""
+            raise ValueError(f"normalize: transform {i} needs an 'op'{extra}. One of: {known}")
+        if chosen not in normalize_op.TRANSFORM_OPS:
+            raise ValueError(f"normalize: transform {i} has unknown op {chosen!r}. One of: {known}")
 
 
 def _source_refs(step: dict, *, known_steps: set[str]) -> list[str]:

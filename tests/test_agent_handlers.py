@@ -277,3 +277,88 @@ def test_set_group_rejects_an_unindexed_source(project):
 def test_set_group_rejects_an_empty_write(project):
     with pytest.raises(ValueError, match="nothing to record"):
         handlers.set_group("g", portia_dir=project)
+
+
+# --- regressions from the hotel-fixture run ---------------------------------
+
+
+def test_record_step_can_chain_from_an_earlier_step(sales, tmp_path):
+    """Multi-hop work: a later step consumes an earlier step's output by id.
+
+    Regression: `record_step`'s tool description never said this was possible, so
+    the copilot concluded the spec format couldn't express a two-hop join, wrote a
+    degraded single-hop version, and advised the user to go implement it in dbt.
+    The engine had the capability all along; only the description was missing.
+    """
+    handlers.record_step(
+        "specs/chain.yaml",
+        {
+            "id": "bridged",
+            "op": "join",
+            "left": "orders",
+            "right": "customers",
+            "keys": ["customer_id"],
+            "how": "left",
+        },
+        portia_dir=sales,
+    )
+    out = handlers.record_step(
+        "specs/chain.yaml",
+        {
+            "id": "second_hop",
+            "op": "normalize",
+            "input": "bridged",  # <- the earlier step, not an indexed source
+            "transforms": [{"column": "name", "op": "strip"}],
+        },
+        portia_dir=sales,
+    )
+    assert out["n_steps"] == 2
+
+    doc = yaml.safe_load((tmp_path / "specs" / "chain.yaml").read_text())
+    assert "bridged" not in doc["sources"]  # a step is not registered as a source
+
+    run = handlers.run_spec("specs/chain.yaml")
+    assert [s["id"] for s in run["steps"]] == ["bridged", "second_hop"]
+    assert run["has_drift"] is False
+
+
+def test_record_step_names_chainable_steps_when_a_ref_is_unknown(sales):
+    """A bad ref must not read as 'chaining is unsupported'."""
+    handlers.record_step(
+        "specs/chain.yaml",
+        {"id": "bridged", "op": "join", "left": "orders", "right": "customers", "keys": ["k"]},
+        portia_dir=sales,
+    )
+    with pytest.raises(ValueError, match="Earlier steps you can chain from: bridged"):
+        handlers.record_step(
+            "specs/chain.yaml",
+            {
+                "id": "x",
+                "op": "normalize",
+                "input": "typo",
+                "transforms": [{"column": "name", "op": "strip"}],
+            },
+            portia_dir=sales,
+        )
+
+
+@pytest.mark.parametrize(
+    ("transforms", "message"),
+    [
+        ([{"column": "name", "transform": "strip"}], "did you mean 'op'"),
+        ([{"column": "name", "op": "uppercase"}], "unknown op"),
+        ([{"op": "strip"}], "needs a 'column'"),
+        (["strip"], "must be an object"),
+    ],
+)
+def test_record_step_validates_the_shape_of_each_transform(sales, transforms, message):
+    """Regression: `transform: strip` (not `op:`) validated, was written, and only
+    failed with a bare KeyError when the spec was re-run — potentially months later.
+    Checking the container and not its contents is the same bug as accepting an
+    `expect` key no op reports."""
+    with pytest.raises(ValueError, match=message):
+        handlers.record_step(
+            "specs/orders.yaml",
+            {"id": "n", "op": "normalize", "input": "orders", "transforms": transforms},
+            portia_dir=sales,
+        )

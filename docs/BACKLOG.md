@@ -65,6 +65,30 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
   present, quoting the user's own billing constraint.*
 - **Brief growth at scale** — L1 is ~30 tokens per source. Fine at 3, unproven at 50; the source
   index will need to become searchable or group-scoped rather than exhaustive.
+- **One tidy home for every injected instruction.** Prompt text currently lives in five places:
+  `agent/prompts/copilot.md` (L0), the brief template in `agent/context.py`, **every tool
+  description inline in `agent/tools.py`**, and the task prompts in `cli/chat.py` and
+  `cli/index.py`. Tool descriptions are the highest-leverage, most performance-sensitive text in
+  the system — the hotel run failed because one of them omitted a sentence — and they're buried in
+  decorators. Move them all under `agent/prompts/` so wording can be diffed, reviewed and A/B'd
+  without touching code, with a test that every tool resolves a description (no silent fallback).
+- **Run log + the metrics that need no labels.** Write each run's events (`agent/events.py`) to
+  JSONL, one line per event, and compute with pandas: which disclosure rungs were pulled and in
+  what order, tokens and turns per decision, how often it asked, drift rate on recorded specs.
+  ~30 lines, no infrastructure. Be honest about what these are: **cost and behaviour descriptors,
+  not correctness** — only the answer keys make a number mean anything.
+- **Langfuse, once the JSONL hurts.** Its job is browsing a run's timeline when debugging why one
+  went sideways, not computing the metrics above. Free either way (self-host via Docker, or the
+  cloud Hobby tier: 50k units/month, 30-day retention, 2 seats). The SDK drives Claude Code as a
+  *subprocess*, so client auto-instrumentation sees nothing — `events.py` is the only sane
+  emission point, which is also why the JSONL is not throwaway work.
+- **Generated data has nowhere to live.** `run_spec --write` dumps `<step-id>.csv` and nothing
+  knows it exists. Needs: a **code-owned** layout (`outputs/` at the project root for the data —
+  users open these in Excel — index entry in `.portia/`), auto-profiling (free) but **not**
+  auto-interpretation (a model turn per run), and `derived_from: <spec>#<step>` so a generated
+  table can't be mistaken for source data. Path convention is not judgment: if every project
+  invents its own tree nothing can find anything and the GUI's left panel has no stable view.
+  This is what makes `VISION.md`'s workflow chaining safe.
 - **Multi-turn chat** — `session.run` is one turn per invocation today; hold the `ClaudeSDKClient`
   open for follow-ups and wire `interrupt()`.
 - **Don't reconstruct rows from samples** — asked for raw data the agent politely assembles a
