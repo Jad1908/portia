@@ -47,6 +47,18 @@ adding code, and extend them rather than working around them:
   rendering for humans/CLI/UI lives at the edge (e.g. `render_text`, the `python -m …` entrypoints).
 - **Compute stays behind the checks layer** so pandas → DuckDB/Snowflake is a swap, not a rewrite
   (see `TECH_STACK.md`).
+- **One home for prompts — inline prompt text is forbidden.** Every string the model reads lives
+  in **`portia/agent/prompts/`** as markdown and is loaded with `prompts.load` / `prompts.tool` /
+  `prompts.task`. Never write instruction text into a Python string — not a module constant, not a
+  `@tool` description, not an f-string, not "just this once". This is enforced:
+  `tests/test_agent_prompts.py` fails on any non-docstring string literal over 200 characters
+  anywhere in `portia/`, and separately on any `@tool` that doesn't take its description from a
+  file. Docstrings are exempt — they're written for us, not the model.
+  *Why it's a rule and not a preference:* `record_step`'s description once lost a sentence saying
+  steps chain, and the copilot concluded portia couldn't express a two-hop join and told the user
+  to go use dbt instead. Prompt text is the least stable, most performance-sensitive part of the
+  system; it has to be diffable and reviewable as prose. (Schema *field* labels like
+  `"Indexed source name"` stay inline — see `prompts/README.md` for that boundary.)
 - **Reuse before you add.** Before writing a helper, look for an existing one. Shared helpers live
   in a shared module; never copy-paste a utility across tools.
 - **Named constants, not magic numbers** — thresholds live as module constants in one obvious place.

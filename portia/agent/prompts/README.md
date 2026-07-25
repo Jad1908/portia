@@ -27,6 +27,18 @@ can't silently fall back to an empty description.
 
 Task files are `str.format` templates; their placeholders are documented at the top of each.
 
+## The rule
+
+**Inline prompt text is forbidden anywhere in the codebase.** Not a module constant, not a
+`@tool` description, not an f-string, not "just this once". If the model reads it, it is a file
+in here.
+
+Enforced by `tests/test_agent_prompts.py`, which fails on any non-docstring string literal over
+200 characters anywhere in `portia/`, and separately on any `@tool` whose description isn't
+`prompts.tool(...)`. Docstrings are exempt — they're written for us, not the model. If the scan
+trips on something that genuinely isn't prompt text, that's worth a conversation rather than a
+threshold bump; nothing in the package has needed a 200-character string yet.
+
 ## What deliberately stays in code
 
 **JSON-schema field descriptions** (`{"type": "string", "description": "Indexed source name"}`)
