@@ -14,6 +14,13 @@ stack, and product vision. Read them every session, before proposing changes or 
   vision, stack, and watch-outs; let specifics emerge from real work.
 - **Rigor lives in the modelling / deterministic code** — the LLM orchestrates, explains, and
   asks; it never eyeballs the data to produce numbers.
+- **Facts vs judgment — the sharp line.** Deterministic code owns *facts and consequences*
+  (measurements, and what each available action would do — computed, never guessed). The **agent**
+  owns *judgment*: which facts are material (given the goal/domain/context the engine can't have),
+  what to ask, how to frame it, what to recommend. **Checks surface evidence generously; they must
+  never rank, prioritize, score "impact", or suggest an answer** — that bakes context-free judgment
+  into code that then fails on hard, subtle problems at scale. Invest in *richer observations*, not
+  a decision layer. (The tool calls stay deterministic; the agent never writes its own analysis.)
 - **pandas-first**; DuckDB/SQL only when scale forces it (behind an abstracted checks layer).
 - **Budget: Claude Pro only** (no API, no Max) — develop on a cheaper, smaller model at low
   effort; keep loops token-lean (compact profiles/schemas, never raw data).
@@ -43,23 +50,24 @@ adding code, and extend them rather than working around them:
 **Package layout — one home per concern; don't let things pile up flat in `portia/`:**
 
 - `portia/core/` — shared seams: `io.py` (loading) · `serialize.py` (compact JSON evidence)
-- `portia/checks/` — the deterministic checks layer (read-only **diagnosis**): `profiling.py`,
-  `join.py`; entity-res next. A check + its `render_*` live together; add new checks in that shape.
+- `portia/checks/` — the deterministic checks layer (read-only **diagnosis**, facts only):
+  `profiling.py`, `join.py` (`join_report` = key-level facts; `join_findings` = facts + example
+  rows). Surface evidence generously; never rank or recommend. A check + its `render_*` live
+  together; add new checks in this shape.
 - `portia/ops/` — the execution layer (**produces** data): `apply_join`, `apply_normalize`
   (coerce/clean columns). Every op returns an `OpResult` (frame + unsuppressable provenance
   report). Same swap seam as checks.
-- `portia/planner.py` — the **decide** layer: turns a diagnosis into ranked decisions (what to
-  ask, with suggested defaults + quantified impact) and a proposed multi-step plan. On a key
-  dtype mismatch it inserts `normalize`/`to_string` remediation steps and re-diagnoses, rather
-  than dead-ending. The deterministic skeleton the copilot later plugs into.
+- *(decide)* — **deliberately not a deterministic module.** Choosing what to ask and what to do is
+  the agent's job (unbuilt): it reads the checks' evidence and orchestrates the ops. Do not add a
+  code layer that ranks decisions or suggests answers — see "facts vs judgment" above.
 - `portia/spec.py` — the durable, git-diffable **spec**: sources + decided steps + `expect`;
   `run_spec` re-executes and detects drift. The residue that makes this a product, not a script.
 - `portia/fixtures/` — kept mock data (a builder per module, registered in `__init__`)
 - `portia/cli/` — play surfaces: `python -m portia.cli.<tool>` (e.g. `profile`, `join`, `run`)
 
-Rule of thumb: **`core` = reused everywhere · `checks` = diagnosis · `planner` = decide ·
-`ops` = execution · `spec` = the durable artifact · `cli` = human edge.** A new file that's none
-of these probably belongs in one of them, not loose in `portia/`.
+Rule of thumb: **`core` = reused everywhere · `checks` = diagnosis (facts) · `ops` = execution ·
+`spec` = the durable artifact · `cli` = human edge.** Deciding is the agent's job, not a layer.
+A new file that's none of these probably belongs in one of them, not loose in `portia/`.
 
 ## Branching — never work on `main` directly
 

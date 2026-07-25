@@ -6,10 +6,11 @@ alone** (set operations + multiplicity counts), so the report is honest at scale
 we can say a join explodes 50M rows to 2B without ever building it (docs/PLAN.md,
 "schemas + samples, never full data").
 
-This is diagnosis only — read-only, mutates nothing. Its vocabulary (`keys`,
-`join_type`, `fan_out`, unmatched counts) is deliberately the vocabulary the
-future execution operation will take as parameters, so diagnose → decide →
-execute stay coherent (see CLAUDE.md).
+This is diagnosis only — read-only, mutates nothing. It surfaces **facts** for a
+reasoning agent to judge; it never ranks, prioritizes, or recommends — that is
+the agent's job, with context the engine can't have (see CLAUDE.md, facts vs
+judgment). `join_findings` layers row-level examples on top of the report so the
+agent can weigh materiality from real rows, not just counts.
 
 The exact result-row formula, per join type, from key multiplicities:
     inner  = Σ_{k in shared}  mult_left[k] * mult_right[k]
@@ -28,6 +29,7 @@ from pandas.api import types as ptypes
 from portia.core.serialize import round_float, to_jsonable
 
 SAMPLE_KEYS = 5  # example unmatched keys shown per side
+SAMPLE_ROWS = 3  # example rows shown per anomaly in join_findings
 LOW_COVERAGE = 0.5  # left match rate below this -> "low_overlap"
 
 
@@ -255,4 +257,90 @@ def render_text(report: dict) -> str:
     if report["flags"]:
         lines.append("")
         lines.append(f"  ⚑ {', '.join(report['flags'])}")
+    return "\n".join(lines)
+
+
+def join_findings(
+    left: pd.DataFrame,
+    right: pd.DataFrame,
+    on: str | list[str] | None = None,
+    *,
+    left_on: str | list[str] | None = None,
+    right_on: str | list[str] | None = None,
+) -> dict:
+    """Evidence package for a join: the full report (facts) **plus samples of the
+    actual rows** behind each anomaly — unmatched, null-keyed, fan-out.
+
+    So a reasoning agent can judge *materiality* from real examples ("are these 2
+    dropped rows my biggest accounts, or noise?") instead of a count. Contains no
+    ranking and no recommendation: what matters, and what to ask, is the agent's
+    call. Row samples are capped (token-lean); at scale we'd also cap columns.
+    """
+    lkeys, rkeys = _resolve_keys(on, left_on, right_on)
+    _require_columns(left, lkeys, "left")
+    _require_columns(right, rkeys, "right")
+    report = join_report(left, right, on=on, left_on=left_on, right_on=right_on)
+
+    lsig, lnull = _key_sig(left, lkeys)
+    rsig, rnull = _key_sig(right, rkeys)
+    left_keys = set(lsig[~lnull])
+    right_keys = set(rsig[~rnull])
+
+    evidence = {
+        "unmatched_left_rows": _sample_rows(left, ~lnull & ~lsig.isin(right_keys)),
+        "unmatched_right_rows": _sample_rows(right, ~rnull & ~rsig.isin(left_keys)),
+        "null_key_left_rows": _sample_rows(left, lnull),
+        "null_key_right_rows": _sample_rows(right, rnull),
+        "fan_out_examples": _fan_out_examples(lsig[~lnull], rsig[~rnull]),
+    }
+    return {"report": report, "evidence": evidence}
+
+
+def _key_sig(df: pd.DataFrame, keys: list[str]) -> tuple[pd.Series, pd.Series]:
+    """A per-row key signature (scalar for a single key, tuple for composite) and
+    a null mask — a row is null-keyed if any key component is null."""
+    null = df[keys].isna().any(axis=1)
+    if len(keys) == 1:
+        return df[keys[0]], null
+    return pd.Series([tuple(r) for r in df[keys].to_numpy()], index=df.index), null
+
+
+def _sample_rows(df: pd.DataFrame, mask: pd.Series, k: int = SAMPLE_ROWS) -> list[dict]:
+    # to_dict("records") keeps each column's own dtype (int stays int); iterrows
+    # would upcast a mixed row to float.
+    return [
+        {c: to_jsonable(v) for c, v in rec.items()}
+        for rec in df.loc[mask].head(k).to_dict("records")
+    ]
+
+
+def _fan_out_examples(lsig: pd.Series, rsig: pd.Series) -> list[dict]:
+    """Shared keys duplicated on either side (the source of row multiplication),
+    worst first. Aligned via concat so int/float keys match like join_report."""
+    counts = pd.concat([lsig.value_counts().rename("l"), rsig.value_counts().rename("r")], axis=1)
+    dup = counts[
+        counts["l"].notna() & counts["r"].notna() & ((counts["l"] > 1) | (counts["r"] > 1))
+    ]
+    dup = dup.assign(prod=dup["l"] * dup["r"]).sort_values("prod", ascending=False)
+    return [
+        {"key": to_jsonable(k), "n_left": int(row["l"]), "n_right": int(row["r"])}
+        for k, row in dup.head(SAMPLE_KEYS).iterrows()
+    ]
+
+
+def render_findings(findings: dict) -> str:
+    """Human-readable findings for the CLI: the report, then example rows."""
+    lines = [render_text(findings["report"]), ""]
+    ev = findings["evidence"]
+    for title, key in [
+        ("unmatched left rows", "unmatched_left_rows"),
+        ("unmatched right rows", "unmatched_right_rows"),
+        ("null-key left rows", "null_key_left_rows"),
+        ("null-key right rows", "null_key_right_rows"),
+    ]:
+        if ev[key]:
+            lines.append(f"  {title} (sample):")
+            lines += [f"    {row}" for row in ev[key]]
+    if ev["fan_out_examples"]:
+        lines.append(f"  fan-out keys (n_left × n_right): {ev['fan_out_examples']}")
     return "\n".join(lines)

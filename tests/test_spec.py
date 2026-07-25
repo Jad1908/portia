@@ -3,9 +3,8 @@
 import pandas as pd
 import pytest
 
-from portia.checks.join import join_report
 from portia.fixtures import sales_customers, sales_orders
-from portia.spec import join_step, load_spec, run_spec, save_spec
+from portia.spec import load_spec, run_spec, save_spec
 
 
 @pytest.fixture
@@ -51,16 +50,6 @@ def test_drift_detected_when_source_changes(project):
     r = run_spec(spec, base_dir=tmp_path)[0]
     assert r.has_drift is True
     assert r.drift["result_rows"] == {"expected": 10, "actual": 11}
-
-
-def test_join_step_records_prediction_as_expectation():
-    # decide -> record: the expect block comes straight from the report.
-    report = join_report(sales_orders(), sales_customers(), on="customer_id")
-    step = join_step(
-        "joined", left="orders", right="customers", on="customer_id", how="left", report=report
-    )
-    assert step["keys"] == "customer_id"
-    assert step["expect"] == {"result_rows": 10, "left_dropped": 0, "right_dropped": 1}
 
 
 def test_spec_yaml_round_trips(tmp_path):

@@ -7,7 +7,7 @@ import it from the module (e.g. `portia.checks.join.render_text`), never inside
 a check.
 """
 
-from portia.checks.join import join_report
+from portia.checks.join import join_findings, join_report
 from portia.checks.profiling import profile_frame, profile_path
 
-__all__ = ["profile_frame", "profile_path", "join_report"]
+__all__ = ["profile_frame", "profile_path", "join_report", "join_findings"]

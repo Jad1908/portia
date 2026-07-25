@@ -75,6 +75,25 @@ def test_numeric_stats_present():
     assert col["min"] == 1.0 and col["max"] == 4.0 and col["mean"] == 2.5
 
 
+def test_numeric_describe_stats():
+    df = pd.DataFrame({"x": [1, 2, 3, 4, 5]})
+    col = profile_frame(df)["columns"][0]
+    assert col["q25"] == 2.0 and col["median"] == 3.0 and col["q75"] == 4.0
+    assert col["std"] is not None
+    assert "top" not in col  # numeric columns report quartiles, not a modal value
+
+
+def test_std_is_none_for_single_value():
+    col = profile_frame(pd.DataFrame({"x": [5]}))["columns"][0]
+    assert col["std"] is None  # undefined, and must stay JSON-valid (not NaN)
+
+
+def test_categorical_top_value():
+    col = profile_frame(pd.DataFrame({"c": ["a", "a", "b"]}))["columns"][0]
+    assert col["top"] == "a" and col["top_freq"] == 2
+    assert "median" not in col  # non-numeric columns don't get quartiles
+
+
 def test_output_is_json_serializable(profile):
     # The profile is what the agent will see; it must round-trip through JSON.
     assert json.loads(to_json(profile)) == json.loads(json.dumps(json.loads(to_json(profile))))
