@@ -1,8 +1,9 @@
 """The catalog indexes sources and preserves human judgment across re-index."""
 
+import pytest
 import yaml
 
-from portia.catalog import index_source, init_project, load_catalog
+from portia.catalog import index_source, init_project, load_catalog, set_interpretation
 from portia.fixtures import messy_customers
 
 
@@ -57,6 +58,57 @@ def test_reindex_preserves_judgment_refreshes_facts(tmp_path):
     cid = next(c for c in after["columns"] if c["name"] == "customer_id")
     assert cid["role"] == "identifier"  # role preserved
     assert "possible_key" in cid["flags"]  # facts still present/refreshed
+
+
+def test_set_interpretation_writes_judgment_and_leaves_facts_alone(tmp_path):
+    csv = _write_source(tmp_path)
+    d = tmp_path / ".portia"
+    src_file = index_source(csv, portia_dir=d)
+    before = yaml.safe_load(src_file.read_text())
+
+    set_interpretation(
+        "customers",
+        summary="The master EU customer list, one row per signup.",
+        roles={"customer_id": "identifier", "signup_amount": "measure"},
+        portia_dir=d,
+    )
+    after = yaml.safe_load(src_file.read_text())
+
+    assert after["summary"] == "The master EU customer list, one row per signup."
+    roles = {c["name"]: c["role"] for c in after["columns"]}
+    assert roles["customer_id"] == "identifier"
+    assert roles["signup_amount"] == "measure"
+
+    # every fact is byte-identical — only `role` moved
+    assert after["candidate_keys"] == before["candidate_keys"]
+    for old, new in zip(before["columns"], after["columns"], strict=True):
+        assert {k: v for k, v in old.items() if k != "role"} == {
+            k: v for k, v in new.items() if k != "role"
+        }
+
+
+def test_set_interpretation_leaves_omitted_fields_untouched(tmp_path):
+    csv = _write_source(tmp_path)
+    d = tmp_path / ".portia"
+    src_file = index_source(csv, portia_dir=d)
+
+    set_interpretation("customers", summary="A first read.", portia_dir=d)
+    set_interpretation("customers", roles={"customer_id": "identifier"}, portia_dir=d)
+    after = yaml.safe_load(src_file.read_text())
+
+    assert after["summary"] == "A first read."  # not clobbered by the roles-only call
+    assert next(c for c in after["columns"] if c["name"] == "customer_id")["role"] == "identifier"
+
+
+def test_set_interpretation_rejects_unknown_source_and_column(tmp_path):
+    csv = _write_source(tmp_path)
+    d = tmp_path / ".portia"
+    index_source(csv, portia_dir=d)
+
+    with pytest.raises(ValueError, match="no catalog entry"):
+        set_interpretation("nope", summary="x", portia_dir=d)
+    with pytest.raises(ValueError, match="no such column"):
+        set_interpretation("customers", roles={"nope": "identifier"}, portia_dir=d)
 
 
 def test_load_catalog_bundles_project_and_sources(tmp_path):

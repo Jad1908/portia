@@ -50,13 +50,21 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
 
 ## Agent — the "decide" layer (the copilot)
 
-- **The copilot loop** (Claude Agent SDK) — reads the checks' evidence, does the judgement (what's
-  material, what to ask, how to frame it), orchestrates the ops, writes decisions + rationale to the
-  spec. This is where "decide" lives; deliberately not a deterministic module.
+- ~~**The copilot loop**~~ — *plumbing shipped (`portia/agent/`, branch `agent-loop`): in-process
+  MCP server over the checks/catalog, `AskUserQuestion` routed to the human, event stream, chat CLI.
+  Proven on the indexing task.* **Remaining: the join copilot** — `join_findings` + `record_step` +
+  `run_spec` as tools, so it orchestrates ops and writes decisions + rationale to the spec.
+- **Multi-turn chat** — `session.run` is one turn per invocation today; hold the `ClaudeSDKClient`
+  open for follow-ups and wire `interrupt()`.
+- **Don't reconstruct rows from samples** — asked for raw data the agent politely assembles a
+  plausible table from `samples` and hedges. Honest, but consider whether the prompt should refuse
+  outright.
 - **Sandbox data access** — hand the agent's code-execution a clean handle to the loaded frames so it
   can run read-only ad-hoc analysis (the imputation-shape question). Ephemeral; verdict → `rationale`.
-- **Pro-auth verification** — confirm which models Claude Pro exposes to the Agent SDK and how they
-  meter (open question in `PLAN.md`); the whole budget discipline rides on this.
+- ~~**Pro-auth verification**~~ — *partly answered 2026-07-25: the SDK authenticates off the local
+  Claude Code login with no `ANTHROPIC_API_KEY` set.* **Still open: how it meters** — the reported
+  `total_cost_usd` is a token-count estimate, not proof of billing; check the API console's usage.
+  See `PLAN.md` → "Auth posture" for what portia does and doesn't claim about this.
 - **Don't re-ask what's decided** — the agent asks only about what the spec hasn't answered; drift
   can re-open a specific decision. (Best shaped by real use, per the user.)
 
@@ -65,8 +73,11 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
 *Substrate built (`catalog.py`): project context + groups + per-source Layer 1 prose / Layer 2
 column roles + facts; facts refresh, judgment preserved. Remaining:*
 
-- **Semantic interpretation** — the agent rewrites the auto-drafted `summary` and fills column
-  `role`s using the project context (needs the agent). Today they're deterministic placeholders/slots.
+- ~~**Semantic interpretation**~~ — *shipped: `catalog.set_interpretation` + the agent's
+  `interpret` flow. The agent now writes `summary` and column `role`s from the project context.*
+- **Role vocabulary** — the agent invents role names per run (`attribute` vs `category`,
+  `unused` vs `dropped`). Fine while we learn what roles are useful; revisit once real use shows
+  which ones carry weight, and only then consider constraining them.
 - **Broad "how sources interact" model** — likely joins / relationships across sources (the
   context-aware end goal). Deferred as too early — forge convictions via the UI first.
 - **Groups in use** — `groups` are stored but nothing consumes them yet; wire group context into

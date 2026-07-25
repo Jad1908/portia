@@ -17,8 +17,9 @@ infrastructure and frontend surface, stay in Python wherever we can, and keep th
 - **Model is a config knob**, not a fixed choice. We develop on a cheaper, smaller model at low
   effort — if it works there, the *engine* is good, not the model; the flagship is a ceiling
   check / upgrade, never a dependency. **Claude Pro only** (no API budget, no Max), so loops stay
-  **token-lean** (the agent sees compact profiles/schemas, never raw data). *To verify:* which
-  models Pro auth exposes to the Agent SDK and how they meter against limits.
+  **token-lean** (the agent sees compact profiles/schemas, never raw data). *Verified 2026-07-25:*
+  the SDK authenticates off the local Claude Code login with no `ANTHROPIC_API_KEY` set; how it
+  meters is still open. portia itself writes **no auth code** — see `PLAN.md` → "Auth posture".
 
 ## Data & compute — pandas-first, SQL only when scale forces it
 

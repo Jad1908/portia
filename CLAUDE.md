@@ -59,9 +59,15 @@ adding code, and extend them rather than working around them:
 - `portia/ops/` — the execution layer (**produces** data): `apply_join`, `apply_normalize`
   (coerce/clean columns). Every op returns an `OpResult` (frame + unsuppressable provenance
   report). Same swap seam as checks.
-- *(decide)* — **deliberately not a deterministic module.** Choosing what to ask and what to do is
-  the agent's job (unbuilt): it reads the checks' evidence and orchestrates the ops. Do not add a
-  code layer that ranks decisions or suggests answers — see "facts vs judgment" above.
+- `portia/agent/` — the **decide layer, as an agent rather than a module** (Claude Agent SDK).
+  `handlers.py` = the callable surface as pure `(args) -> jsonable dict` functions, no SDK import,
+  testable without it · `tools.py` = `@tool` wrappers + the in-process MCP server, the only place
+  the SDK meets the engine · `events.py` = SDK messages normalized to portia events (the seam the
+  UI sits on) · `ask.py` = intercepts `AskUserQuestion` so decisions reach the human · `session.py`
+  = the options block + client lifecycle · `prompts/copilot.md` = the system prompt as prose.
+  **The agent is configured with no built-in filesystem or shell tools**, so it physically cannot
+  read raw data — its whole view is the checks' evidence. Do not add a code layer that ranks
+  decisions or suggests answers — see "facts vs judgment" above. Requires the `agent` extra.
 - **Durable artifacts** (git-diffable YAML, the residue that makes this a product, not a script):
   - `portia/spec.py` — the **spec** (*what we did to the data*): sources + decided steps + `expect`
     + `rationale`; `run_spec` re-executes and detects drift.
@@ -73,8 +79,9 @@ adding code, and extend them rather than working around them:
 - `portia/cli/` — play surfaces: `python -m portia.cli.<tool>` (e.g. `profile`, `join`, `run`, `index`)
 
 Rule of thumb: **`core` = reused everywhere · `checks` = diagnosis (facts) · `ops` = execution ·
-`spec` + `catalog` = the durable artifacts · `cli` = human edge.** Deciding is the agent's job, not
-a layer. A new file that's none of these probably belongs in one of them, not loose in `portia/`.
+`spec` + `catalog` = the durable artifacts · `agent` = judgment · `cli` = human edge.** Deciding is
+the agent's job, not a layer. A new file that's none of these probably belongs in one of them, not
+loose in `portia/`.
 
 ## Branching — never work on `main` directly
 
