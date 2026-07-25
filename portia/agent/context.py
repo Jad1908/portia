@@ -24,39 +24,30 @@ detail belongs to the tools.
 from __future__ import annotations
 
 from portia import catalog
-
-NO_CONTEXT = (
-    "The user has not described this project yet. That description is what makes "
-    "a column's meaning decidable, so ask for it before interpreting anything."
-)
-
-NO_SOURCES = "No data sources have been indexed yet."
+from portia.agent import prompts
 
 
 def build_brief(portia_dir: str = catalog.DEFAULT_DIR) -> str:
-    """Render this project's L1 context as markdown for the system prompt."""
+    """Render this project's L1 context as markdown for the system prompt.
+
+    The wording lives in ``prompts/brief/`` — this function only decides which
+    parts apply and fills them in.
+    """
+    no_context = prompts.load("brief/no_context")
     try:
         cat = catalog.load_catalog(portia_dir)
     except FileNotFoundError:
-        return f"# This project\n\n{NO_CONTEXT}\n"
-
-    lines = ["# This project", ""]
-    lines.append(cat.get("project") or NO_CONTEXT)
+        cat = {}
 
     sources = cat.get("sources") or {}
     grouped = _render_groups(cat.get("groups") or [], sources)
-    if grouped:
-        lines += ["", "## Groups", "", *grouped]
-
-    lines += ["", "## Indexed sources", ""]
-    lines += _render_sources(sources) if sources else [NO_SOURCES]
-    lines += [
-        "",
-        "That is the whole index — one line each. For a source's columns and "
-        "roles call `describe_source`; for its measured facts call `profile_source`.",
-        "",
-    ]
-    return "\n".join(lines)
+    return prompts.load("brief/template").format(
+        project=cat.get("project") or no_context,
+        groups="\n" + "\n".join(["## Groups", "", *grouped, ""]) if grouped else "",
+        sources="\n".join(_render_sources(sources))
+        if sources
+        else prompts.load("brief/no_sources"),
+    )
 
 
 def _render_groups(groups: list[dict], sources: dict) -> list[str]:

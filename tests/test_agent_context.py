@@ -8,7 +8,7 @@ advice. Presence has to be structural, which is what these tests hold.
 
 import pytest
 
-from portia.agent import context
+from portia.agent import context, prompts
 from portia.catalog import index_source, init_project, set_group, set_interpretation
 from portia.fixtures import sales_customers, sales_orders
 
@@ -74,10 +74,11 @@ def test_brief_carries_groups_and_their_shared_context(project):
 
 def test_brief_asks_for_context_when_there_is_none(tmp_path):
     """An uninitialized project must tell the copilot to ask, not stay silent."""
-    assert context.NO_CONTEXT in context.build_brief(str(tmp_path / "nope"))
+    no_context = prompts.load("brief/no_context")
+    assert no_context in context.build_brief(str(tmp_path / "nope"))
 
     init_project("", portia_dir=tmp_path / ".portia")
-    assert context.NO_CONTEXT in context.build_brief(str(tmp_path / ".portia"))
+    assert no_context in context.build_brief(str(tmp_path / ".portia"))
 
 
 def test_system_prompt_composes_l0_and_l1(project):

@@ -67,7 +67,9 @@ adding code, and extend them rather than working around them:
   the SDK meets the engine · `context.py` = the L1 project brief · `events.py` = SDK messages
   normalized to portia events (the seam the UI sits on) · `ask.py` = intercepts `AskUserQuestion`
   so decisions reach the human · `session.py` = the options block + client lifecycle ·
-  `prompts/copilot.md` = the system prompt as prose. Requires the `agent` extra.
+  `prompts/` = **every instruction the model reads** — L0 system prompt, the L1 brief
+  template, one file per tool description, one per CLI task. Nothing the copilot reads is
+  embedded in a Python string; see `prompts/README.md`. Requires the `agent` extra.
   - **No built-in filesystem or shell tools**, so it physically cannot read raw data — its whole
     view is the checks' evidence.
   - **Context arrives in layers, cheapest first.** L0 how-to-work + L1 *this project* (prose,
