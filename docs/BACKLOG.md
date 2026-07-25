@@ -60,10 +60,24 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
 - **Don't re-ask what's decided** — the agent asks only about what the spec hasn't answered; drift
   can re-open a specific decision. (Best shaped by real use, per the user.)
 
+## Context catalog — `.portia/` (the agent's memory)
+
+*Substrate built (`catalog.py`): project context + groups + per-source Layer 1 prose / Layer 2
+column roles + facts; facts refresh, judgment preserved. Remaining:*
+
+- **Semantic interpretation** — the agent rewrites the auto-drafted `summary` and fills column
+  `role`s using the project context (needs the agent). Today they're deterministic placeholders/slots.
+- **Broad "how sources interact" model** — likely joins / relationships across sources (the
+  context-aware end goal). Deferred as too early — forge convictions via the UI first.
+- **Groups in use** — `groups` are stored but nothing consumes them yet; wire group context into
+  downstream reasoning once the agent lands.
+- **Catalog storage shape** — one-file-per-source now; revisit one-file vs per-group vs harmonized
+  once we've used it (kept deliberately un-locked / hand-editable).
+- **Context bundle** — a token-lean projection of the catalog for the agent to consume; and a
+  drift-like "facts changed since summary written" signal.
+
 ## Interface — the surface
 
-- **Per-file "what this data is"** — the LLM's plain-language interpretation on top of the
-  deterministic profile, with user-editable corrections (durable). `VISION.md` flow.
 - **The three-panel app** (files · workflow · chat) — NiceGUI on the engine's event stream. Core to
   the product, deferred until the engine + agent are proven. `VISION.md`.
 
