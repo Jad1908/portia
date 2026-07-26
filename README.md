@@ -11,9 +11,26 @@ It dives into your data and comes back with questions and insights, surfacing mi
 missing values, and near-duplicate entities as decisions to make rather than silent guesses —
 and records every choice as a durable, reproducible artifact.
 
+## The app
+
+Three panes — your files, the workflow, and the copilot — in one window:
+
+```bash
+uv sync --extra ui --extra agent
+python -m portia.ui
+```
+
+Open a project directory (it gets created if it isn't there), write a few lines about what the
+project *is*, drop your CSVs in, and go. Every question the copilot asks and every write it wants to
+make stops on screen, with the evidence still next to it.
+
+There are CLIs for the same engine — `python -m portia.cli.index`, `.chat`, `.run` — if you'd
+rather stay in a terminal.
+
 ## Docs
 
 - [Direction](docs/PLAN.md)
 - [Tech stack](docs/TECH_STACK.md)
 - [Product vision](docs/VISION.md)
+- [Design](DESIGN.md)
 - [Brief](docs/brief.md)

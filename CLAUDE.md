@@ -133,11 +133,24 @@ adding code, and extend them rather than working around them:
     corrections are never clobbered (facts vs judgment, applied to updates).
 - `portia/fixtures/` — kept mock data (a builder per module, registered in `__init__`)
 - `portia/cli/` — play surfaces: `python -m portia.cli.<tool>` (e.g. `profile`, `join`, `run`, `index`)
+- `portia/ui/` — the **app** (`python -m portia.ui`, `ui` extra): three panes on the same event
+  stream, driving a turn through `ask.py`'s injected `answer`/`confirm`. Same status as `cli/` — an
+  **edge**, and the two must never disagree about a number.
+  - **`ui/engine.py` is the only module in here that calls the engine**, and **nothing in `ui/`
+    computes**. A panel that wants a number the engine doesn't expose is a signal to add it to
+    `checks`/`spec`, not to calculate it in a widget.
+  - `state.py` and `graph.py` import no NiceGUI, so the app's logic is testable without a browser.
+  - The look lives in `ui/assets/portia.css` as `DESIGN.md`'s tokens — not in Python strings, and
+    not in NiceGUI APIs, so swapping the framework stays cheap (`TECH_STACK.md`).
+  - **`DESIGN.md`'s product rule is the UI's version of facts vs judgment: colour and prominence
+    communicate *kind*, never *rank*.** No sorting by severity, no badge that grows with its number,
+    no roll-up that implies a score. The engine refuses to rank; the screen must not do it on the
+    engine's behalf.
 
 Rule of thumb: **`core` = reused everywhere · `checks` = diagnosis (facts) · `ops` = execution ·
-`spec` + `catalog` = the durable artifacts · `agent` = judgment · `cli` = human edge.** Deciding is
-the agent's job, not a layer. A new file that's none of these probably belongs in one of them, not
-loose in `portia/`.
+`spec` + `catalog` = the durable artifacts · `agent` = judgment · `cli` + `ui` = human edges.**
+Deciding is the agent's job, not a layer. A new file that's none of these probably belongs in one of
+them, not loose in `portia/`.
 
 ## Branching — never work on `main` directly
 

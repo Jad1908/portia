@@ -23,26 +23,15 @@ from pathlib import Path
 
 from portia.agent import prompts
 from portia.catalog import index_source, init_project, load_catalog, render_source
-from portia.core.io import supported_suffixes
+from portia.core.io import find_data_files
 
 
 def resolve(target: str) -> list[Path]:
-    """Every supported data file at ``target`` — a file, a directory, or a glob."""
-    path = Path(target)
-    if path.is_file():
-        return [path]
-
-    suffixes = supported_suffixes()
-    if path.is_dir():
-        found = sorted(p for p in path.iterdir() if p.suffix.lower() in suffixes)
-    else:  # treat it as a glob
-        found = sorted(p for p in Path().glob(target) if p.suffix.lower() in suffixes)
-
-    if not found:
-        raise SystemExit(
-            f"no supported data files at {target!r} (supported: {', '.join(suffixes)})"
-        )
-    return found
+    """Every supported data file at ``target``, or a clean exit if there are none."""
+    try:
+        return find_data_files(target)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
 
 
 def ensure_project_context(portia_dir: str) -> None:

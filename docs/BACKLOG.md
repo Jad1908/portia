@@ -209,20 +209,31 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
 
 ## Interface — the surface
 
-- **The three-panel app** (files · workflow · copilot) — NiceGUI on the engine's event stream. Core
-  to the product. **V0 is specced** (`VISION.md` → "V0"; looks in `DESIGN.md`) and **drives**: it
-  runs a turn and catches every question and write confirmation, which needs no engine change
-  because `agent/ask.py` injects `answer`/`confirm` for exactly this.
+- ~~**The three-panel app**~~ — **V0 shipped 2026-07-26** (`portia/ui/`, `python -m portia.ui`).
+  Drives a turn, catches every question and write confirmation, and the no-terminal audit in
+  `VISION.md` passes end to end. What V0 left behind, in rough order of felt need:
+  - **A source's catalog entry replaces the workflow pane** while you read it, rather than sitting
+    somewhere the graph stays visible. It works and it is discoverable ("Back to workflow"), but
+    the middle pane is now two things.
+  - **The graph is a fixed grid.** No pan, no zoom, no collapsing a long chain; nodes are a uniform
+    size and a spec with many steps will run off the canvas before it stops reading.
+  - **A denied write leaves no note in the spec.** The transcript records it; nothing durable does.
+  - **Nothing is editable.** `VISION.md` scoped that out on purpose; correcting an interpretation
+    still means opening the YAML.
+  - **Drag-and-drop is unverified.** The picker and the "add by path" field are what got tested.
+- **The transcript disappears when the window does.** V0 keeps a turn in memory only, so the left
+  pane's **Runs** section says so rather than pretending. That is the run log's job (below), and the
+  app is now the second consumer waiting on it.
 - **A conversation that stays open.** `session.run` sends one prompt, drains the response and closes
   the client, so there is no multi-turn — no "actually, redo that as an inner join" after a turn
   ends. The SDK's `ClaudeSDKClient` supports staying open; this is a portia limitation, not an SDK
   one. **Not a prerequisite for the UI** — a turn is a complete unit of work, and V0 offers a fresh
   turn rather than a fake conversation. The first thing to build *after* V0, once the boundary has
   been felt for real.
-- **Tool results are missing from the event stream.** `events.from_message` handles the assistant's
-  messages and the final result and drops the message carrying tool *results* — so any consumer
-  sees what was called and never what came back. Needed by both the run log and the app's
-  transcript panel; do it once, before either. **Smallest high-leverage item on this page.**
+- ~~**Tool results are missing from the event stream.**~~ — *fixed 2026-07-26 alongside the app:
+  `events.TOOL_RESULT`, emitted from the `UserMessage` carrying `ToolResultBlock`s. The app expands
+  them inline; **`cli/chat.py` still ignores the kind**, deliberately, so terminal transcripts stay
+  comparable across the runs already scored against them. Revisit when the run log lands.*
 
 ## Scale — data tiers
 

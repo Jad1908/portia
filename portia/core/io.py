@@ -40,6 +40,43 @@ def supported_suffixes() -> tuple[str, ...]:
     return tuple(sorted(_LOADERS))
 
 
+def find_data_files(target: str | Path) -> list[Path]:
+    """Every supported data file at ``target`` — a file, a directory, or a glob.
+
+    Lives here rather than in a CLI because both human edges need it: the
+    ``index`` command resolves what to index, and the app's "add by path" field
+    resolves the same thing. What counts as a data file is decided by
+    :data:`_LOADERS`, so the answer stays one fact rather than two lists that
+    drift apart.
+    """
+    path = Path(target)
+    if path.is_file():
+        return [path]
+
+    suffixes = supported_suffixes()
+    if path.is_dir():
+        found = sorted(p for p in path.iterdir() if p.suffix.lower() in suffixes)
+    else:
+        found = sorted(p for p in _glob(path) if p.suffix.lower() in suffixes)
+
+    if not found:
+        raise ValueError(f"no supported data files at {str(target)!r} ({', '.join(suffixes)})")
+    return found
+
+
+def _glob(pattern: Path):
+    """Match a glob, absolute or relative.
+
+    ``Path().glob("/data/*.csv")`` raises on an absolute pattern, so an absolute
+    one is anchored at the root and matched from there. Someone adding files by
+    path types the path they have, and it is usually the absolute one.
+    """
+    if pattern.is_absolute():
+        root = Path(pattern.anchor)
+        return root.glob(str(pattern.relative_to(root)))
+    return Path().glob(str(pattern))
+
+
 def _load_csv(path: Path, **kwargs: Any) -> pd.DataFrame:
     # Let pandas infer dtypes: "numeric stored as text" must remain a *reportable*
     # signal, not something we normalize away at the door.

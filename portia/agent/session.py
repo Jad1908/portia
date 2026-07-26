@@ -23,6 +23,13 @@ from portia.agent import ask, context, events, tools
 #: on a small one on purpose: if the loop works here, the *engine* is good.
 DEFAULT_MODEL = "claude-haiku-4-5"
 
+#: Models worth offering in a picker — a **convenience list, not a validation
+#: set**. The model stays a free-form config knob (``--model`` takes anything the
+#: SDK accepts); this exists so a surface with a selector has something to put in
+#: it without inventing its own list. Ordered cheapest-first, which is also the
+#: order `PLAN.md` says to develop in.
+MODELS = ("claude-haiku-4-5", "claude-sonnet-5", "claude-opus-5")
+
 #: How hard the model thinks, passed straight to the SDK. The other half of
 #: "develop on a cheaper, smaller model **at low effort**" (`PLAN.md` → Budget &
 #: model discipline) — and the knob that makes a ceiling check on a flagship a

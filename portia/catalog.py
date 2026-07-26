@@ -33,6 +33,11 @@ from portia.checks.profiling import profile_path
 
 DEFAULT_DIR = ".portia"
 
+#: How an auto-drafted summary announces itself. ``_auto_summary`` writes it and
+#: :func:`is_interpreted` reads it, so "has anyone actually read this source yet"
+#: is one fact rather than a marker string copied into every surface that asks.
+AUTO_DRAFT_MARKER = "(auto-drafted from checks"
+
 # Column flags worth calling out in the auto-drafted prose summary. Plain
 # restatements of facts — not judgements.
 _WATCHOUTS = {
@@ -217,8 +222,13 @@ def _auto_summary(profile: dict) -> str:
             watch.append(f"{col['name']} ({', '.join(hits)})")
     if watch:
         parts.append("Watch-outs: " + "; ".join(watch) + ".")
-    parts.append("(auto-drafted from checks — edit freely; the agent will refine this.)")
+    parts.append(f"{AUTO_DRAFT_MARKER} — edit freely; the agent will refine this.)")
     return " ".join(parts)
+
+
+def is_interpreted(entry: dict) -> bool:
+    """Whether a source's ``summary`` is a real read, or still the placeholder."""
+    return AUTO_DRAFT_MARKER not in (entry.get("summary") or "")
 
 
 def _register(d: Path, name: str) -> None:

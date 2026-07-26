@@ -500,18 +500,28 @@ Their *visual language* lives on in the components above.
 
 ## Known Gaps
 
-- **Light-mode values are first-pass**, inherited and tuned by reasoning rather than capture; verify contrast on device.
-- **Hover states** are left to platform convention and not specified here.
-- **The graph's visual grammar is provisional.** Cards-are-steps and edges-are-data-dependency is V0's working answer to `VISION.md`'s open question; rendering it is how we find out whether it reads correctly. Expect this section to change.
-- **First-run chrome is specced** (`project-open`, `project-context`, `source-dropzone`) because
-  V0's bar is a full test run with no terminal. It is first-pass and unbuilt; the context panel in
-  particular deserves attention beyond a text box, since it carries more of the product's outcome
-  than any other control.
-- **Drag-and-drop file handling** in NiceGUI is unverified. If it proves awkward, the picker plus a
-  path field is an acceptable V0 fallback — the requirement is "no terminal", not "drag".
-- **Teal pill contrast on dark** — white on `#0D9488` sits just under 4.5:1 for 13px text; verify on device and darken toward `#0C7D72` if it reads weak.
+*V0 is built (`portia/ui/`). Gaps below are marked with what the build settled and what it didn't.*
+
+- **Light-mode values are first-pass**, inherited and tuned by reasoning rather than capture; verify contrast on device. *Light mode has now been looked at on screen and reads correctly; the values have still never been measured.*
+- **Hover states** are left to platform convention and not specified here. *V0 gives artifact rows and option rows a `{colors.surface-card}` hover and nothing else.*
+- **The graph's visual grammar is provisional.** Cards-are-steps and edges-are-data-dependency is V0's working answer to `VISION.md`'s open question; rendering it is how we find out whether it reads correctly. *First reading: on a two-source, one-step spec it is legible and unremarkable — which is the answer for the easy case only. It has not been seen on a multi-hop spec, and the layout is a fixed grid with no pan, zoom or collapse, so a long chain will run off the canvas before the grammar is what fails.*
+- ~~**First-run chrome is specced but unbuilt**~~ — *built: `project-open`, `project-context`, `source-dropzone`, `index-progress`. The context panel is still a text box with guidance beneath it, and it still deserves more than that.*
+- ~~**Drag-and-drop file handling is unverified**~~ — *still unverified. The sanctioned fallback is what shipped and what was tested: the picker, plus an "add by path" field that takes a file, a directory or a glob.*
+- **Teal pill contrast on dark** — white on `#0D9488` sits just under 4.5:1 for 13px text; verify on device and darken toward `#0C7D72` if it reads weak. *Unmeasured.*
 - **No syntax highlighting** in V0 code blocks. If SQL steps get long, revisit.
 - **The accent hue is decided: deep teal**, shared with the sibling project. Not a gap — a choice.
   It still lives in one token, so re-hueing stays a one-line change if that ever becomes wanted.
 - **Streaming states are unspecced.** What a `tool_call` row looks like while its result is still
-  pending, and how a long turn signals it is alive, need designing against a real run.
+  pending, and how a long turn signals it is alive, need designing against a real run. *V0's answer
+  is thin and now has a real run behind it: a spinner beside "the copilot is working", and the
+  transcript pinned to its newest row. A `tool_call` still looks identical whether its result is
+  seconds away or never coming.*
+- **Two rules met each other and had to be reconciled.** The toolbar holds **Run**, the transcript
+  holds **Go**, and at most one solid accent fill may be visible per view — so V0 gives the fill to
+  whichever is the way forward: **Go** until a spec has steps, **Run** once it does. Stated here
+  because it is a real decision, not an implementation detail.
+- **The framework fights the palette in two places.** Quasar paints its own components from
+  `--q-primary`, so that token is pointed at `{colors.accent-primary}` and everything unstyled lands
+  on portia's hue in both modes. Its `toggle` still insists on a solid brand fill for the selected
+  segment, so the `segmented-control` is built from `button-micro`s instead — the selected one takes
+  the `{colors.accent-soft}` wash this file specifies.

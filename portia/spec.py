@@ -67,6 +67,26 @@ class StepResult:
         return sorted(hit - set(self.acknowledged))
 
 
+#: Where a step names a table it reads. ``join`` and ``normalize`` name one per
+#: field; ``sql`` declares a list, because a query may read several. This is the
+#: spec format's own fact, so it lives with the format rather than being restated
+#: by every reader — the agent's validator and the app's graph both consult it.
+REF_FIELDS = ("left", "right", "input")
+REF_LIST_FIELD = "inputs"
+
+
+def step_inputs(step: dict) -> list[str]:
+    """The tables a step reads, in the order it declares them.
+
+    A name here is either an indexed source or an earlier step's ``id`` — the
+    step itself doesn't distinguish, and neither does this. That is exactly the
+    edge in the workflow graph: *this step's output is that step's input*.
+    """
+    refs = [step.get(field) for field in REF_FIELDS]
+    refs += list(step.get(REF_LIST_FIELD) or [])
+    return [r for r in refs if isinstance(r, str) and r]
+
+
 def load_spec(path: str | Path) -> dict:
     """Parse a spec YAML file into a plain dict."""
     with open(path) as f:
@@ -96,6 +116,24 @@ def run_spec(spec: dict, *, base_dir: str | Path = ".") -> list[StepResult]:
         frames[step["id"]] = result.frame  # downstream steps may reference it
         results.append(result)
     return results
+
+
+def write_outputs(results: list[StepResult], out_dir: str | Path) -> list[Path]:
+    """Save each step's produced table as ``<out_dir>/<step id>.csv``.
+
+    Both human edges write outputs — ``cli.run --write`` and the app's Run — and
+    a table's filename is part of how a spec is read afterwards, so where it
+    lands is decided once, here, rather than in each renderer.
+    """
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    written = []
+    for r in results:
+        if r.frame is not None:
+            path = out / f"{r.id}.csv"
+            r.frame.to_csv(path, index=False)
+            written.append(path)
+    return written
 
 
 def _run_step(step: dict, frames: dict[str, pd.DataFrame]) -> StepResult:

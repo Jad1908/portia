@@ -28,3 +28,5 @@ venv/
 # regenerated output. specs/sales_join.yaml (hand-authored) stays tracked.
 .portia/
 specs/agent_*.yaml
+# Tables a run wrote (`run --write out`, or the app's "Write outputs").
+out/

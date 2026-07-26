@@ -11,7 +11,7 @@ import argparse
 import json
 from pathlib import Path
 
-from portia.spec import load_spec, render_text, run_spec
+from portia.spec import load_spec, render_text, run_spec, write_outputs
 
 
 def main() -> None:
@@ -37,12 +37,8 @@ def main() -> None:
         print(render_text(results))
 
     if args.write:
-        out_dir = Path(args.write)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        for r in results:
-            if r.frame is not None:
-                r.frame.to_csv(out_dir / f"{r.id}.csv", index=False)
-                print(f"wrote {out_dir / f'{r.id}.csv'}")
+        for path in write_outputs(results, args.write):
+            print(f"wrote {path}")
 
     if any(r.has_drift for r in results):
         raise SystemExit(1)  # drift is a failure signal for scripts/CI

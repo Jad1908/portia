@@ -1,0 +1,1135 @@
+/* portia — the look.
+ *
+ * Every value in this file comes from DESIGN.md, which owns appearance. Tokens
+ * are mode-aware CSS custom properties: :root holds Light, body.body--dark holds
+ * Dark (Quasar sets that class, and resolves `auto` from prefers-color-scheme).
+ * Component rules below reference token names only — never a raw hex, so
+ * re-hueing the app stays a one-token change.
+ *
+ * The rule that is specific to this product: colour and prominence communicate
+ * KIND, never RANK. There is no severity scale in here, no badge that grows with
+ * its number, and nothing sorted by how bad it is.
+ */
+
+/* ── tokens ───────────────────────────────────────────────────────────────── */
+
+:root {
+  /* brand & accent */
+  --accent-primary: #0c6b61;
+  --accent-primary-pressed: #0a564e;
+  --on-accent: #ffffff;
+  --accent-text: #0c6b61;
+  --accent-soft: rgba(12, 107, 97, 0.1);
+
+  /* surface — light compresses toward white; borders carry elevation */
+  --canvas: #f4f6f9;
+  --surface: #fcfdfe;
+  --surface-elevated: #ffffff;
+  --surface-card: #ffffff;
+
+  /* borders */
+  --hairline: #e3e6ec;
+  --hairline-strong: rgba(0, 0, 0, 0.14);
+  --hairline-soft: rgba(0, 0, 0, 0.06);
+
+  /* text */
+  --ink: #0e1116;
+  --body: #3a3f47;
+  --mute: #6b7079;
+  --ash: #9aa0a8;
+  --stone: #c2c7ce;
+
+  /* status — state only, never chrome, never rank */
+  --error: #d93a45;
+  --error-soft: rgba(217, 58, 69, 0.1);
+  --success: #1f9a63;
+  --success-soft: rgba(31, 154, 99, 0.1);
+  --warning: #b7791f;
+  --warning-soft: rgba(183, 121, 31, 0.1);
+
+  /* spacing — 8px base, 2/4 for tight inline gaps */
+  --sp-xxs: 2px;
+  --sp-xs: 4px;
+  --sp-sm: 8px;
+  --sp-md: 12px;
+  --sp-lg: 16px;
+  --sp-xl: 24px;
+  --sp-xxl: 32px;
+
+  /* shapes */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 10px;
+  --r-xl: 16px;
+  --r-full: 9999px;
+
+  --font-sans: Inter, system-ui, sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", "Geist Mono", ui-monospace, monospace;
+
+  /* Quasar paints its own components from `--q-primary`. Pointing it at the
+   * accent means anything we haven't styled by hand still lands on portia's
+   * hue in both modes, rather than on a framework blue. */
+  --q-primary: var(--accent-primary);
+  --q-dark: var(--surface);
+  --q-dark-page: var(--canvas);
+}
+
+body.body--dark {
+  --accent-primary: #0d9488;
+  --accent-primary-pressed: #0b7d72;
+  --on-accent: #ffffff;
+  --accent-text: #2dd4bf;
+  --accent-soft: rgba(13, 148, 136, 0.18);
+
+  /* surface — dark: lighter = closer */
+  --canvas: #08090c;
+  --surface: #0d0f14;
+  --surface-elevated: #12141b;
+  --surface-card: #171922;
+
+  --hairline: #25282f;
+  --hairline-strong: rgba(255, 255, 255, 0.16);
+  --hairline-soft: rgba(255, 255, 255, 0.08);
+
+  --ink: #f3f4f7;
+  --body: #c9ccd3;
+  --mute: #969aa4;
+  --ash: #696d77;
+  --stone: #43464e;
+
+  --error: #ff6b6b;
+  --error-soft: rgba(255, 107, 107, 0.16);
+  --success: #5fd49b;
+  --success-soft: rgba(95, 212, 155, 0.16);
+  --warning: #ffc94d;
+  --warning-soft: rgba(255, 201, 77, 0.16);
+}
+
+/* ── base ─────────────────────────────────────────────────────────────────── */
+
+/* `html body` rather than `body`: Tailwind's preflight is generated in the
+ * browser and lands after this file, so the base rules need the extra
+ * specificity to survive it. */
+html,
+html body {
+  height: 100%;
+  overflow: hidden;
+  margin: 0;
+  background: var(--canvas);
+  color: var(--body);
+  font-family: var(--font-sans);
+  /* ss03 is part of the identity — do not omit it (DESIGN.md → Typography). */
+  font-feature-settings: "calt", "kern", "liga", "ss03";
+  -webkit-font-smoothing: antialiased;
+}
+
+.nicegui-content {
+  padding: 0;
+  gap: 0;
+  height: 100%;
+  width: 100%;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--hairline-strong);
+  border-radius: var(--r-full);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+/* ── typography ───────────────────────────────────────────────────────────── */
+
+.t-display {
+  font-size: 32px;
+  font-weight: 600;
+  line-height: 1.15;
+  color: var(--ink);
+}
+.t-heading-lg {
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--ink);
+}
+.t-heading-md {
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: 0.2px;
+  color: var(--ink);
+}
+.t-heading-sm {
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: 0.2px;
+  color: var(--ink);
+}
+.t-body {
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+.t-body-strong {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+  letter-spacing: 0.1px;
+}
+.t-caption {
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.4;
+  letter-spacing: 0.2px;
+}
+.t-mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.55;
+  font-feature-settings: normal;
+}
+.t-mono-sm {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.5;
+  font-feature-settings: normal;
+}
+
+.c-ink {
+  color: var(--ink);
+}
+.c-body {
+  color: var(--body);
+}
+.c-mute {
+  color: var(--mute);
+}
+.c-ash {
+  color: var(--ash);
+}
+.c-stone {
+  color: var(--stone);
+}
+.c-accent {
+  color: var(--accent-text);
+}
+.c-error {
+  color: var(--error);
+}
+.c-warning {
+  color: var(--warning);
+}
+.c-success {
+  color: var(--success);
+}
+
+.pre-wrap {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── window & panes ───────────────────────────────────────────────────────── */
+
+.p-window {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  background: var(--canvas);
+}
+
+.p-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-md);
+  height: 48px;
+  flex: 0 0 48px;
+  padding: 0 var(--sp-lg);
+  background: var(--canvas);
+  border-bottom: 1px solid var(--hairline);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.p-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.p-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.p-pane-left {
+  flex: 0 0 260px;
+  background: var(--canvas);
+  border-right: 1px solid var(--hairline);
+}
+
+.p-pane-mid {
+  flex: 1 1 auto;
+  background: var(--surface);
+}
+
+.p-pane-right {
+  flex: 0 0 380px;
+  background: var(--surface);
+  border-left: 1px solid var(--hairline);
+}
+
+.p-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.p-pad {
+  padding: var(--sp-lg);
+}
+
+.p-section-header {
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: var(--mute);
+  text-transform: uppercase;
+  padding: var(--sp-md) var(--sp-md) var(--sp-xs);
+}
+
+.p-rule {
+  height: 1px;
+  background: var(--hairline);
+  width: 100%;
+}
+
+.p-rule-strong {
+  height: 1px;
+  background: var(--hairline-strong);
+  width: 100%;
+}
+
+/* the middle pane's horizontal split: graph over report */
+.p-split-top {
+  flex: 0 0 auto;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.p-split-bottom {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Width behaviour — the workflow pane and Run stay reachable at every width, so
+ * it is always the side panes that give way. Below 1024 the left pane stops
+ * taking layout space and overlays instead; a transient overlay is the one place
+ * a shadow is allowed. Both panes are toggled from the toolbar at every width. */
+@media (max-width: 1399px) {
+  .p-pane-right {
+    flex: 0 0 340px;
+  }
+}
+@media (max-width: 1023px) {
+  .p-body {
+    position: relative;
+  }
+  .p-pane-left {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 10;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  }
+  .p-pane-right {
+    flex: 0 0 300px;
+  }
+}
+
+/* ── buttons ──────────────────────────────────────────────────────────────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-xs);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  letter-spacing: 0.2px;
+  padding: 6px 14px;
+  min-height: 32px;
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-primary {
+  background: var(--accent-primary);
+  color: var(--on-accent);
+}
+.btn-primary:active {
+  background: var(--accent-primary-pressed);
+}
+
+.btn-secondary {
+  background: transparent;
+  color: var(--ink);
+}
+
+.btn-tertiary {
+  background: var(--surface-elevated);
+  color: var(--ink);
+  border-color: var(--hairline);
+}
+
+.btn:disabled,
+.btn-disabled {
+  background: var(--surface-elevated);
+  color: var(--ash);
+  border-color: transparent;
+  cursor: default;
+}
+
+.btn-micro {
+  min-height: 24px;
+  padding: 2px 8px;
+  border-radius: var(--r-sm);
+  font-size: 11px;
+  letter-spacing: 0.2px;
+}
+
+/* Quasar's own button chrome, flattened. Two classes so these beat `.q-btn`. */
+.btn.q-btn {
+  text-transform: none;
+  box-shadow: none;
+  min-height: 32px;
+  padding: 6px 14px;
+}
+.btn.q-btn .q-btn__content {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  /* Quasar stacks the icon over the label once the bar gets tight; a toolbar
+   * button should get narrower, not taller. */
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+.btn.q-btn .q-icon {
+  font-size: 16px;
+}
+.btn.q-btn.btn-micro {
+  min-height: 24px;
+  padding: 2px 8px;
+}
+.btn.q-btn.btn-micro .q-btn__content {
+  font-size: 11px;
+}
+.btn.q-btn.btn-micro .q-icon {
+  font-size: 14px;
+}
+.btn.q-btn.q-btn--disabled {
+  background: var(--surface-elevated);
+  color: var(--ash);
+  border-color: transparent;
+  opacity: 1;
+}
+
+/* ── inputs (Quasar chrome, flattened to hairlines) ───────────────────────── */
+
+.p-field .q-field__control {
+  background: var(--surface-elevated);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  padding: 0 var(--sp-md);
+  min-height: 32px;
+}
+.p-field .q-field__control:before,
+.p-field .q-field__control:after {
+  display: none;
+}
+.p-field .q-field__native,
+.p-field .q-field__input,
+.p-field textarea {
+  color: var(--body);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.p-field .q-field__native::placeholder,
+.p-field textarea::placeholder {
+  color: var(--stone);
+  opacity: 1;
+}
+.p-field.q-field--focused .q-field__control {
+  background: var(--accent-soft);
+  border-color: var(--accent-primary);
+}
+.p-field .q-field__marginal,
+.p-field .q-icon {
+  color: var(--mute);
+}
+/* a path, a column, a key: mono in, mono on screen */
+.p-field-mono .q-field__native,
+.p-field-mono .q-field__input,
+.p-field-mono textarea {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-feature-settings: normal;
+}
+.p-editor .q-field__control {
+  padding-top: var(--sp-sm);
+  padding-bottom: var(--sp-sm);
+}
+
+/* segmented control — the selected segment is a soft accent wash, not a solid
+ * fill; the solid one belongs to the single primary action per view. */
+.btn.seg-active,
+.btn.q-btn.seg-active {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  border-color: var(--accent-primary);
+}
+.p-segmented .q-btn__content {
+  font-weight: 500;
+}
+
+.p-toggle .q-toggle__inner--truthy .q-toggle__track {
+  background: var(--accent-primary) !important;
+  opacity: 0.35;
+}
+.p-toggle .q-toggle__inner--truthy .q-toggle__thumb:after {
+  background: var(--accent-primary) !important;
+}
+.p-toggle .q-toggle__label {
+  font-size: 13px;
+  color: var(--body);
+}
+
+/* ── chips & badges ───────────────────────────────────────────────────────── */
+
+.type-chip {
+  display: inline-block;
+  background: var(--surface-elevated);
+  color: var(--mute);
+  border: 1px solid var(--hairline);
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  padding: 2px 6px;
+  border-radius: var(--r-xs);
+  white-space: nowrap;
+}
+
+/* Uniform size regardless of the number behind it. A badge never grows, never
+ * reorders, and never carries a severity score. */
+.flag-badge {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  font-feature-settings: normal;
+  padding: 2px 6px;
+  border-radius: var(--r-xs);
+  background: var(--surface-elevated);
+  color: var(--mute);
+  border: 1px solid var(--hairline);
+  white-space: nowrap;
+}
+.flag-badge--blocking {
+  background: var(--error-soft);
+  color: var(--error);
+  border-color: transparent;
+}
+.flag-badge--drift {
+  background: var(--warning-soft);
+  color: var(--warning);
+  border-color: transparent;
+}
+.flag-badge--ack {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  border-color: transparent;
+}
+
+.keycap {
+  display: inline-block;
+  background: var(--surface-card);
+  color: var(--body);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 1px 6px;
+  border-radius: var(--r-xs);
+  border: 1px solid var(--hairline);
+}
+
+/* ── opening a project ────────────────────────────────────────────────────── */
+
+.p-centered {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  width: 100vw;
+  background: var(--canvas);
+  overflow-y: auto;
+}
+
+.p-centered-column {
+  width: 100%;
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-lg);
+  padding: var(--sp-xl);
+}
+.p-centered-column > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.p-empty-panel {
+  border-radius: var(--r-xl);
+  background: var(--accent-soft);
+  padding: var(--sp-xl);
+}
+
+.dropzone .q-uploader {
+  width: 100%;
+  background: var(--surface);
+  border: 1px dashed var(--hairline-strong);
+  border-radius: var(--r-lg);
+  box-shadow: none;
+  max-height: none;
+}
+.dropzone .q-uploader__header {
+  background: transparent;
+  color: var(--mute);
+  padding: var(--sp-md) var(--sp-lg);
+}
+/* Quasar's byte counter, before anything has been dropped. `0.0B / 0.00%` is
+ * a measurement of nothing, and this app does not show numbers it can't stand
+ * behind. */
+.dropzone .q-uploader__subtitle {
+  display: none;
+}
+.dropzone .q-uploader__list {
+  background: transparent;
+  color: var(--body);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 0 var(--sp-lg) var(--sp-md);
+  min-height: 0;
+}
+
+/* ── left pane — files & artifacts ────────────────────────────────────────── */
+
+.artifact-row {
+  display: flex;
+  align-items: center;
+  /* A flex item's default `min-width: auto` lets one long unbroken path push
+   * the whole row past its container. Paths are exactly what this row holds. */
+  min-width: 0;
+  max-width: 100%;
+  gap: var(--sp-sm);
+  padding: var(--sp-sm) var(--sp-md);
+  margin: 0 var(--sp-sm);
+  border-radius: var(--r-sm);
+  background: transparent;
+  cursor: pointer;
+  min-width: 0;
+}
+.artifact-row .artifact-icon {
+  color: var(--mute);
+  font-size: 16px;
+  flex: 0 0 auto;
+}
+.artifact-row .artifact-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+.artifact-row .artifact-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.artifact-row .artifact-note {
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: var(--mute);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.artifact-row .artifact-meta {
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: var(--mute);
+  flex: 0 0 auto;
+}
+.artifact-row:hover {
+  background: var(--surface-card);
+}
+.artifact-row--selected,
+.artifact-row--selected:hover {
+  background: var(--accent-soft);
+}
+.artifact-row--selected .artifact-name,
+.artifact-row--selected .artifact-icon {
+  color: var(--accent-text);
+}
+
+.empty-note {
+  color: var(--mute);
+  font-size: 13px;
+  line-height: 1.5;
+  padding: var(--sp-xs) var(--sp-md) var(--sp-sm);
+}
+
+/* ── middle pane, top — the graph ─────────────────────────────────────────── */
+
+.graph-canvas {
+  position: relative;
+  padding: var(--sp-lg);
+  overflow: auto;
+}
+
+.graph-edges {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+.graph-edges path {
+  fill: none;
+  stroke: var(--hairline-strong);
+  stroke-width: 1;
+}
+.graph-edges polygon {
+  fill: var(--hairline-strong);
+}
+
+.graph-node {
+  position: absolute;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.step-card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-sm);
+  background: var(--surface-elevated);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  padding: var(--sp-md);
+  cursor: pointer;
+}
+body.body--dark .step-card {
+  background: var(--surface-elevated);
+}
+.step-card--selected {
+  border-color: color-mix(in srgb, var(--accent-primary) 60%, transparent);
+  background: var(--accent-soft);
+}
+.step-card--blocked {
+  border-color: color-mix(in srgb, var(--error) 60%, transparent);
+  background: var(--error-soft);
+}
+.step-card .step-id {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Deliberately quieter than a step: steps are the decisions. */
+.source-node {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  background: var(--canvas);
+  border: 1px solid var(--hairline-soft);
+  border-radius: var(--r-sm);
+  padding: var(--sp-sm) var(--sp-md);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--mute);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── middle pane, bottom — the run report ─────────────────────────────────── */
+
+.report-block {
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  padding: var(--sp-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-sm);
+}
+.report-block--selected {
+  border-color: color-mix(in srgb, var(--accent-primary) 60%, transparent);
+}
+
+.report-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xxs);
+}
+.report-group-label {
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: var(--mute);
+  text-transform: uppercase;
+}
+
+.kv {
+  display: flex;
+  gap: var(--sp-sm);
+  align-items: baseline;
+}
+.kv-key {
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: var(--mute);
+  flex: 0 0 auto;
+}
+.kv-value {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--body);
+  min-width: 0;
+  word-break: break-word;
+}
+
+.drift-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-sm);
+  background: var(--warning-soft);
+  border-radius: var(--r-sm);
+  padding: var(--sp-xs) var(--sp-sm);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--body);
+}
+
+/* The most important component in the app. It never collapses, never truncates,
+ * and never sits below the fold of its step (DESIGN.md; EVALUATION.md → Run 5). */
+.ack-banner {
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent-text) 40%, transparent);
+  border-radius: var(--r-md);
+  padding: var(--sp-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+}
+
+.table-preview {
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  overflow: auto;
+  max-height: 320px;
+}
+.table-preview table {
+  border-collapse: collapse;
+  width: max-content;
+  min-width: 100%;
+}
+.table-preview th {
+  background: var(--surface-elevated);
+  text-align: left;
+  padding: var(--sp-xs) var(--sp-sm);
+  border-bottom: 1px solid var(--hairline-strong);
+  position: sticky;
+  top: 0;
+  white-space: nowrap;
+}
+.table-preview th .col-name {
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: var(--mute);
+  display: block;
+}
+.table-preview th .col-dtype {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--stone);
+  display: block;
+  font-feature-settings: normal;
+}
+.table-preview td {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--body);
+  padding: var(--sp-xs) var(--sp-sm);
+  border-bottom: 1px solid var(--hairline-soft);
+  white-space: nowrap;
+  font-feature-settings: normal;
+}
+.table-preview td.numeric {
+  text-align: right;
+}
+.table-preview td .null {
+  color: var(--stone);
+}
+
+/* ── right pane — the copilot ─────────────────────────────────────────────── */
+
+.transcript-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xxs);
+  padding: var(--sp-sm) 0;
+}
+
+/* the copilot's prose, as it writes it — restrained to the type scale */
+.p-markdown > *:first-child {
+  margin-top: 0;
+}
+.p-markdown > *:last-child {
+  margin-bottom: 0;
+}
+.p-markdown p,
+.p-markdown li {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--body);
+}
+.p-markdown p {
+  margin: 0 0 var(--sp-sm);
+}
+.p-markdown ul,
+.p-markdown ol {
+  margin: 0 0 var(--sp-sm);
+  padding-left: var(--sp-lg);
+  list-style: disc;
+}
+.p-markdown ol {
+  list-style: decimal;
+}
+.p-markdown strong {
+  font-weight: 500;
+  color: var(--ink);
+}
+.p-markdown h1,
+.p-markdown h2,
+.p-markdown h3,
+.p-markdown h4 {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  color: var(--ink);
+  margin: var(--sp-md) 0 var(--sp-xs);
+}
+.p-markdown code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-feature-settings: normal;
+  color: var(--ink);
+}
+.p-markdown pre {
+  background: var(--surface-card);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  padding: var(--sp-md);
+  overflow-x: auto;
+}
+.p-markdown a {
+  color: var(--accent-text);
+}
+
+.tr-tool {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--mute);
+  font-feature-settings: normal;
+  word-break: break-word;
+}
+.tr-tool .tool-name {
+  color: var(--ink);
+}
+
+.code-block {
+  background: var(--surface-card);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  padding: var(--sp-md);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--body);
+  overflow-x: auto;
+  white-space: pre;
+  font-feature-settings: normal;
+}
+
+.p-expansion .q-expansion-item__container > .q-item {
+  padding: 0;
+  min-height: 24px;
+  color: var(--mute);
+  font-size: 11px;
+  letter-spacing: 0.2px;
+}
+.p-expansion .q-item__section--side {
+  padding-right: var(--sp-xs);
+  min-width: 0;
+  color: var(--mute);
+}
+.p-expansion .q-expansion-item__content {
+  padding-top: var(--sp-xs);
+}
+
+/* The only element on screen with a live accent border, so the eye finds it
+ * without a colour-coded alarm. Never a modal. */
+.question-form {
+  background: var(--surface-card);
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 60%, transparent);
+  border-radius: var(--r-md);
+  padding: var(--sp-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-md);
+}
+
+.option-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xxs);
+  padding: var(--sp-sm) var(--sp-md);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+  background: var(--surface-elevated);
+  cursor: pointer;
+}
+.option-row:hover {
+  border-color: var(--hairline-strong);
+}
+.option-row--selected {
+  border-color: var(--accent-primary);
+  background: var(--accent-soft);
+}
+
+.write-confirm {
+  background: var(--surface-card);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--r-md);
+  padding: var(--sp-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-md);
+}
+
+.turn-ended {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-sm);
+  padding-top: var(--sp-md);
+  border-top: 1px solid var(--hairline-strong);
+}
+
+/* ── misc ─────────────────────────────────────────────────────────────────── */
+
+.stack-xs > * + * {
+  margin-top: var(--sp-xs);
+}
+.stack-sm > * + * {
+  margin-top: var(--sp-sm);
+}
+.stack-md > * + * {
+  margin-top: var(--sp-md);
+}
+.stack-lg > * + * {
+  margin-top: var(--sp-lg);
+}
+
+.row-gap-sm {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  flex-wrap: wrap;
+}
+.row-gap-xs {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  flex-wrap: wrap;
+}
+
+.q-notification {
+  border-radius: var(--r-md);
+}
+
+/* the middle pane's draggable divider */
+.p-splitter .q-splitter__separator {
+  background: var(--hairline);
+}
+.p-splitter .q-splitter__panel {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.q-spinner {
+  color: var(--mute);
+}
+
+/* transient overlays are the one place a shadow is allowed */
+.q-dialog__inner > div {
+  background: var(--surface);
+  border-radius: var(--r-lg);
+}
+.q-menu,
+.q-dialog__inner > div {
+  background: var(--surface);
+  color: var(--body);
+}
+.q-menu .q-item {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--body);
+}
+.q-tooltip {
+  background: var(--surface-card);
+  color: var(--body);
+  border: 1px solid var(--hairline);
+  font-size: 11px;
+  border-radius: var(--r-sm);
+}
