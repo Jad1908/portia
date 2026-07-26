@@ -93,6 +93,31 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
   case — it surfaces as `empty_output` or `source_did_not_contribute`, derived from the output
   rather than from the op's flags. The immutability message no longer says "pick another id".*
   **Verified against the engine, not yet against the agent** — see `EVALUATION.md`.
+- **A grain claim can be widened until it passes — the loop's open hole.** Run 3 was refused on
+  `grain: [booking_id]`, then recorded `grain: [booking_id, event_name]` and passed: `event_name`
+  is the column the fan-out varies over, so the claim is a tautology. It didn't override the gate,
+  it dissolved it — the same move as rewriting `expect`, on the one field the agent authors.
+  Candidate fix, claim-free so it can't be dissolved: **row conservation.** A left join whose output
+  exceeds its left input multiplied rows; an inner join can only shrink. Binary, no tunable number,
+  independent of anything the agent says. **Open design call:** a strict inequality is not literally
+  a zero, so admitting it stretches the "only zeros block" rule — but it needs no threshold, which
+  is what that rule is actually protecting. Decide before building.
+- **`expect` values aren't shape-checked, only their keys.** Run 3 wrote `expect: {transforms: 1}`
+  where `transforms` is a list of records; the key exists, so it validated, and the spec now drifts
+  forever — the exact outcome `_EXPECTABLE` was built to prevent, one level down. Check the value's
+  type against what the op reports, at record time (the step is already executed there, so the real
+  value is in hand).
+- **Grain examples should carry the row, not just the key.** Given only
+  `{"booking_id": "B0009", "n_rows": 2}`, Run 3 invented the city and both event names in its
+  summary — "Paris… Tech Summit and Marathon" for what was Amsterdam/Canal Festival/Design Week.
+  Anything it can't measure it will estimate (`handlers.profile_source`'s docstring, same lesson).
+  More evidence, not a sterner prompt.
+- **A partial join failure is invisible to a zero-only blocking rule.** Run 3 stripped `city_name`
+  but never lowercased it, so `" paris"` → `"paris"` never matched `"Paris"` and one event vanished.
+  `source_did_not_contribute` correctly stayed quiet — four other events matched. This is a real
+  limit of the design rather than a bug in it; anything that catches it needs a threshold, i.e.
+  judgment, i.e. it belongs to the agent. Possibly the answer is richer *evidence* (per-key match
+  rates in `join_findings`) rather than a new flag.
 - **Iteration cap on a blocked step** — deliberately not built yet. A hard cap ("three refusals,
   then escalate to the human rather than loop") was in the original sketch; nothing in the loop
   counts attempts today, so a determined agent can retry indefinitely. Wait for a real run to show

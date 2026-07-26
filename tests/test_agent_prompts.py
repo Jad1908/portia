@@ -9,10 +9,12 @@ string the model still gets offered.
 
 import ast
 import pathlib
+import re
 
 import pytest
 
 from portia.agent import prompts, tools
+from portia.checks.outcome import BLOCKING_FLAGS
 
 #: Longer than any legitimate code string here, shorter than any real prompt.
 #: The scan is clean at this threshold today; if a change trips it, the answer is
@@ -39,6 +41,44 @@ def test_tool_descriptions_are_a_single_block():
     """They're delivered as a plain schema string — source wrapping must not leak."""
     for t in tools.ALL_TOOLS:
         assert "\n" not in t.description, f"{t.name} kept its line breaks"
+
+
+#: `{expect_join}` — a placeholder, not a brace. Descriptions legitimately show
+#: JSON, so matching bare `{` would flag every worked example.
+UNFILLED = re.compile(r"\{[a-z_][a-z0-9_]*\}")
+
+
+def test_no_tool_description_reaches_the_model_with_an_unfilled_placeholder():
+    """A literal `{expect_join}` in the tool list is worse than saying nothing."""
+    for t in tools.ALL_TOOLS:
+        assert not UNFILLED.search(t.description), f"{t.name} has an unfilled placeholder"
+
+
+def test_the_step_vocabulary_in_the_prompt_is_generated_from_the_ops():
+    """The lists the model reads and the lists the validator enforces are one thing.
+
+    They used to be two: the description said "base `expect` on what the check
+    measured" and named nothing, and `_EXPECTABLE` revealed the real vocabulary
+    only by rejecting a step. A run burned two round-trips guessing at it. Adding
+    a provenance field must now update the instruction, not silently outdate it.
+    """
+    from portia.agent import handlers
+    from portia.ops import join as join_op
+    from portia.ops import normalize as normalize_op
+
+    description = next(t for t in tools.ALL_TOOLS if t.name == "record_step").description
+
+    for field in join_op.PROVENANCE_KEYS | normalize_op.PROVENANCE_KEYS:
+        assert field in description, f"`expect` may name {field!r}, but nothing says so"
+    for how in join_op.HOWS:
+        assert how in description, f"'{how}' is a valid join, but nothing says so"
+    for op in normalize_op.TRANSFORM_OPS:
+        assert op in description, f"{op!r} is a valid transform, but nothing says so"
+    for flag in BLOCKING_FLAGS:
+        assert flag in description, f"{flag!r} refuses a write, but nothing says so"
+
+    # and the generated block is what's actually rendered, not a lookalike
+    assert handlers.step_vocabulary()["expect_join"] in description
 
 
 def test_a_missing_prompt_is_a_loud_error():

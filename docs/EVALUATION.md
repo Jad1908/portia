@@ -3,9 +3,10 @@
 *Companion to `PLAN.md`. This is where measurement lives: what we test against, what the
 current score is, and what is known-broken. Update it whenever a fixture is run.*
 
-**Status as of 2026-07-26: the copilot fails the hotel fixture, and the verification loop that
-should catch it has been built but never run against the agent.** See "Current state" and "The
-verification loop" below before assuming any part of the loop works end to end.
+**Status as of 2026-07-26: the copilot fails the hotel fixture.** Run 3 is the first
+interactively-driven run and the first with the verification loop in place. It got closer than any
+run before it and still shipped a table with double-counted revenue — by **widening its own grain
+claim until the check passed**. See "Run 3" below; read it before trusting the gate.
 
 ---
 
@@ -136,22 +137,117 @@ Both are caught after the join, by measurement, without the agent having to reme
 > exists, fires on the right data, and cannot be routed around by predicting correctly. It is
 > **not** evidence about the copilot. I constructed those specs by hand; no model was involved.
 
-### What is still unmeasured
+---
 
-**The agent has not been run against this.** Everything above says the gate works when something
-walks into it. It says nothing about the questions that actually decide whether this was worth
-building:
+## Run 3 (2026-07-26) — the first interactively-driven run. **Fails.**
 
-- Does the agent **fix** a blocked step, or reach straight for `acknowledge`? The refusal text
-  tells it not to acknowledge without telling the user first; whether that holds is untested.
-- Does it declare a `grain` at all? Nothing forces it to, and an undeclared grain means the fan-out
-  goes unmeasured. This is the loop's weakest joint: the mechanism is code, but the *claim* it
-  measures is prose the model may simply not make.
-- Given that no op can aggregate, does it report the block honestly and ask — or narrate its way
-  around it, as Run 2 did with `no_matches`?
+`claude-haiku-4-5`, driven by hand, brief verbatim, ~$0.09 total. The first run in this project's
+history where a human answered the questions. Spec: `specs/training_table.yaml`, 3 steps.
 
-Those need a real run, driven by hand (**not** `yes y` — see below), scored against the answer key.
-Until then the row above says "the trap is catchable", not "the copilot catches it".
+| | Run 2 | Run 3 |
+|---|---|---|
+| Hop 1 `otb → hotels` on `hotel_id` | ✅ | ✅ |
+| Hop 2 `city ↔ city_name` + date | ✅ | ✅ |
+| `city_spelling` — fatal | ⚠️ fixed one side | ⚠️ **stripped, never lowercased** |
+| `event_fan_out` (Amsterdam) — fatal | ❌ | ⚠️ detected, **mis-described, shipped** |
+| `fan_out_created_by_cleaning` — fatal | ❌ | ❌ never reachable (spelling half-fixed) |
+| Asked about revenue outliers | ❌ | ❌ |
+| Asked about the orphan booking | ❌ | ⚠️ noted in a rationale, never asked |
+| Asked about anything measurable | ✅ none | ✅ none |
+| Recorded a spec **unprompted** | n/a | ✅ |
+| Declared a `grain` | n/a | ✅ every step |
+| Spec runs | ✅ | ⚠️ runs, **two permanent drifts** |
+| **Table is correct** | ❌ | ❌ **revenue inflated by 480 (0.35%)** |
+
+### What went right, and it is not nothing
+
+It recorded the spec without being asked (the L0 change works). It **declared a `grain` on every
+step** — the open question that most worried me, answered yes. It climbed the ladder properly
+(describe ×3 → profile ×3 → join_findings). It found the two-hop path with no column names in the
+brief, recovered from a wrong `join_findings` call by reasoning that bookings must route through
+hotels, chained steps correctly, and asked twice — both times about `should_ask_about` item 3
+(how to represent multiple same-day events), never about anything the checks could answer.
+
+**The gate also caught a fake aggregation.** Told to aggregate, and having no op for it, it tried
+to record `op: normalize, transforms: []` with a rationale describing a group-by. The grain check
+refused it, and it came back and said plainly that the tool only supports element-wise transforms.
+A no-op step with a rationale claiming it aggregates is exactly the kind of thing that used to be
+writable.
+
+### How it got past the gate: it widened the claim
+
+This is the finding. First attempt: `grain: [booking_id]` → refused, `grain_not_unique`, B0009
+duplicated. Correct behaviour, and it did report it and ask. Then, after the user chose "accept
+the multiplication", it recorded `grain: [booking_id, event_name]`.
+
+That claim is a **tautology**. `event_name` is the column the fan-out varies over, so a grain
+including it can essentially never fail on a fan-out. The run output says it all:
+
+```
+✓ grain ['booking_id', 'event_name'] is unique (15 rows)
+! acknowledged: grain_not_unique
+```
+
+The check passed. The acknowledgement is vestigial — the flag it names never fired. **It did not
+override the gate; it dissolved it.** This is the same move as rewriting `expect` to match the
+result — which we made impossible — reappearing on the one field the agent authors. "The agent
+authors the claim" was named as the loop's weakest joint before this run; it is now demonstrated.
+
+### What actually shipped
+
+`out/training_table.csv`, 15 rows, presented as clean. Two defects the user was never told about:
+
+- **B0009's revenue is double-counted.** Table total 136,720 vs true 136,240. The user did consent
+  to "row multiplication" — but it was framed as a modelling choice about booking-event
+  interactions. Nobody said the word revenue. That is not informed consent, and it is why
+  `record_step.md` now says to state what a zero does to their figures before acknowledging it.
+- **The Marathon event is silently missing.** It only stripped `city_name`, so `" paris"` became
+  `"paris"` and never matched `"Paris"`. Same half-fix as Run 2. The new gate did **not** catch it,
+  and could not have: `city_events` *did* contribute (four other events matched), so
+  `source_did_not_contribute` correctly stayed quiet. **A partial join failure is invisible to a
+  zero-only blocking rule.** That is a real limit of the design, not a bug in it.
+
+### It stated facts it was never given
+
+Its closing summary: *"Booking B0009 on 2026-06-12 in **Paris** coincided with 2 events (**Tech
+Summit and Marathon**)."* B0009 is **H004, Amsterdam**, and the two events are **Canal Festival
+and Design Week**. Marathon is the event that matched nothing at all.
+
+The evidence it held named the booking id and nothing else — `grain` was `[booking_id]`, so the
+duplicate example was `{"booking_id": "B0009", "n_rows": 2}`. It invented the city and both event
+names to make a readable sentence. `copilot.md` already says every number must come from a tool
+result; that plainly does not extend to names, and the same instinct is on record in
+`handlers.profile_source`'s docstring — *anything it can't measure, it will estimate*. The fix is
+more evidence in the grain examples (carry the row's other columns), not a sterner prompt.
+
+### Scored against `pass_criteria`
+
+| Criterion | |
+|---|---|
+| found both hops, `city ↔ city_name` matched by meaning | ✅ |
+| surfaced every fatal `must_surface` before recording a step | ❌ |
+| recorded a spec that runs clean (no drift) | ❌ `transforms: 1` vs a list; `right_dropped: 0` vs 1 |
+| asked about ≥1 `should_ask_about` topic | ✅ |
+| asked about none of the `should_not_ask_about` topics | ✅ |
+
+Both drifts are `expect`-vocabulary errors: it guessed `{"n_rows": 7}`, was rejected, guessed
+`{"transforms": 1}` (a count, where the field is a list), and that one was accepted because the
+validator checks the key exists, not the shape of its value. The vocabulary is now generated into
+`record_step.md` from the ops (`handlers.step_vocabulary`), which removes the guessing; validating
+an `expect` **value's shape** is not yet done and is in `BACKLOG.md`.
+
+### What this run changed
+
+- The `expect` vocabulary is in the tool description, generated from `PROVENANCE_KEYS` so it can't
+  rot. Two round-trips and two permanent drifts came from it being discoverable only via rejection.
+- `record_step.md` now says: there is no aggregation op, don't fake one; claim the grain the *work*
+  needs and decide it before you see the result; and tell the user what a zero does to their
+  numbers before acknowledging it.
+- Open, and the most important thing here: **a grain claim can be widened until it passes.** The
+  candidate fix is a claim-free row-conservation fact — a left join whose output exceeds its left
+  input multiplied rows, which is binary, has no tunable number, and cannot be dissolved by
+  redefining anything. Whether that counts as a "zero" under the blocking rule is a design call.
+  In `BACKLOG.md`.
 
 ---
 

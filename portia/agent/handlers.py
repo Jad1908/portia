@@ -58,6 +58,30 @@ _EXPECTABLE = {
 }
 
 
+def step_vocabulary() -> dict[str, str]:
+    """The words a step is allowed to use, generated from the ops that define them.
+
+    Every one of these lists already exists in code — ``PROVENANCE_KEYS`` per op,
+    ``HOWS``, ``TRANSFORM_OPS`` — and every one of them was, until now, visible to
+    the model *only in a rejection*. `record_step`'s description said "base
+    `expect` on what the check measured" and then refused the step for naming a
+    field no op reports. A real run burned two round-trips guessing
+    (``{"n_rows": 7}``, ``{"transforms": 1}``) before the validator taught it the
+    vocabulary one error at a time.
+
+    So the description states them — filled from here rather than retyped, or the
+    prose rots the moment an op gains a field. `tests/test_agent_prompts.py`
+    asserts the rendered description still matches these.
+    """
+    return {
+        "expect_join": ", ".join(sorted(_EXPECTABLE["join"])),
+        "expect_normalize": ", ".join(sorted(_EXPECTABLE["normalize"])),
+        "hows": " | ".join(join_op.HOWS),
+        "transform_ops": " | ".join(sorted(normalize_op.TRANSFORM_OPS)),
+        "blocking_flags": ", ".join(sorted(BLOCKING_FLAGS)),
+    }
+
+
 def get_context(portia_dir: str = catalog.DEFAULT_DIR) -> dict:
     """Re-read the project's L1 context: prose, groups, and the source index.
 

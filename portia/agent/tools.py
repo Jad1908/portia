@@ -185,7 +185,7 @@ async def join_findings(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     "record_step",
-    prompts.tool("record_step"),
+    prompts.tool("record_step", **handlers.step_vocabulary()),
     {
         "type": "object",
         "properties": {
