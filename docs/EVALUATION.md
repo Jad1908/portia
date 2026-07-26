@@ -9,8 +9,15 @@ revealed the next, ending with Run 5 shipping a 3.85%-inflated table by writing 
 without ever asking the user. Run 6 changed the model to `claude-opus-5` at low effort and, in the
 indexing phase alone, surfaced more of the answer key than every prior run combined — including
 the revenue outliers, which nothing had ever asked about. **Run 6 never reached the gate**, so the
-one question the verification loop exists to answer is still open. Read Runs 5 and 6 below before
-trusting either the gate or the good news.
+one question the verification loop exists to answer is still open. Run 7 then shipped the SQL
+escape hatch to Haiku and watched it **never reach for it** — the fixture's fatal fan-out now has a
+correct handling the spec can express, and the model did not take it. Read Runs 5, 6 and 7 below
+before trusting either the gate or the good news.
+
+**The one run that would move this forward:** `claude-opus-5`, reaching `chat ask` and getting as
+far as a `record_step`. It answers three open questions at once — does it use the hatch, does it
+ask before acknowledging, and does the whole sequence read differently now that a correct move
+exists.
 
 ---
 
@@ -72,9 +79,9 @@ outliers that invite a judgement call without forcing one.
 
 ## Runs 1 & 2 — the failures the verification loop was built from
 
-Five runs so far, all on `claude-haiku-4-5`, **all failing**. They are recorded in order below;
-the current state is **Run 5**, at the end. These first two are the ones that produced the
-verification loop.
+Seven runs so far, **all failing**. They are recorded in order below, and the model changes at
+Run 6 — record it with every result. These first two are the ones that produced the verification
+loop.
 
 | | Run 1 | Run 2 (after bug fixes) |
 |---|---|---|
@@ -414,8 +421,12 @@ Each fix closed the previous escape, and the failure moved rather than disappear
 
 Two conclusions worth separating, because they are not the same claim:
 
-1. **Prose moves what the agent *authors*.** Run 4 → Run 5 is a clean before/after on one added
+1. **Prose moves what the agent *authors*.** Run 4 → Run 5 is a before/after on one added
    paragraph, and the tautology stopped. Prompt tuning is not a dead end.
+   > **Weakened by Run 7**, which is the same model reverting to the same tautology. One sample
+   > either way, and the conditions differed (Run 7 had a facts-only catalog and canned answers).
+   > Read this as "prose moved it once", not as settled. The correction is left here rather than
+   > rewritten, because the over-reading is the more instructive artifact.
 2. **Prose has not held a gate the agent may open alone**, and here the failure is not obviously
    the model's: it was told to state a number that is not in its evidence and that it has no
    sanctioned way to compute. That is a missing measurement, not a missing instruction — the same
@@ -494,6 +505,49 @@ Both are in `portia/cli/chat.py`, both fixed in the same commit as this write-up
 
 Neither is engine behaviour, and both corrupt the only thing a hand-driven run measures — what the
 human actually saw and said.
+
+---
+
+## Run 7 (2026-07-26) — the hatch exists and Haiku doesn't reach for it. **Fails.**
+
+`claude-haiku-4-5`, ~$0.077, on `main` with the SQL escape hatch merged. **Auto-driven** by a
+throwaway script with canned neutral answers, and a facts-only catalog (`--no-interpret`), so it is
+**not a valid test of the asking behaviour** — see the warning at the end of "Running it". It was
+run to answer one narrow question: now that a correct move exists, does the model take it?
+
+**No.** Zero `op: sql` calls. It built the same five-step pipeline as Run 5 and shipped the same
+table — 18 rows, revenue **141,480** against a truth of 136,240, +3.85%. It also never asked
+anything, so the canned answers were never used.
+
+And it got there by a route Run 5 had closed: **`grain: ['booking_id', 'event_name']`**, the
+tautology. The gate never fired, no `acknowledge` was needed, and it closed with a clean-sounding
+summary.
+
+What did work, again: `join_findings` on `<spec>#<step>`, twice, unprompted — all five events
+matched, spelling trap dead. That mechanism has now earned its place in three consecutive runs.
+
+### What this is evidence for
+
+**The hatch is necessary but not sufficient.** It removes the excuse; it does not create the
+judgment. `record_step`'s description names *"aggregating to a coarser grain"* as the hatch's
+purpose in as many words, and the model never called it — the same capability story as Runs 1–5,
+now with the missing-op explanation removed. That is an argument *for* the design rather than
+against it: **"it had no way to do the right thing" is no longer available as a defence for any
+future failure on this fixture.**
+
+It also weakens the Run 4 → Run 5 conclusion above; the note is recorded there.
+
+### A candidate cause, not a claim
+
+`prompts.tool()` collapses every tool description to a single line (`" ".join(text.split())`).
+That is deliberate — it stops source hard-wrapping leaking through — but it also destroys headings,
+paragraph breaks and list structure. `record_step.md` is now **6,038 characters as one unbroken
+line**, with the `## 'sql'` heading running into its body and the JSON example flattened.
+
+Whether that caused the section to be skipped is **unknown and not asserted here.** It is a
+plausible contributor, it got worse when the file more than doubled, and unwrapping *within*
+paragraphs while keeping blank lines and list starts is a small change. It touches every prompt the
+model reads, so it deserves its own before/after against this run — filed in `BACKLOG.md`.
 
 ---
 

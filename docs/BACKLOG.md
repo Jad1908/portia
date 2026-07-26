@@ -40,6 +40,11 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
   watched. Things to watch for in a run log: how often `sql` is chosen over `join`/`normalize`
   where those would have fit (a signal the hatch is too *easy*), and whether the SQL steps cluster
   around one operation.
+- **The hatch exists and a model has not reached for it.** Run 7: Haiku, on merged `main`, made
+  **zero** `sql` calls and shipped the same 3.85%-inflated table, reverting to the tautology grain.
+  So the promotion evidence above (*"what the agent strains to write"*) has nothing in it yet — and
+  the first thing to learn is not which op to promote but **whether the hatch is discoverable at
+  all**. Watch this on the next capable-model run before drawing anything from op ratios.
 - **A SQL step's provenance is thin, and might be earned back.** `join` reports what it dropped
   from each side because it knows what a key is; `sql` reports only shape (`result_rows`,
   `columns`). `checks.outcome` still measures the produced table, so the blocking gate is intact —
@@ -143,6 +148,14 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
   the system — the hotel run failed because one of them omitted a sentence — and they're buried in
   decorators. Move them all under `agent/prompts/` so wording can be diffed, reviewed and A/B'd
   without touching code, with a test that every tool resolves a description (no silent fallback).
+- **Tool descriptions reach the model as one unbroken line.** `prompts.tool()` does
+  `" ".join(text.split())`, which correctly unwraps the source file's hard wrapping but also
+  destroys headings, blank lines and list structure. `record_step.md` is now **6,038 characters
+  with zero newlines** — the `## 'sql'` heading runs into its body, the JSON example is flattened.
+  Fix: unwrap *within* a paragraph, preserve blank lines and line starts for headings and list
+  items. Small, but it changes every prompt the model reads, so it wants its own branch and a
+  before/after against **Run 7**, where a whole section of that description appears to have been
+  ignored. *Suspected contributor, not a proven cause — `EVALUATION.md` → Run 7.*
 - **Run log + the metrics that need no labels. Specced 2026-07-26** — `EVALUATION.md` → "The run
   log". Write each turn's events (`agent/events.py`) to JSONL and compute with pandas: rungs pulled
   and in what order, tokens and turns, how often it asked, which ops it chose, drift rate. No
