@@ -450,12 +450,41 @@ questions-and-insights UX *is* the product" — and they get the most design att
 ### Chrome
 
 **`toolbar`** — the top bar
-- `{colors.canvas}`, 1px `{colors.hairline}` bottom rule. Holds: project name and its context
-  summary (left), a spec switcher, a spacer, then `button-primary` "Run" (right), the transcript
-  toggle, and the light/dark override.
+- `{colors.canvas}`, 1px `{colors.hairline}` bottom rule. Holds: the **session name** (left), a spec
+  switcher, a spacer, then "Run" and "Write outputs" (right), the files and transcript toggles, and
+  the light/dark override.
+- **The session name is the open directory's name, and it is a button**: clicking it returns to the
+  project picker, which is how you move between projects. Disabled while a turn is running — a
+  switch mid-turn would leave the copilot writing into a directory the window has stopped watching.
+- **Not the project brief.** An earlier draft put the brief's first line here. The brief is the most
+  load-bearing text in the product and it is still not chrome: a paragraph of prose across the top
+  of every screen crowds out the one thing a toolbar is for, which is saying where you are. It is
+  currently visible nowhere in the app, which is a gap rather than a decision.
+
+**`dialog`** — a transient overlay (adding data)
+- `{colors.surface}` panel on the standard scrim, `{rounded.lg}`, one soft shadow — the exception to
+  the no-shadow rule. **No scale-in**: the panel appears at full size. Animation is not part of this
+  app's vocabulary, and a transition that depends on an animation frame shows an empty overlay on a
+  tab that isn't animating.
 
 **`keycap`** — `{colors.surface-card}` fill, `{colors.body}` `{typography.mono}`, padding `1px 6px`,
 `{rounded.xs}`.
+
+**`fact`** — one measured value as a small icon plus the number
+- 14px icon in `{colors.stone}`, value in `{typography.mono-sm}` `{colors.body}`, `{spacing.xs}`
+  between them. **The icon is shorthand and never the whole story** — every `fact` carries a tooltip
+  naming what it is, because a number nobody can name is worse than no number.
+- For places where the same handful of facts repeats down a long list. Anywhere else, use `kv`.
+
+**`column-row`** — one column of a source, in the source inspector
+- A row, not a card: name in `{typography.mono}` `{colors.ink}` (fixed 180px, truncating), a
+  `type-chip` for the dtype, then `fact`s for **role**, **null rate** and **distinct**, then the
+  column's `flag-badge`s. Rows are separated by `{colors.hairline-soft}` inside a single
+  `{colors.hairline}` container.
+- A thirty-column source is the normal case. A labelled line per fact made three columns a
+  screenful; nothing is dropped here, it is laid out across rather than down.
+- The null rate is formatted exactly as `catalog.render_source` formats it for the terminal. The two
+  edges must never disagree about a rate.
 
 ### Removed (from the sibling project — do not implement)
 `primary-nav`, `footer-section`, `pricing-tier-card`, `hero-stripe-band`, `file-tree-row`

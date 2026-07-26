@@ -93,10 +93,16 @@ def _runs() -> None:
 
 
 def _add_data_affordance() -> None:
-    """Row-height, at the foot of the pane, once a project has sources."""
+    """Row-height, at the foot of the pane, once a project has sources.
+
+    Only opens the dialog; the dialog itself is built once with the page. See
+    `screens.build_add_dialog` for why it cannot be built from in here.
+    """
+    from portia.ui import screens
+
     c.rule()
     with ui.element("div").classes("p-2"):
-        c.button("Add data", _open_add_dialog, icon="add", micro=True).classes("w-full")
+        c.button("Add data", screens.open_add_dialog, icon="add", micro=True).classes("w-full")
 
 
 # --- selection --------------------------------------------------------------
@@ -119,9 +125,3 @@ def _open_spec(path: Path) -> None:
     pane.refresh()
     workflow.pane.refresh()
     app_module.toolbar.refresh()
-
-
-def _open_add_dialog() -> None:
-    from portia.ui import screens
-
-    screens.add_sources_dialog()

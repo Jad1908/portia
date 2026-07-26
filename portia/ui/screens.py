@@ -146,24 +146,66 @@ def first_sources() -> None:
             dropzone()
 
 
-def add_sources_dialog() -> None:
-    """The same affordance, once the project already has sources."""
-    with ui.dialog() as dialog, ui.element("div").classes("write-confirm w-full"):
-        ui.label("Add data").classes("t-heading-md")
-        dropzone(on_done=dialog.close)
-        c.button("Close", dialog.close, kind="secondary")
-    dialog.open()
+#: Quasar sizes a dialog to its content, and a drop box has no natural width —
+#: without this it collapses to a few hundred pixels of nothing.
+DIALOG_WIDTH = "width:560px;max-width:92vw"
+
+
+#: The add-data dialog for this page. Built once, at page level.
+_ADD_DIALOG: ui.dialog | None = None
+
+
+def build_add_dialog() -> None:
+    """Create the add-data dialog. **Called once per page, never from a pane.**
+
+    `ui.dialog` parents itself to the client layout and leaves a hidden canary
+    element in whatever slot is current, whose job is to delete the dialog when
+    that slot goes away. Build one inside a `@ui.refreshable` and the canary
+    lives in the refreshable's container — so the first refresh takes the dialog
+    with it and `open()` afterwards silently does nothing. NiceGUI says as much
+    ("create it only once and then reuse it"); this is what that means in
+    practice, and it cost an afternoon of a button that looked wired and wasn't.
+    """
+    global _ADD_DIALOG
+    # No scale-in. Quasar's default animation leaves the panel at `scale(0)`
+    # until a rAF fires, so a throttled tab shows an open dialog with nothing in
+    # it — and a quiet developer surface has no use for a popping overlay anyway.
+    with ui.dialog().props("transition-duration=0") as dialog:
+        with ui.element("div").classes("write-confirm").style(DIALOG_WIDTH):
+            ui.label("Add data").classes("t-heading-md")
+            dropzone(on_done=dialog.close)
+            with ui.element("div").classes("row-gap-sm"):
+                c.button("Close", dialog.close, kind="secondary")
+    _ADD_DIALOG = dialog
+
+
+def open_add_dialog() -> None:
+    """Show it. Says so if it isn't there, rather than doing nothing quietly."""
+    if _ADD_DIALOG is None or _ADD_DIALOG.is_deleted:
+        ui.notify(_NO_DIALOG)
+        return
+    _ADD_DIALOG.open()
+
+
+#: Open the file picker from anywhere on the drop box, not only from Quasar's
+#: `+`. A dashed box that says "click to pick" has to be clickable, all of it.
+#: Runs client-side, so a click on the native button isn't handled twice.
+_PICK_ON_CLICK = (
+    "(e) => {{ if (e.target.closest('.q-btn, input')) return; "
+    "getHtmlElement({id}).querySelector('input[type=file]').click(); }}"
+)
 
 
 def dropzone(*, on_done=None) -> None:
     with ui.element("div").classes("stack-md w-full"):
         with ui.element("div").classes("dropzone w-full"):
-            ui.upload(
+            upload = ui.upload(
                 multiple=True,
                 auto_upload=True,
                 on_multi_upload=lambda e: _dropped(e.files, on_done),
                 label=_DROP_LABEL,
             ).props("flat")
+            upload.on("click", js_handler=_PICK_ON_CLICK.format(id=upload.id))
 
         with ui.element("div").classes("row-gap-sm"):
             path = (
@@ -259,3 +301,4 @@ _SOURCES_WHY = "Drop CSVs in. They are copied into the project and profiled stra
 _DROP_LABEL = "Drop CSVs here, or click to pick"
 _PATH_PLACEHOLDER = "…or a path, directory or glob already on disk"
 _INTERPRET_COST = "Profiling is free and always happens. This costs a model turn."
+_NO_DIALOG = "The add-data panel didn't load — reload the page."

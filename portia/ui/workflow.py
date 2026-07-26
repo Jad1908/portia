@@ -278,17 +278,45 @@ def _source_inspector(name: str) -> None:
         _group("columns", lambda: _columns(entry.get("columns") or []))
 
 
+#: The icon each per-column fact gets in the dense list. Shorthand only — every
+#: one carries a tooltip naming the fact, because a number nobody can name is
+#: worse than no number.
+ROLE_ICON = "label"
+NULL_ICON = "opacity"
+DISTINCT_ICON = "fingerprint"
+
+
 def _columns(columns: list[dict]) -> None:
-    for col in columns:
-        with ui.element("div").classes("report-block"):
-            with ui.element("div").classes("row-gap-sm"):
-                ui.label(col["name"]).classes("t-mono c-ink")
-                c.chip(str(col.get("inferred", "")))
-            c.kv("role", col.get("role") or "—")
-            c.kv("null rate", col.get("null_rate"))
-            c.kv("distinct", col.get("n_distinct"))
-            if col.get("flags"):
-                _uncoloured_flags(col["flags"])
+    """One row per column, not one card.
+
+    A source with thirty columns is the normal case, and a labelled line per fact
+    made three of them a screenful. The facts are the same ones and none is
+    dropped; they are just laid out across rather than down.
+    """
+    with ui.element("div").classes("column-list"):
+        for col in columns:
+            _column_row(col)
+
+
+def _column_row(col: dict) -> None:
+    with ui.element("div").classes("column-row"):
+        ui.label(col["name"]).classes("column-name").tooltip(col["name"])
+        c.chip(str(col.get("inferred", "")))
+        c.fact(ROLE_ICON, col.get("role") or "—", "role")
+        c.fact(NULL_ICON, _null_rate(col), "null rate")
+        c.fact(DISTINCT_ICON, col.get("n_distinct"), "distinct values")
+        for flag in col.get("flags") or []:
+            c.flag_badge(flag)
+
+
+def _null_rate(col: dict) -> str:
+    """Formatted exactly as `catalog.render_source` formats it for the terminal.
+
+    Same number, same rounding, both edges — the day the two disagree about a
+    rate is the day someone has to work out which one to believe.
+    """
+    rate = col.get("null_rate")
+    return "—" if rate is None else f"{rate:.0%}"
 
 
 async def _output_inspector(name: str) -> None:

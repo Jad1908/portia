@@ -133,6 +133,21 @@ def chip(value: str) -> ui.label:
     return ui.label(value).classes("type-chip")
 
 
+def fact(icon: str, value: Any, label: str) -> ui.element:
+    """One measured value, as a small icon and the number itself.
+
+    For places where the same handful of facts repeats down a long list and a
+    labelled line each would bury the values in their own labels. The icon is
+    shorthand, never the whole story — ``label`` names the fact in a tooltip, so
+    nothing on screen is a number whose meaning you have to guess.
+    """
+    with ui.element("div").classes("fact") as row:
+        ui.icon(icon).classes("fact-icon")
+        ui.label("—" if value is None else str(value)).classes("fact-value")
+    row.tooltip(label)
+    return row
+
+
 def flag_badge(name: str, variant: str = "") -> ui.label:
     """One flag, named exactly as the engine names it.
 

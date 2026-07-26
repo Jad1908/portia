@@ -28,15 +28,15 @@ TITLE = "portia"
 #: see `state.py` for why this app is a singleton rather than per-tab.
 _DARK: ui.dark_mode | None = None
 
-#: How much of the project brief the toolbar shows before it is cut off.
-BRIEF_CHARS = 90
-
 
 @ui.page("/")
 async def page() -> None:
     global _DARK
     _DARK = theme.apply()
     ui.page_title(TITLE)
+    # At page level, deliberately: a dialog built inside a refreshable is deleted
+    # by the first refresh (see `screens.build_add_dialog`).
+    screens.build_add_dialog()
     await shell()
 
 
@@ -81,10 +81,28 @@ def toolbar() -> None:
 
 
 def _project_label() -> None:
-    with ui.element("div").classes("flex flex-col min-w-0"):
-        ui.label(APP.root.name).classes("t-heading-sm")
-        brief = APP.project_context
-        ui.label(_clip(brief)).classes("t-caption c-mute truncate").tooltip(brief)
+    """The session's name, and the way out of it.
+
+    The name of the open directory, and nothing else — the project brief is
+    load-bearing but it is not chrome, and a paragraph of prose across the top of
+    every screen is not what a toolbar is for.
+
+    It is also the only route back to the project picker, so it is a button and
+    says so. Disabled mid-turn: switching would leave the copilot writing into a
+    directory the window has stopped looking at.
+    """
+    label = c.button(
+        APP.root.name or str(APP.root),
+        _switch_project,
+        icon="folder_open",
+        enabled=not APP.busy,
+    )
+    label.tooltip(_SWITCH_BUSY if APP.busy else f"{APP.root} — click to open another project")
+
+
+def _switch_project() -> None:
+    APP.opened = False
+    shell.refresh()
 
 
 def _spec_switcher() -> None:
@@ -155,8 +173,7 @@ def _cycle_theme() -> None:
     toolbar.refresh()
 
 
-def _clip(value: str) -> str:
-    return value if len(value) <= BRIEF_CHARS else f"{value[:BRIEF_CHARS]}…"
+_SWITCH_BUSY = "Can't switch projects while a turn is running."
 
 
 def open_at_start(path: str | Path) -> None:

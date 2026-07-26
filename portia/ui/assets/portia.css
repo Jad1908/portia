@@ -621,11 +621,19 @@ html body {
   border-radius: var(--r-lg);
   box-shadow: none;
   max-height: none;
+  /* the whole box is the target, so the whole box says so */
+  cursor: pointer;
+}
+.dropzone .q-uploader:hover {
+  border-color: var(--accent-primary);
 }
 .dropzone .q-uploader__header {
   background: transparent;
   color: var(--mute);
   padding: var(--sp-md) var(--sp-lg);
+  min-height: 88px;
+  display: flex;
+  align-items: center;
 }
 /* Quasar's byte counter, before anything has been dropped. `0.0B / 0.00%` is
  * a measurement of nothing, and this app does not show numbers it can't stand
@@ -835,6 +843,61 @@ body.body--dark .step-card {
   color: var(--body);
   min-width: 0;
   word-break: break-word;
+}
+
+/* one row per column, not one card — a thirty-column source is the normal case */
+.column-list {
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+.column-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-md);
+  padding: var(--sp-xs) var(--sp-md);
+  border-bottom: 1px solid var(--hairline-soft);
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.column-row:last-child {
+  border-bottom: none;
+}
+.column-row:hover {
+  background: var(--surface-card);
+}
+.column-row .column-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+  flex: 0 1 180px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* a measured value as a small icon plus the number; the tooltip names the fact */
+.fact {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  min-width: 0;
+}
+.fact-icon {
+  font-size: 14px;
+  color: var(--stone);
+  flex: 0 0 auto;
+}
+.fact-value {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-feature-settings: normal;
+  color: var(--body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .drift-row {
@@ -1109,6 +1172,19 @@ body.body--dark .step-card {
 
 .q-spinner {
   color: var(--mute);
+}
+
+/* Quasar's dialog scales in from `scale(0)`, and the class that undoes that is
+ * removed on the next animation frame — so a tab that isn't animating shows an
+ * open overlay with nothing visible in it. No animation is the house style here
+ * anyway, so remove it rather than depend on a frame firing. */
+.q-dialog .q-transition--scale-enter-from,
+.q-dialog .q-transition--scale-enter-active,
+.q-dialog .q-transition--scale-leave-active,
+.q-dialog .q-transition--scale-leave-to {
+  transform: none !important;
+  opacity: 1 !important;
+  transition: none !important;
 }
 
 /* transient overlays are the one place a shadow is allowed */
