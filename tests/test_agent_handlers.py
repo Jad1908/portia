@@ -840,3 +840,106 @@ def test_record_step_validates_the_shape_of_each_transform(sales, transforms, me
             {"id": "n", "op": "normalize", "input": "orders", "transforms": transforms},
             portia_dir=sales,
         )
+
+
+# --- the sql escape hatch ----------------------------------------------------
+
+
+def test_record_step_runs_a_sql_step_and_chains_from_it(sales, tmp_path):
+    """The hatch end to end: aggregate, then consume the aggregate by id.
+
+    This is the shape the hotel fixture's fatal fan-out needs and no op could
+    express — a capable model worked that out, said so, and stopped
+    (docs/EVALUATION.md, Run 6).
+    """
+    out = handlers.record_step(
+        "specs/hatch.yaml",
+        {
+            "id": "orders_per_customer",
+            "op": "sql",
+            "inputs": ["orders"],
+            "sql": "SELECT customer_id, COUNT(*) AS n_orders FROM orders GROUP BY 1",
+            "grain": ["customer_id"],
+            "rationale": "One row per customer, so the join below cannot multiply rows.",
+        },
+        portia_dir=sales,
+    )
+    json.dumps(out)
+    assert out["outcome"]["grain"]["unique"] is True
+
+    chained = handlers.record_step(
+        "specs/hatch.yaml",
+        {
+            "id": "customers_with_counts",
+            "op": "join",
+            "left": "customers",
+            "right": "orders_per_customer",  # <- the sql step's output
+            "keys": ["customer_id"],
+            "how": "left",
+        },
+        portia_dir=sales,
+    )
+    assert chained["n_steps"] == 2
+
+    doc = yaml.safe_load((tmp_path / "specs" / "hatch.yaml").read_text())
+    assert "orders_per_customer" not in doc["sources"]  # a step is not a source
+    assert doc["sources"]["orders"] == "orders.csv"  # its declared input is
+    assert handlers.run_spec("specs/hatch.yaml")["has_drift"] is False
+
+
+def test_a_sql_step_may_name_an_earlier_step_the_hash_way_too(sales, tmp_path):
+    """One convention for naming a table, in `inputs` as everywhere else."""
+    handlers.record_step(
+        "specs/hatch.yaml",
+        {
+            "id": "stripped",
+            "op": "normalize",
+            "input": "customers",
+            "transforms": [{"column": "name", "op": "strip"}],
+        },
+        portia_dir=sales,
+    )
+    handlers.record_step(
+        "specs/hatch.yaml",
+        {
+            "id": "counted",
+            "op": "sql",
+            "inputs": ["specs/hatch.yaml#stripped"],
+            "sql": "SELECT COUNT(*) AS n FROM stripped",
+        },
+        portia_dir=sales,
+    )
+    doc = yaml.safe_load((tmp_path / "specs" / "hatch.yaml").read_text())
+    assert doc["steps"][1]["inputs"] == ["stripped"]  # stored bare, like every other ref
+
+
+def test_a_sql_step_that_is_not_a_single_read_is_never_written(sales, tmp_path):
+    """Refused at record time, so it cannot reach a durable spec at all."""
+    with pytest.raises(ValueError, match="single SELECT"):
+        handlers.record_step(
+            "specs/hatch.yaml",
+            {
+                "id": "escape",
+                "op": "sql",
+                "inputs": ["orders"],
+                "sql": "COPY (SELECT * FROM orders) TO '/tmp/leak.csv'",
+            },
+            portia_dir=sales,
+        )
+    assert not (tmp_path / "specs" / "hatch.yaml").exists()
+
+
+def test_a_sql_step_predicting_a_field_it_never_reports_is_refused(sales):
+    """`expect` is validated against the op's own PROVENANCE_KEYS, sql included."""
+    with pytest.raises(ValueError, match="left_dropped"):
+        handlers.record_step(
+            "specs/hatch.yaml",
+            {
+                "id": "counted",
+                "op": "sql",
+                "inputs": ["orders"],
+                "sql": "SELECT COUNT(*) AS n FROM orders",
+                "expect": {"left_dropped": 0},
+            },
+            portia_dir=sales,
+        )

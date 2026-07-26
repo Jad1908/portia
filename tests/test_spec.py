@@ -122,3 +122,38 @@ def test_unknown_op_raises(tmp_path):
     spec = {"sources": {"a": "a.csv"}, "steps": [{"id": "x", "op": "pivot", "left": "a"}]}
     with pytest.raises(ValueError, match="unknown op"):
         run_spec(spec, base_dir=tmp_path)
+
+
+def test_a_sql_step_runs_chains_and_shows_its_query(project):
+    """The escape hatch through the spec: aggregate, then join the aggregate.
+
+    Rendering the SQL in full is deliberate — for a custom step the query *is*
+    the decision, and a reader skimming a run shouldn't have to open the YAML to
+    see what it did.
+    """
+    tmp_path, spec = project
+    spec["steps"] = [
+        {
+            "id": "orders_per_customer",
+            "op": "sql",
+            "inputs": ["orders"],
+            "sql": "SELECT customer_id, COUNT(*) AS n_orders FROM orders GROUP BY 1",
+            "grain": ["customer_id"],
+        },
+        {
+            "id": "enriched",
+            "op": "join",
+            "left": "customers",
+            "right": "orders_per_customer",  # the sql step's output, by id
+            "keys": ["customer_id"],
+            "how": "left",
+        },
+    ]
+    results = run_spec(spec, base_dir=tmp_path)
+
+    assert results[0].provenance["op"] == "sql"
+    assert results[0].outcome["grain"]["unique"] is True
+    assert "n_orders" in results[1].frame.columns  # it really chained
+
+    text = render_text(results)
+    assert "COUNT(*) AS n_orders" in text

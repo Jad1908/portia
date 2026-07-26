@@ -12,5 +12,6 @@ stays a swap, not a rewrite.
 from portia.ops.base import OpResult
 from portia.ops.join import apply_join
 from portia.ops.normalize import apply_normalize
+from portia.ops.sql import SqlNotAllowed, apply_sql
 
-__all__ = ["OpResult", "apply_join", "apply_normalize"]
+__all__ = ["OpResult", "SqlNotAllowed", "apply_join", "apply_normalize", "apply_sql"]
