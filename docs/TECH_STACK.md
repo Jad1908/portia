@@ -28,11 +28,18 @@ infrastructure and frontend surface, stay in Python wherever we can, and keep th
   (`isna`, `nunique`, `describe`, dtypes), join row-conservation and fan-out (`merge` +
   `groupby`/`value_counts`), duplicate detection (`duplicated`). You build the whole local phase
   in what you already know.
-- **DuckDB — for scale, and now also for the escape hatch.** *Decided 2026-07-25: agent-authored
-  custom steps are DuckDB SQL, which makes DuckDB a core dependency earlier than "only for scale"
-  below anticipated. Reasoning in `BACKLOG.md` → "The escape hatch"; the short version is that SQL
-  is the only option that keeps the spec reviewable in a PR, keeps the filesystem/network away
-  from the agent, stays stable across versions, and survives the pandas → DuckDB → Snowflake seam.*
+- **DuckDB — for scale, and now also for the escape hatch. SHIPPED 2026-07-26 (`ops/sql.py`), so
+  it is a hard runtime dependency today, not a scale-tier one.** *Decided 2026-07-25; built the
+  day after, because the hotel fixture's fatal fan-out has exactly one correct handling —
+  aggregate events to one row per city-date before joining — and no prewritten op could express
+  it. Reasoning in `BACKLOG.md` → "The escape hatch"; the short version is that SQL is the only
+  option that keeps the spec reviewable in a PR, keeps the filesystem/network away from the agent,
+  stays stable across versions, and survives the pandas → DuckDB → Snowflake seam.*
+
+  *Note what it is **not** used for yet: every frame still goes through
+  `core.io.load_frame` into pandas, and a SQL step runs over registered in-memory DataFrames. The
+  larger-than-memory tier below is still unbuilt — the dependency arrived early for expressiveness,
+  not for scale.*
 - **DuckDB only for scale.** pandas has one hard limit — it loads everything into RAM — and the
   product's premise is data too big to eyeball / too big to be local. DuckDB is the local answer:
   `pip install duckdb`, **embedded (no server)**, reads larger-than-memory CSV/Parquet, and

@@ -34,12 +34,14 @@ from portia.core.io import load_frame
 from portia.core.serialize import to_json
 from portia.ops import join as join_op
 from portia.ops import normalize as normalize_op
+from portia.ops import sql as sql_op
 
 #: Ops the spec knows how to execute, and what each step must carry. Validation
 #: only — which op to *use* is the agent's call.
 _REQUIRED_FIELDS = {
     "join": ("left", "right"),
     "normalize": ("input", "transforms"),
+    "sql": ("inputs", "sql"),
 }
 
 #: What each op actually reports, and therefore the only things an ``expect``
@@ -55,6 +57,7 @@ _REQUIRED_FIELDS = {
 _EXPECTABLE = {
     "join": join_op.PROVENANCE_KEYS,
     "normalize": normalize_op.PROVENANCE_KEYS,
+    "sql": sql_op.PROVENANCE_KEYS,
 }
 
 #: Separator for naming a table an earlier step produced, rather than an indexed
@@ -65,6 +68,12 @@ _EXPECTABLE = {
 #: that (docs/EVALUATION.md, Run 3).
 STEP_REF = "#"
 _STEP_REF_HINT = "'<spec path>#<step id>', e.g. 'specs/training.yaml#otb_hotels'"
+
+#: Where a step names a table it reads. `join` and `normalize` name one per
+#: field; `sql` declares a list, because a query may read several and the
+#: declaration is what lets `checks.outcome` still say which contributed nothing.
+_REF_FIELDS = ("left", "right", "input")
+_REF_LIST_FIELD = "inputs"
 
 
 def step_vocabulary() -> dict[str, str]:
@@ -85,6 +94,7 @@ def step_vocabulary() -> dict[str, str]:
     return {
         "expect_join": ", ".join(sorted(_EXPECTABLE["join"])),
         "expect_normalize": ", ".join(sorted(_EXPECTABLE["normalize"])),
+        "expect_sql": ", ".join(sorted(_EXPECTABLE["sql"])),
         "hows": " | ".join(join_op.HOWS),
         "transform_ops": " | ".join(sorted(normalize_op.TRANSFORM_OPS)),
         "blocking_flags": ", ".join(sorted(BLOCKING_FLAGS)),
@@ -444,6 +454,12 @@ def _validate_step(step: dict, *, existing: list[dict]) -> None:
     if op == "normalize":
         _validate_transforms(step["transforms"])
 
+    if op == "sql":
+        # Refused here rather than at execution, so a statement that isn't a
+        # single read never reaches a spec — the same reason `_validate_grain`
+        # runs before the step does.
+        sql_op.check_sql(step["sql"])
+
     unknown = sorted(set(step.get("expect") or {}) - _EXPECTABLE[op])
     if unknown:
         raise ValueError(
@@ -575,23 +591,37 @@ def _normalize_step_refs(step: dict, *, spec_path: str) -> None:
     what the spec stores — a step referring to its own spec by path in its own
     spec is noise in a file whose whole point is being readable in a diff.
     """
-    for field in ("left", "right", "input"):
+    for field in _REF_FIELDS:
         ref = step.get(field)
-        if not isinstance(ref, str) or STEP_REF not in ref:
-            continue
-        named_spec, _, step_id = ref.partition(STEP_REF)
-        if Path(named_spec) != Path(spec_path):
-            raise ValueError(
-                f"{field} names a step in {named_spec!r}, but this step is being written to "
-                f"{spec_path!r}. A step can only chain from an earlier step in its own spec; "
-                f"anything else has to be an indexed source."
-            )
-        step[field] = step_id
+        if isinstance(ref, str):
+            step[field] = _bare_step_id(ref, field=field, spec_path=spec_path)
+    if isinstance(step.get(_REF_LIST_FIELD), list):
+        step[_REF_LIST_FIELD] = [
+            _bare_step_id(r, field=_REF_LIST_FIELD, spec_path=spec_path)
+            if isinstance(r, str)
+            else r
+            for r in step[_REF_LIST_FIELD]
+        ]
+
+
+def _bare_step_id(ref: str, *, field: str, spec_path: str) -> str:
+    """``specs/t.yaml#otb_hotels`` → ``otb_hotels``; anything else unchanged."""
+    if STEP_REF not in ref:
+        return ref
+    named_spec, _, step_id = ref.partition(STEP_REF)
+    if Path(named_spec) != Path(spec_path):
+        raise ValueError(
+            f"{field} names a step in {named_spec!r}, but this step is being written to "
+            f"{spec_path!r}. A step can only chain from an earlier step in its own spec; "
+            f"anything else has to be an indexed source."
+        )
+    return step_id
 
 
 def _source_refs(step: dict, *, known_steps: set[str]) -> list[str]:
     """Source names the step reads, minus anything produced by an earlier step."""
-    refs = [step.get(field) for field in ("left", "right", "input")]
+    refs = [step.get(field) for field in _REF_FIELDS]
+    refs += list(step.get(_REF_LIST_FIELD) or [])
     return [r for r in refs if r and r not in known_steps]
 
 

@@ -22,43 +22,44 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
 
 ## Ops — execution (trusted transforms)
 
-- **Nothing can aggregate, and the verification loop has made that visible.** `ops = {join,
-  normalize}`. The hotel fixture's correct handling of the fatal fan-out is *"aggregate events to
-  one row per city+date before joining"*, and there is no op for it — so the loop now correctly
-  refuses to write the double-counted step and the agent has no move except `acknowledge` or ask.
-  That is the right failure, and it is the argument for the SQL escape hatch (below) being the
-  immediate next build rather than a later one: verification turns wrong answers into blocks, and
-  the hatch is what unblocks them. Resist adding a bespoke `aggregate` op first — the point of the
-  hatch is to watch what the agent reaches for before designing an API for it.
+- ~~**Nothing can aggregate**~~ — *fixed by the SQL escape hatch, shipped 2026-07-26
+  (`ops/sql.py`). `ops = {join, normalize, sql}`. The hotel fixture's fatal fan-out now has a
+  correct handling the spec can express — aggregate events to one row per city-date, then join —
+  and it produces the answer key's table exactly: 14 rows, 14 bookings, revenue 136,240, zero
+  inflation, with the event signal kept as `n_events`/`total_attendance` features. That is the
+  first correct answer to this fixture in the project's history, though **by construction, not by
+  a copilot** — no model has been watched reaching for it.*
 - **`impute` op** — fill nulls (mean/median/constant/…); pairs naturally with `rationale` (the
   mean-vs-median call is decided by one-off analysis, recorded as the "why"). Good next op.
 - **`dedupe` op** — resolve duplicate rows/keys; gives the `fan_out` situation a real resolution.
 - **`filter` / `derive` ops** — row selection and computed columns, common and safe.
-- **The custom-step escape hatch** — let the agent author a transform we didn't prewrite, captured
-  verbatim in the spec and measured by the same provenance harness. **Open decision: the language**
-  (see the note in `spec` below). Not built — today `ops = {join, normalize}`.
+- **Promoting an op out of the hatch — wait for evidence.** All four above are now expressible in
+  SQL, which is the point: **what the agent strains to write is the argument for prewriting it.**
+  Promote one when real runs reach for the same shape repeatedly, or when the SQL for it is
+  routinely subtly wrong. Building them now means designing an API for a user we still haven't
+  watched. Things to watch for in a run log: how often `sql` is chosen over `join`/`normalize`
+  where those would have fit (a signal the hatch is too *easy*), and whether the SQL steps cluster
+  around one operation.
+- **A SQL step's provenance is thin, and might be earned back.** `join` reports what it dropped
+  from each side because it knows what a key is; `sql` reports only shape (`result_rows`,
+  `columns`). `checks.outcome` still measures the produced table, so the blocking gate is intact —
+  but drift on a SQL step is weaker than on a join. If that bites, the fix is probably declared
+  post-conditions on the step rather than trying to infer semantics from the query.
 
 ## Spec — the durable artifact
 
-- **The escape hatch — DuckDB SQL. Decided 2026-07-25; not yet built.** The agent authors a
-  `SELECT` against the named frames; the step is captured verbatim and wrapped by the same
-  provenance harness as any other op. **Build this before writing more ops** (`filter`, `coerce`,
-  `dedupe`, `impute`): writing them now means designing an API for a user we haven't watched, and
-  what the agent reaches for in the hatch is what tells us which ops deserve promotion.
-  Why SQL over captured Python: the spec's whole claim is being reviewable in a PR, and a 40-line
-  pandas function in YAML isn't; arbitrary Python hands back the filesystem and network access
-  that `session.py` deliberately withholds; SQL semantics are stable across versions where pandas'
-  are not (`BACKLOG` already flagged environment pinning as unsolved for captured Python); and it
-  is the only option that survives the pandas → DuckDB → Snowflake seam instead of needing a
-  rewrite per step. The cost is real — stats-heavy transforms will be awkward — **and that
-  friction is the instrument**: an expressive hatch is a worse measuring device because it has no
-  gradient. Consequence to record: DuckDB becomes a core dependency, earlier than
-  `TECH_STACK.md`'s "only for scale" anticipated.
-  **The line this moves:** an agent authoring transforms is the agent authoring analysis, which
-  the project has forbidden. What preserves the guarantee is that a custom step is captured
-  verbatim, measured by the same harness, and is a *step* rather than a hidden reasoning act — so
-  the rule tightens to **the agent may author a transform; it may never author a number.** Put
-  that in `CLAUDE.md` when the hatch ships.
+- ~~**The escape hatch — DuckDB SQL**~~ — *shipped 2026-07-26 (`ops/sql.py`, branch
+  `sql-escape-hatch`). The agent declares `inputs` and authors one `SELECT` over them; the query is
+  captured verbatim in the spec and wrapped by the same provenance and outcome harness as any other
+  op. The rule tightened rather than bent — **the agent may author a transform; it may never author
+  a number** — and that is now in `CLAUDE.md`. DuckDB became a core dependency, as anticipated;
+  `TECH_STACK.md` records that it arrived for expressiveness, not scale.*
+  - *Sandbox: `check_sql` refuses anything that isn't a single SELECT before DuckDB is touched, and
+    the connection runs with `enable_external_access=False`. Two independent halves on purpose —
+    the string check is bypassable and exists to give a readable error; the config is what holds.*
+  - *Still open: the friction is the instrument, so **watch what it strains at** before promoting
+    any of it into a prewritten op (see Ops above). And nothing has yet observed a **model** using
+    the hatch — the correct hotel table was built by hand.*
 - **Structured `evidence` field** — beyond free-text `rationale`: the key numbers that justified a
   decision (`{skew: 2.3, n_outliers: 40}`), so drift can later check whether the *reason* still holds.
 - **Decision lifecycle** — a clean `accept`/re-baseline command (update `expect` intentionally,

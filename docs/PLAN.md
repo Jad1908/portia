@@ -72,13 +72,14 @@ been shown to do.
 
 Next, in order:
 
-1. **The escape hatch** (DuckDB SQL — decided; see `BACKLOG.md`), deliberately before more ops, so
-   that what the agent reaches for tells us which ops to promote. Verification made this urgent
-   rather than next-ish: no op can aggregate, so the fixture's fatal fan-out is now correctly
-   *blocked* with no way forward. **Run 6 is the argument** — the agent worked out unaided that the
-   data must be reduced to hotel × date, said there was no op for it, and stopped. Turning wrong
-   answers into blocks is only progress if something eventually unblocks them, and the block is now
-   the *only* thing between a capable model and a correct table.
+1. ~~**The escape hatch**~~ — **shipped 2026-07-26** (`ops/sql.py`): the agent declares `inputs`
+   and authors one DuckDB `SELECT`, captured verbatim and measured by the same harness as every
+   other op. `ops = {join, normalize, sql}`. The fixture's fatal fan-out now has a handling the
+   spec can express, and built by hand it produces the answer key's table exactly — 14 rows,
+   revenue 136,240, zero inflation. **Next is to watch a model use it**: every previous run failed
+   at a point where no correct move existed, so the whole sequence needs re-reading once one does.
+   Resist promoting `aggregate`/`filter`/`dedupe` into prewritten ops until runs show which shape
+   is actually reached for (`BACKLOG.md`).
 2. **Make the consequence of a zero a computed fact, rendered where the human answers.** Run 5's
    override was taken alone, and the instruction it skipped ("tell the user what a total would be
    off by") asks for a number that is nowhere in the agent's evidence. Compute what a row

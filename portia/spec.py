@@ -36,7 +36,8 @@ import yaml
 
 from portia.checks.outcome import BLOCKING_FLAGS, outcome_report, render_outcome
 from portia.core.io import load_frame
-from portia.ops import apply_join, apply_normalize
+from portia.ops import apply_join, apply_normalize, apply_sql
+from portia.ops.sql import render_text as render_sql
 
 
 @dataclass
@@ -119,6 +120,13 @@ def _run_step(step: dict, frames: dict[str, pd.DataFrame]) -> StepResult:
         name = step["input"]
         out = apply_normalize(frames[name], step["transforms"])
         inputs, key_columns = {name: frames[name]}, {}
+    elif op == "sql":
+        # Only the declared inputs are visible to the query, so an undeclared
+        # table is a missing-table error rather than a silent dependency — and
+        # `outcome_report` can still say which input contributed nothing.
+        inputs = {name: frames[name] for name in step["inputs"]}
+        out = apply_sql(inputs, step["sql"])
+        key_columns = {}
     else:
         raise ValueError(f"unknown op {op!r} in step {step.get('id')!r}")
 
@@ -196,4 +204,8 @@ def _render_step(r: StepResult) -> list[str]:
             f"    {p['input_rows']} rows  —  {changes}",
             *([f"    ⚑ {', '.join(p['flags'])}"] if p["flags"] else []),
         ]
+    if r.op == "sql":
+        # The SQL is shown in full: it is the decision, and a reader skimming a
+        # run should not have to open the spec to see what a step actually did.
+        return [f"    {line}" for line in render_sql(p).splitlines()]
     return [f"    {p}"]

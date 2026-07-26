@@ -18,6 +18,12 @@ stack, and product vision. Read them every session, before proposing changes or 
   vision, stack, and watch-outs; let specifics emerge from real work.
 - **Rigor lives in the modelling / deterministic code** — the LLM orchestrates, explains, and
   asks; it never eyeballs the data to produce numbers.
+- **The agent may author a transform; it may never author a number.** The SQL escape hatch
+  (`ops/sql.py`) lets the agent write a step we didn't prewrite, which is close to letting it
+  author analysis — the thing this project forbids. What holds the line is that a custom step is
+  captured **verbatim** in the spec, executed by the engine, and measured by the same harness as
+  every other op. It is a *step*, reviewable in a diff, not a hidden reasoning act. Everything the
+  agent asserts about the result still has to come from a check.
 - **Facts vs judgment — the sharp line.** Deterministic code owns *facts and consequences*
   (measurements, and what each available action would do — computed, never guessed). The **agent**
   owns *judgment*: which facts are material (given the goal/domain/context the engine can't have),
@@ -78,8 +84,18 @@ adding code, and extend them rather than working around them:
     which is the deterministic-planner mistake this project already reversed. Rates and ratios are
     reported and never block.
 - `portia/ops/` — the execution layer (**produces** data): `apply_join`, `apply_normalize`
-  (coerce/clean columns). Every op returns an `OpResult` (frame + unsuppressable provenance
-  report). Same swap seam as checks.
+  (coerce/clean columns), `apply_sql` (the escape hatch — one DuckDB `SELECT` over the tables the
+  step declares in `inputs`, for work the prewritten ops can't express: aggregating, deduping,
+  filtering, deriving). Every op returns an `OpResult` (frame + unsuppressable provenance report).
+  Same swap seam as checks.
+  - **The hatch is sandboxed in two independent halves, and both stay.** `check_sql` refuses
+    anything that isn't a single `SELECT`, readably, before DuckDB is touched; the connection then
+    runs with `enable_external_access=False`. The string check is bypassable on purpose — it exists
+    to give a good error — and the config is what actually holds. `session.py` gives the agent no
+    filesystem tools; the hatch must never quietly hand them back.
+  - **Resist adding a prewritten op for something the hatch already does.** What the agent strains
+    to express in SQL is the evidence for which op deserves promoting — build the op when a real
+    run reaches for it, not before (`BACKLOG.md`).
 - `portia/agent/` — the **decide layer, as an agent rather than a module** (Claude Agent SDK).
   `handlers.py` = the callable surface as pure `(args) -> jsonable dict` functions, no SDK import,
   testable without it · `tools.py` = `@tool` wrappers + the in-process MCP server, the only place
