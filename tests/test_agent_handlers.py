@@ -446,6 +446,100 @@ def test_an_unknown_step_id_names_the_steps_that_exist(sales):
         )
 
 
+def test_an_expect_of_the_right_field_but_the_wrong_type_is_refused(sales, tmp_path):
+    """Regression (EVALUATION.md, Run 3): `expect: {transforms: 1}` was written.
+
+    `transforms` is a real normalize field, so the name check passed — but it
+    reports a *list of records*, not a count. `1` can never equal that, so the
+    spec drifted on every run forever. Same disease `_EXPECTABLE` cures, one
+    level down: right field, wrong kind of value.
+    """
+    with pytest.raises(ValueError, match="transforms") as exc:
+        handlers.record_step(
+            "specs/n.yaml",
+            {
+                "id": "clean",
+                "op": "normalize",
+                "input": "customers",
+                "transforms": [{"column": "name", "op": "strip"}],
+                "expect": {"transforms": 1},
+            },
+            portia_dir=sales,
+        )
+    assert "you predicted a number" in str(exc.value)
+    assert "reports a list" in str(exc.value)
+    assert not (tmp_path / "specs" / "n.yaml").exists()
+
+
+def test_a_correctly_shaped_expect_passes(sales):
+    out = handlers.record_step(
+        "specs/n.yaml",
+        {
+            "id": "clean",
+            "op": "normalize",
+            "input": "customers",
+            "transforms": [{"column": "name", "op": "strip"}],
+            "expect": {"input_rows": 6, "flags": []},
+        },
+        portia_dir=sales,
+    )
+    assert out["drift"] == {}
+
+
+def test_a_row_count_predicted_as_a_float_is_not_an_error(sales):
+    """int and float are the same kind — 10.0 rows is a clumsy prediction, not a wrong one."""
+    out = handlers.record_step(
+        "specs/j.yaml",
+        {
+            "id": "j",
+            "op": "join",
+            "left": "orders",
+            "right": "customers",
+            "keys": ["customer_id"],
+            "how": "left",
+            "expect": {"result_rows": 10.0},
+        },
+        portia_dir=sales,
+    )
+    assert out["drift"] == {}
+
+
+def test_a_boolean_field_predicted_as_a_number_is_refused(sales):
+    """`bool` is an `int` in Python; `matches_prediction: 1` must not slip through."""
+    with pytest.raises(ValueError, match="matches_prediction"):
+        handlers.record_step(
+            "specs/j.yaml",
+            {
+                "id": "j",
+                "op": "join",
+                "left": "orders",
+                "right": "customers",
+                "keys": ["customer_id"],
+                "how": "left",
+                "expect": {"matches_prediction": 1},
+            },
+            portia_dir=sales,
+        )
+
+
+def test_a_structured_field_predicted_flat_is_refused(sales):
+    """join reports `keys` as {left: [...], right: [...]}, not a bare list."""
+    with pytest.raises(ValueError, match="you predicted a list"):
+        handlers.record_step(
+            "specs/j.yaml",
+            {
+                "id": "j",
+                "op": "join",
+                "left": "orders",
+                "right": "customers",
+                "keys": ["customer_id"],
+                "how": "left",
+                "expect": {"keys": ["customer_id"]},
+            },
+            portia_dir=sales,
+        )
+
+
 # --- the verification loop ---------------------------------------------------
 
 

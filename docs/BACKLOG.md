@@ -102,11 +102,10 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
   independent of anything the agent says. **Open design call:** a strict inequality is not literally
   a zero, so admitting it stretches the "only zeros block" rule — but it needs no threshold, which
   is what that rule is actually protecting. Decide before building.
-- **`expect` values aren't shape-checked, only their keys.** Run 3 wrote `expect: {transforms: 1}`
-  where `transforms` is a list of records; the key exists, so it validated, and the spec now drifts
-  forever — the exact outcome `_EXPECTABLE` was built to prevent, one level down. Check the value's
-  type against what the op reports, at record time (the step is already executed there, so the real
-  value is in hand).
+- ~~**`expect` values aren't shape-checked, only their keys**~~ — *fixed (branch
+  `expect-value-shapes`): `record_step` compares each prediction's kind against the value the step
+  actually reported, which it has because it just ran it. No acknowledgement for this one — unlike
+  a zero, a wrong-typed prediction is never legitimate.*
 - **Grain examples should carry the row, not just the key.** Given only
   `{"booking_id": "B0009", "n_rows": 2}`, Run 3 invented the city and both event names in its
   summary — "Paris… Tech Summit and Marathon" for what was Amsterdam/Canal Festival/Design Week.

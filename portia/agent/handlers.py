@@ -289,6 +289,14 @@ def record_step(
     # can't apply — is now surfaced instead of being written into a durable spec
     # that only fails when someone re-runs it, possibly months later.
     result = spec.run_spec({**doc, "steps": [*steps, step]})[-1]
+
+    # Shape before post-conditions: a malformed prediction has to be fixed whether
+    # or not the data is sound, and unlike a zero it is never legitimate — so
+    # there is no acknowledgement for it.
+    problems = _expect_shape_problems(step.get("expect") or {}, result.provenance)
+    if problems:
+        raise ValueError(prompts.error("expect_shape", problems="\n".join(problems)))
+
     if result.blocking:
         raise ValueError(
             prompts.error(
@@ -426,6 +434,58 @@ def _validate_step(step: dict, *, existing: list[dict]) -> None:
             f"reports — so it would drift on every run. Assert only measured fields: "
             f"{', '.join(sorted(_EXPECTABLE[op]))}"
         )
+
+
+#: Longest actual value quoted back when a prediction's shape is wrong. Enough to
+#: see the shape; not enough to paste a table into an error message.
+EXAMPLE_CHARS = 90
+
+
+def _expect_shape_problems(expect: dict, provenance: dict) -> list[str]:
+    """Predictions that can never come true because they're the wrong type.
+
+    ``_EXPECTABLE`` already rejects a field no op reports. This is the same
+    disease one level down: the right field, the wrong kind of value. A run
+    predicted ``{"transforms": 1}`` where ``transforms`` is a list of transform
+    records — the key existed, so it validated, and that spec now drifts on every
+    run forever (docs/EVALUATION.md, Run 3).
+
+    Checked here rather than in ``_validate_step`` because it needs the *actual*
+    reported value, which only exists once the step has run — and by this point
+    it has.
+    """
+    problems = []
+    for field, predicted in expect.items():
+        actual = provenance.get(field)
+        if _kind(predicted) != _kind(actual):
+            example = str(actual)
+            if len(example) > EXAMPLE_CHARS:
+                example = f"{example[:EXAMPLE_CHARS]}…"
+            problems.append(
+                f"  {field}: you predicted {_kind(predicted)} ({predicted!r}), "
+                f"but {provenance['op']} reports {_kind(actual)} — {example}"
+            )
+    return problems
+
+
+def _kind(value: Any) -> str:
+    """A coarse type name, in the words an error message should use.
+
+    ``bool`` is checked before ``int`` because in Python it *is* one, and
+    ``matches_prediction: 1`` should not pass as a boolean prediction. int and
+    float share a kind — predicting ``10.0`` for a row count is not an error.
+    """
+    if isinstance(value, bool):
+        return "true/false"
+    if isinstance(value, (int, float)):
+        return "a number"
+    if isinstance(value, str):
+        return "text"
+    if isinstance(value, list):
+        return "a list"
+    if isinstance(value, dict):
+        return "an object"
+    return "nothing" if value is None else type(value).__name__
 
 
 def _validate_grain(grain: Any) -> None:
