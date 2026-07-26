@@ -82,6 +82,7 @@ def main() -> None:
     )
     parser.add_argument("--dir", default=".portia", help="catalog directory (default: .portia)")
     parser.add_argument("--model", default=None, help="model to run the copilot on")
+    parser.add_argument("--effort", default=None, help="how hard it thinks (low … max)")
     args = parser.parse_args()
 
     if args.init is not None:
@@ -112,6 +113,7 @@ def main() -> None:
         run_and_render(
             prompts.task("index_batch", names=", ".join(repr(n) for n in names)),
             model=args.model or DEFAULT_MODEL,
+            effort=args.effort,
             cwd=".",
             portia_dir=args.dir,
         )

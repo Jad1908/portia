@@ -1,6 +1,6 @@
 """Talk to the copilot:
-    python -m portia.cli.chat interpret <source> [--dir .portia] [--model ...]
-    python -m portia.cli.chat ask "<anything>" [--dir .portia] [--model ...]
+    python -m portia.cli.chat interpret <source> [--dir .portia] [--model ...] [--effort ...]
+    python -m portia.cli.chat ask "<anything>" [--dir .portia] [--model ...] [--effort ...]
 
 The human edge of the agent loop. Renders the engine's event stream to a
 terminal and collects answers from stdin; everything it prints is formatting of
@@ -90,7 +90,9 @@ async def confirm_write(tool_name: str, tool_input: dict) -> bool:
 # --- entrypoint --------------------------------------------------------------
 
 
-async def run_and_render(prompt: str, *, model: str, cwd: str, portia_dir: str) -> None:
+async def run_and_render(
+    prompt: str, *, model: str, effort: str | None = None, cwd: str, portia_dir: str
+) -> None:
     """Drive one copilot turn and render its events. Shared with `cli.index`."""
     from portia.agent import session
 
@@ -99,6 +101,7 @@ async def run_and_render(prompt: str, *, model: str, cwd: str, portia_dir: str) 
         answer=answer_questions,
         confirm=confirm_write,
         model=model,
+        effort=effort,
         cwd=cwd,
         portia_dir=portia_dir,
     ):
@@ -109,6 +112,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Talk to the portia copilot.")
     parser.add_argument("--dir", default=".portia", help="catalog directory (default: .portia)")
     parser.add_argument("--model", default=None, help="model to run the copilot on")
+    # No argparse `choices=`: the valid set lives in `session.EFFORTS`, which
+    # can't be imported before the subcommand runs without dragging the SDK in.
+    parser.add_argument("--effort", default=None, help="how hard it thinks (low … max)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     interpret = sub.add_parser("interpret", help="have the copilot read what a source is")
@@ -138,7 +144,13 @@ def main() -> None:
     else:
         prompt = args.prompt
     asyncio.run(
-        run_and_render(prompt, model=args.model or DEFAULT_MODEL, cwd=".", portia_dir=args.dir)
+        run_and_render(
+            prompt,
+            model=args.model or DEFAULT_MODEL,
+            effort=args.effort,
+            cwd=".",
+            portia_dir=args.dir,
+        )
     )
 
 
