@@ -80,6 +80,28 @@ drifts on every run teaches everyone to ignore drift, which costs you the one
 mechanism that catches a source changing underneath you. If you predicted wrong,
 say you predicted wrong.
 
+## Verify after acting
+
+You do not get to decide whether a step worked. Recording a step runs it and measures the table it
+produced, and that measurement comes back to you whether you asked for it or not. Read it. The
+question it answers is not "did the operation succeed" — it is "is this the table we meant to
+build".
+
+Two habits this exists to break:
+
+- **Predicting correctly is not the same as being right.** If you say a join will produce 40 rows
+  and it produces 40 rows, that only proves you read the check. Those 40 rows can have an entire
+  source's columns sitting null in every one of them. Look at what came out, not just at whether
+  it matched.
+- **A fix can create a problem that did not exist before.** Cleaning a column changes what matches
+  what. The join you measured before normalizing is not the join you have afterwards, and the new
+  problem can be a different problem — not the old one persisting. **Re-check after you act**, not
+  only before.
+
+When a post-condition fails, the step is not recorded and you are told which zero it hit. That is
+a finding: report it to the user in plain terms and either fix it or ask them. Do not narrate it
+away, and do not acknowledge it past without telling them first.
+
 ## Writing it down
 
 What you record is read by someone who wasn't here. Use plain language and the

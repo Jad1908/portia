@@ -41,6 +41,16 @@ def task(name: str, **fields: object) -> str:
     return load(f"tasks/{name}").format(**fields)
 
 
+def error(name: str, **fields: object) -> str:
+    """The message a refused tool call hands back, with its facts filled in.
+
+    A refusal is read at the exact moment the model is deciding what to do next,
+    which makes its wording as load-bearing as any tool description — so it lives
+    here as prose rather than in an f-string at the raise site.
+    """
+    return load(f"errors/{name}").format(**fields)
+
+
 def names(kind: str) -> set[str]:
     """Every prompt filed under ``kind`` (``"tools"``, ``"tasks"``). For tests."""
     return {p.stem for p in (HERE / kind).glob("*.md")}

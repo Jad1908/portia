@@ -22,6 +22,14 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
 
 ## Ops — execution (trusted transforms)
 
+- **Nothing can aggregate, and the verification loop has made that visible.** `ops = {join,
+  normalize}`. The hotel fixture's correct handling of the fatal fan-out is *"aggregate events to
+  one row per city+date before joining"*, and there is no op for it — so the loop now correctly
+  refuses to write the double-counted step and the agent has no move except `acknowledge` or ask.
+  That is the right failure, and it is the argument for the SQL escape hatch (below) being the
+  immediate next build rather than a later one: verification turns wrong answers into blocks, and
+  the hatch is what unblocks them. Resist adding a bespoke `aggregate` op first — the point of the
+  hatch is to watch what the agent reaches for before designing an API for it.
 - **`impute` op** — fill nulls (mean/median/constant/…); pairs naturally with `rationale` (the
   mean-vs-median call is decided by one-off analysis, recorded as the "why"). Good next op.
 - **`dedupe` op** — resolve duplicate rows/keys; gives the `fan_out` situation a real resolution.
@@ -78,15 +86,20 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
   prompt, and bulk index+interpret in one session.* **Shipped but NOT validated** — the demo that
   appeared to prove it used a brief that stated the answer outright. See `EVALUATION.md` → "A
   retracted result". The plumbing is right; the evidence was not.
-- **The verification loop** — the copilot currently declares success on a table missing an entire
-  source (`EVALUATION.md` → Current state). After an op runs, **code** computes post-conditions on
-  the output frame — reuse `checks.profiling.profile_frame`, not `describe()`/`head()`, which
-  would hand it raw rows and break the token-lean guarantee — and the agent judges those
-  measurements. It must be able to fail in a way the agent didn't author: asked "was that good?"
-  it says yes every time. Specifics earned the hard way: `no_matches` is a **hard stop**, not an
-  advisory flag; a recorded step is **immutable** (the agent tried to rewrite `expect` to match
-  reality and was blocked only by accident); hard iteration cap, then escalate to the human rather
-  than loop.
+- ~~**The verification loop**~~ — *shipped (branch `verification-loop`): `checks/outcome.py`
+  measures the frame a step produced, `record_step` executes before it writes so the measurement is
+  pushed rather than offered, a step may declare a `grain` the engine checks, zero-conditions refuse
+  to be written, and overriding means an `acknowledge` in the YAML. `no_matches` needed no special
+  case — it surfaces as `empty_output` or `source_did_not_contribute`, derived from the output
+  rather than from the op's flags. The immutability message no longer says "pick another id".*
+  **Verified against the engine, not yet against the agent** — see `EVALUATION.md`.
+- **Iteration cap on a blocked step** — deliberately not built yet. A hard cap ("three refusals,
+  then escalate to the human rather than loop") was in the original sketch; nothing in the loop
+  counts attempts today, so a determined agent can retry indefinitely. Wait for a real run to show
+  whether it loops at all before adding machinery for it.
+- **`record_step` re-runs the whole spec** to measure the candidate step — O(n²) execution across a
+  session. Free at fixture scale, not free at the DuckDB/Snowflake tier; needs incremental
+  execution (cache each step's frame by id, invalidate downstream) before it goes anywhere real.
 - **Brief growth at scale** — L1 is ~30 tokens per source. Fine at 3, unproven at 50; the source
   index will need to become searchable or group-scoped rather than exhaustive.
 - **One tidy home for every injected instruction.** Prompt text currently lives in five places:

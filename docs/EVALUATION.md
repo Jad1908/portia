@@ -3,8 +3,9 @@
 *Companion to `PLAN.md`. This is where measurement lives: what we test against, what the
 current score is, and what is known-broken. Update it whenever a fixture is run.*
 
-**Status as of 2026-07-25: the copilot fails the hotel fixture.** See "Current state" below
-before assuming any part of the loop works end to end.
+**Status as of 2026-07-26: the copilot fails the hotel fixture, and the verification loop that
+should catch it has been built but never run against the agent.** See "Current state" and "The
+verification loop" below before assuming any part of the loop works end to end.
 
 ---
 
@@ -107,6 +108,50 @@ delivered a plausible table missing an entire data source.
 - Model capability is a live variable: these runs are on a deliberately small model
   (`PLAN.md` → "Budget & model discipline"). Re-run on a larger one before concluding a failure
   is architectural.
+
+---
+
+## The verification loop (2026-07-26) — what it closes, and what it does not
+
+`checks/outcome.py` now measures the frame a step produced, and `record_step` executes the step
+before writing it, so the measurement reaches the agent whether it asked for one or not. A step
+that hits a zero — empty output, a column that went in with data and came out all-null, a source
+that contributed nothing, a declared `grain` that isn't unique — is **not written**; overriding it
+means putting `acknowledge: [<flag>]` in the YAML, where the human reads it in a diff.
+
+**Reproduced against the engine, by hand, on the hotel data:**
+
+| Reproduction | Before | Now |
+|---|---|---|
+| Run 2's exact pipeline (lowercase `city_events.city_name` only) | recorded; no drift; shipped | refused: `source_did_not_contribute`, `all_null_column` |
+| Both sides normalized, joined with `grain: [hotel_id, stay_date]` | recorded; ~4% revenue inflation, looks plausible | refused: `grain_not_unique`, naming H004/Amsterdam **and** H002/Paris |
+| A step naming a column that doesn't exist | written to the spec, crashed on re-run | refused at record time |
+
+The second row is worth dwelling on: H004 on 2026-06-12 is `event_fan_out`, and H002 on the same
+date is `fan_out_created_by_cleaning` — the trap that *only exists after the spelling is fixed*.
+Both are caught after the join, by measurement, without the agent having to remember to re-run
+`join_findings`.
+
+> **Read that table for what it is.** It is evidence about the **engine** — that the measurement
+> exists, fires on the right data, and cannot be routed around by predicting correctly. It is
+> **not** evidence about the copilot. I constructed those specs by hand; no model was involved.
+
+### What is still unmeasured
+
+**The agent has not been run against this.** Everything above says the gate works when something
+walks into it. It says nothing about the questions that actually decide whether this was worth
+building:
+
+- Does the agent **fix** a blocked step, or reach straight for `acknowledge`? The refusal text
+  tells it not to acknowledge without telling the user first; whether that holds is untested.
+- Does it declare a `grain` at all? Nothing forces it to, and an undeclared grain means the fan-out
+  goes unmeasured. This is the loop's weakest joint: the mechanism is code, but the *claim* it
+  measures is prose the model may simply not make.
+- Given that no op can aggregate, does it report the block honestly and ask — or narrate its way
+  around it, as Run 2 did with `no_matches`?
+
+Those need a real run, driven by hand (**not** `yes y` — see below), scored against the answer key.
+Until then the row above says "the trap is catchable", not "the copilot catches it".
 
 ---
 
