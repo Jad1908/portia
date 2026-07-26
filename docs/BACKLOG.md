@@ -143,11 +143,12 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
   the system — the hotel run failed because one of them omitted a sentence — and they're buried in
   decorators. Move them all under `agent/prompts/` so wording can be diffed, reviewed and A/B'd
   without touching code, with a test that every tool resolves a description (no silent fallback).
-- **Run log + the metrics that need no labels.** Write each run's events (`agent/events.py`) to
-  JSONL, one line per event, and compute with pandas: which disclosure rungs were pulled and in
-  what order, tokens and turns per decision, how often it asked, drift rate on recorded specs.
-  ~30 lines, no infrastructure. Be honest about what these are: **cost and behaviour descriptors,
-  not correctness** — only the answer keys make a number mean anything.
+- **Run log + the metrics that need no labels. Specced 2026-07-26** — `EVALUATION.md` → "The run
+  log". Write each turn's events (`agent/events.py`) to JSONL and compute with pandas: rungs pulled
+  and in what order, tokens and turns, how often it asked, which ops it chose, drift rate. No
+  infrastructure. Be honest about what these are: **cost and behaviour descriptors, not
+  correctness** — only the answer keys make a number mean anything. Blocked on the tool-result
+  event above, without which the log is half a transcript.
 - **Langfuse, once the JSONL hurts.** Its job is browsing a run's timeline when debugging why one
   went sideways, not computing the metrics above. Free either way (self-host via Docker, or the
   cloud Hobby tier: 50k units/month, 30-day retention, 2 seats). The SDK drives Claude Code as a
@@ -196,7 +197,18 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
 ## Interface — the surface
 
 - **The three-panel app** (files · workflow · chat) — NiceGUI on the engine's event stream. Core to
-  the product, deferred until the engine + agent are proven. `VISION.md`.
+  the product. **V0 is specced** (`VISION.md` → "V0 — the viewer"): read-only, no model calls, so
+  it needs nothing from the agent loop and can be built now. The full driving version stays
+  deferred behind the two engine changes below.
+- **A conversation that stays open.** `session.run` sends one prompt, drains the response and closes
+  the client, so there is no multi-turn: a chat panel built on it forgets everything between
+  messages, and a second `ask` starts cold with only the on-disk artifacts as memory. The SDK's
+  `ClaudeSDKClient` supports staying open — this is a portia limitation, not an SDK one.
+  **Prerequisite for a UI that drives rather than views.**
+- **Tool results are missing from the event stream.** `events.from_message` handles the assistant's
+  messages and the final result and drops the message carrying tool *results* — so any consumer
+  sees what was called and never what came back. Needed by both the run log and the viewer's
+  middle panel; do it once, before either. **Smallest high-leverage item on this page.**
 
 ## Scale — data tiers
 

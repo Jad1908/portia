@@ -572,3 +572,43 @@ block is written to be machine-checkable when we get there.
 > Piping `yes y` to answer prompts is *not* a valid run of the asking behaviour — the agent
 > receives `"y"` as a free-text answer to every question. It is fine for checking the mechanical
 > path; it tells you nothing about whether the questions were good.
+
+---
+
+## The run log (specced 2026-07-26, not yet built)
+
+*Direction, not a task list.*
+
+**The problem it solves.** Six runs are recorded above and every one was scored by hand, from a
+terminal transcript, some of it pasted twice and some lost to a `^C`. Two runs got conflated while
+writing them up. A prompt change is currently evaluated by reading two walls of text side by side
+and trusting memory — which is not a measurement, and it is the thing that makes tuning the loop
+feel impossible.
+
+**The insight: the seam already exists.** `agent/events.py` normalizes every SDK message into
+`Event(kind, data)` precisely so something other than a terminal can consume it. Persisting that
+stream is most of the work.
+
+- **One JSONL per turn**, at `.portia/runs/<timestamp>.jsonl`, one JSON object per event, opened
+  with a header line recording model, effort, prompt, cwd and git sha. Same project directory as
+  the other artifacts, so a run travels with the spec it produced.
+- **Written at the edge, not in the engine.** `cli/chat.run_turn` already wraps every turn for both
+  CLIs — tee the events there. The engine must not learn it is being observed, or `events.py` stops
+  being a clean seam and becomes a logging framework.
+- **A `runs` CLI** to list them and summarize one. Small; the analysis is pandas over JSONL.
+
+**What it can answer without any labels:** which disclosure rungs were pulled and in what order ·
+how often it asked · how many writes were refused and what happened next · which ops it chose
+(the `join`/`normalize`/`sql` ratio is the evidence `BACKLOG.md` wants before promoting a hatch
+operation into a prewritten op) · turns, tokens, cost.
+
+> **Be honest about what these are: cost and behaviour descriptors, not correctness.** "Asked three
+> times" is neither good nor bad without knowing whether it should have — see "What is *not* a
+> correctness signal" above. Only the answer keys make a number mean anything, and they are still
+> scored by hand. The log makes scoring *cheaper and repeatable*; it does not make it automatic.
+
+**It needs one engine change, and the UI needs the same one.** `events.from_message` handles the
+assistant's messages and the final result, but never the message carrying **tool results** — so
+today a log would record that `join_findings` was called and never what it returned. Half a
+transcript. Adding a `TOOL_RESULT` event serves the log and the viewer's middle panel at once, and
+is worth doing before either.

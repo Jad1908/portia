@@ -89,6 +89,74 @@ not a gadget — a place you actually work.
 
 ---
 
+## V0 — the viewer (specced 2026-07-26, not yet built)
+
+*Direction, not a task list. The point of V0 is to make the product **visible**; the specifics of
+the middle panel should emerge from looking at it, not from this section.*
+
+**The problem it solves.** Everything portia produces lands on disk in five places — `.portia/
+project.yaml`, `.portia/sources/*.yaml`, `specs/*.yaml`, `out/*.csv`, and a terminal transcript
+that scrolls away. The only way to see any of it is `cat`. That makes the loop hard to *tune*,
+because you cannot form a broad view of what the copilot did without reassembling it by hand.
+
+**The one rule that keeps V0 cheap: it is read-only, and it never calls a model.** It reads the
+catalog and the specs, runs `spec.run_spec` on demand (deterministic, free, no API), and renders.
+No editing, no chat driving, no interpretation writing. Every one of those needs a decision we
+haven't made or a seam we haven't built, and none of them is needed to stop the project being
+obscure.
+
+**It is an edge, like the CLI.** Lives in `portia/ui/`, launched with `python -m portia.ui`, and
+calls exactly three things: `catalog.load_catalog`, `spec.load_spec`, `spec.run_spec`. **No
+computation in the UI, ever** — if a panel needs a number the engine doesn't expose, that is a
+signal to add it to `checks`/`spec`, not to calculate it in a widget. `cli/` and `ui/` are two
+renderers of one engine, and the day they disagree about a number is the day the seam broke.
+NiceGUI (decided, `TECH_STACK.md`), as an optional `ui` extra so a core install stays thin.
+
+### Left — files & artifacts
+
+`VISION.md` asks how we decide what to surface inside a big repo. V0 answers it cheaply: **a file
+appears if portia knows about it.** Sources come from the catalog, not a directory walk; specs are
+`specs/*.yaml`; outputs are whatever a run wrote. Nothing else is shown, which is the curation.
+
+Clicking a source shows its catalog entry — the prose summary, the per-column roles, the check
+facts. That alone is most of what is currently invisible.
+
+### Middle — the workflow
+
+**Top: the spec as a graph.** This is free today and nobody has looked at it: every step has an
+`id` and names the tables it reads (`left`/`right`/`input`/`inputs`), so the DAG is already fully
+determined by the YAML. Cards are **steps**, an arrow means **"this step's output is that step's
+input"**.
+
+> That is V0's *provisional* answer to the open question below, chosen because it is what the data
+> already encodes — not because it is settled. Build the graph so the answer is cheap to change;
+> the reason to render it at all is to find out whether it reads correctly.
+
+Clicking a card shows the step verbatim: op, keys/how, the SQL for a hatch step, `grain`, `expect`,
+`rationale`, and any `acknowledge`. **An acknowledged blocking flag must be impossible to miss
+here** — Run 5 buried one mid-dict in a terminal confirmation and it shipped a 3.85%-inflated table
+(`EVALUATION.md`). The screen is the second chance at that.
+
+**Bottom: run it.** A Run button calls `run_spec` and shows, per step, what `StepResult` already
+carries — provenance, drift against `expect`, the `outcome` post-conditions, blocking flags — plus
+a preview of the produced table. This is `cli/run.py`'s output with the table attached.
+
+### Right — the transcript
+
+Renders a past run from the **run log** (see `EVALUATION.md`), not a live session. **No input box in
+V0**: the copilot is single-turn today (`session.run` opens a client, sends one prompt, closes), so
+a chat panel would forget everything after each message. Making it a driver needs two engine
+changes first — a conversation that stays open, and tool *results* in the event stream — and both
+should be done deliberately rather than discovered halfway through building a panel.
+
+### What V0 deliberately does not do
+
+Editing anything · driving the copilot · calling a model · multiple workflows · groups · run
+caching or partial runs. Each is a real product question in `VISION.md`; none is needed to see what
+we already have.
+
+---
+
 ## Open questions (revisit later — not now)
 
 - **Nature of the cards:** tables/datasets vs. steps/actions vs. a hybrid (a *step* card that

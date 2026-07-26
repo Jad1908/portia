@@ -88,7 +88,12 @@ Next, in order:
    consequence unprompted — but only qualitatively, and no capable model has yet been watched
    reaching a blocking flag.
 
-The three-panel surface stays deferred until the loop is trustworthy.
+3. **See it.** Six runs have been scored by hand off terminal transcripts, and the artifacts that
+   *are* the product — catalog, spec, provenance, outcome — are only readable with `cat`. Two
+   pieces, both specced 2026-07-26: the **run log** (`EVALUATION.md`) makes tuning repeatable, and
+   the **V0 viewer** (`VISION.md`) makes the system legible. V0 is read-only and calls no model, so
+   it needs nothing from the agent loop; the surface that *drives* the copilot stays deferred
+   behind a conversation that stays open and tool results in the event stream (`BACKLOG.md`).
 
 ## Budget & model discipline
 
