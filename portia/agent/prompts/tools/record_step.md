@@ -12,7 +12,9 @@ count you predicted; the numbers agreeing is not the same as the table being rig
 
 STEPS CHAIN: a step's output is stored under its 'id', and a later step may name that id as its
 'left', 'right' or 'input' to receive the resulting table. That is how multi-hop work is built —
-join A to B, then join THAT result to C. You do not need an external tool for this.
+join A to B, then join THAT result to C. You do not need an external tool for this. Naming it
+'<spec path>#<step id>' works too and is the same thing — that is the form the read-only checks
+need, so one habit works everywhere.
 
 ## The step
 

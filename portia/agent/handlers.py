@@ -29,7 +29,7 @@ from portia import catalog, spec
 from portia.agent import prompts
 from portia.checks.join import join_findings as _join_findings
 from portia.checks.outcome import BLOCKING_FLAGS
-from portia.checks.profiling import profile_path
+from portia.checks.profiling import profile_frame, profile_path
 from portia.core.io import load_frame
 from portia.core.serialize import to_json
 from portia.ops import join as join_op
@@ -151,7 +151,23 @@ def profile_source(source: str, portia_dir: str = catalog.DEFAULT_DIR) -> dict:
 
     ``summary`` and each column's ``role`` come from the catalog: whatever
     judgment has been recorded so far, empty until someone writes it.
+
+    ``source`` may also name a table an earlier step produced
+    (``<spec>#<step id>``). There is no catalog entry for one, so it comes back
+    with no summary and no roles — only measurements, which is the whole point of
+    asking: what do this table's columns look like *now*, after the step ran.
     """
+    if STEP_REF in source:
+        profile = profile_frame(_step_frame(source))
+        return {
+            "source": source,
+            "summary": "",
+            "n_rows": profile["n_rows"],
+            "n_cols": profile["n_cols"],
+            "candidate_keys": profile["candidate_keys"],
+            "columns": [{**col, "role": None} for col in profile["columns"]],
+        }
+
     entry = _entry(source, portia_dir)
     profile = profile_path(entry["source"])
     roles = {c["name"]: c.get("role") for c in entry.get("columns", [])}
@@ -275,6 +291,7 @@ def record_step(
     steps: list[dict] = doc.setdefault("steps", [])
 
     step_ids = {s["id"] for s in steps}
+    _normalize_step_refs(step, spec_path=str(path))
     _validate_step(step, existing=steps)
     for ref in _source_refs(step, known_steps=step_ids):
         try:
@@ -289,6 +306,14 @@ def record_step(
     # can't apply — is now surfaced instead of being written into a durable spec
     # that only fails when someone re-runs it, possibly months later.
     result = spec.run_spec({**doc, "steps": [*steps, step]})[-1]
+
+    # Shape before post-conditions: a malformed prediction has to be fixed whether
+    # or not the data is sound, and unlike a zero it is never legitimate — so
+    # there is no acknowledgement for it.
+    problems = _expect_shape_problems(step.get("expect") or {}, result.provenance)
+    if problems:
+        raise ValueError(prompts.error("expect_shape", problems="\n".join(problems)))
+
     if result.blocking:
         raise ValueError(
             prompts.error(
@@ -428,6 +453,58 @@ def _validate_step(step: dict, *, existing: list[dict]) -> None:
         )
 
 
+#: Longest actual value quoted back when a prediction's shape is wrong. Enough to
+#: see the shape; not enough to paste a table into an error message.
+EXAMPLE_CHARS = 90
+
+
+def _expect_shape_problems(expect: dict, provenance: dict) -> list[str]:
+    """Predictions that can never come true because they're the wrong type.
+
+    ``_EXPECTABLE`` already rejects a field no op reports. This is the same
+    disease one level down: the right field, the wrong kind of value. A run
+    predicted ``{"transforms": 1}`` where ``transforms`` is a list of transform
+    records — the key existed, so it validated, and that spec now drifts on every
+    run forever (docs/EVALUATION.md, Run 3).
+
+    Checked here rather than in ``_validate_step`` because it needs the *actual*
+    reported value, which only exists once the step has run — and by this point
+    it has.
+    """
+    problems = []
+    for field, predicted in expect.items():
+        actual = provenance.get(field)
+        if _kind(predicted) != _kind(actual):
+            example = str(actual)
+            if len(example) > EXAMPLE_CHARS:
+                example = f"{example[:EXAMPLE_CHARS]}…"
+            problems.append(
+                f"  {field}: you predicted {_kind(predicted)} ({predicted!r}), "
+                f"but {provenance['op']} reports {_kind(actual)} — {example}"
+            )
+    return problems
+
+
+def _kind(value: Any) -> str:
+    """A coarse type name, in the words an error message should use.
+
+    ``bool`` is checked before ``int`` because in Python it *is* one, and
+    ``matches_prediction: 1`` should not pass as a boolean prediction. int and
+    float share a kind — predicting ``10.0`` for a row count is not an error.
+    """
+    if isinstance(value, bool):
+        return "true/false"
+    if isinstance(value, (int, float)):
+        return "a number"
+    if isinstance(value, str):
+        return "text"
+    if isinstance(value, list):
+        return "a list"
+    if isinstance(value, dict):
+        return "an object"
+    return "nothing" if value is None else type(value).__name__
+
+
 def _validate_grain(grain: Any) -> None:
     """The grain *claim*'s shape. Whether it holds is measured after the run.
 
@@ -482,6 +559,34 @@ def _validate_transforms(transforms: Any) -> None:
             raise ValueError(f"normalize: transform {i} needs an 'op'{extra}. One of: {known}")
         if chosen not in normalize_op.TRANSFORM_OPS:
             raise ValueError(f"normalize: transform {i} has unknown op {chosen!r}. One of: {known}")
+
+
+def _normalize_step_refs(step: dict, *, spec_path: str) -> None:
+    """Let a step name its inputs the same way every other tool does.
+
+    ``join_findings`` and ``profile_source`` need ``<spec>#<step id>`` — a step's
+    output is not a file, so there is nothing else to call it. A step in a spec
+    doesn't, because the spec it belongs to is the spec it is being written to.
+    Two conventions for one idea, and Run 4 tripped over the seam three times,
+    burning a round-trip and a write confirmation each: `#`-form into
+    ``record_step``, bare id into ``join_findings``, `#`-form again.
+
+    So the `#` form is accepted here too and reduced to the bare id, which is
+    what the spec stores — a step referring to its own spec by path in its own
+    spec is noise in a file whose whole point is being readable in a diff.
+    """
+    for field in ("left", "right", "input"):
+        ref = step.get(field)
+        if not isinstance(ref, str) or STEP_REF not in ref:
+            continue
+        named_spec, _, step_id = ref.partition(STEP_REF)
+        if Path(named_spec) != Path(spec_path):
+            raise ValueError(
+                f"{field} names a step in {named_spec!r}, but this step is being written to "
+                f"{spec_path!r}. A step can only chain from an earlier step in its own spec; "
+                f"anything else has to be an indexed source."
+            )
+        step[field] = step_id
 
 
 def _source_refs(step: dict, *, known_steps: set[str]) -> list[str]:

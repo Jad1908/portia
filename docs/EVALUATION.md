@@ -234,7 +234,10 @@ Both drifts are `expect`-vocabulary errors: it guessed `{"n_rows": 7}`, was reje
 `{"transforms": 1}` (a count, where the field is a list), and that one was accepted because the
 validator checks the key exists, not the shape of its value. The vocabulary is now generated into
 `record_step.md` from the ops (`handlers.step_vocabulary`), which removes the guessing; validating
-an `expect` **value's shape** is not yet done and is in `BACKLOG.md`.
+an `expect` **value's shape** is now checked too: `record_step` compares each prediction's kind
+against the value the step just reported, so `{"transforms": 1}` is refused with *"you predicted a
+number, but normalize reports a list"*. There is no acknowledgement for it — a zero can be
+deliberate, a wrong-typed prediction never is.
 
 ### What this run changed
 

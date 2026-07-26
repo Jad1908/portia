@@ -421,6 +421,81 @@ def test_a_step_reference_only_runs_the_spec_up_to_that_step(sales):
     assert out["report"]["left"]["n_rows"] == 10
 
 
+def test_record_step_accepts_the_same_reference_form_the_checks_need(sales, tmp_path):
+    """One habit must work everywhere. Run 4 tripped over the seam three times.
+
+    `join_findings` needs `<spec>#<step id>` (a step's output is not a file, so
+    there is nothing else to call it); chaining inside a spec used to take only a
+    bare id. The agent guessed wrong in both directions, burning a round-trip and
+    a write confirmation each time.
+    """
+    handlers.record_step(
+        "specs/chain.yaml",
+        {
+            "id": "first",
+            "op": "join",
+            "left": "orders",
+            "right": "customers",
+            "keys": ["customer_id"],
+            "how": "left",
+        },
+        portia_dir=sales,
+    )
+    out = handlers.record_step(
+        "specs/chain.yaml",
+        {
+            "id": "second",
+            "op": "normalize",
+            "input": "specs/chain.yaml#first",  # the read-only checks' form
+            "transforms": [{"column": "name", "op": "strip"}],
+        },
+        portia_dir=sales,
+    )
+    assert out["n_steps"] == 2
+
+    # ...and the spec stores the bare id: a step naming its own spec by path,
+    # inside that spec, is noise in a file whose point is reading well in a diff.
+    doc = yaml.safe_load((tmp_path / "specs" / "chain.yaml").read_text())
+    assert doc["steps"][1]["input"] == "first"
+    assert "chain.yaml" not in doc["steps"][1]["input"]
+
+
+def test_a_step_cannot_chain_from_another_spec(sales):
+    with pytest.raises(ValueError, match="only chain from an earlier step in its own spec"):
+        handlers.record_step(
+            "specs/chain.yaml",
+            {
+                "id": "x",
+                "op": "normalize",
+                "input": "specs/elsewhere.yaml#something",
+                "transforms": [{"column": "name", "op": "strip"}],
+            },
+            portia_dir=sales,
+        )
+
+
+def test_profile_source_measures_a_table_an_earlier_step_produced(sales):
+    """ "Did my normalize actually change the column?" needs the table, not the file."""
+    handlers.record_step(
+        "specs/chain.yaml",
+        {
+            "id": "cleaned",
+            "op": "normalize",
+            "input": "customers",
+            "transforms": [{"column": "name", "op": "lower"}],
+        },
+        portia_dir=sales,
+    )
+    out = handlers.profile_source("specs/chain.yaml#cleaned", sales)
+    json.dumps(out)
+
+    name = next(c for c in out["columns"] if c["name"] == "name")
+    assert all(v == v.lower() for v in name["samples"])  # the transform, visible
+    # no catalog entry exists for an intermediate, so no judgment is invented for it
+    assert out["summary"] == ""
+    assert name["role"] is None
+
+
 def test_an_unknown_table_name_points_at_the_step_form(sales):
     """Otherwise the message reads 'no such table' when the truth is 'not by that name'."""
     with pytest.raises(ValueError, match="spec path.*#.*step id"):
@@ -443,6 +518,100 @@ def test_an_unknown_step_id_names_the_steps_that_exist(sales):
     with pytest.raises(ValueError, match="no step 'typo' in specs/chain.yaml — have: first"):
         handlers.join_findings(
             "specs/chain.yaml#typo", "customers", keys=["customer_id"], portia_dir=sales
+        )
+
+
+def test_an_expect_of_the_right_field_but_the_wrong_type_is_refused(sales, tmp_path):
+    """Regression (EVALUATION.md, Run 3): `expect: {transforms: 1}` was written.
+
+    `transforms` is a real normalize field, so the name check passed — but it
+    reports a *list of records*, not a count. `1` can never equal that, so the
+    spec drifted on every run forever. Same disease `_EXPECTABLE` cures, one
+    level down: right field, wrong kind of value.
+    """
+    with pytest.raises(ValueError, match="transforms") as exc:
+        handlers.record_step(
+            "specs/n.yaml",
+            {
+                "id": "clean",
+                "op": "normalize",
+                "input": "customers",
+                "transforms": [{"column": "name", "op": "strip"}],
+                "expect": {"transforms": 1},
+            },
+            portia_dir=sales,
+        )
+    assert "you predicted a number" in str(exc.value)
+    assert "reports a list" in str(exc.value)
+    assert not (tmp_path / "specs" / "n.yaml").exists()
+
+
+def test_a_correctly_shaped_expect_passes(sales):
+    out = handlers.record_step(
+        "specs/n.yaml",
+        {
+            "id": "clean",
+            "op": "normalize",
+            "input": "customers",
+            "transforms": [{"column": "name", "op": "strip"}],
+            "expect": {"input_rows": 6, "flags": []},
+        },
+        portia_dir=sales,
+    )
+    assert out["drift"] == {}
+
+
+def test_a_row_count_predicted_as_a_float_is_not_an_error(sales):
+    """int and float are the same kind — 10.0 rows is a clumsy prediction, not a wrong one."""
+    out = handlers.record_step(
+        "specs/j.yaml",
+        {
+            "id": "j",
+            "op": "join",
+            "left": "orders",
+            "right": "customers",
+            "keys": ["customer_id"],
+            "how": "left",
+            "expect": {"result_rows": 10.0},
+        },
+        portia_dir=sales,
+    )
+    assert out["drift"] == {}
+
+
+def test_a_boolean_field_predicted_as_a_number_is_refused(sales):
+    """`bool` is an `int` in Python; `matches_prediction: 1` must not slip through."""
+    with pytest.raises(ValueError, match="matches_prediction"):
+        handlers.record_step(
+            "specs/j.yaml",
+            {
+                "id": "j",
+                "op": "join",
+                "left": "orders",
+                "right": "customers",
+                "keys": ["customer_id"],
+                "how": "left",
+                "expect": {"matches_prediction": 1},
+            },
+            portia_dir=sales,
+        )
+
+
+def test_a_structured_field_predicted_flat_is_refused(sales):
+    """join reports `keys` as {left: [...], right: [...]}, not a bare list."""
+    with pytest.raises(ValueError, match="you predicted a list"):
+        handlers.record_step(
+            "specs/j.yaml",
+            {
+                "id": "j",
+                "op": "join",
+                "left": "orders",
+                "right": "customers",
+                "keys": ["customer_id"],
+                "how": "left",
+                "expect": {"keys": ["customer_id"]},
+            },
+            portia_dir=sales,
         )
 
 
