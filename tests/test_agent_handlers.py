@@ -421,6 +421,81 @@ def test_a_step_reference_only_runs_the_spec_up_to_that_step(sales):
     assert out["report"]["left"]["n_rows"] == 10
 
 
+def test_record_step_accepts_the_same_reference_form_the_checks_need(sales, tmp_path):
+    """One habit must work everywhere. Run 4 tripped over the seam three times.
+
+    `join_findings` needs `<spec>#<step id>` (a step's output is not a file, so
+    there is nothing else to call it); chaining inside a spec used to take only a
+    bare id. The agent guessed wrong in both directions, burning a round-trip and
+    a write confirmation each time.
+    """
+    handlers.record_step(
+        "specs/chain.yaml",
+        {
+            "id": "first",
+            "op": "join",
+            "left": "orders",
+            "right": "customers",
+            "keys": ["customer_id"],
+            "how": "left",
+        },
+        portia_dir=sales,
+    )
+    out = handlers.record_step(
+        "specs/chain.yaml",
+        {
+            "id": "second",
+            "op": "normalize",
+            "input": "specs/chain.yaml#first",  # the read-only checks' form
+            "transforms": [{"column": "name", "op": "strip"}],
+        },
+        portia_dir=sales,
+    )
+    assert out["n_steps"] == 2
+
+    # ...and the spec stores the bare id: a step naming its own spec by path,
+    # inside that spec, is noise in a file whose point is reading well in a diff.
+    doc = yaml.safe_load((tmp_path / "specs" / "chain.yaml").read_text())
+    assert doc["steps"][1]["input"] == "first"
+    assert "chain.yaml" not in doc["steps"][1]["input"]
+
+
+def test_a_step_cannot_chain_from_another_spec(sales):
+    with pytest.raises(ValueError, match="only chain from an earlier step in its own spec"):
+        handlers.record_step(
+            "specs/chain.yaml",
+            {
+                "id": "x",
+                "op": "normalize",
+                "input": "specs/elsewhere.yaml#something",
+                "transforms": [{"column": "name", "op": "strip"}],
+            },
+            portia_dir=sales,
+        )
+
+
+def test_profile_source_measures_a_table_an_earlier_step_produced(sales):
+    """ "Did my normalize actually change the column?" needs the table, not the file."""
+    handlers.record_step(
+        "specs/chain.yaml",
+        {
+            "id": "cleaned",
+            "op": "normalize",
+            "input": "customers",
+            "transforms": [{"column": "name", "op": "lower"}],
+        },
+        portia_dir=sales,
+    )
+    out = handlers.profile_source("specs/chain.yaml#cleaned", sales)
+    json.dumps(out)
+
+    name = next(c for c in out["columns"] if c["name"] == "name")
+    assert all(v == v.lower() for v in name["samples"])  # the transform, visible
+    # no catalog entry exists for an intermediate, so no judgment is invented for it
+    assert out["summary"] == ""
+    assert name["role"] is None
+
+
 def test_an_unknown_table_name_points_at_the_step_form(sales):
     """Otherwise the message reads 'no such table' when the truth is 'not by that name'."""
     with pytest.raises(ValueError, match="spec path.*#.*step id"):

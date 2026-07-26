@@ -29,7 +29,7 @@ from portia import catalog, spec
 from portia.agent import prompts
 from portia.checks.join import join_findings as _join_findings
 from portia.checks.outcome import BLOCKING_FLAGS
-from portia.checks.profiling import profile_path
+from portia.checks.profiling import profile_frame, profile_path
 from portia.core.io import load_frame
 from portia.core.serialize import to_json
 from portia.ops import join as join_op
@@ -151,7 +151,23 @@ def profile_source(source: str, portia_dir: str = catalog.DEFAULT_DIR) -> dict:
 
     ``summary`` and each column's ``role`` come from the catalog: whatever
     judgment has been recorded so far, empty until someone writes it.
+
+    ``source`` may also name a table an earlier step produced
+    (``<spec>#<step id>``). There is no catalog entry for one, so it comes back
+    with no summary and no roles — only measurements, which is the whole point of
+    asking: what do this table's columns look like *now*, after the step ran.
     """
+    if STEP_REF in source:
+        profile = profile_frame(_step_frame(source))
+        return {
+            "source": source,
+            "summary": "",
+            "n_rows": profile["n_rows"],
+            "n_cols": profile["n_cols"],
+            "candidate_keys": profile["candidate_keys"],
+            "columns": [{**col, "role": None} for col in profile["columns"]],
+        }
+
     entry = _entry(source, portia_dir)
     profile = profile_path(entry["source"])
     roles = {c["name"]: c.get("role") for c in entry.get("columns", [])}
@@ -275,6 +291,7 @@ def record_step(
     steps: list[dict] = doc.setdefault("steps", [])
 
     step_ids = {s["id"] for s in steps}
+    _normalize_step_refs(step, spec_path=str(path))
     _validate_step(step, existing=steps)
     for ref in _source_refs(step, known_steps=step_ids):
         try:
@@ -542,6 +559,34 @@ def _validate_transforms(transforms: Any) -> None:
             raise ValueError(f"normalize: transform {i} needs an 'op'{extra}. One of: {known}")
         if chosen not in normalize_op.TRANSFORM_OPS:
             raise ValueError(f"normalize: transform {i} has unknown op {chosen!r}. One of: {known}")
+
+
+def _normalize_step_refs(step: dict, *, spec_path: str) -> None:
+    """Let a step name its inputs the same way every other tool does.
+
+    ``join_findings`` and ``profile_source`` need ``<spec>#<step id>`` — a step's
+    output is not a file, so there is nothing else to call it. A step in a spec
+    doesn't, because the spec it belongs to is the spec it is being written to.
+    Two conventions for one idea, and Run 4 tripped over the seam three times,
+    burning a round-trip and a write confirmation each: `#`-form into
+    ``record_step``, bare id into ``join_findings``, `#`-form again.
+
+    So the `#` form is accepted here too and reduced to the bare id, which is
+    what the spec stores — a step referring to its own spec by path in its own
+    spec is noise in a file whose whole point is being readable in a diff.
+    """
+    for field in ("left", "right", "input"):
+        ref = step.get(field)
+        if not isinstance(ref, str) or STEP_REF not in ref:
+            continue
+        named_spec, _, step_id = ref.partition(STEP_REF)
+        if Path(named_spec) != Path(spec_path):
+            raise ValueError(
+                f"{field} names a step in {named_spec!r}, but this step is being written to "
+                f"{spec_path!r}. A step can only chain from an earlier step in its own spec; "
+                f"anything else has to be an indexed source."
+            )
+        step[field] = step_id
 
 
 def _source_refs(step: dict, *, known_steps: set[str]) -> list[str]:

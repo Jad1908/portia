@@ -69,7 +69,14 @@ async def describe_source(args: dict[str, Any]) -> dict[str, Any]:
 @tool(
     "profile_source",
     prompts.tool("profile_source"),
-    {"source": str},
+    {
+        "type": "object",
+        "properties": {
+            "source": {"type": "string", "description": "Source name, or <spec>#<step id>"},
+            "portia_dir": {"type": "string"},
+        },
+        "required": ["source"],
+    },
     annotations=_READ_ONLY,
 )
 async def profile_source(args: dict[str, Any]) -> dict[str, Any]:
