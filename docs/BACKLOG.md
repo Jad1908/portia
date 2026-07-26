@@ -196,19 +196,20 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
 
 ## Interface — the surface
 
-- **The three-panel app** (files · workflow · chat) — NiceGUI on the engine's event stream. Core to
-  the product. **V0 is specced** (`VISION.md` → "V0 — the viewer"): read-only, no model calls, so
-  it needs nothing from the agent loop and can be built now. The full driving version stays
-  deferred behind the two engine changes below.
+- **The three-panel app** (files · workflow · copilot) — NiceGUI on the engine's event stream. Core
+  to the product. **V0 is specced** (`VISION.md` → "V0"; looks in `DESIGN.md`) and **drives**: it
+  runs a turn and catches every question and write confirmation, which needs no engine change
+  because `agent/ask.py` injects `answer`/`confirm` for exactly this.
 - **A conversation that stays open.** `session.run` sends one prompt, drains the response and closes
-  the client, so there is no multi-turn: a chat panel built on it forgets everything between
-  messages, and a second `ask` starts cold with only the on-disk artifacts as memory. The SDK's
-  `ClaudeSDKClient` supports staying open — this is a portia limitation, not an SDK one.
-  **Prerequisite for a UI that drives rather than views.**
+  the client, so there is no multi-turn — no "actually, redo that as an inner join" after a turn
+  ends. The SDK's `ClaudeSDKClient` supports staying open; this is a portia limitation, not an SDK
+  one. **Not a prerequisite for the UI** — a turn is a complete unit of work, and V0 offers a fresh
+  turn rather than a fake conversation. The first thing to build *after* V0, once the boundary has
+  been felt for real.
 - **Tool results are missing from the event stream.** `events.from_message` handles the assistant's
   messages and the final result and drops the message carrying tool *results* — so any consumer
-  sees what was called and never what came back. Needed by both the run log and the viewer's
-  middle panel; do it once, before either. **Smallest high-leverage item on this page.**
+  sees what was called and never what came back. Needed by both the run log and the app's
+  transcript panel; do it once, before either. **Smallest high-leverage item on this page.**
 
 ## Scale — data tiers
 

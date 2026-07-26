@@ -92,21 +92,40 @@ not a gadget — a place you actually work.
 
 ---
 
-## V0 — the viewer (specced 2026-07-26, not yet built)
+## V0 — the app (specced 2026-07-26, not yet built)
 
-*Direction, not a task list. The point of V0 is to make the product **visible**; the specifics of
-the middle panel should emerge from looking at it, not from this section.*
+*Direction, not a task list. The point of V0 is to put the whole loop in one window; the specifics
+of the middle panel should emerge from looking at it, not from this section.*
 
 **The problem it solves.** Everything portia produces lands on disk in five places — `.portia/
 project.yaml`, `.portia/sources/*.yaml`, `specs/*.yaml`, `out/*.csv`, and a terminal transcript
 that scrolls away. The only way to see any of it is `cat`. That makes the loop hard to *tune*,
 because you cannot form a broad view of what the copilot did without reassembling it by hand.
 
-**The one rule that keeps V0 cheap: it is read-only, and it never calls a model.** It reads the
-catalog and the specs, runs `spec.run_spec` on demand (deterministic, free, no API), and renders.
-No editing, no chat driving, no interpretation writing. Every one of those needs a decision we
-haven't made or a seam we haven't built, and none of them is needed to stop the project being
-obscure.
+**V0 drives the copilot. It is not a viewer.** An earlier draft of this section proposed read-only,
+reasoning that the single-turn session blocked a chat panel. That conflated two things and was
+wrong, so the reasoning is recorded here rather than quietly deleted:
+
+- **Driving a turn works today.** `agent/ask.py` injects `answer` and `confirm` as callables
+  precisely so something other than stdin can supply them — its docstring names "the eventual
+  NiceGUI panel" as the third consumer. A UI passes a form-backed `answer` and a
+  payload-rendering `confirm`, and every question and every write confirmation lands on screen. No
+  engine change.
+- **What single-turn actually costs is follow-up**, not driving. `session.run` sends one prompt and
+  closes, so there is no "actually, redo that as an inner join" after the turn ends. That is worth
+  having and it is *not* what a turn needs.
+- **A read-only viewer would not have solved the stated problem.** The complaint is that tuning the
+  loop from a terminal is hard. Reading artifacts in a browser while answering questions in a
+  terminal is two surfaces, not one.
+
+So V0 runs a turn, catches the decisions, and shows the artifacts — because **the decision points
+are the thing being tuned**, and answering a question with the evidence and the spec-so-far visible
+beside it is the product (`PLAN.md`: "the questions-and-insights UX *is* the product").
+
+**What V0 is honest about not having:** when a turn ends, it ends. The UI says so and offers a new
+turn, which starts fresh with the catalog and spec on disk as its memory — exactly what
+`chat ask` does today. It must not present a chat box that implies a conversation the engine
+cannot hold; a follow-up that silently loses context is worse than an honest boundary.
 
 **How it looks is already decided — see `DESIGN.md`**, which specs every token and every component
 named below (`artifact-row`, `step-card`, `report-step-block`, `acknowledged-banner`,
@@ -115,11 +134,17 @@ look like. Its one product-specific rule is load-bearing: **color and prominence
 never rank** — the screen must not smuggle in the prioritization the checks layer refuses to make.
 
 **It is an edge, like the CLI.** Lives in `portia/ui/`, launched with `python -m portia.ui`, and
-calls exactly three things: `catalog.load_catalog`, `spec.load_spec`, `spec.run_spec`. **No
-computation in the UI, ever** — if a panel needs a number the engine doesn't expose, that is a
-signal to add it to `checks`/`spec`, not to calculate it in a widget. `cli/` and `ui/` are two
-renderers of one engine, and the day they disagree about a number is the day the seam broke.
-NiceGUI (decided, `TECH_STACK.md`), as an optional `ui` extra so a core install stays thin.
+calls exactly four things: `catalog.load_catalog`, `spec.load_spec`, `spec.run_spec`, and
+`session.run` with its own `answer`/`confirm`. **No computation in the UI, ever** — if a panel needs
+a number the engine doesn't expose, that is a signal to add it to `checks`/`spec`, not to calculate
+it in a widget. `cli/` and `ui/` are two renderers of one engine, and the day they disagree about a
+number is the day the seam broke. NiceGUI (decided, `TECH_STACK.md`), as an optional `ui` extra so a
+core install stays thin.
+
+> **`cli/chat.py` is the reference implementation.** It already does everything the UI must do —
+> renders each event kind, collects answers, confirms writes, wraps a turn. Read it before writing
+> the panel; where the UI needs something it doesn't have, that is a gap in the *seam*, not
+> permission to reach past it.
 
 ### Left — files & artifacts
 
@@ -150,19 +175,52 @@ here** — Run 5 buried one mid-dict in a terminal confirmation and it shipped a
 carries — provenance, drift against `expect`, the `outcome` post-conditions, blocking flags — plus
 a preview of the produced table. This is `cli/run.py`'s output with the table attached.
 
-### Right — the transcript
+### Right — the copilot
 
-Renders a past run from the **run log** (see `EVALUATION.md`), not a live session. **No input box in
-V0**: the copilot is single-turn today (`session.run` opens a client, sends one prompt, closes), so
-a chat panel would forget everything after each message. Making it a driver needs two engine
-changes first — a conversation that stays open, and tool *results* in the event stream — and both
-should be done deliberately rather than discovered halfway through building a panel.
+A goal box and a **Go**, then the event stream live over NiceGUI's websocket as `session.run`
+yields it. Model and effort are pickable here, and the turn states which it is spending before it
+starts (`cli/chat.py` already prints this; an expensive run must never be silent).
+
+Two of those event kinds are not rows in a log — they are **the loop stopping for the human**, and
+they are the whole reason the UI exists:
+
+- **A question** renders as a form: the question, its options with their descriptions, and a free-text
+  field that goes through verbatim. Answering it resumes the turn. **The evidence panel stays
+  visible while answering** — that is the entire argument for a UI over a terminal, where the
+  profile you need scrolled away four screens ago.
+- **A write confirmation** renders the payload *readably* — the step's fields laid out, its `grain`,
+  its `expect`, its `rationale` — with **any `acknowledge` as a banner above the whole thing**,
+  naming what the engine measured. Run 5 approved one as a fifteen-character fragment inside a
+  400-character single-line dict and shipped a 3.85%-inflated table (`EVALUATION.md`). Deny is a
+  first-class button, not a `n` you have to know about.
+
+**When the turn ends, it ends.** The panel says so and offers a new turn; it does not present a
+chat box implying a conversation the engine cannot hold. Past runs are replayable from the run log
+(`EVALUATION.md`).
+
+### How a tuning session actually goes
+
+The workflow this is built for, end to end, in one window:
+
+1. Pick a model and effort, type the goal, Go.
+2. Watch it climb the ladder — `describe` → `profile` → `join_findings` — with **tool results
+   expandable inline**, so you can see the evidence it is reasoning from rather than inferring it.
+3. When it asks, answer in the form with the source profile and the spec-so-far on screen. Push
+   back. Give it a vague answer. Contradict the data.
+4. When it wants to write, read the whole step and approve or deny.
+5. The graph and the run report fill in as steps are recorded; a blocked step is visible the moment
+   it is refused.
+6. Afterwards, the run is in the log — comparable against every earlier one, which is what makes a
+   prompt change measurable rather than remembered.
+
+That is the loop that is currently spread across a terminal, five YAML files, and my memory of six
+transcripts.
 
 ### What V0 deliberately does not do
 
-Editing anything · driving the copilot · calling a model · multiple workflows · groups · run
-caching or partial runs. Each is a real product question in `VISION.md`; none is needed to see what
-we already have.
+Editing artifacts · follow-up turns (see above) · multiple workflows · groups · run caching or
+partial runs · indexing new sources from the UI. Each is a real product question below; none blocks
+the loop in "How a tuning session actually goes".
 
 ---
 

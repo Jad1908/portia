@@ -610,5 +610,5 @@ operation into a prewritten op) · turns, tokens, cost.
 **It needs one engine change, and the UI needs the same one.** `events.from_message` handles the
 assistant's messages and the final result, but never the message carrying **tool results** — so
 today a log would record that `join_findings` was called and never what it returned. Half a
-transcript. Adding a `TOOL_RESULT` event serves the log and the viewer's middle panel at once, and
+transcript. Adding a `TOOL_RESULT` event serves the log and the app's transcript panel at once, and
 is worth doing before either.

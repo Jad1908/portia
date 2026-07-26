@@ -237,7 +237,9 @@ Cards never go flat (0px) and never exceed 16px except for full pills. Most chro
 
 **`button-primary`** — the one teal action
 - Fill `{colors.accent-primary}`, label `{colors.on-accent}`, `{typography.button}`, padding `6px 14px`, height ~32px, `{rounded.md}`.
-- In V0 this is **Run**. At most one solid accent fill visible per view. Pressed → `{colors.accent-primary-pressed}`.
+- In V0 this is **Go** (start a turn) and **Run** (execute a spec) — never both live at once. At
+  most one solid accent fill visible per view. Pressed → `{colors.accent-primary-pressed}`.
+- **Approving a write is deliberately not this.** See `write-confirm`.
 
 **`button-secondary`** — transparent text button
 - Transparent fill, label `{colors.ink}`, `{typography.button}`, padding `6px 14px`, `{rounded.md}`. "Cancel", "Close".
@@ -341,12 +343,20 @@ Cards never go flat (0px) and never exceed 16px except for full pills. Most chro
 **`empty-report`** — before a run
 - `{colors.mute}` `{typography.body-md}`, one line, with the Run button adjacent. No illustration.
 
-### Right pane — the transcript
+### Right pane — the copilot
 
-**`transcript-pane`** — a recorded run, replayed
-- Fill `{colors.surface}`, padding `{spacing.lg}`. Rows in event order from the run log
-  (`EVALUATION.md`). **No input box in V0** — the copilot is single-turn, so an input that appears
-  to hold a conversation would be a lie about the system.
+**`transcript-pane`** — the live turn, and replayed past ones
+- Fill `{colors.surface}`, padding `{spacing.lg}`. Rows in event order, streamed as `session.run`
+  yields them.
+- **`goal-input`** pinned at the top: a `text-input` at `{typography.body-md}`, model/effort
+  selectors as `segmented-control`s, and the `button-primary` **Go**. The model and effort in play
+  are stated in `{colors.mute}` `{typography.caption}` for the duration of the turn — an expensive
+  run must never be silent.
+- **`turn-ended`** — when the turn closes: a `{colors.hairline-strong}` rule, one line of
+  `{colors.mute}` `{typography.caption}` stating the turn is over and what it cost, and a
+  `button-tertiary` "New turn". **No chat box.** The engine is single-turn; an input implying a
+  conversation it cannot hold is a lie about the system, and this component exists to tell the
+  truth instead.
 
 **`transcript-row`** — one event, styled by kind
 - **text** → `{colors.body}` `{typography.body-md}`, the copilot's prose.
@@ -354,9 +364,44 @@ Cards never go flat (0px) and never exceed 16px except for full pills. Most chro
 - **tool_call** → `{typography.mono}`, tool name `{colors.ink}`, arguments `{colors.mute}`, leading `→`.
 - **tool_result** → collapsed `code-block`, expandable. This is the evidence the copilot acted on
   and the reason the event exists at all.
-- **question** / **answer** → the question `{colors.ink}` `{typography.body-md}`, options listed,
-  the human's answer marked in `{colors.accent-text}`.
-- **approval** → the write payload as a `code-block`, with the outcome (allowed / declined) stated.
+- **question** / **answer** → once answered, the question `{colors.ink}` `{typography.body-md}` with
+  the human's answer marked in `{colors.accent-text}`. While *pending*, it is a `question-form`.
+- **approval** → once resolved, the payload as a `code-block` with the outcome (allowed / declined)
+  stated. While *pending*, it is a `write-confirm`.
+
+### The two components where the loop stops for a human
+
+These are not log rows. They are the product — the moments `PLAN.md` means by "the
+questions-and-insights UX *is* the product" — and they get the most design attention in the app.
+
+**`question-form`** — a pending `AskUserQuestion`
+- Container: fill `{colors.surface-card}`, 1px `{colors.accent-primary}` at ~60%, `{rounded.md}`,
+  padding `{spacing.lg}`. The only element on screen with a live accent border, so the eye finds it
+  without a color-coded alarm.
+- Question in `{colors.ink}` `{typography.heading-sm}`. Each option is a selectable row: label
+  `{colors.body}` `{typography.body-strong}`, description `{colors.mute}` `{typography.body-md}`.
+  A `text-input` for free text sits below them, always — the answer goes through verbatim, and
+  typing an objection is a first-class action, not a fallback.
+- **Options are rendered in the order the agent gave them and are never re-ordered or
+  recommended-badged by the UI.** Which option is best is the human's call; the screen is not a
+  participant.
+- The evidence panels stay visible and interactive while this is pending. **Never a modal.** The
+  reason to answer here instead of in a terminal is that the profile you need is still on screen.
+
+**`write-confirm`** — a pending durable write
+- Container: fill `{colors.surface-card}`, 1px `{colors.hairline-strong}`, `{rounded.md}`, padding
+  `{spacing.lg}`. Tool name and target path in `{typography.mono}` `{colors.ink}`.
+- The payload is **laid out, not dumped**: one labelled line per field, `{typography.mono}` values,
+  with `sql`, `expect`, `transforms` and `rationale` given their own blocks. A step is a decision
+  being made on the record — it reads as a form, never as a `dict` repr.
+- **If the step carries `acknowledge`, an `acknowledged-banner` sits above everything else in this
+  component and cannot be collapsed.** It names the flag, states what the engine measured, and
+  shows the step's `rationale`. This is the single most consequential pixel in portia: Run 5
+  approved an override that appeared as fifteen characters inside a 400-character single-line dict,
+  and shipped a table with 3.85% too much revenue (`EVALUATION.md`).
+- **Allow** is `button-tertiary`; **Deny** is `button-secondary` and always present. Neither is the
+  teal pill — approving a write is not the primary action of the app, and making it the loudest
+  thing on screen trains the reflex this component exists to prevent.
 
 **`code-block`** — SQL, YAML, or a tool result
 - Fill `{colors.surface-card}`, 1px `{colors.hairline}`, `{rounded.md}`, padding `{spacing.md}`,
@@ -400,6 +445,9 @@ Their *visual language* lives on in the components above.
 - Don't pad surfaces 32px+; stay at 12–24px.
 - Don't drop `ss03`, and don't render data in a proportional face.
 - Don't show an input box that implies a conversation the engine can't hold.
+- Don't re-order, recommend or badge the agent's answer options — which one is best is the human's call.
+- Don't make approving a write the loudest thing on screen, and never hide an `acknowledge` inside a payload dump.
+- Don't put a question in a modal; the evidence has to stay visible while it's answered.
 
 ## Iteration Guide
 
@@ -420,4 +468,7 @@ Their *visual language* lives on in the components above.
   (`VISION.md`) is the one screen that most needs design and has none.
 - **Teal pill contrast on dark** — white on `#0D9488` sits just under 4.5:1 for 13px text; verify on device and darken toward `#0C7D72` if it reads weak.
 - **No syntax highlighting** in V0 code blocks. If SQL steps get long, revisit.
-- **The accent hue is shared with a sibling project.** One token to change if portia should look distinct.
+- **The accent hue is decided: deep teal**, shared with the sibling project. Not a gap — a choice.
+  It still lives in one token, so re-hueing stays a one-line change if that ever becomes wanted.
+- **Streaming states are unspecced.** What a `tool_call` row looks like while its result is still
+  pending, and how a long turn signals it is alive, need designing against a real run.
