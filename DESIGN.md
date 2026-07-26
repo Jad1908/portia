@@ -263,6 +263,45 @@ Cards never go flat (0px) and never exceed 16px except for full pills. Most chro
   never carries a severity score. Non-blocking flags are `{colors.mute}` on
   `{colors.surface-elevated}` — visible, uncolored, not ranked.
 
+### Opening a project — the screens before the three panes
+
+The only place `{typography.display}` is used, and the only place the layout is not three panes.
+These exist so a test run never needs a terminal (`VISION.md` → "The no-terminal audit").
+
+**`project-open`** — no project yet
+- Centered column, max ~560px, on `{colors.canvas}`. `{typography.display}` `{colors.ink}` title,
+  one line of `{colors.mute}` `{typography.body-md}` beneath.
+- A `text-input` for the path — **monospace**, since it is a path — with a `button-primary` "Open".
+  A path that does not exist yet is created; testing means a fresh directory per run, so that must
+  be one action, not an error followed by a second one.
+- Below, recent projects as `artifact-row`s with their last-opened time in `{colors.mute}`
+  `{typography.caption}`.
+
+**`project-context`** — the mandatory brief
+- Same centered column. This is **the most consequential text box in the product** — the context is
+  what makes a column's meaning decidable, and a generic brief yields generic judgment
+  (`PLAN.md`). Design it like it matters: `{typography.heading-md}` prompt, a `body-editor` at
+  min-height ~180px, and placeholder guidance in `{colors.stone}` showing the *shape* of a good
+  brief (domain, goal, what a row means to the business) — **never an example that could be
+  mistaken for an answer about the data at hand**.
+- `button-primary` "Continue" disabled until non-empty. **No skip, no dismiss, no "later".** It is
+  the one gate in the app.
+
+**`source-dropzone`** — adding data
+- Dashed 1px `{colors.hairline-strong}`, `{rounded.lg}`, fill `{colors.surface}`, padding
+  `{spacing.xl}`. Prompt in `{colors.mute}` `{typography.body-md}`; a `button-tertiary` file picker
+  for people who don't drag.
+- An **interpret toggle** sits beneath it, on by default, labelled with its cost in
+  `{colors.mute}` `{typography.caption}` — profiling is free, interpretation is a model turn, and
+  the UI must not blur the two.
+- Once a project has sources this shrinks to a row-height affordance at the foot of the left pane.
+
+**`index-progress`** — a file landing
+- Each file appears as an `artifact-row` the moment it profiles, carrying the **uninterpreted**
+  marker until the turn writes its summary. Profiling is instant and deterministic; the
+  interpretation arrives later through the ordinary transcript. **Never one merged spinner** — one
+  of the two costs money and the operator should be able to see which is which.
+
 ### Left pane — files & artifacts
 
 **`artifact-pane`** — the curated project view
@@ -464,8 +503,12 @@ Their *visual language* lives on in the components above.
 - **Light-mode values are first-pass**, inherited and tuned by reasoning rather than capture; verify contrast on device.
 - **Hover states** are left to platform convention and not specified here.
 - **The graph's visual grammar is provisional.** Cards-are-steps and edges-are-data-dependency is V0's working answer to `VISION.md`'s open question; rendering it is how we find out whether it reads correctly. Expect this section to change.
-- **Empty / first-run chrome** is sketched, not specced. The mandatory project-context panel
-  (`VISION.md`) is the one screen that most needs design and has none.
+- **First-run chrome is specced** (`project-open`, `project-context`, `source-dropzone`) because
+  V0's bar is a full test run with no terminal. It is first-pass and unbuilt; the context panel in
+  particular deserves attention beyond a text box, since it carries more of the product's outcome
+  than any other control.
+- **Drag-and-drop file handling** in NiceGUI is unverified. If it proves awkward, the picker plus a
+  path field is an acceptable V0 fallback — the requirement is "no terminal", not "drag".
 - **Teal pill contrast on dark** — white on `#0D9488` sits just under 4.5:1 for 13px text; verify on device and darken toward `#0C7D72` if it reads weak.
 - **No syntax highlighting** in V0 code blocks. If SQL steps get long, revisit.
 - **The accent hue is decided: deep teal**, shared with the sibling project. Not a gap — a choice.

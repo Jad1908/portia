@@ -94,8 +94,16 @@ not a gadget — a place you actually work.
 
 ## V0 — the app (specced 2026-07-26, not yet built)
 
-*Direction, not a task list. The point of V0 is to put the whole loop in one window; the specifics
-of the middle panel should emerge from looking at it, not from this section.*
+*Direction, not a task list. The specifics of the middle panel should emerge from looking at it,
+not from this section.*
+
+> **The bar V0 has to clear: a full test run with no terminal.** Not "less terminal" — none. Create
+> the project, write its context, add the CSVs, index them, run a turn, answer its questions,
+> approve its writes, execute the spec, write the outputs, and read every artifact — all in the
+> window. Any step that sends the operator back to a shell is a V0 bug, because the thing being
+> fixed is that tuning the loop across two surfaces is miserable.
+>
+> The audit against today's commands is at the end of this section; keep it honest as things move.
 
 **The problem it solves.** Everything portia produces lands on disk in five places — `.portia/
 project.yaml`, `.portia/sources/*.yaml`, `specs/*.yaml`, `out/*.csv`, and a terminal transcript
@@ -141,10 +149,38 @@ it in a widget. `cli/` and `ui/` are two renderers of one engine, and the day th
 number is the day the seam broke. NiceGUI (decided, `TECH_STACK.md`), as an optional `ui` extra so a
 core install stays thin.
 
-> **`cli/chat.py` is the reference implementation.** It already does everything the UI must do —
-> renders each event kind, collects answers, confirms writes, wraps a turn. Read it before writing
-> the panel; where the UI needs something it doesn't have, that is a gap in the *seam*, not
-> permission to reach past it.
+> **`cli/chat.py` and `cli/index.py` are the reference implementations.** Between them they already
+> do everything the UI must do — render each event kind, collect answers, confirm writes, wrap a
+> turn, profile a source, register it, prompt for project context. Read them before writing the
+> panel; where the UI needs something they don't have, that is a gap in the *seam*, not permission
+> to reach past it.
+
+### Opening a project
+
+The first screen, and the one that has to exist for the no-terminal bar to be met. Three states:
+
+**No project open.** A path field and an **Open** — plus the recent projects it has seen. Testing
+means a fresh directory per run (`~/portia-run7`, `~/portia-run8`), so creating one has to be as
+cheap as typing a path that doesn't exist yet.
+
+**Project open, no context set.** The **mandatory context panel** `VISION.md` has always called
+for: a multi-line field, nothing else reachable until it is filled. This is the one screen where
+the product's premise is most exposed — the context is what makes a column's meaning decidable, and
+a generic brief produces generic judgment. Give it room, show the placeholder guidance, and do not
+let it be skipped. Writes `project.yaml` via `catalog.init_project`.
+
+**Project open, no sources.** A drop zone and a file picker. Dropped CSVs are copied into the
+project directory, then **indexed** — which is two distinct things and the UI must show them as
+two, because one is free and one is not:
+
+- **Profiling** (`catalog.index_source`) — deterministic, no model, always happens. Each file
+  appears in the left panel the moment it lands, with its auto-drafted summary.
+- **Interpretation** — a model turn that writes what each source *is*. Default on with a visible
+  toggle (`--no-interpret`'s equivalent), and it runs through the same driving machinery as any
+  other turn: same event stream, same write confirmations on each `set_interpretation`. It is not a
+  special case; it is a turn with a different opening prompt (`prompts.task("index_batch", …)`).
+
+Adding a source later is the same affordance, available from the left panel.
 
 ### Left — files & artifacts
 
@@ -200,27 +236,54 @@ chat box implying a conversation the engine cannot hold. Past runs are replayabl
 
 ### How a tuning session actually goes
 
-The workflow this is built for, end to end, in one window:
+The workflow this is built for, end to end, in one window, starting from nothing:
 
-1. Pick a model and effort, type the goal, Go.
-2. Watch it climb the ladder — `describe` → `profile` → `join_findings` — with **tool results
+1. Open a new project directory. Write the brief into the context panel.
+2. Drop the CSVs in. They profile instantly; the interpret turn runs, and you approve each
+   `set_interpretation` — already a place where the copilot's judgment is worth reading.
+3. Pick a model and effort, type the goal, Go.
+4. Watch it climb the ladder — `describe` → `profile` → `join_findings` — with **tool results
    expandable inline**, so you can see the evidence it is reasoning from rather than inferring it.
-3. When it asks, answer in the form with the source profile and the spec-so-far on screen. Push
+5. When it asks, answer in the form with the source profile and the spec-so-far on screen. Push
    back. Give it a vague answer. Contradict the data.
-4. When it wants to write, read the whole step and approve or deny.
-5. The graph and the run report fill in as steps are recorded; a blocked step is visible the moment
+6. When it wants to write, read the whole step and approve or deny.
+7. The graph and the run report fill in as steps are recorded; a blocked step is visible the moment
    it is refused.
-6. Afterwards, the run is in the log — comparable against every earlier one, which is what makes a
-   prompt change measurable rather than remembered.
+8. Run the spec, write the outputs, read the produced table.
+9. The run is in the log — comparable against every earlier one, which is what makes a prompt
+   change measurable rather than remembered.
 
-That is the loop that is currently spread across a terminal, five YAML files, and my memory of six
-transcripts.
+That is the loop currently spread across four terminal commands, five YAML files, and someone's
+memory of six transcripts.
+
+### The no-terminal audit
+
+Every command a test run needs today, and where it goes. **If a row loses its UI answer, V0 has
+regressed** — this is the checklist, not a nice-to-have.
+
+| Terminal today | In V0 |
+|---|---|
+| `mkdir ~/portia-runN` + copy CSVs in | Open-project path field · drop zone |
+| `index --init "<brief>"` | Mandatory context panel → `catalog.init_project` |
+| `index .` (profiling half) | Automatic on drop → `catalog.index_source` |
+| `index .` (interpret half) | A turn, with its `set_interpretation` write confirmations |
+| `index --no-interpret` | The interpret toggle on the drop zone |
+| `index --model/--effort` | Model + effort selectors, shown for the turn's duration |
+| `chat ask "<goal>"` | Goal box + **Go** |
+| answering `?` prompts on stdin | `question-form` |
+| answering `allow? [Y/n]` on stdin | `write-confirm` |
+| `run <spec>` | **Run** in the workflow pane |
+| `run --write out` | Same, with an output location — outputs land in the left panel |
+| `cat specs/*.yaml` | The graph, and each step's detail |
+| `cat out/*.csv` | `table-preview` |
+| `cat .portia/sources/*.yaml` | Clicking a source |
+| scrolling back through a transcript | The transcript panel, and the run log |
 
 ### What V0 deliberately does not do
 
-Editing artifacts · follow-up turns (see above) · multiple workflows · groups · run caching or
-partial runs · indexing new sources from the UI. Each is a real product question below; none blocks
-the loop in "How a tuning session actually goes".
+Editing artifacts by hand · follow-up turns within one session (see above) · multiple workflows ·
+groups · run caching or partial runs. Each is a real product question below. **None of them sends
+you back to a terminal**, which is the line that matters.
 
 ---
 
