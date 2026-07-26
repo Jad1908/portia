@@ -18,7 +18,6 @@ usefully happen without it (docs/VISION.md).
 from __future__ import annotations
 
 import argparse
-import asyncio
 import sys
 from pathlib import Path
 
@@ -82,6 +81,7 @@ def main() -> None:
     )
     parser.add_argument("--dir", default=".portia", help="catalog directory (default: .portia)")
     parser.add_argument("--model", default=None, help="model to run the copilot on")
+    parser.add_argument("--effort", default=None, help="how hard it thinks (low … max)")
     args = parser.parse_args()
 
     if args.init is not None:
@@ -105,16 +105,15 @@ def main() -> None:
         return
 
     from portia.agent.session import DEFAULT_MODEL
-    from portia.cli.chat import run_and_render
+    from portia.cli.chat import run_turn
 
     print()
-    asyncio.run(
-        run_and_render(
-            prompts.task("index_batch", names=", ".join(repr(n) for n in names)),
-            model=args.model or DEFAULT_MODEL,
-            cwd=".",
-            portia_dir=args.dir,
-        )
+    run_turn(
+        prompts.task("index_batch", names=", ".join(repr(n) for n in names)),
+        model=args.model or DEFAULT_MODEL,
+        effort=args.effort,
+        cwd=".",
+        portia_dir=args.dir,
     )
 
 

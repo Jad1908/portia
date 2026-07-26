@@ -59,22 +59,33 @@ layer is **core, not deferred**; its shape is still to be designed (the user's v
 the copilot loop (`portia/agent/` — in-process MCP server, layered context, `AskUserQuestion`
 routed to a human, spec writing, chat CLI). The **verification loop** now exists too: recording a
 step executes it, `checks/outcome.py` measures the table it produced, and a step that hits a zero
-is refused rather than written. **This is not yet a working copilot.** The last full run shipped a
-training table missing an entire data source and called it done; the gate that would have stopped
-that has been reproduced by hand but never faced a model. Read **`EVALUATION.md`** before building
-on top of any of it — it separates what the engine can do from what the copilot has been shown to
-do, and those are still far apart.
+is refused rather than written. **This is not yet a working copilot.** The loop has now faced a
+model four times (Runs 3–6 in `EVALUATION.md`). Each fix closed one escape and revealed the next:
+the spelling trap is dead, the tautology grain is dead, and Run 5 shipped a 3.85%-inflated table by
+writing `acknowledge` without ever asking the user. **Run 6 changed the model rather than the
+code** — `claude-opus-5` at low effort — and in the indexing phase alone raised the revenue
+outliers nobody had ever asked about, predicted the fan-out before joining, and named portia's
+missing aggregate itself. It never reached the gate, so the consent question is still open, but the
+Runs 1–5 failures now read as **capability rather than architecture**. Read **`EVALUATION.md`**
+before building on top of any of it — it separates what the engine can do from what the copilot has
+been shown to do.
 
 Next, in order:
 
-1. **Run the copilot against the verification loop** and score it. Cheap, and it is the only thing
-   that turns "the trap is catchable" into "the copilot catches it". Drive it *by hand* — piping
-   `yes y` measures nothing about the asking behaviour, which is the product.
-2. **The escape hatch** (DuckDB SQL — decided; see `BACKLOG.md`), deliberately before more ops, so
-   that what the agent reaches for tells us which ops to promote. Verification has made this
-   urgent rather than next-ish: no op can aggregate, so the fixture's fatal fan-out is now
-   correctly *blocked* with no way forward. Turning wrong answers into blocks is only progress if
-   something eventually unblocks them.
+1. **The escape hatch** (DuckDB SQL — decided; see `BACKLOG.md`), deliberately before more ops, so
+   that what the agent reaches for tells us which ops to promote. Verification made this urgent
+   rather than next-ish: no op can aggregate, so the fixture's fatal fan-out is now correctly
+   *blocked* with no way forward. **Run 6 is the argument** — the agent worked out unaided that the
+   data must be reduced to hotel × date, said there was no op for it, and stopped. Turning wrong
+   answers into blocks is only progress if something eventually unblocks them, and the block is now
+   the *only* thing between a capable model and a correct table.
+2. **Make the consequence of a zero a computed fact, rendered where the human answers.** Run 5's
+   override was taken alone, and the instruction it skipped ("tell the user what a total would be
+   off by") asks for a number that is nowhere in the agent's evidence. Compute what a row
+   multiplication does to each measure column and put it at the confirmation prompt, so consent is
+   informed whether or not the agent cooperates. Demoted below the hatch by Run 6, which stated the
+   consequence unprompted — but only qualitatively, and no capable model has yet been watched
+   reaching a blocking flag.
 
 The three-panel surface stays deferred until the loop is trustworthy.
 

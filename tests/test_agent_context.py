@@ -89,3 +89,22 @@ def test_system_prompt_composes_l0_and_l1(project):
     assert "You are **portia**" in prompt  # L0
     assert "Reconciling vendor orders" in prompt  # L1
     assert prompt.index("You are **portia**") < prompt.index("Reconciling vendor orders")
+
+
+def test_effort_reaches_the_sdk_options(project):
+    """`--effort` is half of "develop on a small model at low effort" (PLAN.md).
+
+    A knob that silently does nothing is worse than no knob: a ceiling check on
+    a flagship would report a low-effort result as a high-effort one.
+    """
+    from portia.agent import session
+
+    assert session.build_options(portia_dir=project).effort is None
+    assert session.build_options(portia_dir=project, effort="low").effort == "low"
+
+
+def test_an_unknown_effort_is_refused_rather_than_ignored(project):
+    from portia.agent import session
+
+    with pytest.raises(ValueError, match="unknown effort"):
+        session.build_options(portia_dir=project, effort="lowish")

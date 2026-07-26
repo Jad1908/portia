@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from portia import catalog
 from portia.agent import ask, context, events, tools
@@ -22,6 +22,12 @@ from portia.agent import ask, context, events, tools
 #: The model is a config knob, never a hard dependency (docs/PLAN.md). We develop
 #: on a small one on purpose: if the loop works here, the *engine* is good.
 DEFAULT_MODEL = "claude-haiku-4-5"
+
+#: How hard the model thinks, passed straight to the SDK. The other half of
+#: "develop on a cheaper, smaller model **at low effort**" (`PLAN.md` → Budget &
+#: model discipline) — and the knob that makes a ceiling check on a flagship a
+#: one-flag experiment rather than a code change. ``None`` leaves the SDK's default.
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
 
 PROMPT_PATH = Path(__file__).parent / "prompts" / "copilot.md"
 
@@ -41,6 +47,7 @@ def build_system_prompt(portia_dir: str = catalog.DEFAULT_DIR) -> str:
 def build_options(
     *,
     model: str = DEFAULT_MODEL,
+    effort: str | None = None,
     cwd: str | Path | None = None,
     portia_dir: str = catalog.DEFAULT_DIR,
     can_use_tool: Callable[..., Any] | None = None,
@@ -48,8 +55,14 @@ def build_options(
     """Assemble ``ClaudeAgentOptions`` for a portia session."""
     from claude_agent_sdk import ClaudeAgentOptions
 
+    if effort is not None and effort not in EFFORTS:
+        raise ValueError(f"unknown effort {effort!r} — expected one of {', '.join(EFFORTS)}")
+
     return ClaudeAgentOptions(
         model=model,
+        # Checked against EFFORTS just above; the SDK types it as a Literal and
+        # the value arrives from argparse as a plain str.
+        effort=cast(Any, effort),
         system_prompt=build_system_prompt(portia_dir),
         # The agent gets NO built-in filesystem or shell tools. It therefore
         # *cannot* open a CSV — its only view of the data is the compact evidence
@@ -87,6 +100,7 @@ async def run(
     answer: ask.AnswerFn,
     confirm: ask.ConfirmFn,
     model: str = DEFAULT_MODEL,
+    effort: str | None = None,
     cwd: str | Path | None = None,
     portia_dir: str = catalog.DEFAULT_DIR,
 ) -> AsyncIterator[events.Event]:
@@ -107,6 +121,7 @@ async def run(
     pending: list[events.Event] = []
     options = build_options(
         model=model,
+        effort=effort,
         cwd=cwd,
         portia_dir=portia_dir,
         can_use_tool=ask.build_can_use_tool(answer=answer, confirm=confirm, emit=pending.append),
