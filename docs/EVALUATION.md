@@ -3,10 +3,14 @@
 *Companion to `PLAN.md`. This is where measurement lives: what we test against, what the
 current score is, and what is known-broken. Update it whenever a fixture is run.*
 
-**Status as of 2026-07-26: the copilot fails the hotel fixture.** Run 3 is the first
-interactively-driven run and the first with the verification loop in place. It got closer than any
-run before it and still shipped a table with double-counted revenue — by **widening its own grain
-claim until the check passed**. See "Run 3" below; read it before trusting the gate.
+**Status as of 2026-07-26: the copilot fails the hotel fixture on `claude-haiku-4-5`, and the
+failures look like capability rather than architecture.** Runs 3–5 each closed one escape and
+revealed the next, ending with Run 5 shipping a 3.85%-inflated table by writing `acknowledge`
+without ever asking the user. Run 6 changed the model to `claude-opus-5` at low effort and, in the
+indexing phase alone, surfaced more of the answer key than every prior run combined — including
+the revenue outliers, which nothing had ever asked about. **Run 6 never reached the gate**, so the
+one question the verification loop exists to answer is still open. Read Runs 5 and 6 below before
+trusting either the gate or the good news.
 
 ---
 
@@ -425,6 +429,74 @@ should be computed by code and rendered where the human answers.
 
 ---
 
+## Run 6 (2026-07-26) — a bigger model, and the diagnosis changes. **Incomplete.**
+
+`claude-opus-5 --effort low`, driven by hand, same fixture and brief, same `main`. **Two attempts,
+both ended by Ctrl-C during `index`.** Neither reached `chat ask`, so no spec was recorded, no step
+ran, and the gate never fired. Everything below is the **indexing phase only** — this run is not
+scored against `pass_criteria`, and it settles nothing about the verification loop.
+
+It is recorded anyway because the indexing phase alone surfaced more of the answer key than every
+previous run put together.
+
+| Answer-key item | Runs 1–5 | Run 6 (index only) |
+|---|---|---|
+| revenue outliers (`should_ask_about`) | ❌ **never, in any run** | ✅ asked — median 1,790 vs max 61,500 against `rooms_sold` ≤ 25 |
+| multiple same-day events per city (`should_ask_about`) | ❌ | ✅ asked, fan-out named |
+| hotels with no bookings (`should_ask_about`) | ❌ | ⚠️ H005 raised in prose, not asked |
+| any `should_not_ask_about` topic | ✅ none | ✅ none |
+| `city_spelling` — fatal | found late, half-fixed 3 runs of 5 | ✅ at **profile** time |
+| `event_fan_out` — fatal | found after joining, if at all | ✅ **predicted before any join** |
+| orphan `B0011` / `H999` | ⚠️ rationale only | ✅ asked, with three framed options |
+
+Three things worth more than the checklist:
+
+**It derived the grain from the goal, unprompted.** *"`otb` is booking-grain, not hotel × date. You
+said you model per hotel, so this needs aggregating first."* That is the "grain declared from the
+goal, before any step runs" design we had parked as the hardest of three candidate fixes — reached
+by reading the brief, with no format change.
+
+**It diagnosed portia's own missing op**: *"there is no aggregation op in the spec toolkit, so that
+reshaping has to happen upstream of me."* Then it stopped, rather than faking one with an empty
+`normalize` the way Run 3 did.
+
+**Its options carry consequences.** *"Allow fan-out — will double-count revenue in training — I'd
+advise against this."* That is the quantify-before-you-ask behaviour Run 5 skipped, offered here
+without a refusal to prompt it. Note it is still *qualitative* — "double-count", not a figure —
+which is what a model can honestly say from evidence that contains no figure.
+
+And when two answers came back garbled it said so — *"Neither answer is actionable yet"* — and
+re-asked instead of guessing.
+
+### What this does and does not change
+
+It shifts the diagnosis of Runs 1–5 substantially: **the judgment failures read as capability, not
+architecture.** The context and evidence portia hands over are sufficient for a capable model to
+reach the right conclusions from them, which is the more important half of the design being
+validated. Develop-on-a-small-model stays right for the *engine*; it was over-weighted as evidence
+about the *loop*.
+
+What it does not touch: **whether the agent asks before writing `acknowledge`.** Run 6 stopped
+before the first `record_step`. The consent question, and the "an acknowledged flag vanishes from
+the closing summary" problem, remain exactly as open as Run 5 left them.
+
+### Two defects in our own edge, found by running it
+
+Both are in `portia/cli/chat.py`, both fixed in the same commit as this write-up:
+
+- **Type-ahead was answering the wrong prompt.** Confirmations and questions both block on
+  `input()` mid-stream, so a `Y` typed at a write confirmation sat in the buffer and satisfied the
+  *next* read — the answer to an `AskUserQuestion`. The agent caught it (*"the first came back as
+  just `Y`"*) and re-asked, which is the good outcome of a bad situation. Now the buffer is flushed
+  before each prompt on a tty.
+- **Ctrl-C printed a 40-line `anyio` traceback** over the transcript being read. Ending a turn you
+  have seen enough of is an ordinary exit; it prints `[interrupted]`.
+
+Neither is engine behaviour, and both corrupt the only thing a hand-driven run measures — what the
+human actually saw and said.
+
+---
+
 ## The biggest untested thing: whether it asks at all
 
 Runs 1 and 2 piped `yes y`, so the agent received `"y"` as its answer to every question and
@@ -438,13 +510,21 @@ across an entire session in which it hit a blocking flag, overrode it, and shipp
 real modelling position (booking-event grain) in a rationale rather than putting it to the user.
 
 So the unmeasured thing is no longer *"are the questions good"* but *"does it ask when it
-matters"*, and on the one occasion that mattered most the answer was no. That is the product
-thesis failing at its own centre — `PLAN.md`: *"the questions-and-insights UX **is** the
-product"*. Everything else measured so far is the engine around it.
+matters"* — `PLAN.md`: *"the questions-and-insights UX **is** the product"*.
 
-Still untested, and worth an hour: how it behaves when a human **disagrees** with it. Push back on
-a recommendation, give a vague answer, tell it something that contradicts the data. None of that
-is gradeable by the answer key, and none of it needs to be — the failure modes will be obvious.
+**Run 6 answered the first half of that and not the second.** On a bigger model the questions were
+good by the answer key's own standard: two `should_ask_about` topics raised, none of the
+`should_not_ask_about` ones, options that state their consequence. But it asked them all during
+*indexing*, and the session ended before a single step was recorded. **Nobody has yet watched a
+capable model reach a blocking flag.** Whether it asks at the one moment the loop is built around
+is still unmeasured, and it is the cheapest remaining experiment: run `chat ask` on
+`claude-opus-5` and answer the questions.
+
+Also still untested, and worth an hour: how it behaves when a human **disagrees** with it. Push
+back on a recommendation, give a vague answer, tell it something that contradicts the data. None of
+that is gradeable by the answer key, and none of it needs to be — the failure modes will be
+obvious. Run 6 gave one early sign here: handed two unusable answers, it said so and re-asked
+rather than proceeding on a guess.
 
 ## A retracted result
 
@@ -469,6 +549,15 @@ python -m portia.cli.index --init "<brief from hotels.answers.yaml>" .
 python -m portia.cli.chat ask "Build me the one table I can train on."
 python -m portia.cli.run specs/<whatever it wrote>.yaml --write out
 ```
+
+Both agent commands take `--model` and `--effort`, and each turn prints what it is about to spend.
+The default is `claude-haiku-4-5` — the develop-on-a-small-model discipline (`PLAN.md`), and the
+one a run costs by accident. **Record the model and effort with every result**: Run 6 is only
+comparable to Run 5 because they differ in that and nothing else.
+
+> **Note which phase a finding comes from.** `index` and `ask` are separate turns with separate
+> transcripts, and Run 6 is a standing reminder that a run can produce excellent evidence in the
+> first and never reach the second. A finding from indexing says nothing about the gate.
 
 **The prompt is the goal and nothing else.** It used to end "Record what you decide as a spec",
 which was a bug in the test: writing the residue is what portia *is* (`PLAN.md` → "Every decision
