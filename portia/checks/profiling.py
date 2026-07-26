@@ -50,6 +50,18 @@ def profile_frame(df: pd.DataFrame, *, sample_values: int = SAMPLE_VALUES) -> di
     }
 
 
+def null_rates(df: pd.DataFrame) -> dict[str, float]:
+    """Per-column null rate — the one slice of a profile a post-condition needs.
+
+    Split out so ``checks.outcome`` can measure a produced frame without paying
+    for quantiles and value counts on every column of every step of every run,
+    and without having to strip the ``samples`` (raw values) a full profile
+    carries and a post-condition has no business handling.
+    """
+    n = len(df)
+    return {str(col): round_float(df[col].isna().mean()) if n else 0.0 for col in df.columns}
+
+
 def _profile_column(s: pd.Series, *, sample_values: int) -> dict:
     n = int(len(s))
     n_null = int(s.isna().sum())

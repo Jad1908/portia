@@ -8,6 +8,7 @@ a check.
 """
 
 from portia.checks.join import join_findings, join_report
+from portia.checks.outcome import outcome_report
 from portia.checks.profiling import profile_frame, profile_path
 
-__all__ = ["profile_frame", "profile_path", "join_report", "join_findings"]
+__all__ = ["profile_frame", "profile_path", "join_report", "join_findings", "outcome_report"]

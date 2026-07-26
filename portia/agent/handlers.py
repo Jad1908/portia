@@ -26,9 +26,12 @@ from pathlib import Path
 from typing import Any
 
 from portia import catalog, spec
+from portia.agent import prompts
 from portia.checks.join import join_findings as _join_findings
+from portia.checks.outcome import BLOCKING_FLAGS
 from portia.checks.profiling import profile_path
 from portia.core.io import load_frame
+from portia.core.serialize import to_json
 from portia.ops import join as join_op
 from portia.ops import normalize as normalize_op
 
@@ -53,6 +56,39 @@ _EXPECTABLE = {
     "join": join_op.PROVENANCE_KEYS,
     "normalize": normalize_op.PROVENANCE_KEYS,
 }
+
+#: Separator for naming a table an earlier step produced, rather than an indexed
+#: source: ``specs/training.yaml#otb_hotels``. A multi-hop merge joins an
+#: *intermediate* result, which is not a file and so cannot be in the catalog —
+#: without this, "always measure before you decide" is impossible to obey from
+#: hop 2 onward, and the agent is left recording blind. Observed doing exactly
+#: that (docs/EVALUATION.md, Run 3).
+STEP_REF = "#"
+_STEP_REF_HINT = "'<spec path>#<step id>', e.g. 'specs/training.yaml#otb_hotels'"
+
+
+def step_vocabulary() -> dict[str, str]:
+    """The words a step is allowed to use, generated from the ops that define them.
+
+    Every one of these lists already exists in code — ``PROVENANCE_KEYS`` per op,
+    ``HOWS``, ``TRANSFORM_OPS`` — and every one of them was, until now, visible to
+    the model *only in a rejection*. `record_step`'s description said "base
+    `expect` on what the check measured" and then refused the step for naming a
+    field no op reports. A real run burned two round-trips guessing
+    (``{"n_rows": 7}``, ``{"transforms": 1}``) before the validator taught it the
+    vocabulary one error at a time.
+
+    So the description states them — filled from here rather than retyped, or the
+    prose rots the moment an op gains a field. `tests/test_agent_prompts.py`
+    asserts the rendered description still matches these.
+    """
+    return {
+        "expect_join": ", ".join(sorted(_EXPECTABLE["join"])),
+        "expect_normalize": ", ".join(sorted(_EXPECTABLE["normalize"])),
+        "hows": " | ".join(join_op.HOWS),
+        "transform_ops": " | ".join(sorted(normalize_op.TRANSFORM_OPS)),
+        "blocking_flags": ", ".join(sorted(BLOCKING_FLAGS)),
+    }
 
 
 def get_context(portia_dir: str = catalog.DEFAULT_DIR) -> dict:
@@ -207,12 +243,23 @@ def record_step(
     step: dict,
     portia_dir: str = catalog.DEFAULT_DIR,
 ) -> dict:
-    """Append a decided step to the spec — the durable residue of this session.
+    """Execute a decided step, measure what it produced, and record it if it holds.
 
     The step carries the decision (`op`, keys, `how`), an `expect` block stating
     what you predict the numbers will be, and a `rationale` saying *why*. The
     `expect` is what makes it falsifiable later: `run_spec` re-executes and
     reports drift against it. State what the check told you, not what you hope.
+
+    **Recording runs it.** The candidate step is executed before anything is
+    written and `checks.outcome` measures the resulting frame, so the returned
+    dict says what the table actually looks like — not merely that YAML was
+    saved. This is push, not pull: a verification the agent *may* call is one it
+    will sometimes skip, and the run that shipped a table missing an entire
+    source skipped exactly that (docs/EVALUATION.md).
+
+    A step that hits a zero-condition is **not written**. Overriding is possible
+    and deliberate: `acknowledge: [<flag>]` on the step, which lands in the YAML
+    for the user to read in a diff.
 
     **Steps chain.** A step's output is registered under its ``id``, so a later
     step may name it as ``left``, ``right`` or ``input`` and receive that frame.
@@ -238,10 +285,31 @@ def record_step(
             known = ", ".join(sorted(step_ids)) or "(none yet)"
             raise ValueError(f"{exc}. Earlier steps you can chain from: {known}") from exc
 
+    # Run before writing. An exception here — a missing column, a transform that
+    # can't apply — is now surfaced instead of being written into a durable spec
+    # that only fails when someone re-runs it, possibly months later.
+    result = spec.run_spec({**doc, "steps": [*steps, step]})[-1]
+    if result.blocking:
+        raise ValueError(
+            prompts.error(
+                "blocked_step",
+                step_id=repr(step["id"]),
+                flags=", ".join(result.blocking),
+                facts=to_json(result.outcome),
+            )
+        )
+
     steps.append(step)
     path.parent.mkdir(parents=True, exist_ok=True)
     spec.save_spec(doc, path)
-    return {"spec": str(path), "step_id": step["id"], "n_steps": len(steps)}
+    return {
+        "spec": str(path),
+        "step_id": step["id"],
+        "n_steps": len(steps),
+        "outcome": result.outcome,
+        "drift": result.drift,
+        "acknowledged": result.acknowledged,
+    }
 
 
 def run_spec(spec_path: str) -> dict:
@@ -251,23 +319,66 @@ def run_spec(spec_path: str) -> dict:
     numbers match what you predicted. Drift is a disagreement between the spec's
     `expect` and today's result — not necessarily an error, but always worth
     surfacing rather than smoothing over.
+
+    Each step also carries its `outcome`: the post-conditions measured on the
+    table it produced. Drift says whether the prediction held; the outcome says
+    what came out. A step can have no drift and still have produced a table with
+    an entire source missing from it — that has happened.
     """
     results = spec.run_spec(spec.load_spec(spec_path))
     return {
         "spec": spec_path,
         "steps": [
-            {"id": r.id, "op": r.op, "provenance": r.provenance, "drift": r.drift} for r in results
+            {
+                "id": r.id,
+                "op": r.op,
+                "provenance": r.provenance,
+                "drift": r.drift,
+                "outcome": r.outcome,
+                "acknowledged": r.acknowledged,
+                "blocking": r.blocking,
+            }
+            for r in results
         ],
         "has_drift": any(r.has_drift for r in results),
+        "blocking": sorted({flag for r in results for flag in r.blocking}),
     }
 
 
 # --- internals --------------------------------------------------------------
 
 
-def _frame(source: str, portia_dir: str):
-    """Load an indexed source. All reading goes through ``core.io.load_frame``."""
-    return load_frame(_source_path(source, portia_dir))
+def _frame(ref: str, portia_dir: str):
+    """Resolve a table reference: an indexed source, or an earlier step's output.
+
+    All file reading goes through ``core.io.load_frame``.
+    """
+    if STEP_REF in ref:
+        return _step_frame(ref)
+    try:
+        return load_frame(_source_path(ref, portia_dir))
+    except ValueError as exc:
+        # Almost certainly a step id. Without this the message reads as "that
+        # table doesn't exist", when the truth is "not by that name".
+        raise ValueError(f"{exc}. For a table an earlier step produced: {_STEP_REF_HINT}") from exc
+
+
+def _step_frame(ref: str):
+    """Materialize the table an earlier step produced, by re-running up to it.
+
+    Only up to it: a later step may be the one being diagnosed and may not run
+    at all yet. Executing the prefix is what ``record_step`` already does to
+    measure a candidate, so this adds no new machinery — it just makes the same
+    frame reachable to a *read-only* check, before anything is written.
+    """
+    spec_path, _, step_id = ref.partition(STEP_REF)
+    doc = spec.load_spec(spec_path)
+    steps = doc.get("steps") or []
+    ids = [s["id"] for s in steps]
+    if step_id not in ids:
+        known = ", ".join(ids) or "(no steps yet)"
+        raise ValueError(f"no step {step_id!r} in {spec_path} — have: {known}")
+    return spec.run_spec({**doc, "steps": steps[: ids.index(step_id) + 1]})[-1].frame
 
 
 def _entry(source: str, portia_dir: str) -> dict:
@@ -287,7 +398,14 @@ def _validate_step(step: dict, *, existing: list[dict]) -> None:
     if not step.get("id"):
         raise ValueError("step needs an 'id'")
     if step["id"] in {s["id"] for s in existing}:
-        raise ValueError(f"step id {step['id']!r} is already in this spec — pick another")
+        # Steps are append-only. The old message here said "pick another", which
+        # taught the workaround: a run that wanted to rewrite its `expect` to
+        # match reality would simply have recorded `join_v2`. Say what the rule
+        # is and why, rather than naming the loophole.
+        raise ValueError(prompts.error("immutable_step", step_id=repr(step["id"])))
+
+    _validate_grain(step.get("grain"))
+    _validate_acknowledge(step.get("acknowledge"))
 
     op = step.get("op")
     if op not in _REQUIRED_FIELDS:
@@ -307,6 +425,37 @@ def _validate_step(step: dict, *, existing: list[dict]) -> None:
             f"expect refers to {', '.join(repr(u) for u in unknown)}, which {op} never "
             f"reports — so it would drift on every run. Assert only measured fields: "
             f"{', '.join(sorted(_EXPECTABLE[op]))}"
+        )
+
+
+def _validate_grain(grain: Any) -> None:
+    """The grain *claim*'s shape. Whether it holds is measured after the run.
+
+    Only the shape is checkable here — whether the columns exist depends on what
+    the step produces, so a claim naming a column that never appears comes back
+    as the `grain_columns_missing` post-condition rather than a validation error.
+    """
+    if grain is None:
+        return
+    if not isinstance(grain, list) or not grain or not all(isinstance(c, str) for c in grain):
+        raise ValueError("'grain' must be a non-empty list of output column names")
+
+
+def _validate_acknowledge(acknowledge: Any) -> None:
+    """An override may only name a flag that can actually block.
+
+    Acknowledging something that was never going to block reads, in a diff, like
+    a decision the user should weigh — so it has to be a real one.
+    """
+    if acknowledge is None:
+        return
+    if not isinstance(acknowledge, list) or not all(isinstance(f, str) for f in acknowledge):
+        raise ValueError("'acknowledge' must be a list of flag names")
+    unknown = sorted(set(acknowledge) - BLOCKING_FLAGS)
+    if unknown:
+        raise ValueError(
+            f"acknowledge names {', '.join(repr(u) for u in unknown)}, which never blocks. "
+            f"Blocking flags: {', '.join(sorted(BLOCKING_FLAGS))}"
         )
 
 

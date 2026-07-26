@@ -20,6 +20,14 @@ go use dbt instead. That sentence was buried in a decorator argument.
 | `brief/no_sources.md` | what L1 says when nothing is indexed | when no source is indexed |
 | `tools/<tool>.md` | one tool's description — what it does **and when to reach for it** | in the tool list |
 | `tasks/<task>.md` | the opening instruction a CLI command sends | once, per invocation |
+| `errors/<name>.md` | what a **refused** tool call says back | when the engine blocks a write |
+
+`errors/` exists because a refusal is read at the exact moment the model is choosing what to do
+next, which makes its wording as load-bearing as any tool description — and the two refusals here
+are the ones the hotel runs earned. `blocked_step.md` has to say "this is a zero, not a matter of
+degree" convincingly enough that the model doesn't reach for the acknowledgement by reflex;
+`immutable_step.md` replaced a message that said "pick another id", which was an instruction for
+how to get around the rule. Both are filled with measured facts via `prompts.error(...)`.
 
 Tool files are named for the tool. `agent/tools.py` loads them by name, and
 `tests/test_agent_prompts.py` fails if a tool has no file or a file has no tool — so a rename

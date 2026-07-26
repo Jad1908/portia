@@ -8,9 +8,11 @@ a tool result breaks the loop at runtime with no useful error.
 
 import json
 
+import pandas as pd
 import pytest
 import yaml
 
+from portia import spec
 from portia.agent import handlers
 from portia.catalog import index_source, init_project
 from portia.fixtures import messy_customers, sales_customers, sales_orders
@@ -218,7 +220,13 @@ def test_record_step_rejects_an_expect_on_a_field_the_op_never_reports(sales):
         )
 
 
-def test_record_step_rejects_a_duplicate_id(sales):
+def test_a_recorded_step_is_immutable_and_the_message_does_not_teach_the_workaround(sales):
+    """Regression: a run tried to rewrite `expect` to match the result it got.
+
+    It was stopped only by accident — duplicate-id checking — and the message it
+    read said "pick another", which is an instruction for how to get around the
+    rule. Recording `join_v2` would have worked.
+    """
     step = {
         "id": "dup",
         "op": "join",
@@ -227,8 +235,10 @@ def test_record_step_rejects_a_duplicate_id(sales):
         "keys": ["customer_id"],
     }
     handlers.record_step("specs/orders.yaml", step, portia_dir=sales)
-    with pytest.raises(ValueError, match="already in this spec"):
+    with pytest.raises(ValueError, match="append-only") as exc:
         handlers.record_step("specs/orders.yaml", dict(step), portia_dir=sales)
+
+    assert "pick another" not in str(exc.value)
 
 
 # --- progressive disclosure -------------------------------------------------
@@ -326,7 +336,14 @@ def test_record_step_names_chainable_steps_when_a_ref_is_unknown(sales):
     """A bad ref must not read as 'chaining is unsupported'."""
     handlers.record_step(
         "specs/chain.yaml",
-        {"id": "bridged", "op": "join", "left": "orders", "right": "customers", "keys": ["k"]},
+        {
+            "id": "bridged",
+            "op": "join",
+            "left": "orders",
+            "right": "customers",
+            "keys": ["customer_id"],
+            "how": "left",
+        },
         portia_dir=sales,
     )
     with pytest.raises(ValueError, match="Earlier steps you can chain from: bridged"):
@@ -337,6 +354,298 @@ def test_record_step_names_chainable_steps_when_a_ref_is_unknown(sales):
                 "op": "normalize",
                 "input": "typo",
                 "transforms": [{"column": "name", "op": "strip"}],
+            },
+            portia_dir=sales,
+        )
+
+
+def test_join_findings_can_measure_a_table_an_earlier_step_produced(sales):
+    """Hop 2 must be measurable before it is committed to, like hop 1.
+
+    Regression (EVALUATION.md, Run 3): `join_findings` resolved names through the
+    catalog only, so an intermediate result — not a file, therefore not indexed —
+    was unreachable. "Always measure before deciding" was impossible to obey from
+    the second hop onward, and the agent recorded blind instead.
+    """
+    handlers.record_step(
+        "specs/chain.yaml",
+        {
+            "id": "orders_named",
+            "op": "join",
+            "left": "orders",
+            "right": "customers",
+            "keys": ["customer_id"],
+            "how": "left",
+        },
+        portia_dir=sales,
+    )
+    out = handlers.join_findings(
+        "specs/chain.yaml#orders_named", "customers", keys=["customer_id"], portia_dir=sales
+    )
+    json.dumps(out)
+    assert out["report"]["left"]["n_rows"] == 10  # the joined table, not the 8-row source
+
+
+def test_a_step_reference_only_runs_the_spec_up_to_that_step(sales):
+    """A later step may be the very thing being diagnosed, and may not run yet."""
+    handlers.record_step(
+        "specs/chain.yaml",
+        {
+            "id": "first",
+            "op": "join",
+            "left": "orders",
+            "right": "customers",
+            "keys": ["customer_id"],
+            "how": "left",
+        },
+        portia_dir=sales,
+    )
+    # hand-append a step that cannot run; diagnosing `first` must not touch it
+    from pathlib import Path
+
+    path = Path("specs/chain.yaml")
+    doc = yaml.safe_load(path.read_text())
+    doc["steps"].append(
+        {
+            "id": "broken",
+            "op": "normalize",
+            "input": "first",
+            "transforms": [{"column": "no_such_column", "op": "strip"}],
+        }
+    )
+    path.write_text(yaml.safe_dump(doc))
+
+    out = handlers.join_findings(
+        "specs/chain.yaml#first", "customers", keys=["customer_id"], portia_dir=sales
+    )
+    assert out["report"]["left"]["n_rows"] == 10
+
+
+def test_an_unknown_table_name_points_at_the_step_form(sales):
+    """Otherwise the message reads 'no such table' when the truth is 'not by that name'."""
+    with pytest.raises(ValueError, match="spec path.*#.*step id"):
+        handlers.join_findings("otb_hotels", "customers", keys=["customer_id"], portia_dir=sales)
+
+
+def test_an_unknown_step_id_names_the_steps_that_exist(sales):
+    handlers.record_step(
+        "specs/chain.yaml",
+        {
+            "id": "first",
+            "op": "join",
+            "left": "orders",
+            "right": "customers",
+            "keys": ["customer_id"],
+            "how": "left",
+        },
+        portia_dir=sales,
+    )
+    with pytest.raises(ValueError, match="no step 'typo' in specs/chain.yaml — have: first"):
+        handlers.join_findings(
+            "specs/chain.yaml#typo", "customers", keys=["customer_id"], portia_dir=sales
+        )
+
+
+# --- the verification loop ---------------------------------------------------
+
+
+@pytest.fixture
+def orphans(tmp_path, monkeypatch):
+    """Two sources whose keys match nothing — Run 2's failure, in miniature.
+
+    The copilot normalized one side of a join key and not the other. The join
+    matched nothing, it predicted the row count correctly so drift was clean,
+    and it shipped a table whose event columns were null in every row.
+    """
+    monkeypatch.chdir(tmp_path)
+    sales_orders().to_csv("orders.csv", index=False)
+    pd.DataFrame({"customer_id": [90001, 90002], "name": ["Nobody", "Nowhere"]}).to_csv(
+        "strangers.csv", index=False
+    )
+    d = tmp_path / ".portia"
+    init_project("order reconciliation", portia_dir=d)
+    index_source("orders.csv", portia_dir=d)
+    index_source("strangers.csv", portia_dir=d)
+    return str(d)
+
+
+def _unmatched_join(**extra):
+    return {
+        "id": "orders_x_strangers",
+        "op": "join",
+        "left": "orders",
+        "right": "strangers",
+        "keys": ["customer_id"],
+        "how": "left",
+        # The prediction is *correct* — 8 left rows, none matched. Drift is clean
+        # and says nothing at all about the table being useless.
+        "expect": {"result_rows": 8},
+        **extra,
+    }
+
+
+def test_a_step_whose_output_loses_a_source_is_refused_and_nothing_is_written(orphans, tmp_path):
+    with pytest.raises(ValueError, match="source_did_not_contribute"):
+        handlers.record_step("specs/x.yaml", _unmatched_join(), portia_dir=orphans)
+
+    assert not (tmp_path / "specs" / "x.yaml").exists(), "a refused step must leave no residue"
+
+
+def test_the_refusal_hands_back_the_measurements_not_just_a_verdict(orphans):
+    """It has to be able to act on this, so it gets the facts, generously."""
+    with pytest.raises(ValueError) as exc:
+        handlers.record_step("specs/x.yaml", _unmatched_join(), portia_dir=orphans)
+
+    message = str(exc.value)
+    assert '"contributed": false' in message
+    assert "name" in message  # the column that came out empty
+    assert "acknowledge" in message  # and the way out, if it's deliberate
+
+
+def test_a_correct_prediction_does_not_rescue_a_broken_join(orphans):
+    """The exact hole: `expect` held perfectly and the table was still wrong."""
+    with pytest.raises(ValueError):
+        handlers.record_step("specs/x.yaml", _unmatched_join(), portia_dir=orphans)
+
+    # prove the prediction really was right, so drift alone would have passed it
+    run = spec.run_spec(
+        {
+            "sources": {"orders": "orders.csv", "strangers": "strangers.csv"},
+            "steps": [_unmatched_join()],
+        }
+    )
+    assert run[0].has_drift is False
+    assert run[0].blocking == ["all_null_column", "source_did_not_contribute"]
+
+
+def test_an_acknowledged_zero_is_written_and_visible_in_the_spec(orphans, tmp_path):
+    """Override stays possible — but it lands in the YAML the user reads."""
+    out = handlers.record_step(
+        "specs/x.yaml",
+        _unmatched_join(
+            acknowledge=["source_did_not_contribute", "all_null_column"],
+            rationale="strangers is a future feed; no overlap with this window yet",
+        ),
+        portia_dir=orphans,
+    )
+    json.dumps(out)
+    assert out["acknowledged"] == ["source_did_not_contribute", "all_null_column"]
+
+    doc = yaml.safe_load((tmp_path / "specs" / "x.yaml").read_text())
+    assert doc["steps"][0]["acknowledge"] == ["source_did_not_contribute", "all_null_column"]
+
+
+def test_acknowledging_only_one_of_two_zeros_still_refuses(orphans):
+    with pytest.raises(ValueError, match="all_null_column"):
+        handlers.record_step(
+            "specs/x.yaml",
+            _unmatched_join(acknowledge=["source_did_not_contribute"]),
+            portia_dir=orphans,
+        )
+
+
+def test_acknowledge_must_name_a_flag_that_can_actually_block(orphans):
+    with pytest.raises(ValueError, match="never blocks"):
+        handlers.record_step(
+            "specs/x.yaml", _unmatched_join(acknowledge=["low_overlap"]), portia_dir=orphans
+        )
+
+
+def test_recording_returns_what_the_table_looks_like_not_just_that_it_saved(sales):
+    out = handlers.record_step(
+        "specs/orders.yaml",
+        {
+            "id": "j",
+            "op": "join",
+            "left": "orders",
+            "right": "customers",
+            "keys": ["customer_id"],
+            "how": "left",
+        },
+        portia_dir=sales,
+    )
+    json.dumps(out)
+    assert out["outcome"]["n_rows"] == 10
+    assert out["outcome"]["contribution"]["customers"]["contributed"] is True
+
+
+def test_a_grain_claim_that_does_not_hold_refuses_the_step(sales, tmp_path):
+    """Customer 1001 is duplicated, so the join fans out and orders multiply.
+
+    The fatal trap in the hotel fixture is this shape: the result still looks
+    plausible, it's just silently double-counting.
+    """
+    with pytest.raises(ValueError, match="grain_not_unique") as exc:
+        handlers.record_step(
+            "specs/orders.yaml",
+            {
+                "id": "j",
+                "op": "join",
+                "left": "orders",
+                "right": "customers",
+                "keys": ["customer_id"],
+                "how": "left",
+                "grain": ["order_id"],  # one row per order — not true after the fan-out
+            },
+            portia_dir=sales,
+        )
+    assert "9001" in str(exc.value)  # the duplicated key, named
+    assert not (tmp_path / "specs" / "orders.yaml").exists()
+
+
+def test_a_step_that_cannot_run_is_caught_before_it_reaches_the_spec(sales, tmp_path):
+    """Regression: a step naming a column that doesn't exist used to validate,
+    get written to a durable artifact, and fail only when someone re-ran it."""
+    with pytest.raises(ValueError, match="missing key column"):
+        handlers.record_step(
+            "specs/orders.yaml",
+            {"id": "j", "op": "join", "left": "orders", "right": "customers", "keys": ["nope"]},
+            portia_dir=sales,
+        )
+    assert not (tmp_path / "specs" / "orders.yaml").exists()
+
+
+def test_run_spec_carries_the_outcome_alongside_drift(sales):
+    handlers.record_step(
+        "specs/orders.yaml",
+        {
+            "id": "j",
+            "op": "join",
+            "left": "orders",
+            "right": "customers",
+            "keys": ["customer_id"],
+            "how": "left",
+        },
+        portia_dir=sales,
+    )
+    run = handlers.run_spec("specs/orders.yaml")
+    json.dumps(run)
+
+    step = run["steps"][0]
+    assert step["outcome"]["n_rows"] == 10
+    assert step["blocking"] == []
+    assert run["blocking"] == []
+
+
+@pytest.mark.parametrize(
+    ("grain", "message"),
+    [
+        ("order_id", "non-empty list"),
+        ([], "non-empty list"),
+        ([1, 2], "non-empty list"),
+    ],
+)
+def test_record_step_validates_the_shape_of_a_grain_claim(sales, grain, message):
+    with pytest.raises(ValueError, match=message):
+        handlers.record_step(
+            "specs/orders.yaml",
+            {
+                "id": "j",
+                "op": "join",
+                "left": "orders",
+                "right": "customers",
+                "keys": ["customer_id"],
+                "grain": grain,
             },
             portia_dir=sales,
         )

@@ -68,8 +68,15 @@ adding code, and extend them rather than working around them:
 - `portia/core/` — shared seams: `io.py` (loading) · `serialize.py` (compact JSON evidence)
 - `portia/checks/` — the deterministic checks layer (read-only **diagnosis**, facts only):
   `profiling.py`, `join.py` (`join_report` = key-level facts; `join_findings` = facts + example
-  rows). Surface evidence generously; never rank or recommend. A check + its `render_*` live
+  rows), `outcome.py` (post-conditions on a frame an op **produced** — every other check reads
+  inputs). Surface evidence generously; never rank or recommend. A check + its `render_*` live
   together; add new checks in this shape.
+  - **`outcome.BLOCKING_FLAGS` is the one place a check can stop the loop, and it holds zeros
+    only** — an empty table, a column that went in with data and came out all-null, a source that
+    contributed nothing, a declared `grain` that isn't unique. A zero needs no threshold to be a
+    fact. The moment a tunable number appears in that set, code is deciding what counts as bad,
+    which is the deterministic-planner mistake this project already reversed. Rates and ratios are
+    reported and never block.
 - `portia/ops/` — the execution layer (**produces** data): `apply_join`, `apply_normalize`
   (coerce/clean columns). Every op returns an `OpResult` (frame + unsuppressable provenance
   report). Same swap seam as checks.
@@ -94,7 +101,12 @@ adding code, and extend them rather than working around them:
   - Do not add a code layer that ranks decisions or suggests answers — see "facts vs judgment".
 - **Durable artifacts** (git-diffable YAML, the residue that makes this a product, not a script):
   - `portia/spec.py` — the **spec** (*what we did to the data*): sources + decided steps + `expect`
-    + `rationale`; `run_spec` re-executes and detects drift.
+    + `rationale` + an optional `grain` claim and `acknowledge` list; `run_spec` re-executes,
+    detects drift, and attaches each step's measured `outcome`. **Drift and outcome are different
+    questions** — drift asks whether the prediction held, the outcome asks what came out. A correct
+    prediction about a broken join is still a broken join. Recording a step **runs** it
+    (`handlers.record_step`), so a step that hits a zero is never written; overriding means writing
+    `acknowledge` into the YAML, where the human reads it in a diff.
   - `portia/catalog.py` — the **context catalog** (*what the data is*), in `.portia/`: project
     context + groups + per-source metadata (Layer 1 prose `summary`, Layer 2 per-column `role` +
     check facts). The agent's memory. **Update rule: facts refresh, prose/roles are preserved** —

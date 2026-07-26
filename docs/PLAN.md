@@ -55,17 +55,28 @@ the interactive copilot loop over it (the questions-and-insights UX, emitting a 
 a decision stream) → the surface where those questions are asked and answered. The interactive
 layer is **core, not deferred**; its shape is still to be designed (the user's vision).
 
-**Where we are (2026-07-25).** The engine is built (`checks`, `ops`, `spec`, `catalog`) and so is
+**Where we are (2026-07-26).** The engine is built (`checks`, `ops`, `spec`, `catalog`) and so is
 the copilot loop (`portia/agent/` — in-process MCP server, layered context, `AskUserQuestion`
-routed to a human, spec writing, chat CLI). **It does not yet work well enough to trust:** on the
-hotel fixture it ships a training table missing an entire data source and calls it done. Read
-**`EVALUATION.md`** before building on top of it — that is the honest state of play, and it names
-which failures are engine defects and which are the verification loop not existing yet.
+routed to a human, spec writing, chat CLI). The **verification loop** now exists too: recording a
+step executes it, `checks/outcome.py` measures the table it produced, and a step that hits a zero
+is refused rather than written. **This is not yet a working copilot.** The last full run shipped a
+training table missing an entire data source and called it done; the gate that would have stopped
+that has been reproduced by hand but never faced a model. Read **`EVALUATION.md`** before building
+on top of any of it — it separates what the engine can do from what the copilot has been shown to
+do, and those are still far apart.
 
-Next, in order: the **verification loop** (code measures the output, the agent judges) and the
-**escape hatch** (DuckDB SQL — decided; see `BACKLOG.md`), which is deliberately built *before*
-more ops so that what the agent reaches for tells us which ops to promote. The three-panel surface
-stays deferred until the loop is trustworthy.
+Next, in order:
+
+1. **Run the copilot against the verification loop** and score it. Cheap, and it is the only thing
+   that turns "the trap is catchable" into "the copilot catches it". Drive it *by hand* — piping
+   `yes y` measures nothing about the asking behaviour, which is the product.
+2. **The escape hatch** (DuckDB SQL — decided; see `BACKLOG.md`), deliberately before more ops, so
+   that what the agent reaches for tells us which ops to promote. Verification has made this
+   urgent rather than next-ish: no op can aggregate, so the fixture's fatal fan-out is now
+   correctly *blocked* with no way forward. Turning wrong answers into blocks is only progress if
+   something eventually unblocks them.
+
+The three-panel surface stays deferred until the loop is trustworthy.
 
 ## Budget & model discipline
 

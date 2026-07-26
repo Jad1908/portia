@@ -11,6 +11,16 @@ auditability the product sells (docs/brief.md §6). It is git-diffable, reviewab
 in a PR, and re-runnable: ``run_spec`` reloads the sources, re-executes the steps,
 and reports **drift** — where today's result diverges from the spec's ``expect``.
 
+Every step also carries an ``outcome``: the post-conditions ``checks.outcome``
+measures on the frame it produced. Drift and outcome answer different questions
+and fail independently — drift asks whether the *prediction* held, the outcome
+asks what actually came out. A correct prediction about a broken join is still a
+broken join, and that is precisely how a table missing an entire source once
+passed as clean (docs/EVALUATION.md). Two optional step fields feed it: ``grain``,
+the author's claim about what one output row is, and ``acknowledge``, naming a
+zero-condition they have decided is deliberate — recorded in the YAML so the
+override is reviewable rather than silent.
+
 Format is intentionally minimal; its schema is meant to *emerge* from real runs,
 so resist over-specifying it. Ops so far: ``join`` and ``normalize`` (the latter
 takes an ``input`` + ``transforms``, so a workflow can clean a column then join).
@@ -24,6 +34,7 @@ from pathlib import Path
 import pandas as pd
 import yaml
 
+from portia.checks.outcome import BLOCKING_FLAGS, outcome_report, render_outcome
 from portia.core.io import load_frame
 from portia.ops import apply_join, apply_normalize
 
@@ -36,10 +47,23 @@ class StepResult:
     drift: dict = field(default_factory=dict)
     frame: pd.DataFrame | None = None
     rationale: str | None = None  # the recorded "why" — documentation, not executed
+    #: Post-conditions measured on the frame this step produced (`checks.outcome`).
+    #: `provenance` says what the op did; this says what came out — the difference
+    #: that let a table missing an entire source pass as clean.
+    outcome: dict = field(default_factory=dict)
+    #: Blocking flags the step itself declares as deliberate. Recorded in the spec
+    #: so an override is a visible, reviewable act rather than a silent one.
+    acknowledged: list[str] = field(default_factory=list)
 
     @property
     def has_drift(self) -> bool:
         return bool(self.drift)
+
+    @property
+    def blocking(self) -> list[str]:
+        """Zero-conditions this step hit and did not acknowledge."""
+        hit = BLOCKING_FLAGS & set(self.outcome.get("flags", []))
+        return sorted(hit - set(self.acknowledged))
 
 
 def load_spec(path: str | Path) -> dict:
@@ -78,16 +102,23 @@ def _run_step(step: dict, frames: dict[str, pd.DataFrame]) -> StepResult:
     if op == "join":
         # NB: the spec field is `keys`, not `on` — `on` is a reserved boolean in
         # YAML 1.1 (parses to True), so it can't be used as a mapping key.
+        left, right = step["left"], step["right"]
         out = apply_join(
-            frames[step["left"]],
-            frames[step["right"]],
+            frames[left],
+            frames[right],
             how=step.get("how", "inner"),
             on=step.get("keys"),
             left_on=step.get("left_on"),
             right_on=step.get("right_on"),
         )
+        # Insertion order is load-bearing: it's how pandas' `_x`/`_y` collision
+        # suffixes are traced back to a side (see `checks.outcome`).
+        inputs = {left: frames[left], right: frames[right]}
+        key_columns = _join_key_columns(step)
     elif op == "normalize":
-        out = apply_normalize(frames[step["input"]], step["transforms"])
+        name = step["input"]
+        out = apply_normalize(frames[name], step["transforms"])
+        inputs, key_columns = {name: frames[name]}, {}
     else:
         raise ValueError(f"unknown op {op!r} in step {step.get('id')!r}")
 
@@ -98,7 +129,22 @@ def _run_step(step: dict, frames: dict[str, pd.DataFrame]) -> StepResult:
         drift=_drift(step.get("expect"), out.provenance),
         frame=out.frame,
         rationale=step.get("rationale"),
+        outcome=outcome_report(out.frame, inputs=inputs, keys=key_columns, grain=step.get("grain")),
+        acknowledged=list(step.get("acknowledge") or []),
     )
+
+
+def _join_key_columns(step: dict) -> dict[str, list[str]]:
+    """Each side's key columns, so the outcome check can exclude them.
+
+    A key is present on both sides by construction, so counting it as a
+    contribution would make a join that matched nothing look as though both
+    sources had put data in.
+    """
+    if step.get("keys"):
+        keys = list(step["keys"])
+        return {step["left"]: keys, step["right"]: keys}
+    return {step["left"]: list(step["left_on"]), step["right"]: list(step["right_on"])}
 
 
 def _drift(expect: dict | None, provenance: dict) -> dict:
@@ -117,6 +163,10 @@ def render_text(results: list[StepResult]) -> str:
     for r in results:
         lines.append(f"[{r.id}]  {r.op}")
         lines.extend(_render_step(r))
+        if r.outcome:
+            lines.append(render_outcome(r.outcome))
+        if r.acknowledged:
+            lines.append(f"    ! acknowledged: {', '.join(r.acknowledged)}")
         if r.rationale:
             lines.append(f"    ↳ why: {r.rationale}")
         if r.has_drift:
