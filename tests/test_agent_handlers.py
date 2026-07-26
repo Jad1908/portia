@@ -359,6 +359,93 @@ def test_record_step_names_chainable_steps_when_a_ref_is_unknown(sales):
         )
 
 
+def test_join_findings_can_measure_a_table_an_earlier_step_produced(sales):
+    """Hop 2 must be measurable before it is committed to, like hop 1.
+
+    Regression (EVALUATION.md, Run 3): `join_findings` resolved names through the
+    catalog only, so an intermediate result — not a file, therefore not indexed —
+    was unreachable. "Always measure before deciding" was impossible to obey from
+    the second hop onward, and the agent recorded blind instead.
+    """
+    handlers.record_step(
+        "specs/chain.yaml",
+        {
+            "id": "orders_named",
+            "op": "join",
+            "left": "orders",
+            "right": "customers",
+            "keys": ["customer_id"],
+            "how": "left",
+        },
+        portia_dir=sales,
+    )
+    out = handlers.join_findings(
+        "specs/chain.yaml#orders_named", "customers", keys=["customer_id"], portia_dir=sales
+    )
+    json.dumps(out)
+    assert out["report"]["left"]["n_rows"] == 10  # the joined table, not the 8-row source
+
+
+def test_a_step_reference_only_runs_the_spec_up_to_that_step(sales):
+    """A later step may be the very thing being diagnosed, and may not run yet."""
+    handlers.record_step(
+        "specs/chain.yaml",
+        {
+            "id": "first",
+            "op": "join",
+            "left": "orders",
+            "right": "customers",
+            "keys": ["customer_id"],
+            "how": "left",
+        },
+        portia_dir=sales,
+    )
+    # hand-append a step that cannot run; diagnosing `first` must not touch it
+    from pathlib import Path
+
+    path = Path("specs/chain.yaml")
+    doc = yaml.safe_load(path.read_text())
+    doc["steps"].append(
+        {
+            "id": "broken",
+            "op": "normalize",
+            "input": "first",
+            "transforms": [{"column": "no_such_column", "op": "strip"}],
+        }
+    )
+    path.write_text(yaml.safe_dump(doc))
+
+    out = handlers.join_findings(
+        "specs/chain.yaml#first", "customers", keys=["customer_id"], portia_dir=sales
+    )
+    assert out["report"]["left"]["n_rows"] == 10
+
+
+def test_an_unknown_table_name_points_at_the_step_form(sales):
+    """Otherwise the message reads 'no such table' when the truth is 'not by that name'."""
+    with pytest.raises(ValueError, match="spec path.*#.*step id"):
+        handlers.join_findings("otb_hotels", "customers", keys=["customer_id"], portia_dir=sales)
+
+
+def test_an_unknown_step_id_names_the_steps_that_exist(sales):
+    handlers.record_step(
+        "specs/chain.yaml",
+        {
+            "id": "first",
+            "op": "join",
+            "left": "orders",
+            "right": "customers",
+            "keys": ["customer_id"],
+            "how": "left",
+        },
+        portia_dir=sales,
+    )
+    with pytest.raises(ValueError, match="no step 'typo' in specs/chain.yaml — have: first"):
+        handlers.join_findings(
+            "specs/chain.yaml#typo", "customers", keys=["customer_id"], portia_dir=sales
+        )
+
+
 # --- the verification loop ---------------------------------------------------
 
 

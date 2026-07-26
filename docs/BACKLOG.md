@@ -112,12 +112,21 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
   summary — "Paris… Tech Summit and Marathon" for what was Amsterdam/Canal Festival/Design Week.
   Anything it can't measure it will estimate (`handlers.profile_source`'s docstring, same lesson).
   More evidence, not a sterner prompt.
-- **A partial join failure is invisible to a zero-only blocking rule.** Run 3 stripped `city_name`
-  but never lowercased it, so `" paris"` → `"paris"` never matched `"Paris"` and one event vanished.
-  `source_did_not_contribute` correctly stayed quiet — four other events matched. This is a real
-  limit of the design rather than a bug in it; anything that catches it needs a threshold, i.e.
-  judgment, i.e. it belongs to the agent. Possibly the answer is richer *evidence* (per-key match
-  rates in `join_findings`) rather than a new flag.
+- ~~**A partial join failure is invisible to a zero-only blocking rule**~~ — *largely answered, and
+  the answer was evidence rather than a flag.* Run 3 stripped `city_name` but never lowercased it,
+  so `" paris"` → `"paris"` never matched `"Paris"` and one event vanished;
+  `source_did_not_contribute` correctly stayed quiet because four other events matched. Catching
+  that with a **rule** needs a threshold, i.e. judgment, i.e. it isn't code's. But it needs no rule:
+  now that `join_findings` reaches a step's output, the same call on hop 2 returns
+  `{'city_name': 'paris', 'event_name': 'Marathon'}` in `unmatched_right_rows` and
+  `('2026-06-12','Amsterdam') n_left 1 × n_right 2` in `fan_out_examples` — both failures, in plain
+  rows, before anything is written. "Invest in richer observations, not a decision layer"
+  (`CLAUDE.md`), demonstrated. Whether the agent *looks* is the open part, and that is a prompt
+  question now rather than a structural one.
+- **`describe_source` / `profile_source` still can't see a step's output** — only `join_findings`
+  takes `<spec>#<step id>`. Profiling an intermediate table (what are its columns actually like
+  now?) is the obvious next want; the resolver is already shared, so it is a small change. Waiting
+  for a run to actually reach for it.
 - **Iteration cap on a blocked step** — deliberately not built yet. A hard cap ("three refusals,
   then escalate to the human rather than loop") was in the original sketch; nothing in the loop
   counts attempts today, so a determined agent can retry indefinitely. Wait for a real run to show

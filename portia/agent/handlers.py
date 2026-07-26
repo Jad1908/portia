@@ -57,6 +57,15 @@ _EXPECTABLE = {
     "normalize": normalize_op.PROVENANCE_KEYS,
 }
 
+#: Separator for naming a table an earlier step produced, rather than an indexed
+#: source: ``specs/training.yaml#otb_hotels``. A multi-hop merge joins an
+#: *intermediate* result, which is not a file and so cannot be in the catalog —
+#: without this, "always measure before you decide" is impossible to obey from
+#: hop 2 onward, and the agent is left recording blind. Observed doing exactly
+#: that (docs/EVALUATION.md, Run 3).
+STEP_REF = "#"
+_STEP_REF_HINT = "'<spec path>#<step id>', e.g. 'specs/training.yaml#otb_hotels'"
+
 
 def step_vocabulary() -> dict[str, str]:
     """The words a step is allowed to use, generated from the ops that define them.
@@ -339,9 +348,37 @@ def run_spec(spec_path: str) -> dict:
 # --- internals --------------------------------------------------------------
 
 
-def _frame(source: str, portia_dir: str):
-    """Load an indexed source. All reading goes through ``core.io.load_frame``."""
-    return load_frame(_source_path(source, portia_dir))
+def _frame(ref: str, portia_dir: str):
+    """Resolve a table reference: an indexed source, or an earlier step's output.
+
+    All file reading goes through ``core.io.load_frame``.
+    """
+    if STEP_REF in ref:
+        return _step_frame(ref)
+    try:
+        return load_frame(_source_path(ref, portia_dir))
+    except ValueError as exc:
+        # Almost certainly a step id. Without this the message reads as "that
+        # table doesn't exist", when the truth is "not by that name".
+        raise ValueError(f"{exc}. For a table an earlier step produced: {_STEP_REF_HINT}") from exc
+
+
+def _step_frame(ref: str):
+    """Materialize the table an earlier step produced, by re-running up to it.
+
+    Only up to it: a later step may be the one being diagnosed and may not run
+    at all yet. Executing the prefix is what ``record_step`` already does to
+    measure a candidate, so this adds no new machinery — it just makes the same
+    frame reachable to a *read-only* check, before anything is written.
+    """
+    spec_path, _, step_id = ref.partition(STEP_REF)
+    doc = spec.load_spec(spec_path)
+    steps = doc.get("steps") or []
+    ids = [s["id"] for s in steps]
+    if step_id not in ids:
+        known = ", ".join(ids) or "(no steps yet)"
+        raise ValueError(f"no step {step_id!r} in {spec_path} — have: {known}")
+    return spec.run_spec({**doc, "steps": steps[: ids.index(step_id) + 1]})[-1].frame
 
 
 def _entry(source: str, portia_dir: str) -> dict:

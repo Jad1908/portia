@@ -152,8 +152,8 @@ async def set_interpretation(args: dict[str, Any]) -> dict[str, Any]:
     {
         "type": "object",
         "properties": {
-            "left": {"type": "string", "description": "Indexed source name"},
-            "right": {"type": "string", "description": "Indexed source name"},
+            "left": {"type": "string", "description": "Source name, or <spec>#<step id>"},
+            "right": {"type": "string", "description": "Source name, or <spec>#<step id>"},
             "keys": {
                 "type": "array",
                 "items": {"type": "string"},

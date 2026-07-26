@@ -243,6 +243,12 @@ an `expect` **value's shape** is not yet done and is in `BACKLOG.md`.
 - `record_step.md` now says: there is no aggregation op, don't fake one; claim the grain the *work*
   needs and decide it before you see the result; and tell the user what a zero does to their
   numbers before acknowledging it.
+- **`join_findings` now reaches a step's output** (`<spec>#<step id>`). It couldn't, which made
+  *"always measure before deciding"* impossible to obey from hop 2 onward — the run tried it, was
+  refused, and recorded blind instead. Measuring hop 2 up front on this same data returns
+  `('2026-06-12','Amsterdam') n_left 1 × n_right 2` **and** the row
+  `{'city_name': 'paris', 'event_name': 'Marathon'}` among the unmatched. Both fatal traps, in
+  plain rows, before any write. Neither needed a new flag; the evidence was simply unreachable.
 - Open, and the most important thing here: **a grain claim can be widened until it passes.** The
   candidate fix is a claim-free row-conservation fact — a left join whose output exceeds its left
   input multiplied rows, which is binary, has no tunable number, and cannot be dissolved by
