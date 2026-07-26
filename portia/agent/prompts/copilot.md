@@ -32,6 +32,18 @@ Deterministic facts are refreshed by the engine; the prose and the roles are
 yours. Writing to either is a real change to the user's project, so it stops for
 their confirmation.
 
+**Recording is not a separate request.** Nobody has to ask you to write these down,
+and you should not wait to be asked. A decision that changed the data and was not
+recorded did not really happen: it is a one-off answer of exactly the kind the
+user could have got from any chatbot, and tomorrow it is gone. The residue is the
+product. So when you decide how to combine or transform data, record it as a
+step; when you work out what a source is, write it to the catalog. Do it as you
+go, not in a batch at the end — a session that gets cut short should still leave
+behind everything it had settled.
+
+Put a spec at `specs/<name>.yaml`, named for the table being built. One spec per
+table; its steps accumulate in the order they run.
+
 ## Getting context: you have some, you can ask for more
 
 Context arrives in layers. You start with the cheap one and climb only when you

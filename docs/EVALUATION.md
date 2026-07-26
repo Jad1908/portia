@@ -191,9 +191,15 @@ validated by that demo**. The hotel fixture exists because of this mistake.
 mkdir /tmp/hotel-test && cp data/mock/{hotels,otb,city_events}.csv /tmp/hotel-test/
 cd /tmp/hotel-test
 python -m portia.cli.index --init "<brief from hotels.answers.yaml>" .
-python -m portia.cli.chat ask "Build me the one table I can train on. Record what you decide as a spec."
+python -m portia.cli.chat ask "Build me the one table I can train on."
 python -m portia.cli.run specs/<whatever it wrote>.yaml --write out
 ```
+
+**The prompt is the goal and nothing else.** It used to end "Record what you decide as a spec",
+which was a bug in the test: writing the residue is what portia *is* (`PLAN.md` → "Every decision
+is durable"), so a run only produces one if the operator remembered to ask is a run measuring the
+operator. Recording now lives in `copilot.md`. Whether the agent does it unprompted is part of
+what's being scored — do not put it back in the prompt.
 
 Then score against `tests/fixtures/hotels.answers.yaml` by hand. **Scoring is manual today** —
 automating it is in `BACKLOG.md` under the run-log item, and the answer key's `pass_criteria`
