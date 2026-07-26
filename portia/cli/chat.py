@@ -93,8 +93,15 @@ async def confirm_write(tool_name: str, tool_input: dict) -> bool:
 async def run_and_render(
     prompt: str, *, model: str, effort: str | None = None, cwd: str, portia_dir: str
 ) -> None:
-    """Drive one copilot turn and render its events. Shared with `cli.index`."""
+    """Drive one copilot turn and render its events. Shared with `cli.index`.
+
+    The banner is not decoration: the default is deliberately a small model
+    (`PLAN.md` → Budget & model discipline) and a run on a flagship costs orders
+    of magnitude more. A turn should never be able to spend that silently.
+    """
     from portia.agent import session
+
+    print(f"  [{model}{', effort ' + effort if effort else ''}]")
 
     async for event in session.run(
         prompt,
