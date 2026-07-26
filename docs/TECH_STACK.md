@@ -80,6 +80,9 @@ not a SWE project, so we minimize JS/frontend learning.
 - **Safety net.** The engine emits a clean **event stream** (questions, insights, decisions) and
   the UI sits on top of it. The UI is **swappable** — choosing NiceGUI now does not lock us out
   of a bespoke Vue/React frontend later; we would replace the UI without touching the engine.
+- **The look is specced independently of the framework** — `DESIGN.md` is CSS custom properties and
+  component definitions, not NiceGUI APIs, precisely so the swap above stays cheap. Ships as an
+  optional `ui` extra (like `agent`), so a core install stays pandas + pyyaml + duckdb.
 
 ## Durable artifact
 

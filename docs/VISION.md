@@ -1,8 +1,11 @@
 # Vision & Flows — portia
 
-*A living scratchpad for the product's look, feel, and user flows. Deliberately unfinished —
-dump ideas here freely; nothing here is decided. Companion to `PLAN.md` (direction) and
-`TECH_STACK.md` (stack). Open questions are collected at the bottom.*
+*A living scratchpad for the product's flows and structure. Deliberately unfinished — dump ideas
+here freely; nothing here is decided. Companion to `PLAN.md` (direction), `TECH_STACK.md` (stack)
+and `DESIGN.md` (appearance). Open questions are collected at the bottom.*
+
+> **Layout and behavior live here; how it looks lives in `DESIGN.md`.** Where the two overlap,
+> `DESIGN.md` wins on appearance and this file wins on structure. Read both before building UI.
 
 ---
 
@@ -104,6 +107,12 @@ catalog and the specs, runs `spec.run_spec` on demand (deterministic, free, no A
 No editing, no chat driving, no interpretation writing. Every one of those needs a decision we
 haven't made or a seam we haven't built, and none of them is needed to stop the project being
 obscure.
+
+**How it looks is already decided — see `DESIGN.md`**, which specs every token and every component
+named below (`artifact-row`, `step-card`, `report-step-block`, `acknowledged-banner`,
+`table-preview`, `transcript-row`). This section says what the panels *do*; that file says what they
+look like. Its one product-specific rule is load-bearing: **color and prominence communicate kind,
+never rank** — the screen must not smuggle in the prioritization the checks layer refuses to make.
 
 **It is an edge, like the CLI.** Lives in `portia/ui/`, launched with `python -m portia.ui`, and
 calls exactly three things: `catalog.load_catalog`, `spec.load_spec`, `spec.run_spec`. **No
