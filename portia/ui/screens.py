@@ -42,27 +42,41 @@ def project_open() -> None:
                 ui.label("portia").classes("t-display")
             c.text(_OPEN_SUBTITLE, color="c-mute")
 
-            # Browse is the way in; typing an absolute path is the fallback for
+            # Browse is the way in. Typing an absolute path is the fallback — for
             # a machine with no chooser, or for a directory that doesn't exist
-            # yet — which the chooser cannot express and a fresh test run needs.
+            # yet, which the chooser cannot express and a fresh run needs — so it
+            # is folded away rather than offered as the obvious thing to do.
             if engine.can_browse():
                 with ui.element("div").classes("row-gap-sm"):
                     c.button("Browse…", _browse, kind="primary", icon="folder_open")
-                    c.caption(_BROWSE_HINT)
-
-            path = (
-                ui.input(placeholder=str(Path.home() / "portia-run1"))
-                .classes("p-field p-field-mono w-full")
-                .props("borderless")
-            )
-            with ui.element("div").classes("row-gap-sm"):
-                c.button("Open", lambda: _open(path.value), kind=_open_kind())
-                c.caption(_OPEN_NEW)
+            _by_path(_open, placeholder=str(Path.home() / "portia-run1"), label=_OPEN_NEW)
 
             _recents()
 
 
-def _open_kind() -> str:
+def _by_path(submit, *, placeholder: str, label: str) -> None:
+    """The folded-away path field: a link, then the field once it is wanted."""
+    reveal = ui.element("div").classes("row-gap-sm")
+    field = ui.element("div").classes("row-gap-sm w-full")
+    field.set_visibility(False)
+
+    with reveal:
+        c.button(label, lambda: _reveal(reveal, field), kind="secondary", micro=True)
+    with field:
+        path = (
+            ui.input(placeholder=placeholder)
+            .classes("p-field p-field-mono flex-1")
+            .props("borderless")
+        )
+        c.button("Open", lambda: submit(path.value), kind=_path_kind())
+
+
+def _reveal(hide: ui.element, show: ui.element) -> None:
+    hide.set_visibility(False)
+    show.set_visibility(True)
+
+
+def _path_kind() -> str:
     """One accent action: Browse where there is one, Open where there isn't."""
     return "tertiary" if engine.can_browse() else "primary"
 
@@ -230,15 +244,26 @@ def dropzone(*, on_done=None) -> None:
             ).props("flat")
             upload.on("click", js_handler=_PICK_ON_CLICK.format(id=upload.id))
 
-        with ui.element("div").classes("row-gap-sm"):
-            path = (
-                ui.input(placeholder=_PATH_PLACEHOLDER)
-                .classes("p-field p-field-mono flex-1")
-                .props("borderless")
-            )
-            c.button("Add by path", lambda: _add_by_path(path.value, on_done))
-
+        # Same as the project picker: dropping or picking is the way in, and the
+        # path field is folded away until someone wants it.
+        _add_by_path_field(on_done)
         _interpret_toggle()
+
+
+def _add_by_path_field(on_done) -> None:
+    reveal = ui.element("div").classes("row-gap-sm")
+    field = ui.element("div").classes("row-gap-sm w-full")
+    field.set_visibility(False)
+
+    with reveal:
+        c.button(_ADD_BY_PATH, lambda: _reveal(reveal, field), kind="secondary", micro=True)
+    with field:
+        path = (
+            ui.input(placeholder=_PATH_PLACEHOLDER)
+            .classes("p-field p-field-mono flex-1")
+            .props("borderless")
+        )
+        c.button("Add", lambda: _add_by_path(path.value, on_done))
 
 
 def _interpret_toggle() -> None:
@@ -310,8 +335,8 @@ def _default_model() -> str:
 
 
 _OPEN_SUBTITLE = "Open a project directory. If it doesn't exist yet, it gets created."
-_BROWSE_HINT = "pick an existing folder"
-_OPEN_NEW = "…or type a path, including one that doesn't exist yet"
+_OPEN_NEW = "Type a path instead"
+_ADD_BY_PATH = "Add from a path already on disk"
 _CONTEXT_WHY = (
     "This is what makes a column's meaning decidable. A generic brief yields generic judgment."
 )

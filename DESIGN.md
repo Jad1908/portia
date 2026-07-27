@@ -188,8 +188,12 @@ positive at small sizes to keep the cool surfaces airy.
 - Three panes: **files & artifacts** (left) · **workflow** (middle) · **transcript** (right).
 - The middle pane splits horizontally: **the graph on top, the run report below**, with a draggable
   divider. The report half is the taller of the two by default — it is where the evidence is.
-- Minimum viewport ~`1024×640`. Left default ~260px (collapsible). Right default ~380px
-  (toggleable). The workflow pane is always present and takes the remainder.
+- Minimum viewport ~`1024×640`. Left default 260px, transcript default 400px, both draggable and
+  both collapsible from the toolbar. The workflow pane is always present and takes the remainder.
+- **Pane minimums are pixels, not percentages** — 200px left, 330px transcript. A percentage floor
+  moves with the window, and the transcript holds the `question-form` and the `write-confirm`, the
+  two components this app exists for. Below its minimum it stops being worth having, and the honest
+  move at that point is to close it rather than to squeeze it.
 - Panes are divided by a 1px `{colors.hairline}` — no gutters, no shadows between them. The canvas
   runs continuously behind all three. **Every divider is draggable**, including the graph/report one:
   a hairline at rest, taking `{colors.accent-primary}` only while it is being dragged, because it is

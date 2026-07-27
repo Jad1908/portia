@@ -53,11 +53,13 @@ async def shell() -> None:
         await _window()
 
 
-#: Where the vertical dividers sit by default, as a percentage of the window, and
-#: how far they can be dragged. Every pane is resizable; the limits only stop one
-#: being dragged to nothing, which is what the toolbar toggles are for.
-FILES_SPLIT, FILES_LIMITS = 17, (10, 45)
-TRANSCRIPT_SPLIT, TRANSCRIPT_LIMITS = 68, (35, 95)
+#: Pane sizes, **in pixels rather than percent**. A percentage minimum means the
+#: floor moves with the window, and the transcript — which holds the question form
+#: and the write confirmation, the two things this app exists for — could be
+#: dragged down to a few characters wide. These minimums are the width at which
+#: each pane is still worth having; the toolbar toggles are how you get rid of one.
+FILES_WIDTH, FILES_LIMITS = 260, (200, 520)
+TRANSCRIPT_WIDTH, TRANSCRIPT_LIMITS = 400, (330, 780)
 
 
 async def _window() -> None:
@@ -65,7 +67,7 @@ async def _window() -> None:
         toolbar()
         with ui.element("div").classes("p-body"):
             if APP.show_files:
-                with _splitter(FILES_SPLIT, FILES_LIMITS) as files:
+                with _splitter(FILES_WIDTH, FILES_LIMITS) as files:
                     with files.before:
                         _left()
                     with files.after:
@@ -78,15 +80,21 @@ async def _workflow_and_transcript() -> None:
     if not APP.show_transcript:
         await _middle()
         return
-    with _splitter(TRANSCRIPT_SPLIT, TRANSCRIPT_LIMITS) as split:
+    # `reverse` so the pixel size applies to the transcript rather than to the
+    # workflow: the pane with a real minimum is the one the number should govern.
+    with _splitter(TRANSCRIPT_WIDTH, TRANSCRIPT_LIMITS, reverse=True) as split:
         with split.before:
             await _middle()
         with split.after:
             _right()
 
 
-def _splitter(value: int, limits: tuple[int, int]) -> ui.splitter:
-    return ui.splitter(value=value, limits=limits).classes("w-full h-full p-splitter")
+def _splitter(value: int, limits: tuple[int, int], *, reverse: bool = False) -> ui.splitter:
+    return (
+        ui.splitter(value=value, limits=limits, reverse=reverse)
+        .props("unit=px")
+        .classes("w-full h-full p-splitter")
+    )
 
 
 def _left() -> None:

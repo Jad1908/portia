@@ -286,16 +286,21 @@ html body {
   height: 100%;
 }
 
+/* Backstop for the splitter's own limits: whatever a drag does, a pane never
+ * renders narrower than the width at which it stops being readable. */
 .p-pane-left {
   background: var(--canvas);
+  min-width: 200px;
 }
 
 .p-pane-mid {
   background: var(--surface);
+  min-width: 320px;
 }
 
 .p-pane-right {
   background: var(--surface);
+  min-width: 330px;
 }
 
 .p-scroll {
@@ -623,8 +628,8 @@ html body {
   object-fit: contain;
 }
 .p-logo-sm {
-  width: 34px;
-  height: 34px;
+  width: 40px;
+  height: 40px;
   flex: 0 0 auto;
   object-fit: contain;
 }
