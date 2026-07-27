@@ -1,16 +1,20 @@
 """The catalog indexes sources and preserves human judgment across re-index."""
 
+import time
+
 import pytest
 import yaml
 
 from portia.catalog import (
     index_source,
     init_project,
+    is_stale,
     load_catalog,
     remove_source,
     set_group,
     set_interpretation,
 )
+from portia.core import store
 from portia.fixtures import messy_customers
 
 
@@ -172,3 +176,74 @@ def test_removing_a_source_takes_it_out_of_its_groups(tmp_path):
 def test_removing_something_that_was_never_indexed_is_not_an_error(tmp_path):
     init_project("x", portia_dir=tmp_path / ".portia")
     assert remove_source("ghost", portia_dir=tmp_path / ".portia") is None
+
+
+# --- the store: indexing ingests, un-indexing forgets ----------------------
+
+
+def test_indexing_ingests_the_data_into_the_store(tmp_path):
+    """Indexing is the moment the copy is made — eagerly, per §3 of the migration."""
+    csv = _write_source(tmp_path)
+    d = tmp_path / ".portia"
+    index_source(csv, portia_dir=d)
+
+    assert store.store_path(d).exists()
+    con = store.connect(d)
+    try:
+        assert store.table(con, "customers").count() == 40
+    finally:
+        con.close()
+
+
+def test_the_entry_records_what_was_ingested_and_when(tmp_path):
+    """So a file that changed on disk afterwards is detectable, not silently stale."""
+    csv = _write_source(tmp_path)
+    entry = yaml.safe_load(index_source(csv, portia_dir=tmp_path / ".portia").read_text())
+
+    assert entry["ingestion"]["size"] == csv.stat().st_size
+    assert entry["ingestion"]["ingested_at"]
+    assert not is_stale(entry)
+
+
+def test_a_source_whose_file_changed_reads_as_stale(tmp_path):
+    csv = _write_source(tmp_path)
+    d = tmp_path / ".portia"
+    index_source(csv, portia_dir=d)
+    time.sleep(0.01)
+    messy_customers(n=30).to_csv(csv, index=False)
+
+    assert is_stale(yaml.safe_load((d / "sources" / "customers.yaml").read_text()))
+
+
+def test_reindexing_refreshes_the_store_and_the_ingestion_record(tmp_path):
+    """The update rule, extended: facts refresh, judgment survives."""
+    csv = _write_source(tmp_path)
+    d = tmp_path / ".portia"
+    index_source(csv, portia_dir=d)
+    set_interpretation("customers", summary="our CRM export", portia_dir=d)
+
+    messy_customers(n=30).to_csv(csv, index=False)
+    entry = yaml.safe_load(index_source(csv, portia_dir=d).read_text())
+
+    assert entry["summary"] == "our CRM export"  # judgment preserved
+    assert not is_stale(entry)  # fact refreshed
+    con = store.connect(d)
+    try:
+        assert store.table(con, "customers").count() == 30
+    finally:
+        con.close()
+
+
+def test_forgetting_a_source_drops_its_data_too(tmp_path):
+    """The catalog stops knowing about it, so the copy it caused should go."""
+    csv = _write_source(tmp_path)
+    d = tmp_path / ".portia"
+    index_source(csv, portia_dir=d)
+    remove_source("customers", portia_dir=d)
+
+    con = store.connect(d)
+    try:
+        assert not store.has(con, "customers")
+    finally:
+        con.close()
+    assert csv.exists()  # the file itself is still not ours to delete
