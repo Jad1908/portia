@@ -40,6 +40,11 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
   watched. Things to watch for in a run log: how often `sql` is chosen over `join`/`normalize`
   where those would have fit (a signal the hatch is too *easy*), and whether the SQL steps cluster
   around one operation.
+- **The hatch exists and a model has not reached for it.** Run 7: Haiku, on merged `main`, made
+  **zero** `sql` calls and shipped the same 3.85%-inflated table, reverting to the tautology grain.
+  So the promotion evidence above (*"what the agent strains to write"*) has nothing in it yet — and
+  the first thing to learn is not which op to promote but **whether the hatch is discoverable at
+  all**. Watch this on the next capable-model run before drawing anything from op ratios.
 - **A SQL step's provenance is thin, and might be earned back.** `join` reports what it dropped
   from each side because it knows what a key is; `sql` reports only shape (`result_rows`,
   `columns`). `checks.outcome` still measures the produced table, so the blocking gate is intact —
@@ -143,11 +148,20 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
   the system — the hotel run failed because one of them omitted a sentence — and they're buried in
   decorators. Move them all under `agent/prompts/` so wording can be diffed, reviewed and A/B'd
   without touching code, with a test that every tool resolves a description (no silent fallback).
-- **Run log + the metrics that need no labels.** Write each run's events (`agent/events.py`) to
-  JSONL, one line per event, and compute with pandas: which disclosure rungs were pulled and in
-  what order, tokens and turns per decision, how often it asked, drift rate on recorded specs.
-  ~30 lines, no infrastructure. Be honest about what these are: **cost and behaviour descriptors,
-  not correctness** — only the answer keys make a number mean anything.
+- **Tool descriptions reach the model as one unbroken line.** `prompts.tool()` does
+  `" ".join(text.split())`, which correctly unwraps the source file's hard wrapping but also
+  destroys headings, blank lines and list structure. `record_step.md` is now **6,038 characters
+  with zero newlines** — the `## 'sql'` heading runs into its body, the JSON example is flattened.
+  Fix: unwrap *within* a paragraph, preserve blank lines and line starts for headings and list
+  items. Small, but it changes every prompt the model reads, so it wants its own branch and a
+  before/after against **Run 7**, where a whole section of that description appears to have been
+  ignored. *Suspected contributor, not a proven cause — `EVALUATION.md` → Run 7.*
+- **Run log + the metrics that need no labels. Specced 2026-07-26** — `EVALUATION.md` → "The run
+  log". Write each turn's events (`agent/events.py`) to JSONL and compute with pandas: rungs pulled
+  and in what order, tokens and turns, how often it asked, which ops it chose, drift rate. No
+  infrastructure. Be honest about what these are: **cost and behaviour descriptors, not
+  correctness** — only the answer keys make a number mean anything. Blocked on the tool-result
+  event above, without which the log is half a transcript.
 - **Langfuse, once the JSONL hurts.** Its job is browsing a run's timeline when debugging why one
   went sideways, not computing the metrics above. Free either way (self-host via Docker, or the
   cloud Hobby tier: 50k units/month, 30-day retention, 2 seats). The SDK drives Claude Code as a
@@ -195,8 +209,20 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
 
 ## Interface — the surface
 
-- **The three-panel app** (files · workflow · chat) — NiceGUI on the engine's event stream. Core to
-  the product, deferred until the engine + agent are proven. `VISION.md`.
+- **The three-panel app** (files · workflow · copilot) — NiceGUI on the engine's event stream. Core
+  to the product. **V0 is specced** (`VISION.md` → "V0"; looks in `DESIGN.md`) and **drives**: it
+  runs a turn and catches every question and write confirmation, which needs no engine change
+  because `agent/ask.py` injects `answer`/`confirm` for exactly this.
+- **A conversation that stays open.** `session.run` sends one prompt, drains the response and closes
+  the client, so there is no multi-turn — no "actually, redo that as an inner join" after a turn
+  ends. The SDK's `ClaudeSDKClient` supports staying open; this is a portia limitation, not an SDK
+  one. **Not a prerequisite for the UI** — a turn is a complete unit of work, and V0 offers a fresh
+  turn rather than a fake conversation. The first thing to build *after* V0, once the boundary has
+  been felt for real.
+- **Tool results are missing from the event stream.** `events.from_message` handles the assistant's
+  messages and the final result and drops the message carrying tool *results* — so any consumer
+  sees what was called and never what came back. Needed by both the run log and the app's
+  transcript panel; do it once, before either. **Smallest high-leverage item on this page.**
 
 ## Scale — data tiers
 

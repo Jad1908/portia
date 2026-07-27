@@ -1,8 +1,11 @@
 # Vision & Flows — portia
 
-*A living scratchpad for the product's look, feel, and user flows. Deliberately unfinished —
-dump ideas here freely; nothing here is decided. Companion to `PLAN.md` (direction) and
-`TECH_STACK.md` (stack). Open questions are collected at the bottom.*
+*A living scratchpad for the product's flows and structure. Deliberately unfinished — dump ideas
+here freely; nothing here is decided. Companion to `PLAN.md` (direction), `TECH_STACK.md` (stack)
+and `DESIGN.md` (appearance). Open questions are collected at the bottom.*
+
+> **Layout and behavior live here; how it looks lives in `DESIGN.md`.** Where the two overlap,
+> `DESIGN.md` wins on appearance and this file wins on structure. Read both before building UI.
 
 ---
 
@@ -86,6 +89,201 @@ not a gadget — a place you actually work.
   input to the next workflow.
 - The **right-panel chat** is the copilot loop — it should be able to reach into the middle-panel
   cards (propose a join, flag a unit mismatch on a specific step, etc.).
+
+---
+
+## V0 — the app (specced 2026-07-26, not yet built)
+
+*Direction, not a task list. The specifics of the middle panel should emerge from looking at it,
+not from this section.*
+
+> **The bar V0 has to clear: a full test run with no terminal.** Not "less terminal" — none. Create
+> the project, write its context, add the CSVs, index them, run a turn, answer its questions,
+> approve its writes, execute the spec, write the outputs, and read every artifact — all in the
+> window. Any step that sends the operator back to a shell is a V0 bug, because the thing being
+> fixed is that tuning the loop across two surfaces is miserable.
+>
+> The audit against today's commands is at the end of this section; keep it honest as things move.
+
+**The problem it solves.** Everything portia produces lands on disk in five places — `.portia/
+project.yaml`, `.portia/sources/*.yaml`, `specs/*.yaml`, `out/*.csv`, and a terminal transcript
+that scrolls away. The only way to see any of it is `cat`. That makes the loop hard to *tune*,
+because you cannot form a broad view of what the copilot did without reassembling it by hand.
+
+**V0 drives the copilot. It is not a viewer.** An earlier draft of this section proposed read-only,
+reasoning that the single-turn session blocked a chat panel. That conflated two things and was
+wrong, so the reasoning is recorded here rather than quietly deleted:
+
+- **Driving a turn works today.** `agent/ask.py` injects `answer` and `confirm` as callables
+  precisely so something other than stdin can supply them — its docstring names "the eventual
+  NiceGUI panel" as the third consumer. A UI passes a form-backed `answer` and a
+  payload-rendering `confirm`, and every question and every write confirmation lands on screen. No
+  engine change.
+- **What single-turn actually costs is follow-up**, not driving. `session.run` sends one prompt and
+  closes, so there is no "actually, redo that as an inner join" after the turn ends. That is worth
+  having and it is *not* what a turn needs.
+- **A read-only viewer would not have solved the stated problem.** The complaint is that tuning the
+  loop from a terminal is hard. Reading artifacts in a browser while answering questions in a
+  terminal is two surfaces, not one.
+
+So V0 runs a turn, catches the decisions, and shows the artifacts — because **the decision points
+are the thing being tuned**, and answering a question with the evidence and the spec-so-far visible
+beside it is the product (`PLAN.md`: "the questions-and-insights UX *is* the product").
+
+**What V0 is honest about not having:** when a turn ends, it ends. The UI says so and offers a new
+turn, which starts fresh with the catalog and spec on disk as its memory — exactly what
+`chat ask` does today. It must not present a chat box that implies a conversation the engine
+cannot hold; a follow-up that silently loses context is worse than an honest boundary.
+
+**How it looks is already decided — see `DESIGN.md`**, which specs every token and every component
+named below (`artifact-row`, `step-card`, `report-step-block`, `acknowledged-banner`,
+`table-preview`, `transcript-row`). This section says what the panels *do*; that file says what they
+look like. Its one product-specific rule is load-bearing: **color and prominence communicate kind,
+never rank** — the screen must not smuggle in the prioritization the checks layer refuses to make.
+
+**It is an edge, like the CLI.** Lives in `portia/ui/`, launched with `python -m portia.ui`, and
+calls exactly four things: `catalog.load_catalog`, `spec.load_spec`, `spec.run_spec`, and
+`session.run` with its own `answer`/`confirm`. **No computation in the UI, ever** — if a panel needs
+a number the engine doesn't expose, that is a signal to add it to `checks`/`spec`, not to calculate
+it in a widget. `cli/` and `ui/` are two renderers of one engine, and the day they disagree about a
+number is the day the seam broke. NiceGUI (decided, `TECH_STACK.md`), as an optional `ui` extra so a
+core install stays thin.
+
+> **`cli/chat.py` and `cli/index.py` are the reference implementations.** Between them they already
+> do everything the UI must do — render each event kind, collect answers, confirm writes, wrap a
+> turn, profile a source, register it, prompt for project context. Read them before writing the
+> panel; where the UI needs something they don't have, that is a gap in the *seam*, not permission
+> to reach past it.
+
+### Opening a project
+
+The first screen, and the one that has to exist for the no-terminal bar to be met. Three states:
+
+**No project open.** A path field and an **Open** — plus the recent projects it has seen. Testing
+means a fresh directory per run (`~/portia-run7`, `~/portia-run8`), so creating one has to be as
+cheap as typing a path that doesn't exist yet.
+
+**Project open, no context set.** The **mandatory context panel** `VISION.md` has always called
+for: a multi-line field, nothing else reachable until it is filled. This is the one screen where
+the product's premise is most exposed — the context is what makes a column's meaning decidable, and
+a generic brief produces generic judgment. Give it room, show the placeholder guidance, and do not
+let it be skipped. Writes `project.yaml` via `catalog.init_project`.
+
+**Project open, no sources.** A drop zone and a file picker. Dropped CSVs are copied into the
+project directory, then **indexed** — which is two distinct things and the UI must show them as
+two, because one is free and one is not:
+
+- **Profiling** (`catalog.index_source`) — deterministic, no model, always happens. Each file
+  appears in the left panel the moment it lands, with its auto-drafted summary.
+- **Interpretation** — a model turn that writes what each source *is*. Default on with a visible
+  toggle (`--no-interpret`'s equivalent), and it runs through the same driving machinery as any
+  other turn: same event stream, same write confirmations on each `set_interpretation`. It is not a
+  special case; it is a turn with a different opening prompt (`prompts.task("index_batch", …)`).
+
+Adding a source later is the same affordance, available from the left panel.
+
+### Left — files & artifacts
+
+`VISION.md` asks how we decide what to surface inside a big repo. V0 answers it cheaply: **a file
+appears if portia knows about it.** Sources come from the catalog, not a directory walk; specs are
+`specs/*.yaml`; outputs are whatever a run wrote. Nothing else is shown, which is the curation.
+
+Clicking a source shows its catalog entry — the prose summary, the per-column roles, the check
+facts. That alone is most of what is currently invisible.
+
+### Middle — the workflow
+
+**Top: the spec as a graph.** This is free today and nobody has looked at it: every step has an
+`id` and names the tables it reads (`left`/`right`/`input`/`inputs`), so the DAG is already fully
+determined by the YAML. Cards are **steps**, an arrow means **"this step's output is that step's
+input"**.
+
+> That is V0's *provisional* answer to the open question below, chosen because it is what the data
+> already encodes — not because it is settled. Build the graph so the answer is cheap to change;
+> the reason to render it at all is to find out whether it reads correctly.
+
+Clicking a card shows the step verbatim: op, keys/how, the SQL for a hatch step, `grain`, `expect`,
+`rationale`, and any `acknowledge`. **An acknowledged blocking flag must be impossible to miss
+here** — Run 5 buried one mid-dict in a terminal confirmation and it shipped a 3.85%-inflated table
+(`EVALUATION.md`). The screen is the second chance at that.
+
+**Bottom: run it.** A Run button calls `run_spec` and shows, per step, what `StepResult` already
+carries — provenance, drift against `expect`, the `outcome` post-conditions, blocking flags — plus
+a preview of the produced table. This is `cli/run.py`'s output with the table attached.
+
+### Right — the copilot
+
+A goal box and a **Go**, then the event stream live over NiceGUI's websocket as `session.run`
+yields it. Model and effort are pickable here, and the turn states which it is spending before it
+starts (`cli/chat.py` already prints this; an expensive run must never be silent).
+
+Two of those event kinds are not rows in a log — they are **the loop stopping for the human**, and
+they are the whole reason the UI exists:
+
+- **A question** renders as a form: the question, its options with their descriptions, and a free-text
+  field that goes through verbatim. Answering it resumes the turn. **The evidence panel stays
+  visible while answering** — that is the entire argument for a UI over a terminal, where the
+  profile you need scrolled away four screens ago.
+- **A write confirmation** renders the payload *readably* — the step's fields laid out, its `grain`,
+  its `expect`, its `rationale` — with **any `acknowledge` as a banner above the whole thing**,
+  naming what the engine measured. Run 5 approved one as a fifteen-character fragment inside a
+  400-character single-line dict and shipped a 3.85%-inflated table (`EVALUATION.md`). Deny is a
+  first-class button, not a `n` you have to know about.
+
+**When the turn ends, it ends.** The panel says so and offers a new turn; it does not present a
+chat box implying a conversation the engine cannot hold. Past runs are replayable from the run log
+(`EVALUATION.md`).
+
+### How a tuning session actually goes
+
+The workflow this is built for, end to end, in one window, starting from nothing:
+
+1. Open a new project directory. Write the brief into the context panel.
+2. Drop the CSVs in. They profile instantly; the interpret turn runs, and you approve each
+   `set_interpretation` — already a place where the copilot's judgment is worth reading.
+3. Pick a model and effort, type the goal, Go.
+4. Watch it climb the ladder — `describe` → `profile` → `join_findings` — with **tool results
+   expandable inline**, so you can see the evidence it is reasoning from rather than inferring it.
+5. When it asks, answer in the form with the source profile and the spec-so-far on screen. Push
+   back. Give it a vague answer. Contradict the data.
+6. When it wants to write, read the whole step and approve or deny.
+7. The graph and the run report fill in as steps are recorded; a blocked step is visible the moment
+   it is refused.
+8. Run the spec, write the outputs, read the produced table.
+9. The run is in the log — comparable against every earlier one, which is what makes a prompt
+   change measurable rather than remembered.
+
+That is the loop currently spread across four terminal commands, five YAML files, and someone's
+memory of six transcripts.
+
+### The no-terminal audit
+
+Every command a test run needs today, and where it goes. **If a row loses its UI answer, V0 has
+regressed** — this is the checklist, not a nice-to-have.
+
+| Terminal today | In V0 |
+|---|---|
+| `mkdir ~/portia-runN` + copy CSVs in | Open-project path field · drop zone |
+| `index --init "<brief>"` | Mandatory context panel → `catalog.init_project` |
+| `index .` (profiling half) | Automatic on drop → `catalog.index_source` |
+| `index .` (interpret half) | A turn, with its `set_interpretation` write confirmations |
+| `index --no-interpret` | The interpret toggle on the drop zone |
+| `index --model/--effort` | Model + effort selectors, shown for the turn's duration |
+| `chat ask "<goal>"` | Goal box + **Go** |
+| answering `?` prompts on stdin | `question-form` |
+| answering `allow? [Y/n]` on stdin | `write-confirm` |
+| `run <spec>` | **Run** in the workflow pane |
+| `run --write out` | Same, with an output location — outputs land in the left panel |
+| `cat specs/*.yaml` | The graph, and each step's detail |
+| `cat out/*.csv` | `table-preview` |
+| `cat .portia/sources/*.yaml` | Clicking a source |
+| scrolling back through a transcript | The transcript panel, and the run log |
+
+### What V0 deliberately does not do
+
+Editing artifacts by hand · follow-up turns within one session (see above) · multiple workflows ·
+groups · run caching or partial runs. Each is a real product question below. **None of them sends
+you back to a terminal**, which is the line that matters.
 
 ---
 

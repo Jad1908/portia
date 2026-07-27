@@ -88,7 +88,17 @@ Next, in order:
    consequence unprompted — but only qualitatively, and no capable model has yet been watched
    reaching a blocking flag.
 
-The three-panel surface stays deferred until the loop is trustworthy.
+3. **The surface.** Six runs have been scored by hand off terminal transcripts, and the artifacts
+   that *are* the product — catalog, spec, provenance, outcome — are only readable with `cat`. Two
+   pieces, both specced 2026-07-26: the **run log** (`EVALUATION.md`) makes tuning repeatable, and
+   **V0 of the app** (`VISION.md` + `DESIGN.md`) puts the loop in one window. V0 **drives** — it
+   runs a turn and catches every question and every write confirmation, which `agent/ask.py` already
+   supports by injecting those callbacks. It is not deferred behind multi-turn: single-turn costs
+   *follow-up*, not driving. **The bar is a full test run with no terminal at all** — project
+   creation, the brief, adding and indexing sources, the turn, the spec run, and every artifact, in
+   one window; `VISION.md` carries the command-by-command audit. This is the point where "the
+   questions-and-insights UX is the product" stops being a claim in this document and becomes
+   something we can sit in front of.
 
 ## Budget & model discipline
 
