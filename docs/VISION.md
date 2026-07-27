@@ -118,6 +118,16 @@ not a gadget — a place you actually work.
 > - **An acknowledged flag at the confirmation prompt names the flag and what it means, not what it
 >   would cost.** That number does not exist yet; it is `PLAN.md` item 2, and the banner is built to
 >   take it the day it does.
+>
+> **What V0 grew after this section was written** (2026-07-27, all in `BACKLOG.md` → Interface):
+> resizable panes, a native folder chooser, a pannable dot-grid canvas, editable briefs and source
+> interpretations, un-indexing a source, saved run reports (`runs/*.md`), and a **two-tab right
+> pane** — Copilot and Indexing as separate transcripts, because a goal you typed and the catalog
+> work the app runs on your behalf are different jobs, and a decision waiting on the hidden tab is
+> indistinguishable from a hung turn unless the tab says so.
+>
+> **The one thing V0 does not surface at all is groups**, which the engine has had since the context
+> work: `catalog.set_group`, a write tool, and rendering into the L1 brief. See `BACKLOG.md`.
 
 *Direction, not a task list. The specifics of the middle panel should emerge from looking at it,
 not from this section.*

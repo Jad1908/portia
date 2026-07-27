@@ -60,7 +60,13 @@ the copilot loop (`portia/agent/` — in-process MCP server, layered context, `A
 routed to a human, spec writing, chat CLI), and so is **V0 of the app** (`portia/ui/`) — the loop
 now runs in one window, with no terminal. The **verification loop** now exists too: recording a
 step executes it, `checks/outcome.py` measures the table it produced, and a step that hits a zero
-is refused rather than written. **This is not yet a working copilot.** The loop has now faced a
+is refused rather than written.
+
+**What is not built is scale.** The engine is pandas throughout, so it needs several times a file's
+size in RAM to look at it, and the next real test is ~20 PHQ tables, many multi-GB. Measured
+2026-07-27 and specced in **`docs/DUCKDB_MIGRATION.md`**, now item 4 below.
+
+**This is not yet a working copilot.** The loop has now faced a
 model four times (Runs 3–6 in `EVALUATION.md`). Each fix closed one escape and revealed the next:
 the spelling trap is dead, the tautology grain is dead, and Run 5 shipped a 3.85%-inflated table by
 writing `acknowledge` without ever asking the user. **Run 6 changed the model rather than the
@@ -98,10 +104,28 @@ Next, in order:
    *The claim this settles is that the loop is now **watchable**, not that it is good* — what the
    copilot does with a question is still scored by hand in `EVALUATION.md`.
 
-4. **The run log** (`EVALUATION.md`, specced 2026-07-26). Now the more painful half of the surface
+4. **The scale tier — DuckDB (`docs/DUCKDB_MIGRATION.md`, specced 2026-07-27).** Promoted to the
+   front because it is now a **blocker on the next real test**, not an eventual concern. The target
+   dataset is ~20 PHQ tables, many multi-GB; pandas needs 4.8× a file's size to profile it and
+   `run_spec` holds every source and every intermediate at once. Measured: the same profile costs
+   122 MB and 0.3 s in DuckDB, and an 80M-row join — portia's fan-out case, the one that inflated
+   revenue in Run 5 — can be counted in 0.4 s without being built. pandas cannot measure that join
+   on real data at all. The guarantee is that **nothing the copilot reads changes**: same evidence
+   dicts, same provenance keys, same sandbox, enforced by golden-file parity tests written before
+   any implementation moves.
+
+5. **The run log** (`EVALUATION.md`, specced 2026-07-26). The more painful half of the surface
    problem: seven runs scored by hand off transcripts, and the app's transcript still dies with the
    window. One JSONL per turn, teed at the edge in `cli/chat.run_turn` and the app's turn driver.
    `events.TOOL_RESULT` — its other prerequisite — landed with the app.
+
+> **A cheaper answer to the question that motivated the migration.** The copilot never sees data,
+> only profiles — so its judgment on a 5 GB table and on a *referentially-consistent subset* of it
+> is nearly the same. Slicing every table to rows reachable from a chosen set of ids preserves
+> schemas, key overlap, spelling mismatches and fan-out, and tests the reasoning question today at
+> 1/100th the size. (Naive per-table sampling does not: independently sampled tables stop sharing
+> keys and every join looks empty.) Scale and judgment are separable questions; only one of them
+> needs the migration. `DUCKDB_MIGRATION.md` §11.
 
 ## Budget & model discipline
 
