@@ -1,0 +1,138 @@
+{
+  "report": {
+    "keys": {
+      "left": [
+        "order_id"
+      ],
+      "right": [
+        "hotel_id"
+      ]
+    },
+    "left": {
+      "n_rows": 8,
+      "n_null_keys": 0,
+      "n_distinct_keys": 8,
+      "n_duplicated_keys": 0,
+      "max_key_multiplicity": 1,
+      "unique_keys": true
+    },
+    "right": {
+      "n_rows": 5,
+      "n_null_keys": 0,
+      "n_distinct_keys": 5,
+      "n_duplicated_keys": 0,
+      "max_key_multiplicity": 1,
+      "unique_keys": true
+    },
+    "key_dtypes": {
+      "left": [
+        "numeric"
+      ],
+      "right": [
+        "string"
+      ]
+    },
+    "key_dtype_match": false,
+    "relationship": "1:1",
+    "overlap": {
+      "n_shared_keys": 0,
+      "n_left_only_keys": 8,
+      "n_right_only_keys": 5,
+      "left_coverage": 0.0,
+      "right_coverage": 0.0,
+      "sample_left_only": [
+        9000,
+        9001,
+        9002,
+        9003,
+        9004
+      ],
+      "sample_right_only": [
+        "H001",
+        "H002",
+        "H003",
+        "H004",
+        "H005"
+      ]
+    },
+    "fan_out": {
+      "max_left_to_right": 0,
+      "max_right_to_left": 0,
+      "result_per_matched_left": 0.0
+    },
+    "joins": {
+      "inner": {
+        "result_rows": 0,
+        "left_dropped": 8,
+        "right_dropped": 5
+      },
+      "left": {
+        "result_rows": 8,
+        "left_dropped": 0,
+        "right_dropped": 5
+      },
+      "right": {
+        "result_rows": 5,
+        "left_dropped": 8,
+        "right_dropped": 0
+      },
+      "outer": {
+        "result_rows": 13,
+        "left_dropped": 0,
+        "right_dropped": 0
+      }
+    },
+    "flags": [
+      "key_dtype_mismatch",
+      "no_matches",
+      "left_rows_dropped",
+      "low_overlap",
+      "right_rows_dropped"
+    ]
+  },
+  "evidence": {
+    "unmatched_left_rows": [
+      {
+        "order_id": 9000,
+        "customer_id": 1000.0,
+        "amount": 50
+      },
+      {
+        "order_id": 9001,
+        "customer_id": 1001.0,
+        "amount": 20
+      },
+      {
+        "order_id": 9002,
+        "customer_id": 1001.0,
+        "amount": 30
+      }
+    ],
+    "unmatched_right_rows": [
+      {
+        "hotel_id": "H001",
+        "hotel_name": "Grand Riverside",
+        "city": "Paris",
+        "country": "FR",
+        "rooms": 220
+      },
+      {
+        "hotel_id": "H002",
+        "hotel_name": "Le Petit Nord",
+        "city": "Paris",
+        "country": "FR",
+        "rooms": 85
+      },
+      {
+        "hotel_id": "H003",
+        "hotel_name": "Marina Bay Suites",
+        "city": "Barcelona",
+        "country": "ES",
+        "rooms": 310
+      }
+    ],
+    "null_key_left_rows": [],
+    "null_key_right_rows": [],
+    "fan_out_examples": []
+  }
+}

@@ -1,0 +1,127 @@
+{
+  "report": {
+    "keys": {
+      "left": [
+        "hotel_id"
+      ],
+      "right": [
+        "hotel_id"
+      ]
+    },
+    "left": {
+      "n_rows": 14,
+      "n_null_keys": 0,
+      "n_distinct_keys": 5,
+      "n_duplicated_keys": 4,
+      "max_key_multiplicity": 4,
+      "unique_keys": false
+    },
+    "right": {
+      "n_rows": 5,
+      "n_null_keys": 0,
+      "n_distinct_keys": 5,
+      "n_duplicated_keys": 0,
+      "max_key_multiplicity": 1,
+      "unique_keys": true
+    },
+    "key_dtypes": {
+      "left": [
+        "string"
+      ],
+      "right": [
+        "string"
+      ]
+    },
+    "key_dtype_match": true,
+    "relationship": "many:1",
+    "overlap": {
+      "n_shared_keys": 4,
+      "n_left_only_keys": 1,
+      "n_right_only_keys": 1,
+      "left_coverage": 0.9286,
+      "right_coverage": 0.8,
+      "sample_left_only": [
+        "H999"
+      ],
+      "sample_right_only": [
+        "H005"
+      ]
+    },
+    "fan_out": {
+      "max_left_to_right": 1,
+      "max_right_to_left": 4,
+      "result_per_matched_left": 1.0
+    },
+    "joins": {
+      "inner": {
+        "result_rows": 13,
+        "left_dropped": 1,
+        "right_dropped": 1
+      },
+      "left": {
+        "result_rows": 14,
+        "left_dropped": 0,
+        "right_dropped": 1
+      },
+      "right": {
+        "result_rows": 14,
+        "left_dropped": 1,
+        "right_dropped": 0
+      },
+      "outer": {
+        "result_rows": 15,
+        "left_dropped": 0,
+        "right_dropped": 0
+      }
+    },
+    "flags": [
+      "left_rows_dropped",
+      "fan_out",
+      "right_rows_dropped"
+    ]
+  },
+  "evidence": {
+    "unmatched_left_rows": [
+      {
+        "booking_id": "B0011",
+        "hotel_id": "H999",
+        "stay_date": "2026-06-12",
+        "rooms_sold": 7,
+        "revenue": 1400.0
+      }
+    ],
+    "unmatched_right_rows": [
+      {
+        "hotel_id": "H005",
+        "hotel_name": "Canal View",
+        "city": "Amsterdam",
+        "country": "NL",
+        "rooms": 120
+      }
+    ],
+    "null_key_left_rows": [],
+    "null_key_right_rows": [],
+    "fan_out_examples": [
+      {
+        "key": "H001",
+        "n_left": 4,
+        "n_right": 1
+      },
+      {
+        "key": "H003",
+        "n_left": 4,
+        "n_right": 1
+      },
+      {
+        "key": "H002",
+        "n_left": 3,
+        "n_right": 1
+      },
+      {
+        "key": "H004",
+        "n_left": 2,
+        "n_right": 1
+      }
+    ]
+  }
+}

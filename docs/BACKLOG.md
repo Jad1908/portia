@@ -76,6 +76,15 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
   named, versioned artifact; spec versioning; drift across the chain (`VISION.md` open question).
 - **Reproducibility of custom steps** — pin the execution environment (DuckDB version, or Python +
   deps + seeds) so a captured step truly re-runs identically.
+- **A `sql` step's output row order is not stable, so `write_outputs` isn't byte-reproducible.**
+  Found 2026-07-27 while freezing the golden files: the same `GROUP BY` over the same 7 rows
+  returned **three different orderings in six runs** (DuckDB parallelises hash aggregation, and
+  nothing promises order without `ORDER BY`). The *rows* are identical every time, so no evidence
+  dict moves and nothing the copilot reads is affected — but `run --write` produces a CSV that
+  re-diffs on every run, which cuts against "re-running against a changed source produces a
+  readable diff". The golden harness sorts previews by value to sidestep it. Real fix is probably a
+  deterministic order at the write edge (`spec.write_outputs` sorts, or the step declares one),
+  **not** an `ORDER BY` the agent has to remember. Gets worse, not better, once every op is DuckDB.
 
 ## Agent — the "decide" layer (the copilot)
 

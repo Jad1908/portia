@@ -1,0 +1,548 @@
+{
+  "steps": [
+    {
+      "id": "events_clean",
+      "op": "normalize",
+      "provenance": {
+        "op": "normalize",
+        "input_rows": 7,
+        "transforms": [
+          {
+            "column": "city_name",
+            "op": "strip",
+            "n_changed": 1
+          },
+          {
+            "column": "city_name",
+            "op": "lower",
+            "n_changed": 6
+          }
+        ],
+        "flags": []
+      },
+      "drift": {},
+      "outcome": {
+        "n_rows": 7,
+        "n_cols": 4,
+        "empty": false,
+        "null_rates": {},
+        "all_null_columns": [],
+        "newly_all_null_columns": [],
+        "contribution": {
+          "city_events": {
+            "columns_in_output": [
+              "city_name",
+              "event_date",
+              "event_name",
+              "expected_attendance"
+            ],
+            "n_columns": 4,
+            "columns_dropped": [],
+            "contributed": true
+          }
+        },
+        "grain": null,
+        "flags": []
+      },
+      "acknowledged": [],
+      "blocking": [],
+      "rationale": null,
+      "output": {
+        "n_rows": 7,
+        "columns": [
+          "city_name",
+          "event_date",
+          "event_name",
+          "expected_attendance"
+        ],
+        "head": [
+          {
+            "city_name": "amsterdam",
+            "event_date": "2026-06-12",
+            "event_name": "Canal Festival",
+            "expected_attendance": 25000
+          },
+          {
+            "city_name": "amsterdam",
+            "event_date": "2026-06-12",
+            "event_name": "Design Week",
+            "expected_attendance": 12000
+          },
+          {
+            "city_name": "barcelona",
+            "event_date": "2026-06-12",
+            "event_name": "Mobile Congress",
+            "expected_attendance": 90000
+          },
+          {
+            "city_name": "barcelona",
+            "event_date": "2026-06-13",
+            "event_name": "Mobile Congress",
+            "expected_attendance": 90000
+          },
+          {
+            "city_name": "lyon",
+            "event_date": "2026-06-12",
+            "event_name": "Food Fair",
+            "expected_attendance": 8000
+          }
+        ]
+      }
+    },
+    {
+      "id": "hotels_clean",
+      "op": "normalize",
+      "provenance": {
+        "op": "normalize",
+        "input_rows": 5,
+        "transforms": [
+          {
+            "column": "city",
+            "op": "lower",
+            "n_changed": 5
+          }
+        ],
+        "flags": []
+      },
+      "drift": {},
+      "outcome": {
+        "n_rows": 5,
+        "n_cols": 5,
+        "empty": false,
+        "null_rates": {},
+        "all_null_columns": [],
+        "newly_all_null_columns": [],
+        "contribution": {
+          "hotels": {
+            "columns_in_output": [
+              "city",
+              "country",
+              "hotel_id",
+              "hotel_name",
+              "rooms"
+            ],
+            "n_columns": 5,
+            "columns_dropped": [],
+            "contributed": true
+          }
+        },
+        "grain": null,
+        "flags": []
+      },
+      "acknowledged": [],
+      "blocking": [],
+      "rationale": null,
+      "output": {
+        "n_rows": 5,
+        "columns": [
+          "hotel_id",
+          "hotel_name",
+          "city",
+          "country",
+          "rooms"
+        ],
+        "head": [
+          {
+            "hotel_id": "H004",
+            "hotel_name": "Old Town Inn",
+            "city": "amsterdam",
+            "country": "NL",
+            "rooms": 64
+          },
+          {
+            "hotel_id": "H005",
+            "hotel_name": "Canal View",
+            "city": "amsterdam",
+            "country": "NL",
+            "rooms": 120
+          },
+          {
+            "hotel_id": "H003",
+            "hotel_name": "Marina Bay Suites",
+            "city": "barcelona",
+            "country": "ES",
+            "rooms": 310
+          },
+          {
+            "hotel_id": "H001",
+            "hotel_name": "Grand Riverside",
+            "city": "paris",
+            "country": "FR",
+            "rooms": 220
+          },
+          {
+            "hotel_id": "H002",
+            "hotel_name": "Le Petit Nord",
+            "city": "paris",
+            "country": "FR",
+            "rooms": 85
+          }
+        ]
+      }
+    },
+    {
+      "id": "bookings",
+      "op": "join",
+      "provenance": {
+        "op": "join",
+        "how": "left",
+        "keys": {
+          "left": [
+            "hotel_id"
+          ],
+          "right": [
+            "hotel_id"
+          ]
+        },
+        "relationship": "many:1",
+        "input_rows": {
+          "left": 14,
+          "right": 5
+        },
+        "result_rows": 14,
+        "predicted_rows": 14,
+        "matches_prediction": true,
+        "left_dropped": 0,
+        "right_dropped": 1,
+        "flags": [
+          "left_rows_dropped",
+          "fan_out",
+          "right_rows_dropped"
+        ]
+      },
+      "drift": {},
+      "outcome": {
+        "n_rows": 14,
+        "n_cols": 9,
+        "empty": false,
+        "null_rates": {
+          "hotel_name": 0.0714,
+          "city": 0.0714,
+          "country": 0.0714,
+          "rooms": 0.0714
+        },
+        "all_null_columns": [],
+        "newly_all_null_columns": [],
+        "contribution": {
+          "otb": {
+            "columns_in_output": [
+              "booking_id",
+              "revenue",
+              "rooms_sold",
+              "stay_date"
+            ],
+            "n_columns": 4,
+            "columns_dropped": [],
+            "contributed": true
+          },
+          "hotels_clean": {
+            "columns_in_output": [
+              "city",
+              "country",
+              "hotel_name",
+              "rooms"
+            ],
+            "n_columns": 4,
+            "columns_dropped": [],
+            "contributed": true
+          }
+        },
+        "grain": {
+          "keys": [
+            "booking_id"
+          ],
+          "measurable": true,
+          "unique": true,
+          "n_distinct": 14,
+          "n_duplicated_keys": 0,
+          "max_multiplicity": 1,
+          "examples": []
+        },
+        "flags": []
+      },
+      "acknowledged": [],
+      "blocking": [],
+      "rationale": null,
+      "output": {
+        "n_rows": 14,
+        "columns": [
+          "booking_id",
+          "hotel_id",
+          "stay_date",
+          "rooms_sold",
+          "revenue",
+          "hotel_name",
+          "city",
+          "country",
+          "rooms"
+        ],
+        "head": [
+          {
+            "booking_id": "B0001",
+            "hotel_id": "H001",
+            "stay_date": "2026-06-12",
+            "rooms_sold": 12,
+            "revenue": 2400.0,
+            "hotel_name": "Grand Riverside",
+            "city": "paris",
+            "country": "FR",
+            "rooms": 220.0
+          },
+          {
+            "booking_id": "B0002",
+            "hotel_id": "H001",
+            "stay_date": "2026-06-12",
+            "rooms_sold": 8,
+            "revenue": 1600.0,
+            "hotel_name": "Grand Riverside",
+            "city": "paris",
+            "country": "FR",
+            "rooms": 220.0
+          },
+          {
+            "booking_id": "B0003",
+            "hotel_id": "H001",
+            "stay_date": "2026-06-13",
+            "rooms_sold": 15,
+            "revenue": 3000.0,
+            "hotel_name": "Grand Riverside",
+            "city": "paris",
+            "country": "FR",
+            "rooms": 220.0
+          },
+          {
+            "booking_id": "B0004",
+            "hotel_id": "H002",
+            "stay_date": "2026-06-12",
+            "rooms_sold": 4,
+            "revenue": 760.0,
+            "hotel_name": "Le Petit Nord",
+            "city": "paris",
+            "country": "FR",
+            "rooms": 85.0
+          },
+          {
+            "booking_id": "B0005",
+            "hotel_id": "H002",
+            "stay_date": "2026-06-14",
+            "rooms_sold": 6,
+            "revenue": 1140.0,
+            "hotel_name": "Le Petit Nord",
+            "city": "paris",
+            "country": "FR",
+            "rooms": 85.0
+          }
+        ]
+      }
+    },
+    {
+      "id": "bookings_events",
+      "op": "join",
+      "provenance": {
+        "op": "join",
+        "how": "left",
+        "keys": {
+          "left": [
+            "city",
+            "stay_date"
+          ],
+          "right": [
+            "city_name",
+            "event_date"
+          ]
+        },
+        "relationship": "many:many",
+        "input_rows": {
+          "left": 14,
+          "right": 7
+        },
+        "result_rows": 18,
+        "predicted_rows": 18,
+        "matches_prediction": true,
+        "left_dropped": 0,
+        "right_dropped": 1,
+        "flags": [
+          "many_to_many",
+          "left_rows_dropped",
+          "fan_out",
+          "null_keys",
+          "right_rows_dropped"
+        ]
+      },
+      "drift": {},
+      "outcome": {
+        "n_rows": 18,
+        "n_cols": 13,
+        "empty": false,
+        "null_rates": {
+          "hotel_name": 0.0556,
+          "city": 0.0556,
+          "country": 0.0556,
+          "rooms": 0.0556,
+          "city_name": 0.3889,
+          "event_date": 0.3889,
+          "event_name": 0.3889,
+          "expected_attendance": 0.3889
+        },
+        "all_null_columns": [],
+        "newly_all_null_columns": [],
+        "contribution": {
+          "bookings": {
+            "columns_in_output": [
+              "booking_id",
+              "country",
+              "hotel_id",
+              "hotel_name",
+              "revenue",
+              "rooms",
+              "rooms_sold"
+            ],
+            "n_columns": 7,
+            "columns_dropped": [],
+            "contributed": true
+          },
+          "events_clean": {
+            "columns_in_output": [
+              "event_name",
+              "expected_attendance"
+            ],
+            "n_columns": 2,
+            "columns_dropped": [],
+            "contributed": true
+          }
+        },
+        "grain": {
+          "keys": [
+            "booking_id"
+          ],
+          "measurable": true,
+          "unique": false,
+          "n_distinct": 14,
+          "n_duplicated_keys": 4,
+          "max_multiplicity": 2,
+          "examples": [
+            {
+              "booking_id": "B0001",
+              "n_rows": 2
+            },
+            {
+              "booking_id": "B0002",
+              "n_rows": 2
+            },
+            {
+              "booking_id": "B0004",
+              "n_rows": 2
+            },
+            {
+              "booking_id": "B0009",
+              "n_rows": 2
+            }
+          ]
+        },
+        "flags": [
+          "grain_not_unique"
+        ]
+      },
+      "acknowledged": [],
+      "blocking": [
+        "grain_not_unique"
+      ],
+      "rationale": null,
+      "output": {
+        "n_rows": 18,
+        "columns": [
+          "booking_id",
+          "hotel_id",
+          "stay_date",
+          "rooms_sold",
+          "revenue",
+          "hotel_name",
+          "city",
+          "country",
+          "rooms",
+          "city_name",
+          "event_date",
+          "event_name",
+          "expected_attendance"
+        ],
+        "head": [
+          {
+            "booking_id": "B0001",
+            "hotel_id": "H001",
+            "stay_date": "2026-06-12",
+            "rooms_sold": 12,
+            "revenue": 2400.0,
+            "hotel_name": "Grand Riverside",
+            "city": "paris",
+            "country": "FR",
+            "rooms": 220.0,
+            "city_name": "paris",
+            "event_date": "2026-06-12",
+            "event_name": "Marathon",
+            "expected_attendance": 40000.0
+          },
+          {
+            "booking_id": "B0001",
+            "hotel_id": "H001",
+            "stay_date": "2026-06-12",
+            "rooms_sold": 12,
+            "revenue": 2400.0,
+            "hotel_name": "Grand Riverside",
+            "city": "paris",
+            "country": "FR",
+            "rooms": 220.0,
+            "city_name": "paris",
+            "event_date": "2026-06-12",
+            "event_name": "Tech Summit",
+            "expected_attendance": 15000.0
+          },
+          {
+            "booking_id": "B0002",
+            "hotel_id": "H001",
+            "stay_date": "2026-06-12",
+            "rooms_sold": 8,
+            "revenue": 1600.0,
+            "hotel_name": "Grand Riverside",
+            "city": "paris",
+            "country": "FR",
+            "rooms": 220.0,
+            "city_name": "paris",
+            "event_date": "2026-06-12",
+            "event_name": "Marathon",
+            "expected_attendance": 40000.0
+          },
+          {
+            "booking_id": "B0002",
+            "hotel_id": "H001",
+            "stay_date": "2026-06-12",
+            "rooms_sold": 8,
+            "revenue": 1600.0,
+            "hotel_name": "Grand Riverside",
+            "city": "paris",
+            "country": "FR",
+            "rooms": 220.0,
+            "city_name": "paris",
+            "event_date": "2026-06-12",
+            "event_name": "Tech Summit",
+            "expected_attendance": 15000.0
+          },
+          {
+            "booking_id": "B0003",
+            "hotel_id": "H001",
+            "stay_date": "2026-06-13",
+            "rooms_sold": 15,
+            "revenue": 3000.0,
+            "hotel_name": "Grand Riverside",
+            "city": "paris",
+            "country": "FR",
+            "rooms": 220.0,
+            "city_name": null,
+            "event_date": null,
+            "event_name": null,
+            "expected_attendance": null
+          }
+        ]
+      }
+    }
+  ]
+}

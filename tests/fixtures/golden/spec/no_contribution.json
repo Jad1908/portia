@@ -1,0 +1,166 @@
+{
+  "steps": [
+    {
+      "id": "bookings_events",
+      "op": "join",
+      "provenance": {
+        "op": "join",
+        "how": "left",
+        "keys": {
+          "left": [
+            "hotel_id"
+          ],
+          "right": [
+            "city_name"
+          ]
+        },
+        "relationship": "many:many",
+        "input_rows": {
+          "left": 14,
+          "right": 7
+        },
+        "result_rows": 14,
+        "predicted_rows": 14,
+        "matches_prediction": true,
+        "left_dropped": 0,
+        "right_dropped": 7,
+        "flags": [
+          "no_matches",
+          "many_to_many",
+          "left_rows_dropped",
+          "low_overlap",
+          "right_rows_dropped"
+        ]
+      },
+      "drift": {},
+      "outcome": {
+        "n_rows": 14,
+        "n_cols": 9,
+        "empty": false,
+        "null_rates": {
+          "city_name": 1.0,
+          "event_date": 1.0,
+          "event_name": 1.0,
+          "expected_attendance": 1.0
+        },
+        "all_null_columns": [
+          "city_name",
+          "event_date",
+          "event_name",
+          "expected_attendance"
+        ],
+        "newly_all_null_columns": [
+          "city_name",
+          "event_date",
+          "event_name",
+          "expected_attendance"
+        ],
+        "contribution": {
+          "otb": {
+            "columns_in_output": [
+              "booking_id",
+              "revenue",
+              "rooms_sold",
+              "stay_date"
+            ],
+            "n_columns": 4,
+            "columns_dropped": [],
+            "contributed": true
+          },
+          "city_events": {
+            "columns_in_output": [
+              "event_date",
+              "event_name",
+              "expected_attendance"
+            ],
+            "n_columns": 3,
+            "columns_dropped": [],
+            "contributed": false
+          }
+        },
+        "grain": null,
+        "flags": [
+          "all_null_column",
+          "source_did_not_contribute"
+        ]
+      },
+      "acknowledged": [],
+      "blocking": [
+        "all_null_column",
+        "source_did_not_contribute"
+      ],
+      "rationale": null,
+      "output": {
+        "n_rows": 14,
+        "columns": [
+          "booking_id",
+          "hotel_id",
+          "stay_date",
+          "rooms_sold",
+          "revenue",
+          "city_name",
+          "event_date",
+          "event_name",
+          "expected_attendance"
+        ],
+        "head": [
+          {
+            "booking_id": "B0001",
+            "hotel_id": "H001",
+            "stay_date": "2026-06-12",
+            "rooms_sold": 12,
+            "revenue": 2400.0,
+            "city_name": null,
+            "event_date": null,
+            "event_name": null,
+            "expected_attendance": null
+          },
+          {
+            "booking_id": "B0002",
+            "hotel_id": "H001",
+            "stay_date": "2026-06-12",
+            "rooms_sold": 8,
+            "revenue": 1600.0,
+            "city_name": null,
+            "event_date": null,
+            "event_name": null,
+            "expected_attendance": null
+          },
+          {
+            "booking_id": "B0003",
+            "hotel_id": "H001",
+            "stay_date": "2026-06-13",
+            "rooms_sold": 15,
+            "revenue": 3000.0,
+            "city_name": null,
+            "event_date": null,
+            "event_name": null,
+            "expected_attendance": null
+          },
+          {
+            "booking_id": "B0004",
+            "hotel_id": "H002",
+            "stay_date": "2026-06-12",
+            "rooms_sold": 4,
+            "revenue": 760.0,
+            "city_name": null,
+            "event_date": null,
+            "event_name": null,
+            "expected_attendance": null
+          },
+          {
+            "booking_id": "B0005",
+            "hotel_id": "H002",
+            "stay_date": "2026-06-14",
+            "rooms_sold": 6,
+            "revenue": 1140.0,
+            "city_name": null,
+            "event_date": null,
+            "event_name": null,
+            "expected_attendance": null
+          }
+        ]
+      }
+    }
+  ]
+}

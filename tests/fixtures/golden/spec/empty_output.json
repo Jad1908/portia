@@ -1,0 +1,57 @@
+{
+  "steps": [
+    {
+      "id": "no_such_hotel",
+      "op": "sql",
+      "provenance": {
+        "op": "sql",
+        "sql": "SELECT * FROM otb WHERE hotel_id = 'H000'",
+        "inputs": [
+          "otb"
+        ],
+        "input_rows": {
+          "otb": 14
+        },
+        "result_rows": 0,
+        "columns": [
+          "booking_id",
+          "hotel_id",
+          "stay_date",
+          "rooms_sold",
+          "revenue"
+        ],
+        "flags": []
+      },
+      "drift": {},
+      "outcome": {
+        "n_rows": 0,
+        "n_cols": 5,
+        "empty": true,
+        "null_rates": {},
+        "all_null_columns": [],
+        "newly_all_null_columns": [],
+        "contribution": {},
+        "grain": null,
+        "flags": [
+          "empty_output"
+        ]
+      },
+      "acknowledged": [],
+      "blocking": [
+        "empty_output"
+      ],
+      "rationale": null,
+      "output": {
+        "n_rows": 0,
+        "columns": [
+          "booking_id",
+          "hotel_id",
+          "stay_date",
+          "rooms_sold",
+          "revenue"
+        ],
+        "head": []
+      }
+    }
+  ]
+}

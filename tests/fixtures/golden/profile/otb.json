@@ -1,0 +1,113 @@
+{
+  "n_rows": 14,
+  "n_cols": 5,
+  "candidate_keys": [
+    "booking_id",
+    "rooms_sold",
+    "revenue"
+  ],
+  "columns": [
+    {
+      "name": "booking_id",
+      "dtype": "str",
+      "inferred": "text",
+      "n_null": 0,
+      "null_rate": 0.0,
+      "n_distinct": 14,
+      "distinct_rate": 1.0,
+      "samples": [
+        "B0001",
+        "B0002",
+        "B0003"
+      ],
+      "top": "B0001",
+      "top_freq": 1,
+      "flags": [
+        "possible_key",
+        "high_cardinality"
+      ]
+    },
+    {
+      "name": "hotel_id",
+      "dtype": "str",
+      "inferred": "categorical",
+      "n_null": 0,
+      "null_rate": 0.0,
+      "n_distinct": 5,
+      "distinct_rate": 0.3571,
+      "samples": [
+        "H001",
+        "H001",
+        "H001"
+      ],
+      "top": "H001",
+      "top_freq": 4,
+      "flags": []
+    },
+    {
+      "name": "stay_date",
+      "dtype": "str",
+      "inferred": "categorical",
+      "n_null": 0,
+      "null_rate": 0.0,
+      "n_distinct": 7,
+      "distinct_rate": 0.5,
+      "samples": [
+        "2026-06-12",
+        "2026-06-12",
+        "2026-06-13"
+      ],
+      "top": "2026-06-12",
+      "top_freq": 6,
+      "flags": []
+    },
+    {
+      "name": "rooms_sold",
+      "dtype": "int64",
+      "inferred": "integer",
+      "n_null": 0,
+      "null_rate": 0.0,
+      "n_distinct": 14,
+      "distinct_rate": 1.0,
+      "samples": [
+        12,
+        8,
+        15
+      ],
+      "min": 2,
+      "max": 25,
+      "mean": 10.5,
+      "std": 7.1441,
+      "q25": 5.25,
+      "median": 8.5,
+      "q75": 14.25,
+      "flags": [
+        "possible_key"
+      ]
+    },
+    {
+      "name": "revenue",
+      "dtype": "float64",
+      "inferred": "float",
+      "n_null": 0,
+      "null_rate": 0.0,
+      "n_distinct": 14,
+      "distinct_rate": 1.0,
+      "samples": [
+        2400.0,
+        1600.0,
+        3000.0
+      ],
+      "min": 380.0,
+      "max": 61500.0,
+      "mean": 9731.4286,
+      "std": 20049.2466,
+      "q25": 885.0,
+      "median": 1790.0,
+      "q75": 3720.0,
+      "flags": [
+        "possible_key"
+      ]
+    }
+  ]
+}

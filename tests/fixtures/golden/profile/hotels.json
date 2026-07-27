@@ -1,0 +1,109 @@
+{
+  "n_rows": 5,
+  "n_cols": 5,
+  "candidate_keys": [
+    "hotel_id",
+    "hotel_name",
+    "rooms"
+  ],
+  "columns": [
+    {
+      "name": "hotel_id",
+      "dtype": "str",
+      "inferred": "text",
+      "n_null": 0,
+      "null_rate": 0.0,
+      "n_distinct": 5,
+      "distinct_rate": 1.0,
+      "samples": [
+        "H001",
+        "H002",
+        "H003"
+      ],
+      "top": "H001",
+      "top_freq": 1,
+      "flags": [
+        "possible_key",
+        "high_cardinality"
+      ]
+    },
+    {
+      "name": "hotel_name",
+      "dtype": "str",
+      "inferred": "text",
+      "n_null": 0,
+      "null_rate": 0.0,
+      "n_distinct": 5,
+      "distinct_rate": 1.0,
+      "samples": [
+        "Grand Riverside",
+        "Le Petit Nord",
+        "Marina Bay Suites"
+      ],
+      "top": "Grand Riverside",
+      "top_freq": 1,
+      "flags": [
+        "possible_key",
+        "high_cardinality"
+      ]
+    },
+    {
+      "name": "city",
+      "dtype": "str",
+      "inferred": "categorical",
+      "n_null": 0,
+      "null_rate": 0.0,
+      "n_distinct": 3,
+      "distinct_rate": 0.6,
+      "samples": [
+        "Paris",
+        "Paris",
+        "Barcelona"
+      ],
+      "top": "Paris",
+      "top_freq": 2,
+      "flags": []
+    },
+    {
+      "name": "country",
+      "dtype": "str",
+      "inferred": "categorical",
+      "n_null": 0,
+      "null_rate": 0.0,
+      "n_distinct": 3,
+      "distinct_rate": 0.6,
+      "samples": [
+        "FR",
+        "FR",
+        "ES"
+      ],
+      "top": "FR",
+      "top_freq": 2,
+      "flags": []
+    },
+    {
+      "name": "rooms",
+      "dtype": "int64",
+      "inferred": "integer",
+      "n_null": 0,
+      "null_rate": 0.0,
+      "n_distinct": 5,
+      "distinct_rate": 1.0,
+      "samples": [
+        220,
+        85,
+        310
+      ],
+      "min": 64,
+      "max": 310,
+      "mean": 159.8,
+      "std": 103.1271,
+      "q25": 85.0,
+      "median": 120.0,
+      "q75": 220.0,
+      "flags": [
+        "possible_key"
+      ]
+    }
+  ]
+}

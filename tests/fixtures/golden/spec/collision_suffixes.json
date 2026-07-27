@@ -1,0 +1,168 @@
+{
+  "steps": [
+    {
+      "id": "joined",
+      "op": "join",
+      "provenance": {
+        "op": "join",
+        "how": "inner",
+        "keys": {
+          "left": [
+            "customer_id"
+          ],
+          "right": [
+            "customer_id"
+          ]
+        },
+        "relationship": "1:many",
+        "input_rows": {
+          "left": 40,
+          "right": 6
+        },
+        "result_rows": 6,
+        "predicted_rows": 6,
+        "matches_prediction": true,
+        "left_dropped": 35,
+        "right_dropped": 0,
+        "flags": [
+          "left_rows_dropped",
+          "fan_out",
+          "low_overlap"
+        ]
+      },
+      "drift": {},
+      "outcome": {
+        "n_rows": 6,
+        "n_cols": 9,
+        "empty": false,
+        "null_rates": {
+          "notes": 0.6667,
+          "legacy_col": 1.0
+        },
+        "all_null_columns": [
+          "legacy_col"
+        ],
+        "newly_all_null_columns": [],
+        "contribution": {
+          "messy": {
+            "columns_in_output": [
+              "country",
+              "legacy_col",
+              "mixed_ref",
+              "name_x",
+              "notes",
+              "signup_amount",
+              "source"
+            ],
+            "n_columns": 7,
+            "columns_dropped": [],
+            "contributed": true
+          },
+          "sales": {
+            "columns_in_output": [
+              "name_y"
+            ],
+            "n_columns": 1,
+            "columns_dropped": [],
+            "contributed": true
+          }
+        },
+        "grain": {
+          "keys": [
+            "customer_id"
+          ],
+          "measurable": true,
+          "unique": false,
+          "n_distinct": 5,
+          "n_duplicated_keys": 1,
+          "max_multiplicity": 2,
+          "examples": [
+            {
+              "customer_id": 1001,
+              "n_rows": 2
+            }
+          ]
+        },
+        "flags": [
+          "grain_not_unique"
+        ]
+      },
+      "acknowledged": [
+        "grain_not_unique"
+      ],
+      "blocking": [],
+      "rationale": "customer 1001 is duplicated in the dimension table — a known data-quality bug, kept rather than silently deduped.",
+      "output": {
+        "n_rows": 6,
+        "columns": [
+          "customer_id",
+          "name_x",
+          "country",
+          "signup_amount",
+          "notes",
+          "source",
+          "legacy_col",
+          "mixed_ref",
+          "name_y"
+        ],
+        "head": [
+          {
+            "customer_id": 1004,
+            "name_x": "Firm E4",
+            "country": "DE",
+            "signup_amount": "3008.36",
+            "notes": null,
+            "source": "import_v2",
+            "legacy_col": null,
+            "mixed_ref": "4",
+            "name_y": "Echo"
+          },
+          {
+            "customer_id": 1001,
+            "name_x": "Firm A0",
+            "country": "FR",
+            "signup_amount": "8972.27",
+            "notes": null,
+            "source": "import_v2",
+            "legacy_col": null,
+            "mixed_ref": "ref-1",
+            "name_y": "Bravo"
+          },
+          {
+            "customer_id": 1001,
+            "name_x": "Firm A0",
+            "country": "FR",
+            "signup_amount": "8972.27",
+            "notes": null,
+            "source": "import_v2",
+            "legacy_col": null,
+            "mixed_ref": "ref-1",
+            "name_y": "Bravo-dup"
+          },
+          {
+            "customer_id": 1002,
+            "name_x": "Firm A0",
+            "country": "UK",
+            "signup_amount": "7758.32",
+            "notes": null,
+            "source": "import_v2",
+            "legacy_col": null,
+            "mixed_ref": "2",
+            "name_y": "Charlie"
+          },
+          {
+            "customer_id": 1003,
+            "name_x": "Firm D3",
+            "country": "UK",
+            "signup_amount": "7758.32",
+            "notes": "note 3",
+            "source": "import_v2",
+            "legacy_col": null,
+            "mixed_ref": "ref-3",
+            "name_y": "Delta"
+          }
+        ]
+      }
+    }
+  ]
+}
