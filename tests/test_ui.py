@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from portia.checks.outcome import BLOCKING_FLAGS
+from portia.ui import state
 from portia.ui.state import App, Decision
 
 pytest.importorskip("nicegui", reason="the app needs the `ui` extra")
@@ -70,18 +71,35 @@ def test_the_accent_follows_the_state_the_project_is_in():
 def test_a_turn_in_flight_makes_the_app_busy():
     app = App()
     assert app.busy is False
-    turn = app.start_turn("merge these", model="claude-haiku-4-5", effort="low")
+    stream = app.start_turn("merge these", model="claude-haiku-4-5", effort="low")
     assert app.busy is True
-    turn.running = False
-    assert app.busy is False and turn.ended is True
+    stream.turn.running = False
+    assert app.busy is False and stream.turn.ended is True
 
 
 def test_starting_a_turn_clears_the_last_one():
     """A turn is one shot; a new one starts fresh, per the engine it drives."""
     app = App()
-    app.rows = ["something from before"]
+    app.stream().rows = ["something from before"]
     app.start_turn("again", model="m", effort=None)
     assert app.rows == []
+
+
+def test_indexing_and_chat_keep_separate_transcripts():
+    """Two jobs with different rhythms; interleaving them made both hard to read."""
+    app = App()
+    app.stream(state.CHAT).rows = ["a goal I typed"]
+    app.start_turn("index these", model="m", effort=None, kind=state.INDEXING)
+    assert app.tab == state.INDEX, "the pane follows the turn that just started"
+    assert app.stream(state.CHAT).rows == ["a goal I typed"], "the chat is untouched"
+    assert app.stream(state.INDEX).rows == []
+
+
+def test_a_turn_anywhere_makes_the_app_busy():
+    """The engine is single-turn: a chat turn must block an indexing one."""
+    app = App()
+    app.start_turn("index these", model="m", effort=None, kind=state.INDEXING)
+    assert app.busy is True
 
 
 @pytest.fixture
@@ -96,14 +114,15 @@ def loop():
 def test_the_pending_decision_is_the_unresolved_one(loop):
     """The loop is blocked on the most recent unanswered one."""
     app = App()
+    stream = app.stream()
     first = Decision("approval", {}, loop.create_future())
     second = Decision("approval", {}, loop.create_future())
-    app.rows = [first, second]
-    assert app.pending is second
+    stream.rows = [first, second]
+    assert stream.pending is second
     second.resolve(True)
-    assert app.pending is first
+    assert stream.pending is first
     first.resolve(True)
-    assert app.pending is None
+    assert stream.pending is None
 
 
 def test_resolving_a_decision_hands_the_answer_to_the_waiting_callback(loop):

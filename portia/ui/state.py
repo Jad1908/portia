@@ -36,6 +36,10 @@ __all__ = [
     "GOAL",
     "INDEXING",
     "REREAD",
+    "CHAT",
+    "INDEX",
+    "TABS",
+    "Stream",
 ]
 
 #: What a left-pane selection can be. ``None`` means the workflow is in view.
@@ -72,12 +76,20 @@ class Decision:
             self.future.set_result(outcome)
 
 
-#: What a turn was started *for*. The transcript is one panel, and a turn you
-#: typed and a turn the app started on your behalf are different enough that the
-#: panel has to say which it is looking at.
+#: What a turn was started *for*.
 GOAL = "goal"
 INDEXING = "indexing"
 REREAD = "reread"
+
+#: The right pane's two tabs. A goal you typed and the catalog work the app runs
+#: on your behalf are different jobs with different rhythms, and interleaving
+#: them in one scroll made each harder to read than it is alone.
+CHAT = "chat"
+INDEX = "index"
+TABS = (CHAT, INDEX)
+
+#: Which tab a turn's transcript belongs to.
+TAB_FOR_KIND = {GOAL: CHAT, INDEXING: INDEX, REREAD: INDEX}
 
 
 @dataclass
@@ -97,6 +109,31 @@ class Turn:
     @property
     def ended(self) -> bool:
         return not self.running
+
+
+@dataclass
+class Stream:
+    """One tab's transcript: its rows, and the turn that produced them.
+
+    Two streams, one engine. The engine is single-turn, so at most one of these
+    is ever live — the split is about *reading* them apart, not about running
+    two at once.
+    """
+
+    rows: list[Any] = field(default_factory=list)
+    turn: Turn | None = None
+
+    @property
+    def busy(self) -> bool:
+        return self.turn is not None and self.turn.running
+
+    @property
+    def pending(self) -> Decision | None:
+        """The decision this stream is blocked on, if any."""
+        for row in reversed(self.rows):
+            if isinstance(row, Decision) and not row.resolved:
+                return row
+        return None
 
 
 @dataclass
@@ -131,9 +168,9 @@ class App:
     show_transcript: bool = True
     show_files: bool = True
 
-    #: The transcript, in the order things happened: `events.Event | Decision`.
-    rows: list[Any] = field(default_factory=list)
-    turn: Turn | None = None
+    #: One transcript per tab, and which tab is showing.
+    streams: dict[str, Stream] = field(default_factory=lambda: {t: Stream() for t in TABS})
+    tab: str = CHAT
 
     #: Turn settings, remembered between turns.
     goal: str = ""
@@ -160,18 +197,26 @@ class App:
         is primary; once a spec has steps, **Run** is. Never both at once."""
         return bool((self.spec or {}).get("steps"))
 
-    @property
-    def busy(self) -> bool:
-        """A turn is live. Starting a second one would interleave two streams."""
-        return self.turn is not None and self.turn.running
+    def stream(self, tab: str | None = None) -> Stream:
+        """One tab's transcript — the showing one unless another is named."""
+        return self.streams[tab or self.tab]
+
+    def stream_for(self, kind: str) -> Stream:
+        """Where a turn of this kind writes."""
+        return self.streams[TAB_FOR_KIND.get(kind, CHAT)]
 
     @property
-    def pending(self) -> Decision | None:
-        """The decision the loop is currently blocked on, if any."""
-        for row in reversed(self.rows):
-            if isinstance(row, Decision) and not row.resolved:
-                return row
-        return None
+    def rows(self) -> list[Any]:
+        return self.stream().rows
+
+    @property
+    def turn(self) -> Turn | None:
+        return self.stream().turn
+
+    @property
+    def busy(self) -> bool:
+        """A turn is live **anywhere**. Starting a second would interleave two."""
+        return any(s.busy for s in self.streams.values())
 
     def select(self, kind: str | None, name: str = "") -> None:
         self.selection = None if kind is None else (kind, name)
@@ -187,10 +232,17 @@ class App:
         effort: str | None,
         kind: str = GOAL,
         label: str = "",
-    ) -> Turn:
-        self.rows = []
-        self.turn = Turn(prompt=prompt, model=model, effort=effort, kind=kind, label=label)
-        return self.turn
+    ) -> Stream:
+        """Begin a turn in the stream its kind belongs to, and show that tab.
+
+        Switching is not a nicety: the turn is about to ask questions and request
+        writes, and a loop blocked behind a hidden tab is a loop that looks hung.
+        """
+        stream = self.stream_for(kind)
+        stream.rows = []
+        stream.turn = Turn(prompt=prompt, model=model, effort=effort, kind=kind, label=label)
+        self.tab = TAB_FOR_KIND.get(kind, CHAT)
+        return stream
 
 
 #: The one open project. See the module docstring for why it is a singleton.

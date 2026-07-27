@@ -46,16 +46,69 @@ ARG_CHARS = 160
 
 @ui.refreshable
 def pane() -> None:
-    _goal_input()
+    _tabs()
+    stream = APP.stream()
+    if APP.tab == state.CHAT:
+        _goal_input(stream)
+    else:
+        _index_header(stream)
     with ui.element("div").classes("p-scroll p-pad stack-md") as scroll:
-        if not APP.rows:
-            c.empty_note(_IDLE)
-        for row in APP.rows:
+        if not stream.rows:
+            c.empty_note(_IDLE if APP.tab == state.CHAT else _IDLE_INDEX)
+        for row in stream.rows:
             _row(row)
-        if APP.turn and APP.turn.ended:
-            _turn_ended()
-    if APP.turn is not None:
+        if stream.turn and stream.turn.ended:
+            _turn_ended(stream)
+    if stream.turn is not None:
         _stay_at_the_bottom(scroll)
+
+
+# --- the two tabs -----------------------------------------------------------
+
+
+def _tabs() -> None:
+    """Copilot and Indexing, side by side.
+
+    They are different jobs with different rhythms — one you drive, one the app
+    runs on your behalf — and interleaving them in a single scroll made each
+    harder to read than it is alone. The marks matter as much as the split: a
+    turn is live or a decision is waiting on a tab you cannot see, and the pane
+    has to say so or a blocked loop looks like a hung one.
+    """
+    with ui.element("div").classes("pane-tabs"):
+        for tab in state.TABS:
+            _tab(tab)
+
+
+def _tab(tab: str) -> None:
+    stream = APP.stream(tab)
+    classes = "pane-tab" + (" pane-tab--active" if tab == APP.tab else "")
+    with ui.element("div").classes(classes) as element:
+        ui.label(_TAB_LABEL[tab])
+        if stream.pending is not None:
+            ui.element("div").classes("pane-tab-dot pane-tab-dot--waiting").tooltip(_WAITING)
+        elif stream.busy:
+            ui.element("div").classes("pane-tab-dot").tooltip(_RUNNING)
+    element.on("click", lambda t=tab: _show_tab(t))
+
+
+def _show_tab(tab: str) -> None:
+    APP.tab = tab
+    pane.refresh()
+
+
+def _index_header(stream) -> None:
+    """What this tab is for, and what is happening in it."""
+    with ui.element("div").classes("p-pad stack-md"):
+        if stream.turn is not None:
+            _turn_banner(stream.turn)
+            if stream.busy:
+                with ui.element("div").classes("row-gap-sm"):
+                    ui.spinner(size="sm")
+                    c.caption("the copilot is working")
+        else:
+            c.caption(_INDEX_WHAT)
+    c.rule()
 
 
 def _stay_at_the_bottom(scroll: ui.element) -> None:
@@ -74,16 +127,12 @@ def _stay_at_the_bottom(scroll: ui.element) -> None:
 # --- the goal box -----------------------------------------------------------
 
 
-def _goal_input() -> None:
+def _goal_input(stream) -> None:
     from portia.agent.session import DEFAULT_MODEL, EFFORTS, MODELS
 
     with ui.element("div").classes("p-pad stack-md"):
-        with ui.element("div").classes("row-gap-sm"):
-            c.pane_title("Copilot")
-            if APP.busy:
-                c.caption(_spend())
-        if APP.turn is not None:
-            _running_state()
+        if stream.turn is not None:
+            _running_state(stream)
             return
 
         APP.model = APP.model or DEFAULT_MODEL
@@ -101,27 +150,21 @@ def _goal_input() -> None:
     c.rule()
 
 
-def _running_state() -> None:
-    _turn_banner()
-    if APP.busy:
+def _running_state(stream) -> None:
+    if stream.busy:
         with ui.element("div").classes("row-gap-sm"):
             ui.spinner(size="sm")
-            c.caption("the copilot is working")
-    c.rule()
+            c.caption(f"the copilot is working · {_spend()}")
 
 
-def _turn_banner() -> None:
-    """Say what this turn is, when the app started it rather than you.
+def _turn_banner(turn) -> None:
+    """What this turn is, and which half of indexing is actually running.
 
-    Indexing and re-reading run through the same panel as a goal you typed —
-    there is one copilot and one transcript — but they are not the same act, and
-    a panel that shows them identically is a panel you have to reconstruct from
-    the tool calls. The banner also keeps profiling and interpretation visibly
-    separate: the first already happened and was free, the second is what is
-    running now and costs a turn.
+    Profiling already happened and was free; what costs a turn is the
+    interpretation. A panel that merges the two is the "one merged spinner"
+    docs/DESIGN.md forbids.
     """
-    turn = APP.turn
-    if turn is None or turn.kind == state.GOAL:
+    if turn.kind == state.GOAL:
         return
     with ui.element("div").classes("turn-banner"):
         with ui.element("div").classes("row-gap-sm"):
@@ -356,8 +399,8 @@ def _resolved_write(decision: Decision) -> None:
 # --- the end of a turn ------------------------------------------------------
 
 
-def _turn_ended() -> None:
-    turn = APP.turn
+def _turn_ended(stream) -> None:
+    turn = stream.turn
     assert turn is not None
     with ui.element("div").classes("turn-ended"):
         if turn.error:
@@ -365,7 +408,7 @@ def _turn_ended() -> None:
         c.caption(_ended_line(turn))
         c.caption(_NO_FOLLOW_UP)
         with ui.element("div").classes("row-gap-sm"):
-            c.button("New turn", _new_turn, icon="refresh")
+            c.button("New turn", lambda: _new_turn(stream), icon="refresh")
 
 
 def _ended_line(turn: Any) -> str:
@@ -373,9 +416,9 @@ def _ended_line(turn: Any) -> str:
     return f"turn ended ({turn.subtype or 'stopped'}) · {turn.model}{cost}"
 
 
-def _new_turn() -> None:
-    APP.turn = None
-    APP.rows = []
+def _new_turn(stream) -> None:
+    stream.turn = None
+    stream.rows = []
     pane.refresh()
 
 
@@ -391,7 +434,13 @@ _BANNER_WHY = {
     state.REREAD: "The copilot is re-reading this source with your note in hand.",
 }
 
+_TAB_LABEL = {state.CHAT: "Copilot", state.INDEX: "Indexing"}
+_RUNNING = "a turn is running here"
+_WAITING = "this turn is waiting on you"
+
 _IDLE = "Nothing yet. Describe the goal above and press Go."
+_IDLE_INDEX = "Nothing indexed in this session."
+_INDEX_WHAT = "Reading a source lands here — from Add data, or from Ask the copilot on a source."
 _GOAL_PLACEHOLDER = "What do you want from this data?"
 _ANSWER_PLACEHOLDER = "…or answer in your own words"
 _NO_FOLLOW_UP = (

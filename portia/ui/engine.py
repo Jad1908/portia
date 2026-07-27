@@ -39,6 +39,7 @@ from pathlib import Path
 from portia import catalog
 from portia import spec as spec_module
 from portia.core.io import find_data_files, load_frame
+from portia.ui import state as State
 from portia.ui.state import App
 
 #: Where a dropped file lands, and where a run writes its tables. Relative to the
@@ -81,8 +82,8 @@ def open_project(path: str | Path, app: App) -> Path:
     app.run_error = None
     app.selection = None
     app.selected_step = None
-    app.rows = []
-    app.turn = None
+    app.streams = {tab: State.Stream() for tab in State.TABS}
+    app.tab = State.CHAT
     app.skipped_sources = False
     app.editing = app.asking = app.removing = None
     refresh_catalog(app)

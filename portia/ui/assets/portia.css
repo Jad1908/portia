@@ -1205,6 +1205,54 @@ body.body--dark .step-card {
   gap: var(--sp-md);
 }
 
+/* The right pane's tab strip. The active tab takes the accent as *foreground*
+ * plus a rule beneath it — a selected label, which the accent is allowed to be.
+ * No soft fill: that is reserved for the selected step card, the selected
+ * artifact row and the focused input, and nowhere else. */
+.pane-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface);
+}
+
+.pane-tab {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  padding: var(--sp-md) var(--sp-lg);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.1px;
+  color: var(--mute);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  white-space: nowrap;
+}
+.pane-tab:hover {
+  color: var(--body);
+}
+.pane-tab--active {
+  color: var(--accent-text);
+  border-bottom-color: var(--accent-primary);
+}
+
+/* A turn is live here, or waiting on you. Kind, not rank: the waiting dot is
+ * the accent because it is asking for you, not because it is worse. */
+.pane-tab-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: var(--mute);
+  flex: 0 0 auto;
+}
+.pane-tab-dot--waiting {
+  background: var(--accent-primary);
+}
+
 /* An indexing or re-read turn, in the panel it shares with the chat. Uncoloured
  * on purpose — it is a different *kind* of turn, not a more important one. */
 .turn-banner {

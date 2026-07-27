@@ -50,7 +50,9 @@ async def start(
 
     if APP.busy:
         return
-    turn = APP.start_turn(prompt, model=model, effort=effort, kind=kind, label=label)
+    stream = APP.start_turn(prompt, model=model, effort=effort, kind=kind, label=label)
+    turn = stream.turn
+    assert turn is not None
     transcript.pane.refresh()
 
     try:
@@ -71,7 +73,7 @@ async def start(
             cwd=str(APP.root),
             portia_dir=APP.portia_dir,
         ):
-            _record(event, turn)
+            _record(event, stream)
     except asyncio.CancelledError:
         turn.error = "interrupted"
         raise
@@ -84,15 +86,15 @@ async def start(
         transcript.pane.refresh()
 
 
-def _record(event: events.Event, turn: Any) -> None:
+def _record(event: events.Event, stream: state.Stream) -> None:
     from portia.ui import transcript
 
     if event.kind in _OWNED:
         return
-    if event.kind == events.RESULT:
-        turn.subtype = event.data.get("subtype")
-        turn.cost_usd = event.data.get("cost_usd")
-    APP.rows.append(event)
+    if event.kind == events.RESULT and stream.turn is not None:
+        stream.turn.subtype = event.data.get("subtype")
+        stream.turn.cost_usd = event.data.get("cost_usd")
+    stream.rows.append(event)
     if event.kind in _SYNC_ON:
         _sync_artifacts()
     transcript.pane.refresh()
@@ -122,12 +124,25 @@ async def confirm(tool_name: str, tool_input: dict) -> bool:
 
 
 def _stop(kind: str, payload: dict) -> Decision:
+    """Park a decision in the running turn's stream, and show that tab.
+
+    The loop is now blocked on a human. A question sitting behind a tab nobody
+    is looking at is indistinguishable from a hung turn, so the pane follows the
+    decision rather than waiting to be found.
+    """
     from portia.ui import transcript
 
     decision = Decision(kind, payload, asyncio.get_running_loop().create_future())
-    APP.rows.append(decision)
+    stream = _running_stream()
+    stream.rows.append(decision)
+    APP.tab = next(tab for tab, s in APP.streams.items() if s is stream)
     transcript.pane.refresh()
     return decision
+
+
+def _running_stream() -> state.Stream:
+    """Whichever stream owns the live turn. The engine only ever runs one."""
+    return next((s for s in APP.streams.values() if s.busy), APP.stream())
 
 
 def _resolve_orphans() -> None:
@@ -137,9 +152,10 @@ def _resolve_orphans() -> None:
     still waiting. Cancel the future rather than leave the panel showing a
     decision that will never be read.
     """
-    for row in APP.rows:
-        if isinstance(row, Decision) and not row.resolved and not row.future.done():
-            row.future.cancel()
+    for stream in APP.streams.values():
+        for row in stream.rows:
+            if isinstance(row, Decision) and not row.resolved and not row.future.done():
+                row.future.cancel()
 
 
 # --- keeping the other panes honest -----------------------------------------

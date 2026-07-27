@@ -395,9 +395,23 @@ These exist so a test run never needs a terminal (`VISION.md` → "The no-termin
 
 ### Right pane — the copilot
 
+**`pane-tabs`** — **Copilot** | **Indexing**, at the top of the right pane
+- Active tab: `{colors.accent-text}` label with a 2px `{colors.accent-primary}` rule beneath.
+  Inactive: `{colors.mute}`. **No soft fill** — `{colors.accent-soft}` keeps its three jobs.
+- Two transcripts, not one filtered view. A goal you typed and the catalog work the app runs on your
+  behalf are different jobs with different rhythms, and interleaving them in one scroll made each
+  harder to read than it is alone.
+- **Each tab carries a dot when something is happening there**: `{colors.mute}` while a turn runs,
+  `{colors.accent-primary}` when that turn is *waiting on you*. This is not decoration — the engine
+  is single-turn, so a question parked behind the tab you are not looking at is indistinguishable
+  from a hung turn. For the same reason **the pane follows a decision**: starting a turn shows its
+  tab, and a question or write confirmation switches to its tab when it arrives.
+- Kind, never rank: the waiting dot takes the accent because it is asking for you, not because it
+  is worse than anything else on screen.
+
 **`transcript-pane`** — the live turn, and replayed past ones
 - Fill `{colors.surface}`, padding `{spacing.lg}`. Rows in event order, streamed as `session.run`
-  yields them.
+  yields them. One per tab.
 - **`goal-input`** pinned at the top: a `text-input` at `{typography.body-md}`, model/effort
   selectors as `segmented-control`s, and the `button-primary` **Go**. The model and effort in play
   are stated in `{colors.mute}` `{typography.caption}` for the duration of the turn — an expensive
