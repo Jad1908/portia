@@ -41,7 +41,7 @@ GRAPH_SPLIT = 38
 async def pane() -> None:
     kind, name = APP.selection or (None, "")
     if kind == SOURCE:
-        _source_inspector(name)
+        await _source_inspector(name)
     elif kind == OUTPUT:
         await _output_inspector(name)
     elif kind == RUN:
@@ -230,7 +230,7 @@ def _table(frame) -> None:
     report is that the four groups can be read at a glance. The label carries
     the shape, so the table is never a surprise you have to open to size up.
     """
-    label = f"table · {c.count(len(frame), 'row')} × {c.count(frame.shape[1], 'column')}"
+    label = f"preview · {c.count(len(frame), 'row')} × {c.count(frame.shape[1], 'column')}"
     c.collapsed(label, lambda: c.table_preview(frame))
 
 
@@ -294,9 +294,15 @@ def _uncoloured_flags(flags: list[str]) -> None:
 # --- inspectors -------------------------------------------------------------
 
 
-def _source_inspector(name: str) -> None:
-    """A source's catalog entry — the prose read, the roles, the check facts."""
+async def _source_inspector(name: str) -> None:
+    """A source's catalog entry — the prose read, the roles, the check facts, the rows.
+
+    The catalog is what the *copilot* sees, and it never sees the rows. A person
+    reading the same screen usually wants to, so the data is here too — the one
+    place in the app where the difference between the two views is deliberate.
+    """
     entry = APP.sources.get(name)
+    frame = await _source_frame(entry) if entry else None
     with ui.element("div").classes("p-scroll p-pad stack-lg"):
         _inspector_header(name, "the catalog's entry for this source")
         if entry is None:
@@ -307,6 +313,19 @@ def _source_inspector(name: str) -> None:
             c.kv("candidate_keys", entry.get("candidate_keys") or "(none)")
         _group("summary", lambda: c.text(entry.get("summary", "")))
         _group("columns", lambda: _columns(entry.get("columns") or []))
+        if frame is not None:
+            _group("preview", lambda: c.table_preview(frame))
+
+
+async def _source_frame(entry: dict):
+    """The source's rows, or None if the file has moved since it was indexed."""
+    path = APP.root / str(entry.get("source", ""))
+    if not path.exists():
+        return None
+    try:
+        return await engine.read_frame(path)
+    except Exception:  # noqa: BLE001 — a missing preview must not blank the pane
+        return None
 
 
 #: The per-column facts, each as (icon, heading). The **heading names the fact in

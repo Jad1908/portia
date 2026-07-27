@@ -25,9 +25,9 @@ SPEC = "spec"
 OUTPUT = "output"
 RUN = "run"
 
-#: How many rows of a produced table the preview shows. The count is stated on
-#: screen (`showing N of M`) rather than implied.
-PREVIEW_ROWS = 25
+#: How much of a table a preview shows — one number for every surface, so
+#: "showing 15 of 40" means the same thing in the app and in a saved report.
+from portia.core.present import PREVIEW_ROWS  # noqa: E402,F401  (re-export)
 
 
 @dataclass

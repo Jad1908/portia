@@ -16,10 +16,54 @@ from typing import Any
 
 import yaml
 
+#: How much of a table a preview shows. One number for every surface: the app's
+#: table panels and the saved report both cut here, so "showing 15 of 40" means
+#: the same thing wherever you read it.
+PREVIEW_ROWS = 15
+PREVIEW_COLS = 12
+
+#: A null cell. Visible, never blank, and never zero — a blank cell is
+#: indistinguishable from an empty string, which is a different fact.
+NULL_CELL = "·"
+
 
 def count(n: int, word: str) -> str:
     """`1 step` / `2 steps`. A count is a measured number; it should read like one."""
     return f"{n} {word}" if n == 1 else f"{n} {word}s"
+
+
+def frame_to_markdown(frame: Any, *, rows: int = PREVIEW_ROWS, cols: int = PREVIEW_COLS) -> str:
+    """The head of a table as markdown, and an honest count of what was cut.
+
+    For the saved run report: a report you can read without the CSV beside it is
+    worth more than one that only describes a table in the abstract.
+    """
+    if frame is None or len(frame) == 0:
+        return "_(no rows)_"
+
+    shown = frame.iloc[:rows, :cols]
+    names = [str(c) for c in shown.columns]
+    lines = [
+        "| " + " | ".join(names) + " |",
+        "| " + " | ".join("---" for _ in names) + " |",
+    ]
+    lines += [
+        "| " + " | ".join(_cell(v) for v in row) + " |"
+        for row in shown.itertuples(index=False, name=None)
+    ]
+
+    note = f"_showing {count(len(shown), 'row')} of {count(len(frame), 'row')}"
+    if frame.shape[1] > cols:
+        note += f", {count(len(names), 'column')} of {count(frame.shape[1], 'column')}"
+    lines += ["", note + "_"]
+    return "\n".join(lines)
+
+
+def _cell(value: Any) -> str:
+    """One table cell. A pipe inside a value would otherwise split the row."""
+    if value is None or value != value:  # NaN is the only value unequal to itself
+        return NULL_CELL
+    return str(value).replace("|", "\\|")
 
 
 def format_rate(rate: float | None) -> str:

@@ -42,16 +42,35 @@ def project_open() -> None:
                 ui.label("portia").classes("t-display")
             c.text(_OPEN_SUBTITLE, color="c-mute")
 
+            # Browse is the way in; typing an absolute path is the fallback for
+            # a machine with no chooser, or for a directory that doesn't exist
+            # yet — which the chooser cannot express and a fresh test run needs.
+            if engine.can_browse():
+                with ui.element("div").classes("row-gap-sm"):
+                    c.button("Browse…", _browse, kind="primary", icon="folder_open")
+                    c.caption(_BROWSE_HINT)
+
             path = (
                 ui.input(placeholder=str(Path.home() / "portia-run1"))
                 .classes("p-field p-field-mono w-full")
-                .props("borderless autofocus")
+                .props("borderless")
             )
             with ui.element("div").classes("row-gap-sm"):
-                c.button("Open", lambda: _open(path.value), kind="primary")
-                c.caption(_OPEN_HINT)
+                c.button("Open", lambda: _open(path.value), kind=_open_kind())
+                c.caption(_OPEN_NEW)
 
             _recents()
+
+
+def _open_kind() -> str:
+    """One accent action: Browse where there is one, Open where there isn't."""
+    return "tertiary" if engine.can_browse() else "primary"
+
+
+async def _browse() -> None:
+    chosen = await engine.browse_for_folder()
+    if chosen is not None:
+        _open(str(chosen))
 
 
 def _recents() -> None:
@@ -291,7 +310,8 @@ def _default_model() -> str:
 
 
 _OPEN_SUBTITLE = "Open a project directory. If it doesn't exist yet, it gets created."
-_OPEN_HINT = "one directory per test run"
+_BROWSE_HINT = "pick an existing folder"
+_OPEN_NEW = "…or type a path, including one that doesn't exist yet"
 _CONTEXT_WHY = (
     "This is what makes a column's meaning decidable. A generic brief yields generic judgment."
 )

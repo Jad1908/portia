@@ -191,7 +191,9 @@ positive at small sizes to keep the cool surfaces airy.
 - Minimum viewport ~`1024×640`. Left default ~260px (collapsible). Right default ~380px
   (toggleable). The workflow pane is always present and takes the remainder.
 - Panes are divided by a 1px `{colors.hairline}` — no gutters, no shadows between them. The canvas
-  runs continuously behind all three.
+  runs continuously behind all three. **Every divider is draggable**, including the graph/report one:
+  a hairline at rest, taking `{colors.accent-primary}` only while it is being dragged, because it is
+  a pane edge first and a control second. Widths are percentages, so they survive a resized window.
 - Left sits on `{colors.canvas}`; workflow and transcript sit on `{colors.surface}`.
 
 ### Width behavior
@@ -450,9 +452,11 @@ questions-and-insights UX *is* the product" — and they get the most design att
 ### Chrome
 
 **`toolbar`** — the top bar
-- `{colors.canvas}`, 1px `{colors.hairline}` bottom rule. Holds: the **session name** (left), a spec
-  switcher, a spacer, then "Run", "Write outputs" and "Save report" (right), the files and
-  transcript toggles, and the light/dark override.
+- `{colors.canvas}`, 1px `{colors.hairline}` bottom rule. Holds: the mark and the **session name**
+  (left), a spacer, then "Run", "Write outputs" and "Save report" (right), the files and transcript
+  toggles, and the light/dark override.
+- **No spec switcher.** A spec is an artifact and artifacts are chosen in the left pane, where the
+  sources, outputs and runs are. A second place to choose one is a second thing to keep in sync.
 - **Run writes nothing.** The two save actions beside it are how a result becomes durable, and both
   are things you press rather than things that happen to you — the same rule as every other write
   in the app.

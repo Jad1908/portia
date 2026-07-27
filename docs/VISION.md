@@ -103,6 +103,11 @@ not a gadget — a place you actually work.
 >
 > - **Where a source's catalog entry renders.** It replaces the workflow in the middle pane, with a
 >   "Back to workflow" out. The spec says clicking a source shows its entry and doesn't say where.
+>   It also shows the source's **rows**, which the catalog does not hold — the copilot never sees
+>   them, and a person reading the same screen usually wants to.
+> - **Opening a project is a folder chooser**, not a path field. `Browse…` shells out to the OS's own
+>   dialog (macOS today; the path field is the fallback elsewhere, and the only way to name a
+>   directory that does not exist yet, which a fresh test run needs).
 > - **Which action carries the accent.** `DESIGN.md` puts **Run** in the toolbar and **Go** in the
 >   transcript, and separately allows one solid accent fill per view — so V0 gives it to whichever
 >   is the way forward: **Go** until a spec has steps, **Run** once it does.

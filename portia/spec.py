@@ -43,7 +43,7 @@ from portia.checks.outcome import (
     render_outcome,
 )
 from portia.core.io import load_frame
-from portia.core.present import format_rate, inline
+from portia.core.present import format_rate, frame_to_markdown, inline
 from portia.ops import apply_join, apply_normalize, apply_sql
 from portia.ops.sql import render_text as render_sql
 
@@ -338,6 +338,10 @@ def _report_step(r: StepResult) -> list[str]:
         lines += _report_table("drift", drift)
     if r.rationale and not r.acknowledged:
         lines += ["### rationale", "", r.rationale, ""]
+    if r.frame is not None:
+        # The table itself, not just a description of it. A report you can read
+        # without the CSV open beside it is the one that gets read.
+        lines += ["### preview", "", frame_to_markdown(r.frame), ""]
     return lines
 
 

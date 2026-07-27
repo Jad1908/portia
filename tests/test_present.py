@@ -4,7 +4,14 @@ has to spend working out which one to believe."""
 
 from __future__ import annotations
 
-from portia.core.present import as_yaml, count, format_rate, inline
+from portia.core.present import (
+    NULL_CELL,
+    as_yaml,
+    count,
+    format_rate,
+    frame_to_markdown,
+    inline,
+)
 
 # --- rates -------------------------------------------------------------------
 
@@ -78,3 +85,44 @@ def test_one_is_singular_and_everything_else_is_not():
     assert count(1, "step") == "1 step"
     assert count(0, "step") == "0 steps"
     assert count(2, "step") == "2 steps"
+
+
+# --- a table as markdown -----------------------------------------------------
+
+
+def _frame():
+    import pandas as pd
+
+    return pd.DataFrame({"a": [1, 2, None], "b": ["x", "y|z", "w"]})
+
+
+def test_a_frame_becomes_a_markdown_table():
+    md = frame_to_markdown(_frame())
+    assert "| a | b |" in md
+    assert "| --- | --- |" in md
+
+
+def test_a_null_cell_is_visible_never_blank():
+    """A blank cell is indistinguishable from an empty string — a different fact."""
+    assert f"| {NULL_CELL} |" in frame_to_markdown(_frame())
+
+
+def test_a_pipe_in_a_value_cannot_break_the_row():
+    assert "y\\|z" in frame_to_markdown(_frame())
+
+
+def test_the_preview_says_how_much_it_cut():
+    md = frame_to_markdown(_frame(), rows=2)
+    assert "_showing 2 rows of 3 rows_" in md
+
+
+def test_cutting_columns_is_stated_too():
+    md = frame_to_markdown(_frame(), cols=1)
+    assert "1 column of 2 columns" in md
+
+
+def test_an_empty_frame_says_so_rather_than_rendering_an_empty_table():
+    import pandas as pd
+
+    assert frame_to_markdown(pd.DataFrame({"a": []})) == "_(no rows)_"
+    assert frame_to_markdown(None) == "_(no rows)_"

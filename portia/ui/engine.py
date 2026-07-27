@@ -16,6 +16,10 @@ What the app is allowed to call, and why each is on the list:
 - ``core.io.find_data_files`` — resolving what "add by path" points at
 - ``agent.session.run`` — a turn, driven with the app's own answer/confirm
 
+The one thing here that isn't the engine is ``browse_for_folder``: the OS's own
+folder chooser, because picking a directory by typing its absolute path is not a
+thing anyone should be asked to do.
+
 Blocking work (profiling a CSV, executing a spec) is pandas and would freeze the
 websocket, so it goes through ``asyncio.to_thread``. Nothing here formats
 anything for a human — that is the panes' job.
@@ -27,6 +31,8 @@ import asyncio
 import json
 import os
 import shutil
+import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -80,6 +86,40 @@ def open_project(path: str | Path, app: App) -> Path:
     refresh_catalog(app)
     remember(root)
     return root
+
+
+#: Ask the OS for a folder. macOS only, and deliberately so: the app is
+#: local-first (`TECH_STACK.md` — `pip install` → localhost), so the machine
+#: running the server is the machine with the Finder. Elsewhere the path field is
+#: the way in, which is why it is still there.
+_CHOOSE_FOLDER = 'POSIX path of (choose folder with prompt "Choose a project folder")'
+
+
+def can_browse() -> bool:
+    return sys.platform == "darwin" and shutil.which("osascript") is not None
+
+
+async def browse_for_folder() -> Path | None:
+    """Open the native folder chooser. ``None`` if it isn't available or was cancelled."""
+    if not can_browse():
+        return None
+    return await asyncio.to_thread(_choose_folder)
+
+
+def _choose_folder() -> Path | None:
+    try:
+        done = subprocess.run(
+            ["osascript", "-e", _CHOOSE_FOLDER],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    chosen = done.stdout.strip()
+    # A cancelled dialog exits non-zero with "User canceled." on stderr — not an
+    # error worth surfacing, just an answer of "no".
+    return Path(chosen) if done.returncode == 0 and chosen else None
 
 
 def recents() -> list[tuple[Path, str]]:

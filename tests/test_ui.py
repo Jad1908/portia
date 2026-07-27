@@ -7,6 +7,8 @@ communicates *kind* and never *rank*, and the UI never computes.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from portia.checks.outcome import BLOCKING_FLAGS
@@ -121,3 +123,38 @@ def test_selecting_nothing_returns_to_the_workflow():
     assert app.is_selected("source", "orders")
     app.select(None)
     assert app.selection is None
+
+
+# --- choosing a folder -------------------------------------------------------
+
+
+def test_a_cancelled_folder_chooser_is_an_answer_of_no_not_an_error(monkeypatch):
+    """Cancel exits non-zero with "User canceled." — nothing worth surfacing."""
+    from types import SimpleNamespace
+
+    from portia.ui import engine
+
+    monkeypatch.setattr(
+        engine.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=1, stdout="")
+    )
+    assert engine._choose_folder() is None
+
+
+def test_a_chosen_folder_comes_back_as_a_path(monkeypatch):
+    from types import SimpleNamespace
+
+    from portia.ui import engine
+
+    monkeypatch.setattr(
+        engine.subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespace(returncode=0, stdout="/Users/x/project/\n"),
+    )
+    assert engine._choose_folder() == Path("/Users/x/project")
+
+
+def test_no_chooser_means_the_path_field_is_the_way_in(monkeypatch):
+    from portia.ui import engine
+
+    monkeypatch.setattr(engine.sys, "platform", "linux")
+    assert engine.can_browse() is False
