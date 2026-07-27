@@ -31,6 +31,7 @@ from nicegui import ui
 
 from portia.agent import events
 from portia.ui import components as c
+from portia.ui import state
 from portia.ui import turn as turn_driver
 from portia.ui.state import APP, Decision
 
@@ -101,11 +102,34 @@ def _goal_input() -> None:
 
 
 def _running_state() -> None:
+    _turn_banner()
     if APP.busy:
         with ui.element("div").classes("row-gap-sm"):
             ui.spinner(size="sm")
             c.caption("the copilot is working")
     c.rule()
+
+
+def _turn_banner() -> None:
+    """Say what this turn is, when the app started it rather than you.
+
+    Indexing and re-reading run through the same panel as a goal you typed —
+    there is one copilot and one transcript — but they are not the same act, and
+    a panel that shows them identically is a panel you have to reconstruct from
+    the tool calls. The banner also keeps profiling and interpretation visibly
+    separate: the first already happened and was free, the second is what is
+    running now and costs a turn.
+    """
+    turn = APP.turn
+    if turn is None or turn.kind == state.GOAL:
+        return
+    with ui.element("div").classes("turn-banner"):
+        with ui.element("div").classes("row-gap-sm"):
+            ui.icon(_BANNER_ICON[turn.kind]).classes("fact-icon")
+            ui.label(_BANNER_TITLE[turn.kind]).classes("t-body-strong c-ink")
+            if turn.label:
+                c.mono(turn.label, color="c-mute", small=True)
+        c.caption(_BANNER_WHY[turn.kind])
 
 
 def _set_effort(effort: str) -> None:
@@ -358,6 +382,14 @@ def _new_turn() -> None:
 def _as_text(answer: Any) -> str:
     return ", ".join(str(a) for a in answer) if isinstance(answer, list) else str(answer)
 
+
+#: What each non-goal turn is, in the panel it shares with the chat.
+_BANNER_ICON = {state.INDEXING: "inventory_2", state.REREAD: "autorenew"}
+_BANNER_TITLE = {state.INDEXING: "Indexing", state.REREAD: "Re-reading"}
+_BANNER_WHY = {
+    state.INDEXING: "Profiled already — free and deterministic. The copilot is reading them now.",
+    state.REREAD: "The copilot is re-reading this source with your note in hand.",
+}
 
 _IDLE = "Nothing yet. Describe the goal above and press Go."
 _GOAL_PLACEHOLDER = "What do you want from this data?"

@@ -23,7 +23,20 @@ from portia.core.present import PREVIEW_ROWS
 
 #: How much of a table a preview shows — one number for every surface, so
 #: "showing 15 of 40" means the same thing in the app and in a saved report.
-__all__ = ["PREVIEW_ROWS", "APP", "App", "Decision", "Turn", "SOURCE", "SPEC", "OUTPUT", "RUN"]
+__all__ = [
+    "PREVIEW_ROWS",
+    "APP",
+    "App",
+    "Decision",
+    "Turn",
+    "SOURCE",
+    "SPEC",
+    "OUTPUT",
+    "RUN",
+    "GOAL",
+    "INDEXING",
+    "REREAD",
+]
 
 #: What a left-pane selection can be. ``None`` means the workflow is in view.
 SOURCE = "source"
@@ -59,6 +72,14 @@ class Decision:
             self.future.set_result(outcome)
 
 
+#: What a turn was started *for*. The transcript is one panel, and a turn you
+#: typed and a turn the app started on your behalf are different enough that the
+#: panel has to say which it is looking at.
+GOAL = "goal"
+INDEXING = "indexing"
+REREAD = "reread"
+
+
 @dataclass
 class Turn:
     """One copilot turn: what it was asked, what it is spending, how it ended."""
@@ -66,6 +87,8 @@ class Turn:
     prompt: str
     model: str
     effort: str | None
+    kind: str = GOAL
+    label: str = ""
     running: bool = True
     subtype: str | None = None
     cost_usd: float | None = None
@@ -101,6 +124,10 @@ class App:
     editing: str | None = None
     #: The source the operator is writing a note about, for the copilot to re-read.
     asking: str | None = None
+    #: The source whose removal is waiting on a confirmation.
+    removing: str | None = None
+    #: Whether the operator chose to get on with it without adding data yet.
+    skipped_sources: bool = False
     show_transcript: bool = True
     show_files: bool = True
 
@@ -152,9 +179,17 @@ class App:
     def is_selected(self, kind: str, name: str) -> bool:
         return self.selection == (kind, name)
 
-    def start_turn(self, prompt: str, *, model: str, effort: str | None) -> Turn:
+    def start_turn(
+        self,
+        prompt: str,
+        *,
+        model: str,
+        effort: str | None,
+        kind: str = GOAL,
+        label: str = "",
+    ) -> Turn:
         self.rows = []
-        self.turn = Turn(prompt=prompt, model=model, effort=effort)
+        self.turn = Turn(prompt=prompt, model=model, effort=effort, kind=kind, label=label)
         return self.turn
 
 

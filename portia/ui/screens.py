@@ -26,7 +26,7 @@ from nicegui import ui
 
 from portia.agent import prompts
 from portia.ui import components as c
-from portia.ui import engine
+from portia.ui import engine, state
 from portia.ui.state import APP
 
 # --- project-open -----------------------------------------------------------
@@ -198,6 +198,20 @@ def first_sources() -> None:
             ui.label("Add data").classes("t-heading-md")
             c.text(_SOURCES_WHY, color="c-mute")
             dropzone()
+            c.rule()
+            with ui.element("div").classes("row-gap-sm"):
+                # Unlike the brief, this is not a gate: an empty project is a
+                # legitimate place to stand, and "Add data" waits in the left pane.
+                c.button("Skip for now", _skip_sources, kind="secondary")
+                c.button("Back", _back_to_picker, kind="secondary")
+                c.caption(_SKIP_HINT)
+
+
+def _skip_sources() -> None:
+    from portia.ui import app as app_module
+
+    APP.skipped_sources = True
+    app_module.shell.refresh()
 
 
 #: Quasar sizes a dialog to its content, and a drop box has no natural width —
@@ -388,6 +402,8 @@ async def _index_and_interpret(paths: list[Path], on_done) -> None:
             prompts.task("index_batch", names=", ".join(repr(n) for n in names)),
             model=APP.model or _default_model(),
             effort=APP.effort,
+            kind=state.INDEXING,
+            label=", ".join(names),
         )
 
 
@@ -416,6 +432,7 @@ _CONTEXT_SHAPE = (
     "Say what the result gets used for, and what would make it wrong.",
 )
 _SOURCES_WHY = "Drop CSVs in. They are copied into the project and profiled straight away."
+_SKIP_HINT = "you can add data later from the left pane"
 _DROP_LABEL = "Drop CSVs here, or click to pick"
 _PATH_PLACEHOLDER = "…or a path, directory or glob already on disk"
 _INTERPRET_COST = "Profiling is free and always happens. This costs a model turn."

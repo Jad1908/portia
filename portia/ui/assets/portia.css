@@ -270,6 +270,10 @@ html body {
 .p-pane {
   display: flex;
   flex-direction: column;
+  /* Fill the panel rather than shrinking to content. Without this the graph
+   * canvas ended where the graph did, leaving dead space below it that looked
+   * like the pane but wasn't — nothing to pan on, and no grid drawn. */
+  flex: 1 1 auto;
   min-height: 0;
   min-width: 0;
 }
@@ -756,10 +760,21 @@ html body {
 
 /* ── middle pane, top — the graph ─────────────────────────────────────────── */
 
+/* A dot grid, the way a node canvas reads everywhere: it says "this space is
+ * navigable" before you touch it, and gives the eye something to judge panning
+ * against. Faint enough that the cards still carry the contrast. */
 .graph-canvas {
   position: relative;
   padding: var(--sp-lg);
   overflow: auto;
+  cursor: grab;
+  background-image: radial-gradient(var(--hairline-strong) 1.5px, transparent 1.5px);
+  background-size: 20px 20px;
+  background-position: -1px -1px;
+}
+.graph-canvas.is-panning {
+  cursor: grabbing;
+  user-select: none;
 }
 
 .graph-edges {
@@ -900,10 +915,12 @@ body.body--dark .step-card {
 /* aligned columns: name · type · role · null · distinct · flags */
 .column-row {
   display: grid;
-  /* the name earns some room; the flags earn more, since there can be several */
+  /* Every row is its own grid, so the tracks must be **content-independent** or
+   * each row sizes its own `auto` columns and nothing lines up with the heading.
+   * Fixed widths for the short facts, fractions for the text. */
   grid-template-columns:
-    minmax(110px, 0.8fr) minmax(64px, auto) minmax(80px, auto)
-    minmax(44px, auto) minmax(60px, auto) minmax(0, 2.2fr);
+    minmax(0, 1.4fr) 84px minmax(0, 1fr)
+    56px 72px minmax(0, 1.8fr);
   align-items: center;
   gap: var(--sp-md);
   padding: var(--sp-xs) var(--sp-md);
@@ -1186,6 +1203,18 @@ body.body--dark .step-card {
   display: flex;
   flex-direction: column;
   gap: var(--sp-md);
+}
+
+/* An indexing or re-read turn, in the panel it shares with the chat. Uncoloured
+ * on purpose — it is a different *kind* of turn, not a more important one. */
+.turn-banner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xxs);
+  background: var(--surface-elevated);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  padding: var(--sp-sm) var(--sp-md);
 }
 
 .turn-ended {

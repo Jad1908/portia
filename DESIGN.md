@@ -329,7 +329,12 @@ These exist so a test run never needs a terminal (`VISION.md` → "The no-termin
 ### Middle pane, top — the graph
 
 **`workflow-graph`** — the spec as a DAG
-- Fill `{colors.surface}`, padding `{spacing.lg}`. Nodes are **steps**; an edge means *"this step's
+- Fill `{colors.surface}` with a **dot grid** — 1.5px `{colors.hairline-strong}` dots on a 20px
+  pitch. It says "this space is navigable" before you touch it, and gives the eye something to judge
+  panning against. Padding `{spacing.lg}`.
+- **Drag anywhere on the canvas to pan.** Cursor `grab` at rest, `grabbing` while dragging. Nodes do
+  **not** move: the layout is the recorded sequence of decisions, so dragging a card would either
+  mean nothing or imply the order can be rearranged, and neither is true. Nodes are **steps**; an edge means *"this step's
   output is that step's input"*, derived from `left`/`right`/`input`/`inputs`. Source tables appear
   as leaf nodes in a quieter treatment.
 - Layout is left-to-right in spec order. **Do not reorder nodes by anything measured** — the order
@@ -487,8 +492,20 @@ questions-and-insights UX *is* the product" — and they get the most design att
   naming what it is, because a number nobody can name is worse than no number.
 - For places where the same handful of facts repeats down a long list. Anywhere else, use `kv`.
 
+**`turn-banner`** — what a turn is, when the app started it rather than you
+- `{colors.surface-elevated}`, 1px `{colors.hairline}`, `{rounded.md}`, padding `{spacing.sm}`
+  `{spacing.md}`. An icon, the kind (`Indexing`, `Re-reading`), the subject in `{typography.mono-sm}`,
+  and one `{typography.caption}` line saying what is actually running.
+- **Uncoloured on purpose** — it is a different *kind* of turn, not a more important one.
+- It exists because indexing and a goal you typed share one transcript, and a panel that renders them
+  identically is one you have to reconstruct from the tool calls. It also keeps the two halves of
+  indexing apart: profiling already happened and was free, interpretation is what costs a turn.
+
 **`column-row`** — one column of a source, in the source inspector
-- A row, not a card: name in `{typography.mono}` `{colors.ink}` (fixed 180px, truncating), a
+- **Tracks are content-independent** (fixed px for the short facts, fractions for the text). Every
+  row is its own grid, so an `auto` track sizes to that row's content and nothing lines up with the
+  heading — which is exactly how it first shipped.
+- A row, not a card: name in `{typography.mono}` `{colors.ink}` (truncating), a
   `type-chip` for the dtype, then `fact`s for **role**, **null rate** and **distinct**, then the
   column's `flag-badge`s. Rows are separated by `{colors.hairline-soft}` inside a single
   `{colors.hairline}` container.

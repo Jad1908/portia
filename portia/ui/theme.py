@@ -42,11 +42,17 @@ MODE_ICON = {None: "brightness_auto", False: "light_mode", True: "dark_mode"}
 MODE_LABEL = {None: "auto", False: "light", True: "dark"}
 
 
+#: Drag-to-pan for the workflow canvas. A file rather than an inline string for
+#: the same reason the CSS is: behaviour worth reading is behaviour worth diffing.
+PAN_JS = ASSETS / "pan.js"
+
+
 def apply() -> ui.dark_mode:
-    """Attach the stylesheet and the font, and return the mode control."""
+    """Attach the stylesheet, the font and the canvas panning; return the mode control."""
     ui.add_head_html(_PRECONNECT)
     ui.add_head_html(f'<link rel="stylesheet" href="{_INTER}">')
     ui.add_css(CSS)
+    ui.add_body_html(f"<script>{PAN_JS.read_text()}</script>")
     return ui.dark_mode(None)
 
 

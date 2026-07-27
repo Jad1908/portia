@@ -83,6 +83,8 @@ def open_project(path: str | Path, app: App) -> Path:
     app.selected_step = None
     app.rows = []
     app.turn = None
+    app.skipped_sources = False
+    app.editing = app.asking = app.removing = None
     refresh_catalog(app)
     remember(root)
     return root
@@ -150,6 +152,12 @@ def set_context(text: str, app: App) -> None:
 
 def refresh_catalog(app: App) -> None:
     app.catalog = catalog.load_catalog(app.portia_dir)
+
+
+def remove_source(name: str, app: App) -> None:
+    """Un-index a source. The file stays on disk — see `catalog.remove_source`."""
+    catalog.remove_source(name, portia_dir=app.portia_dir)
+    refresh_catalog(app)
 
 
 def set_interpretation(

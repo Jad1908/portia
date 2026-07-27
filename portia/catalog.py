@@ -83,6 +83,34 @@ def index_source(
     return src_file
 
 
+def remove_source(name: str, *, portia_dir: str | Path = DEFAULT_DIR) -> Path | None:
+    """Forget a source: drop its entry, its registration, and its group membership.
+
+    **The data file is not touched.** Un-indexing says "portia should stop
+    knowing about this", which is a statement about the catalog; deleting
+    someone's CSV because they tidied a sidebar is a different act entirely, and
+    not one a catalog function gets to make on their behalf.
+
+    A spec that already references the source keeps working — it resolves paths
+    from its own ``sources:`` block, not from the catalog. What breaks is
+    *recording a new step* against a name that is no longer indexed, which fails
+    loudly at `record_step`.
+    """
+    d = Path(portia_dir)
+    entry = d / "sources" / f"{name}.yaml"
+    removed = entry if entry.exists() else None
+    entry.unlink(missing_ok=True)
+
+    proj = d / "project.yaml"
+    if proj.exists():
+        data = _read(proj)
+        (data.get("sources") or {}).pop(name, None)
+        for group in data.get("groups") or []:
+            group["sources"] = [s for s in group.get("sources") or [] if s != name]
+        _write(proj, data)
+    return removed
+
+
 def set_interpretation(
     name: str,
     *,

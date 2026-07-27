@@ -29,7 +29,7 @@ from nicegui import ui
 from portia.checks.outcome import BLOCKING_FLAGS, describe_contribution, describe_grain
 from portia.core.present import format_rate
 from portia.ui import components as c
-from portia.ui import engine, graph
+from portia.ui import engine, graph, state
 from portia.ui.state import APP, OUTPUT, RUN, SOURCE
 
 #: How tall the graph half sits by default, as a percentage. The report half is
@@ -338,8 +338,44 @@ def _interpretation_actions(name: str) -> None:
     with ui.element("div").classes("row-gap-sm"):
         c.button("Edit", lambda: _start_editing(name), icon="edit", micro=True)
         c.button("Ask the copilot", lambda: _start_asking(name), icon="forum", micro=True)
+        ui.element("div").classes("flex-1")
+        c.button("Remove", lambda: _start_removing(name), icon="delete_outline", micro=True)
     if APP.asking == name:
         _ask_form(name)
+    if APP.removing == name:
+        _remove_confirm(name)
+
+
+def _remove_confirm(name: str) -> None:
+    """Un-indexing is reversible; say so, and say what it does not do."""
+    with ui.element("div").classes("write-confirm"):
+        ui.label(f"Stop indexing {name}?").classes("t-heading-sm")
+        c.text(_REMOVE_SCOPE, color="c-mute")
+        c.text(_REMOVE_UNDO, color="c-mute")
+        with ui.element("div").classes("row-gap-sm"):
+            c.button("Remove", lambda: _remove(name))
+            c.button("Cancel", _stop_removing, kind="secondary")
+
+
+def _start_removing(name: str) -> None:
+    APP.removing, APP.editing, APP.asking = name, None, None
+    pane.refresh()
+
+
+def _stop_removing() -> None:
+    APP.removing = None
+    pane.refresh()
+
+
+def _remove(name: str) -> None:
+    from portia.ui import artifacts
+
+    engine.remove_source(name, APP)
+    APP.removing = None
+    APP.select(None)
+    pane.refresh()
+    artifacts.pane.refresh()
+    ui.notify(f"{name} is no longer indexed")
 
 
 def _ask_form(name: str) -> None:
@@ -451,6 +487,8 @@ async def _ask_copilot(name: str, note: str) -> None:
         prompts.task("reinterpret", source=name, note=note.strip()),
         model=APP.model or _default_model(),
         effort=APP.effort,
+        kind=state.REREAD,
+        label=name,
     )
 
 
@@ -609,3 +647,9 @@ _EDIT_SCOPE = "writes the prose and the roles; the measured facts are untouched"
 _ASK_HEADING = "What did it miss?"
 _ASK_WHY = "It re-reads this source with your note in hand, and asks if the two disagree."
 _ASK_PLACEHOLDER = "e.g. this id is a legacy code, not a customer reference…"
+_REMOVE_SCOPE = (
+    "Drops its catalog entry, its roles and its summary. The data file stays where it is."
+)
+_REMOVE_UNDO = (
+    "Add it again from the same path to re-index it — the facts come back, the prose doesn't."
+)

@@ -25,7 +25,7 @@ import asyncio
 from typing import Any
 
 from portia.agent import events
-from portia.ui import engine
+from portia.ui import engine, state
 from portia.ui.state import APP, Decision
 
 #: Events the UI already represents as a `Decision`, having rendered them from
@@ -37,13 +37,20 @@ _OWNED = (events.QUESTION, events.ANSWER, events.APPROVAL)
 _SYNC_ON = (events.TOOL_RESULT, events.RESULT)
 
 
-async def start(prompt: str, *, model: str, effort: str | None) -> None:
+async def start(
+    prompt: str,
+    *,
+    model: str,
+    effort: str | None,
+    kind: str = state.GOAL,
+    label: str = "",
+) -> None:
     """Run one turn to completion, streaming its events into the transcript."""
     from portia.ui import transcript
 
     if APP.busy:
         return
-    turn = APP.start_turn(prompt, model=model, effort=effort)
+    turn = APP.start_turn(prompt, model=model, effort=effort, kind=kind, label=label)
     transcript.pane.refresh()
 
     try:

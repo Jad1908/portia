@@ -3,7 +3,14 @@
 import pytest
 import yaml
 
-from portia.catalog import index_source, init_project, load_catalog, set_interpretation
+from portia.catalog import (
+    index_source,
+    init_project,
+    load_catalog,
+    remove_source,
+    set_group,
+    set_interpretation,
+)
 from portia.fixtures import messy_customers
 
 
@@ -121,3 +128,47 @@ def test_load_catalog_bundles_project_and_sources(tmp_path):
     assert catalog["project"] == "reconciliation project"
     assert "customers" in catalog["sources"]
     assert catalog["sources"]["customers"]["candidate_keys"]
+
+
+# --- forgetting a source -----------------------------------------------------
+
+
+def test_removing_a_source_drops_its_entry_and_its_registration(tmp_path):
+    frame = messy_customers()
+    frame.to_csv(tmp_path / "customers.csv", index=False)
+    d = tmp_path / ".portia"
+    index_source(tmp_path / "customers.csv", portia_dir=d)
+
+    remove_source("customers", portia_dir=d)
+
+    assert not (d / "sources" / "customers.yaml").exists()
+    assert load_catalog(d)["sources"] == {}
+
+
+def test_removing_a_source_leaves_the_data_file_alone(tmp_path):
+    """Un-indexing says "stop knowing about this", not "delete my CSV"."""
+    csv = tmp_path / "customers.csv"
+    messy_customers().to_csv(csv, index=False)
+    d = tmp_path / ".portia"
+    index_source(csv, portia_dir=d)
+
+    remove_source("customers", portia_dir=d)
+
+    assert csv.exists()
+
+
+def test_removing_a_source_takes_it_out_of_its_groups(tmp_path):
+    """A group listing a source that no longer exists is a broken reference."""
+    for name in ("a", "b"):
+        messy_customers().to_csv(tmp_path / f"{name}.csv", index=False)
+        index_source(tmp_path / f"{name}.csv", portia_dir=tmp_path / ".portia")
+    set_group("pair", sources=["a", "b"], portia_dir=tmp_path / ".portia")
+
+    remove_source("a", portia_dir=tmp_path / ".portia")
+
+    assert load_catalog(tmp_path / ".portia")["groups"][0]["sources"] == ["b"]
+
+
+def test_removing_something_that_was_never_indexed_is_not_an_error(tmp_path):
+    init_project("x", portia_dir=tmp_path / ".portia")
+    assert remove_source("ghost", portia_dir=tmp_path / ".portia") is None
