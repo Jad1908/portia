@@ -18,13 +18,17 @@ from nicegui import ui
 from portia import catalog
 from portia.ui import components as c
 from portia.ui import engine
-from portia.ui.state import APP, OUTPUT, SOURCE, SPEC
+from portia.ui.state import APP, OUTPUT, RUN, SOURCE, SPEC
 
-ICON = {SOURCE: "table_chart", SPEC: "account_tree", OUTPUT: "description"}
+ICON = {SOURCE: "table_chart", SPEC: "account_tree", OUTPUT: "description", RUN: "history"}
 
-#: The run log is specced but not built (docs/EVALUATION.md). The section stays,
-#: and says so, rather than implying past turns are somewhere to be found.
-RUNS_NOTE = "The run log isn't built yet — a turn lives in the transcript until the window closes."
+#: A spec run can be saved (Save report → `runs/*.md`). A **copilot turn** still
+#: cannot: the run log is specced but unbuilt (docs/EVALUATION.md), so say which
+#: half exists rather than implying every past turn is somewhere to be found.
+RUNS_NOTE = "No saved runs. Press Run, then Save report."
+TURNS_NOTE = (
+    "Copilot turns aren't logged yet — a turn lives in the transcript until the window closes."
+)
 
 
 @ui.refreshable
@@ -89,7 +93,18 @@ def _outputs() -> None:
 
 def _runs() -> None:
     c.section_header("Runs")
-    c.empty_note(RUNS_NOTE)
+    runs = engine.runs_in(APP)
+    if not runs:
+        c.empty_note(RUNS_NOTE)
+        return
+    for path in runs:
+        c.artifact_row(
+            name=path.stem,
+            icon=ICON[RUN],
+            selected=APP.is_selected(RUN, path.name),
+            on_click=lambda p=path: _select(RUN, p.name),
+        )
+    c.empty_note(TURNS_NOTE)
 
 
 def _add_data_affordance() -> None:

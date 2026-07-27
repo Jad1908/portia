@@ -10,7 +10,8 @@ What the app is allowed to call, and why each is on the list:
 - ``catalog.init_project`` — the mandatory context panel writes ``project.yaml``
 - ``catalog.index_source`` — a dropped file is profiled (free, deterministic)
 - ``catalog.load_catalog`` — what the left pane and the source inspector show
-- ``spec.load_spec`` / ``spec.run_spec`` / ``spec.write_outputs`` — the Run button
+- ``spec.load_spec`` / ``spec.run_spec`` / ``spec.write_outputs`` /
+  ``spec.write_report`` — the Run button and what it can save
 - ``core.io.load_frame`` — previewing an output CSV (the one way to load data)
 - ``core.io.find_data_files`` — resolving what "add by path" points at
 - ``agent.session.run`` — a turn, driven with the app's own answer/confirm
@@ -38,6 +39,9 @@ from portia.ui.state import App
 #: project root, so the catalog and the spec stay portable.
 DATA_DIR = "data"
 OUT_DIR = "out"
+
+#: Saved run reports. The Runs section of the left pane lists these.
+RUNS_DIR = "runs"
 
 #: Recently opened projects. Not project state, so it lives with the user rather
 #: than inside any one ``.portia/``.
@@ -194,6 +198,28 @@ async def run_spec(app: App) -> None:
     except Exception as exc:  # noqa: BLE001 — shown to the operator, not swallowed
         app.results = None
         app.run_error = f"{type(exc).__name__}: {exc}"
+
+
+def runs_in(app: App) -> list[Path]:
+    """Saved run reports, newest first."""
+    runs = app.root / RUNS_DIR
+    return sorted(runs.glob("*.md"), reverse=True) if runs.is_dir() else []
+
+
+async def write_report(app: App) -> Path | None:
+    """Save the open run as markdown. Explicit, like every other write here."""
+    if not app.results:
+        return None
+    return await asyncio.to_thread(
+        spec_module.write_report,
+        app.results,
+        app.root / RUNS_DIR,
+        spec_path=app.spec_path,
+    )
+
+
+async def read_text(path: Path) -> str:
+    return await asyncio.to_thread(path.read_text)
 
 
 async def write_outputs(app: App) -> list[Path]:

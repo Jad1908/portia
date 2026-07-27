@@ -24,8 +24,11 @@ Open a project directory (it gets created if it isn't there), write a few lines 
 project *is*, drop your CSVs in, and go. Every question the copilot asks and every write it wants to
 make stops on screen, with the evidence still next to it.
 
+Pressing **Run** executes the spec in memory; **Write outputs** saves the tables to `out/` and
+**Save report** saves the run as markdown to `runs/`. Nothing is written until you ask.
+
 There are CLIs for the same engine — `python -m portia.cli.index`, `.chat`, `.run` — if you'd
-rather stay in a terminal.
+rather stay in a terminal; `run --write out --report runs` produces the same two artifacts.
 
 ## Docs
 

@@ -30,6 +30,8 @@ venv/
 specs/agent_*.yaml
 # Tables a run wrote (`run --write out`, or the app's "Write outputs").
 out/
+# Saved run reports (`run --report runs`, or the app's "Save report").
+runs/
 
 # The 1024px logo original. What the app uses is the 256px copy that ships with
 # the package (portia/ui/assets/cute-portia.png); this one is 1.5 MB and trips

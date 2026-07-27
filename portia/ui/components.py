@@ -20,10 +20,10 @@ from collections.abc import Callable
 from typing import Any
 
 import pandas as pd
-import yaml
 from nicegui import ui
 
 from portia.checks.outcome import BLOCKING_FLAGS
+from portia.core.present import as_yaml, count, inline
 from portia.ui.state import PREVIEW_ROWS
 
 #: `flag-badge` variants. Three, and no others (DESIGN.md).
@@ -79,11 +79,6 @@ def pane_title(value: str) -> ui.label:
 
 def rule(strong: bool = False) -> ui.element:
     return ui.element("div").classes("p-rule-strong" if strong else "p-rule")
-
-
-def count(n: int, word: str) -> str:
-    """`1 step` / `2 steps`. A count is a measured number; it should read like one."""
-    return f"{n} {word}" if n == 1 else f"{n} {word}s"
 
 
 # --- controls ---------------------------------------------------------------
@@ -158,6 +153,19 @@ def flag_badge(name: str, variant: str = "") -> ui.label:
     return ui.label(name).classes(f"flag-badge{suffix}")
 
 
+#: How prose is rendered wherever it appears. ``code-friendly`` is not cosmetic:
+#: it stops `_` from starting emphasis, and without it `customer_id and name`
+#: came out as "customer" followed by italics with the underscores eaten. Column
+#: names are the identifiers this whole product is about; a renderer that
+#: silently rewrites them is worse than one that shows raw asterisks.
+MARKDOWN_EXTRAS = ["fenced-code-blocks", "tables", "code-friendly"]
+
+
+def markdown(value: str) -> ui.markdown:
+    """Prose as its author wrote it — the copilot's, or a saved report's."""
+    return ui.markdown(value, extras=MARKDOWN_EXTRAS).classes("p-markdown t-body c-body")
+
+
 def code_block(value: str) -> ui.element:
     with ui.element("div").classes("code-block") as block:
         ui.html(_escape(value))
@@ -193,31 +201,6 @@ def kv(key: str, value: Any = None, *, body: Callable[[], Any] | None = None) ->
             body()
     else:
         ui.label(inline(value)).classes("kv-value")
-
-
-def inline(value: Any) -> str:
-    """A measured value on one line, in words rather than punctuation.
-
-    ``{"left": 8, "right": 6}`` becomes ``left 8 · right 6`` and
-    ``{"left": ["customer_id"], "right": ["customer_id"]}`` becomes
-    ``left customer_id · right customer_id``. Both were being dumped as inline
-    YAML, braces and all, which is most of what made the report unreadable.
-    Anything genuinely nested still falls back to YAML rather than being flattened
-    into something that reads clearer than it is.
-    """
-    if value is None or isinstance(value, (bool, int, float, str)):
-        return _scalar(value)
-    if isinstance(value, dict) and all(not isinstance(v, dict) for v in value.values()):
-        return " · ".join(f"{k} {inline(v)}" for k, v in value.items()) or "—"
-    if isinstance(value, list) and all(not isinstance(v, (dict, list)) for v in value):
-        return ", ".join(_scalar(v) for v in value) or "—"
-    return _as_yaml(value, flow=True)
-
-
-def _scalar(value: Any) -> str:
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    return "—" if value is None else str(value)
 
 
 # --- artifact rows ----------------------------------------------------------
@@ -360,7 +343,7 @@ def _field(key: str, value: Any) -> None:
     elif key in BLOCK_FIELDS or isinstance(value, (dict, list)):
         with ui.element("div").classes("report-group"):
             ui.label(key).classes("report-group-label")
-            code_block(value if isinstance(value, str) else _as_yaml(value))
+            code_block(value if isinstance(value, str) else as_yaml(value))
     else:
         with kv_list():
             kv(key, value)
@@ -412,42 +395,6 @@ def _cell(value: Any) -> str:
 
 
 # --- helpers ----------------------------------------------------------------
-
-
-class _NoAliases(yaml.SafeDumper):
-    """Never emit `&id001` / `*id001`.
-
-    A join step names the same key list on both sides, and PyYAML's anchors
-    turned that into `keys: &id001 [customer_id] … right: *id001` on screen.
-    Correct YAML, unreadable evidence — and this pane exists to be read.
-    """
-
-    def ignore_aliases(self, data: Any) -> bool:
-        return True
-
-
-def _as_yaml(value: Any, *, flow: bool = False) -> str:
-    """A value the way the artifacts are written, or plainly if it is a scalar.
-
-    A scalar goes through as itself: ``yaml.safe_dump(8)`` is ``"8\\n...\\n"``, and
-    a row count rendering as ``8 ...`` reads like a truncation of the number the
-    whole product exists to be trusted about.
-    """
-    if isinstance(value, str):
-        return value
-    if isinstance(value, bool):
-        return "true" if value else "false"  # as the YAML artifacts spell it
-    if value is None or isinstance(value, (int, float)):
-        return str(value)
-    dumped = yaml.dump(
-        value,
-        Dumper=_NoAliases,
-        sort_keys=False,
-        default_flow_style=flow,
-        allow_unicode=True,
-        width=10_000 if flow else 80,
-    )
-    return dumped.strip()
 
 
 def _escape(value: str) -> str:

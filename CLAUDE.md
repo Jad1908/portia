@@ -75,7 +75,10 @@ adding code, and extend them rather than working around them:
 
 **Package layout — one home per concern; don't let things pile up flat in `portia/`:**
 
-- `portia/core/` — shared seams: `io.py` (loading) · `serialize.py` (compact JSON evidence)
+- `portia/core/` — shared seams: `io.py` (loading) · `serialize.py` (compact JSON evidence) ·
+  `present.py` (**one way to show a measured value to a human** — rates, counts, a value on one
+  line. Every surface renders the same numbers; the day the terminal and the app disagree about a
+  null rate is the day someone has to work out which one to believe.)
 - `portia/checks/` — the deterministic checks layer (read-only **diagnosis**, facts only):
   `profiling.py`, `join.py` (`join_report` = key-level facts; `join_findings` = facts + example
   rows), `outcome.py` (post-conditions on a frame an op **produced** — every other check reads

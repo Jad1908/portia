@@ -26,11 +26,11 @@ from typing import Any
 
 from nicegui import ui
 
-from portia.checks.outcome import BLOCKING_FLAGS
-from portia.core.serialize import format_rate
+from portia.checks.outcome import BLOCKING_FLAGS, describe_contribution, describe_grain
+from portia.core.present import format_rate
 from portia.ui import components as c
 from portia.ui import engine, graph
-from portia.ui.state import APP, OUTPUT, SOURCE
+from portia.ui.state import APP, OUTPUT, RUN, SOURCE
 
 #: How tall the graph half sits by default, as a percentage. The report half is
 #: the taller of the two — it is where the evidence is (DESIGN.md → Layout).
@@ -44,6 +44,8 @@ async def pane() -> None:
         _source_inspector(name)
     elif kind == OUTPUT:
         await _output_inspector(name)
+    elif kind == RUN:
+        await _run_inspector(name)
     else:
         _workflow()
 
@@ -255,9 +257,9 @@ def _outcome(outcome: dict, acknowledged: list[str]) -> None:
         if outcome.get("null_rates"):
             c.kv("null_rates", _rates(outcome["null_rates"]))
         for name, contribution in (outcome.get("contribution") or {}).items():
-            c.kv(name, _contribution(contribution))
+            c.kv(name, describe_contribution(contribution))
         if outcome.get("grain"):
-            c.kv("grain", _grain(outcome["grain"]))
+            c.kv("grain", describe_grain(outcome["grain"]))
         if outcome.get("flags"):
             c.kv("flags", body=partial(_outcome_flags, outcome["flags"], acknowledged))
 
@@ -265,37 +267,6 @@ def _outcome(outcome: dict, acknowledged: list[str]) -> None:
 def _rates(rates: dict) -> str:
     """`customer_id 12% · notes 65%`, formatted the way the terminal formats it."""
     return " · ".join(f"{col} {format_rate(rate)}" for col, rate in rates.items())
-
-
-def _contribution(contribution: dict) -> str:
-    """What one input actually put into the output, on one line."""
-    reached = contribution.get("n_columns")
-    contributed = contribution.get("contributed")
-    parts = [c.count(reached, "column") + " in output" if reached is not None else "—"]
-    if contributed is False:
-        parts.append("contributed nothing")
-    elif contributed is True:
-        parts.append("contributed")
-    else:
-        parts.append("no non-key columns to judge")
-    if contribution.get("columns_dropped"):
-        parts.append(f"dropped {', '.join(contribution['columns_dropped'])}")
-    return " · ".join(parts)
-
-
-def _grain(grain: dict) -> str:
-    """The claim, and whether it held — the engine's words, not a verdict."""
-    keys = ", ".join(grain.get("keys") or [])
-    if not grain.get("measurable"):
-        return (
-            f"[{keys}] · not measurable · missing {', '.join(grain.get('missing_columns') or [])}"
-        )
-    if grain.get("unique"):
-        return f"[{keys}] · unique · {c.count(grain.get('n_distinct', 0), 'row')}"
-    return (
-        f"[{keys}] · not unique · {c.count(grain.get('n_duplicated_keys', 0), 'duplicated key')}"
-        f" · up to {c.count(grain.get('max_multiplicity', 0), 'row')} each"
-    )
 
 
 def _outcome_flags(flags: list[str], acknowledged: list[str]) -> None:
@@ -392,6 +363,21 @@ def _null_rate(col: dict) -> str:
     rate is the day someone has to work out which one to believe.
     """
     return format_rate(col.get("null_rate"))
+
+
+async def _run_inspector(name: str) -> None:
+    """A saved run report, as it was written to disk.
+
+    Rendered from the file rather than re-derived from state: what this shows has
+    to be exactly what a reviewer sees in the diff, or saving it was pointless.
+    """
+    path = APP.root / engine.RUNS_DIR / name
+    with ui.element("div").classes("p-scroll p-pad stack-lg"):
+        _inspector_header(name, str(path))
+        if not path.exists():
+            c.empty_note("that report is gone")
+            return
+        c.markdown(await engine.read_text(path))
 
 
 async def _output_inspector(name: str) -> None:

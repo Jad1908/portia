@@ -451,8 +451,11 @@ questions-and-insights UX *is* the product" — and they get the most design att
 
 **`toolbar`** — the top bar
 - `{colors.canvas}`, 1px `{colors.hairline}` bottom rule. Holds: the **session name** (left), a spec
-  switcher, a spacer, then "Run" and "Write outputs" (right), the files and transcript toggles, and
-  the light/dark override.
+  switcher, a spacer, then "Run", "Write outputs" and "Save report" (right), the files and
+  transcript toggles, and the light/dark override.
+- **Run writes nothing.** The two save actions beside it are how a result becomes durable, and both
+  are things you press rather than things that happen to you — the same rule as every other write
+  in the app.
 - **The session name is the open directory's name, and it is a button**: clicking it returns to the
   project picker, which is how you move between projects. Disabled while a turn is running — a
   switch mid-turn would leave the copilot writing into a directory the window has stopped watching.

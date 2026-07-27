@@ -132,6 +132,10 @@ def _run_controls() -> None:
     run.tooltip(str(APP.spec_path) if APP.spec_path else "no spec open")
     write = c.button("Write outputs", _write, icon="save_alt", enabled=bool(APP.results))
     write.tooltip(str(APP.root / engine.OUT_DIR))
+    # Run itself writes nothing — these two are how a result becomes durable, and
+    # both are things you press rather than things that happen to you.
+    report = c.button("Save report", _save_report, icon="description", enabled=bool(APP.results))
+    report.tooltip(str(APP.root / engine.RUNS_DIR))
 
 
 def _view_controls() -> None:
@@ -155,6 +159,14 @@ async def _write() -> None:
     written = await engine.write_outputs(APP)
     ui.notify(f"wrote {len(written)} table(s) to {engine.OUT_DIR}/")
     artifacts.pane.refresh()
+
+
+async def _save_report() -> None:
+    path = await engine.write_report(APP)
+    if path is not None:
+        ui.notify(f"saved {path.name} to {engine.RUNS_DIR}/")
+        artifacts.pane.refresh()
+        toolbar.refresh()
 
 
 def _toggle_transcript() -> None:

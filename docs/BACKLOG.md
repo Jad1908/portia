@@ -221,9 +221,10 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
   - **Nothing is editable.** `VISION.md` scoped that out on purpose; correcting an interpretation
     still means opening the YAML.
   - **Drag-and-drop is unverified.** The picker and the "add by path" field are what got tested.
-- **The transcript disappears when the window does.** V0 keeps a turn in memory only, so the left
-  pane's **Runs** section says so rather than pretending. That is the run log's job (below), and the
-  app is now the second consumer waiting on it.
+- **A copilot turn still disappears when the window does.** *Half of this closed 2026-07-27: a
+  **spec run** can be saved as markdown (`Save report` → `runs/*.md`, or `cli.run --report`), and the
+  left pane lists them.* What is still unwritten is the **turn** — questions asked, answers given,
+  writes approved — which is the run log's job (below) and what `EVALUATION.md` actually needs.
 - **A conversation that stays open.** `session.run` sends one prompt, drains the response and closes
   the client, so there is no multi-turn — no "actually, redo that as an inner join" after a turn
   ends. The SDK's `ClaudeSDKClient` supports staying open; this is a portia limitation, not an SDK

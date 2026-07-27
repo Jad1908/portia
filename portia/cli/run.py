@@ -11,7 +11,7 @@ import argparse
 import json
 from pathlib import Path
 
-from portia.spec import load_spec, render_text, run_spec, write_outputs
+from portia.spec import load_spec, render_text, run_spec, write_outputs, write_report
 
 
 def main() -> None:
@@ -19,6 +19,7 @@ def main() -> None:
     parser.add_argument("spec", help="path to a spec .yaml file")
     parser.add_argument("--write", metavar="DIR", help="write each step's output table there")
     parser.add_argument("--json", action="store_true", help="emit provenance + drift as JSON")
+    parser.add_argument("--report", metavar="DIR", help="save the run as markdown there")
     args = parser.parse_args()
 
     # Source paths in the spec are relative to the current directory (run from
@@ -39,6 +40,9 @@ def main() -> None:
     if args.write:
         for path in write_outputs(results, args.write):
             print(f"wrote {path}")
+
+    if args.report:
+        print(f"wrote {write_report(results, args.report, spec_path=args.spec)}")
 
     if any(r.has_drift for r in results):
         raise SystemExit(1)  # drift is a failure signal for scripts/CI

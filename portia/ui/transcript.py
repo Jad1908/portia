@@ -42,13 +42,6 @@ CHOSEN = "chosen"
 TOOL_PREFIX = "mcp__portia__"
 ARG_CHARS = 160
 
-#: How the copilot's prose is rendered. ``code-friendly`` is not cosmetic: it
-#: stops `_` from starting emphasis, and without it `customer_id and name` came
-#: out as "customer" followed by italics with the underscores eaten. Column names
-#: are the identifiers this whole product is about; a renderer that silently
-#: rewrites them is worse than one that shows raw asterisks.
-MARKDOWN_EXTRAS = ["fenced-code-blocks", "tables", "code-friendly"]
-
 
 @ui.refreshable
 def pane() -> None:
@@ -160,9 +153,7 @@ def _event(event: events.Event) -> None:
             # The copilot writes markdown, so it is rendered as markdown. Showing
             # `**sales_orders**` literally is the panel failing to read what it
             # was handed.
-            ui.markdown(event.data.get("text", ""), extras=MARKDOWN_EXTRAS).classes(
-                "p-markdown t-body c-body"
-            )
+            c.markdown(event.data.get("text", ""))
         elif kind == events.THINKING:
             c.collapsed("thinking", lambda: c.text(event.data.get("text", ""), color="c-mute"))
         elif kind == events.TOOL_CALL:

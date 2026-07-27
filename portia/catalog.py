@@ -30,7 +30,7 @@ from typing import Any
 import yaml
 
 from portia.checks.profiling import profile_path
-from portia.core.serialize import format_rate
+from portia.core.present import format_rate
 
 DEFAULT_DIR = ".portia"
 

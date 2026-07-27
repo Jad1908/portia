@@ -23,6 +23,7 @@ from typing import Any
 SOURCE = "source"
 SPEC = "spec"
 OUTPUT = "output"
+RUN = "run"
 
 #: How many rows of a produced table the preview shows. The count is stated on
 #: screen (`showing N of M`) rather than implied.
