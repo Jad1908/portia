@@ -135,6 +135,9 @@ adding code, and extend them rather than working around them:
     check facts). The agent's memory. **Update rule: facts refresh, prose/roles are preserved** —
     corrections are never clobbered (facts vs judgment, applied to updates).
 - `portia/fixtures/` — kept mock data (a builder per module, registered in `__init__`)
+- `sandbox/` — **gitignored scratch space for throwaway test projects** (`sandbox/run1`, …). Spin up
+  as many as you like; none of it reaches the repo. Test runs used to land in the repo root or in
+  `/tmp`, and the first cluttered the tree while the second was gone by morning.
 - `portia/cli/` — play surfaces: `python -m portia.cli.<tool>` (e.g. `profile`, `join`, `run`, `index`)
 - `portia/ui/` — the **app** (`python -m portia.ui`, `ui` extra): three panes on the same event
   stream, driving a turn through `ask.py`'s injected `answer`/`confirm`. Same status as `cli/` — an

@@ -60,8 +60,12 @@ not a gadget — a place you actually work.
      analysis **plus** the project context provided. This costs a model turn, so it is
      **on by default but opt-out-able** — **GUI: a toggle** on the data-selection panel;
      **CLI: `--no-interpret`**.
-3. **User can correct it.** The user can open that per-file interpretation/metadata and **edit it
-   manually** if the model misunderstood something. (Corrections are durable decisions.)
+3. ~~**User can correct it.**~~ — *built 2026-07-27. The source inspector has two routes, and they
+   write to the same place: **Edit** turns the summary into a text box and each role into a field,
+   with the check facts still on screen beside them; **Ask the copilot** takes a note about what it
+   missed and runs a turn that re-reads the source with that in hand. Both go through
+   `catalog.set_interpretation`, which writes judgment and never touches a measured fact, so a
+   correction survives a re-index either way. The project brief is editable from the toolbar.*
 4. **Group files + group context.** Files can be **grouped**, with **additional context attached
    to the group** — e.g. *"these three tables are external data related to our events."*
 

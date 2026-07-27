@@ -19,15 +19,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from portia.core.present import PREVIEW_ROWS
+
+#: How much of a table a preview shows — one number for every surface, so
+#: "showing 15 of 40" means the same thing in the app and in a saved report.
+__all__ = ["PREVIEW_ROWS", "APP", "App", "Decision", "Turn", "SOURCE", "SPEC", "OUTPUT", "RUN"]
+
 #: What a left-pane selection can be. ``None`` means the workflow is in view.
 SOURCE = "source"
 SPEC = "spec"
 OUTPUT = "output"
 RUN = "run"
-
-#: How much of a table a preview shows — one number for every surface, so
-#: "showing 15 of 40" means the same thing in the app and in a saved report.
-from portia.core.present import PREVIEW_ROWS  # noqa: E402,F401  (re-export)
 
 
 @dataclass
@@ -93,6 +95,12 @@ class App:
 
     selection: tuple[str, str] | None = None  # (kind, name) — None = the workflow
     selected_step: str | None = None
+    #: The source whose interpretation is being edited by hand, if any. Editing is
+    #: a mode rather than a dialog: the check facts have to stay on screen while
+    #: you write the prose, because they are what the prose is a read *of*.
+    editing: str | None = None
+    #: The source the operator is writing a note about, for the copilot to re-read.
+    asking: str | None = None
     show_transcript: bool = True
     show_files: bool = True
 

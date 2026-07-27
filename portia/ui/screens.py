@@ -158,7 +158,24 @@ def project_context() -> None:
 
             with ui.element("div").classes("row-gap-sm"):
                 c.button("Continue", lambda: _save_context(box.value), kind="primary")
+                # The gate has no skip, but it must have a way back: choosing the
+                # wrong folder is easy, and the only other exit was the process.
+                c.button("Back", _back_to_picker, kind="secondary")
                 c.caption(str(APP.catalog_dir / "project.yaml"))
+
+
+def _back_to_picker() -> None:
+    """Return to the project picker without writing anything.
+
+    A directory the picker created on the way in is left where it is — an empty
+    folder is cheap, and deleting one on a cancel is the kind of helpfulness
+    nobody asked for.
+    """
+    from portia.ui import app as app_module
+
+    APP.opened = False
+    APP.goal = ""
+    app_module.shell.refresh()
 
 
 def _save_context(text: str) -> None:
@@ -218,10 +235,62 @@ def build_add_dialog() -> None:
 
 def open_add_dialog() -> None:
     """Show it. Says so if it isn't there, rather than doing nothing quietly."""
-    if _ADD_DIALOG is None or _ADD_DIALOG.is_deleted:
+    _show(_ADD_DIALOG)
+
+
+# --- editing the brief ------------------------------------------------------
+
+#: The brief dialog for this page. Same rule as the add dialog: built once, at
+#: page level, never inside a refreshable.
+_BRIEF_DIALOG: ui.dialog | None = None
+
+
+def build_brief_dialog() -> None:
+    """The project brief, editable after the fact.
+
+    The gate writes it once; nothing else could change it, which made the most
+    consequential text in the product the only text you couldn't correct. It
+    writes through `catalog.init_project` — the same call the gate makes.
+    """
+    global _BRIEF_DIALOG
+    with ui.dialog().props("transition-duration=0") as dialog:
+        with ui.element("div").classes("write-confirm").style(DIALOG_WIDTH):
+            ui.label("What is this project?").classes("t-heading-md")
+            c.text(_CONTEXT_WHY, color="c-mute")
+            box = (
+                ui.textarea(placeholder=_CONTEXT_PLACEHOLDER)
+                .classes("p-field p-editor w-full")
+                .props("borderless")
+                .style("min-height:160px")
+            )
+            dialog.on("show", lambda: box.set_value(APP.project_context))
+            with ui.element("div").classes("row-gap-sm"):
+                c.button("Save", lambda: _save_brief(box.value, dialog), kind="primary")
+                c.button("Cancel", dialog.close, kind="secondary")
+    _BRIEF_DIALOG = dialog
+
+
+def open_brief_dialog() -> None:
+    _show(_BRIEF_DIALOG)
+
+
+def _save_brief(text: str, dialog: ui.dialog) -> None:
+    from portia.ui import app as app_module
+
+    if not (text or "").strip():
+        ui.notify("the brief cannot be empty")
+        return
+    engine.set_context(text, APP)
+    dialog.close()
+    app_module.toolbar.refresh()
+    ui.notify("brief saved")
+
+
+def _show(dialog: ui.dialog | None) -> None:
+    if dialog is None or dialog.is_deleted:
         ui.notify(_NO_DIALOG)
         return
-    _ADD_DIALOG.open()
+    dialog.open()
 
 
 #: Open the file picker from anywhere on the drop box, not only from Quasar's

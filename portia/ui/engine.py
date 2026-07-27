@@ -152,6 +152,20 @@ def refresh_catalog(app: App) -> None:
     app.catalog = catalog.load_catalog(app.portia_dir)
 
 
+def set_interpretation(
+    source: str, *, summary: str | None, roles: dict[str, str], app: App
+) -> None:
+    """Record the human's read of a source — the same write the copilot makes.
+
+    ``catalog.set_interpretation`` is judgment-only by construction: it writes the
+    prose and the roles and never touches a measured fact. So a correction typed
+    here and one the copilot proposes land in the same place, in the same shape,
+    and a re-index preserves both (`catalog` → the update rule).
+    """
+    catalog.set_interpretation(source, summary=summary, roles=roles, portia_dir=app.portia_dir)
+    refresh_catalog(app)
+
+
 # --- adding data ------------------------------------------------------------
 
 

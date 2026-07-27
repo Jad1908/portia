@@ -303,6 +303,7 @@ async def _source_inspector(name: str) -> None:
     """
     entry = APP.sources.get(name)
     frame = await _source_frame(entry) if entry else None
+    editing = APP.editing == name
     with ui.element("div").classes("p-scroll p-pad stack-lg"):
         _inspector_header(name, "the catalog's entry for this source")
         if entry is None:
@@ -311,10 +312,157 @@ async def _source_inspector(name: str) -> None:
         with c.kv_list():
             c.kv("file", entry.get("source", ""))
             c.kv("candidate_keys", entry.get("candidate_keys") or "(none)")
-        _group("summary", lambda: c.text(entry.get("summary", "")))
-        _group("columns", lambda: _columns(entry.get("columns") or []))
+
+        columns = entry.get("columns") or []
+        if editing:
+            _edit_interpretation(name, entry, columns)
+        else:
+            _group("summary", lambda: c.text(entry.get("summary", "")))
+            _group("columns", lambda: _columns(columns))
+            _interpretation_actions(name)
         if frame is not None:
             _group("preview", lambda: c.table_preview(frame))
+
+
+# --- correcting what the catalog says ----------------------------------------
+
+
+def _interpretation_actions(name: str) -> None:
+    """Two ways to fix a read: write it yourself, or tell the copilot what it missed.
+
+    The prose and the roles are **judgment**, and judgment is the half of a
+    catalog entry a human is allowed to overwrite — `catalog.set_interpretation`
+    writes exactly that and never touches a measured fact, so both routes land in
+    the same place and survive a re-index.
+    """
+    with ui.element("div").classes("row-gap-sm"):
+        c.button("Edit", lambda: _start_editing(name), icon="edit", micro=True)
+        c.button("Ask the copilot", lambda: _start_asking(name), icon="forum", micro=True)
+    if APP.asking == name:
+        _ask_form(name)
+
+
+def _ask_form(name: str) -> None:
+    """Say what the copilot got wrong; it re-reads with that in hand."""
+    with ui.element("div").classes("question-form"):
+        ui.label(_ASK_HEADING).classes("t-heading-sm")
+        c.caption(_ASK_WHY)
+        note = (
+            ui.textarea(placeholder=_ASK_PLACEHOLDER)
+            .classes("p-field p-editor w-full")
+            .props("borderless autogrow autofocus")
+        )
+        with ui.element("div").classes("row-gap-sm"):
+            c.button("Send", lambda: _ask_copilot(name, note.value), enabled=not APP.busy)
+            c.button("Cancel", _stop_asking, kind="secondary")
+            c.caption(_spend())
+
+
+def _edit_interpretation(name: str, entry: dict, columns: list[dict]) -> None:
+    """The summary and the roles, editable in place, with the facts still visible."""
+    with ui.element("div").classes("report-group"):
+        ui.label("summary").classes("report-group-label")
+        summary = (
+            ui.textarea(value=entry.get("summary", ""))
+            .classes("p-field p-editor w-full")
+            .props("borderless autogrow")
+        )
+    roles: dict[str, Any] = {}
+    with ui.element("div").classes("report-group"):
+        ui.label("columns").classes("report-group-label")
+        with ui.element("div").classes("column-list"):
+            _column_headings()
+            for col in columns:
+                roles[col["name"]] = _editable_column_row(col)
+    with ui.element("div").classes("row-gap-sm"):
+        c.button(
+            "Save",
+            lambda: _save_interpretation(name, summary.value, roles),
+            kind="primary",
+            icon="check",
+        )
+        c.button("Cancel", _stop_editing, kind="secondary")
+        c.caption(_EDIT_SCOPE)
+
+
+def _editable_column_row(col: dict):
+    """One column, with its role as a field and its facts still beside it."""
+    with ui.element("div").classes("column-row"):
+        ui.label(col["name"]).classes("column-name").tooltip(col["name"])
+        with ui.element("div"):
+            c.chip(str(col.get("inferred", "")))
+        role = (
+            ui.input(value=col.get("role") or "")
+            .classes("p-field p-field-mono w-full")
+            .props("borderless dense")
+        )
+        c.mono(_null_rate(col), small=True)
+        c.mono(str(col.get("n_distinct", "—")), small=True)
+        with ui.element("div").classes("row-gap-xs"):
+            for flag in col.get("flags") or []:
+                c.flag_badge(flag)
+    return role
+
+
+def _start_editing(name: str) -> None:
+    APP.editing, APP.asking = name, None
+    pane.refresh()
+
+
+def _stop_editing() -> None:
+    APP.editing = None
+    pane.refresh()
+
+
+def _start_asking(name: str) -> None:
+    APP.asking, APP.editing = name, None
+    pane.refresh()
+
+
+def _stop_asking() -> None:
+    APP.asking = None
+    pane.refresh()
+
+
+def _save_interpretation(name: str, summary: str, roles: dict) -> None:
+    from portia.ui import artifacts
+
+    engine.set_interpretation(
+        name,
+        summary=summary.strip() or None,
+        roles={col: field.value.strip() for col, field in roles.items() if field.value.strip()},
+        app=APP,
+    )
+    APP.editing = None
+    pane.refresh()
+    artifacts.pane.refresh()
+    ui.notify(f"saved · {name}")
+
+
+async def _ask_copilot(name: str, note: str) -> None:
+    from portia.agent import prompts
+    from portia.ui import turn
+
+    if not (note or "").strip() or APP.busy:
+        return
+    APP.asking = None
+    pane.refresh()
+    await turn.start(
+        prompts.task("reinterpret", source=name, note=note.strip()),
+        model=APP.model or _default_model(),
+        effort=APP.effort,
+    )
+
+
+def _default_model() -> str:
+    from portia.agent.session import DEFAULT_MODEL
+
+    return DEFAULT_MODEL
+
+
+def _spend() -> str:
+    effort = f" · effort {APP.effort}" if APP.effort else ""
+    return f"costs a turn on {APP.model or _default_model()}{effort}"
 
 
 async def _source_frame(entry: dict):
@@ -457,3 +605,7 @@ def spec_label(path: Path | None) -> str:
 _NO_SPEC = "No spec open. The copilot writes one as it records steps; pick one on the left."
 _NO_STEPS = "This spec has no steps yet."
 _NO_RUN = "No run yet. Press Run in the toolbar to execute this spec."
+_EDIT_SCOPE = "writes the prose and the roles; the measured facts are untouched"
+_ASK_HEADING = "What did it miss?"
+_ASK_WHY = "It re-reads this source with your note in hand, and asks if the two disagree."
+_ASK_PLACEHOLDER = "e.g. this id is a legacy code, not a customer reference…"
