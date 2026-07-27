@@ -19,6 +19,9 @@ dev = [
 agent = [
     "claude-agent-sdk>=0.2.128",
 ]
+ui = [
+    "nicegui>=2.0",
+]
 
 [build-system]
 requires = ["hatchling"]

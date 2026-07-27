@@ -28,3 +28,18 @@ venv/
 # regenerated output. specs/sales_join.yaml (hand-authored) stays tracked.
 .portia/
 specs/agent_*.yaml
+# Tables a run wrote (`run --write out`, or the app's "Write outputs").
+out/
+# Saved run reports (`run --report runs`, or the app's "Save report").
+runs/
+
+# Scratch project directories. Spin up as many throwaway runs as you like —
+# `sandbox/run1`, `sandbox/hotels-3` — without any of it reaching the repo. The
+# folder is deliberately not tracked, not even with a .gitkeep: the app creates
+# whatever directory you point it at.
+/sandbox/
+
+# The 1024px logo original. What the app uses is the 256px copy that ships with
+# the package (portia/ui/assets/cute-portia.png); this one is 1.5 MB and trips
+# the large-file hook. Keep it somewhere, just not in git — unless we decide to.
+/cute-portia.png

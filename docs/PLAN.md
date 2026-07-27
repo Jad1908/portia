@@ -55,9 +55,10 @@ the interactive copilot loop over it (the questions-and-insights UX, emitting a 
 a decision stream) → the surface where those questions are asked and answered. The interactive
 layer is **core, not deferred**; its shape is still to be designed (the user's vision).
 
-**Where we are (2026-07-26).** The engine is built (`checks`, `ops`, `spec`, `catalog`) and so is
+**Where we are (2026-07-26).** The engine is built (`checks`, `ops`, `spec`, `catalog`), so is
 the copilot loop (`portia/agent/` — in-process MCP server, layered context, `AskUserQuestion`
-routed to a human, spec writing, chat CLI). The **verification loop** now exists too: recording a
+routed to a human, spec writing, chat CLI), and so is **V0 of the app** (`portia/ui/`) — the loop
+now runs in one window, with no terminal. The **verification loop** now exists too: recording a
 step executes it, `checks/outcome.py` measures the table it produced, and a step that hits a zero
 is refused rather than written. **This is not yet a working copilot.** The loop has now faced a
 model four times (Runs 3–6 in `EVALUATION.md`). Each fix closed one escape and revealed the next:
@@ -88,17 +89,19 @@ Next, in order:
    consequence unprompted — but only qualitatively, and no capable model has yet been watched
    reaching a blocking flag.
 
-3. **The surface.** Six runs have been scored by hand off terminal transcripts, and the artifacts
-   that *are* the product — catalog, spec, provenance, outcome — are only readable with `cat`. Two
-   pieces, both specced 2026-07-26: the **run log** (`EVALUATION.md`) makes tuning repeatable, and
-   **V0 of the app** (`VISION.md` + `DESIGN.md`) puts the loop in one window. V0 **drives** — it
-   runs a turn and catches every question and every write confirmation, which `agent/ask.py` already
-   supports by injecting those callbacks. It is not deferred behind multi-turn: single-turn costs
-   *follow-up*, not driving. **The bar is a full test run with no terminal at all** — project
-   creation, the brief, adding and indexing sources, the turn, the spec run, and every artifact, in
-   one window; `VISION.md` carries the command-by-command audit. This is the point where "the
-   questions-and-insights UX is the product" stops being a claim in this document and becomes
-   something we can sit in front of.
+3. ~~**The surface — V0 of the app.**~~ — **shipped 2026-07-26** (`portia/ui/`,
+   `python -m portia.ui`, `ui` extra). Three panes on the engine's event stream, driving a turn
+   through `agent/ask.py`'s injected `answer`/`confirm`. **The bar is met: a full test run with no
+   terminal** — project creation, the brief, adding and profiling sources, the interpret turn with
+   its write confirmations, the spec run, and every artifact, all in one window. The engine gained
+   exactly one thing it was already missing (`events.TOOL_RESULT`); everything else is a renderer.
+   *The claim this settles is that the loop is now **watchable**, not that it is good* — what the
+   copilot does with a question is still scored by hand in `EVALUATION.md`.
+
+4. **The run log** (`EVALUATION.md`, specced 2026-07-26). Now the more painful half of the surface
+   problem: seven runs scored by hand off transcripts, and the app's transcript still dies with the
+   window. One JSONL per turn, teed at the edge in `cli/chat.run_turn` and the app's turn driver.
+   `events.TOOL_RESULT` — its other prerequisite — landed with the app.
 
 ## Budget & model discipline
 

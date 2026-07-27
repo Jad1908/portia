@@ -69,11 +69,11 @@ _EXPECTABLE = {
 STEP_REF = "#"
 _STEP_REF_HINT = "'<spec path>#<step id>', e.g. 'specs/training.yaml#otb_hotels'"
 
-#: Where a step names a table it reads. `join` and `normalize` name one per
-#: field; `sql` declares a list, because a query may read several and the
-#: declaration is what lets `checks.outcome` still say which contributed nothing.
-_REF_FIELDS = ("left", "right", "input")
-_REF_LIST_FIELD = "inputs"
+#: Where a step names a table it reads — defined by the spec format itself, so a
+#: query declaring several inputs stays one fact rather than two lists. That
+#: declaration is what lets `checks.outcome` say which input contributed nothing.
+_REF_FIELDS = spec.REF_FIELDS
+_REF_LIST_FIELD = spec.REF_LIST_FIELD
 
 
 def step_vocabulary() -> dict[str, str]:
@@ -620,12 +620,9 @@ def _bare_step_id(ref: str, *, field: str, spec_path: str) -> str:
 
 def _source_refs(step: dict, *, known_steps: set[str]) -> list[str]:
     """Source names the step reads, minus anything produced by an earlier step."""
-    refs = [step.get(field) for field in _REF_FIELDS]
-    refs += list(step.get(_REF_LIST_FIELD) or [])
-    return [r for r in refs if r and r not in known_steps]
+    return [ref for ref in spec.step_inputs(step) if ref not in known_steps]
 
 
 def _is_interpreted(entry: dict) -> bool:
     """Whether a source still carries the auto-drafted placeholder read."""
-    summary: Any = entry.get("summary") or ""
-    return "(auto-drafted from checks" not in summary
+    return catalog.is_interpreted(entry)

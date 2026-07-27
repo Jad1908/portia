@@ -75,7 +75,10 @@ adding code, and extend them rather than working around them:
 
 **Package layout — one home per concern; don't let things pile up flat in `portia/`:**
 
-- `portia/core/` — shared seams: `io.py` (loading) · `serialize.py` (compact JSON evidence)
+- `portia/core/` — shared seams: `io.py` (loading) · `serialize.py` (compact JSON evidence) ·
+  `present.py` (**one way to show a measured value to a human** — rates, counts, a value on one
+  line. Every surface renders the same numbers; the day the terminal and the app disagree about a
+  null rate is the day someone has to work out which one to believe.)
 - `portia/checks/` — the deterministic checks layer (read-only **diagnosis**, facts only):
   `profiling.py`, `join.py` (`join_report` = key-level facts; `join_findings` = facts + example
   rows), `outcome.py` (post-conditions on a frame an op **produced** — every other check reads
@@ -132,12 +135,28 @@ adding code, and extend them rather than working around them:
     check facts). The agent's memory. **Update rule: facts refresh, prose/roles are preserved** —
     corrections are never clobbered (facts vs judgment, applied to updates).
 - `portia/fixtures/` — kept mock data (a builder per module, registered in `__init__`)
+- `sandbox/` — **gitignored scratch space for throwaway test projects** (`sandbox/run1`, …). Spin up
+  as many as you like; none of it reaches the repo. Test runs used to land in the repo root or in
+  `/tmp`, and the first cluttered the tree while the second was gone by morning.
 - `portia/cli/` — play surfaces: `python -m portia.cli.<tool>` (e.g. `profile`, `join`, `run`, `index`)
+- `portia/ui/` — the **app** (`python -m portia.ui`, `ui` extra): three panes on the same event
+  stream, driving a turn through `ask.py`'s injected `answer`/`confirm`. Same status as `cli/` — an
+  **edge**, and the two must never disagree about a number.
+  - **`ui/engine.py` is the only module in here that calls the engine**, and **nothing in `ui/`
+    computes**. A panel that wants a number the engine doesn't expose is a signal to add it to
+    `checks`/`spec`, not to calculate it in a widget.
+  - `state.py` and `graph.py` import no NiceGUI, so the app's logic is testable without a browser.
+  - The look lives in `ui/assets/portia.css` as `DESIGN.md`'s tokens — not in Python strings, and
+    not in NiceGUI APIs, so swapping the framework stays cheap (`TECH_STACK.md`).
+  - **`DESIGN.md`'s product rule is the UI's version of facts vs judgment: colour and prominence
+    communicate *kind*, never *rank*.** No sorting by severity, no badge that grows with its number,
+    no roll-up that implies a score. The engine refuses to rank; the screen must not do it on the
+    engine's behalf.
 
 Rule of thumb: **`core` = reused everywhere · `checks` = diagnosis (facts) · `ops` = execution ·
-`spec` + `catalog` = the durable artifacts · `agent` = judgment · `cli` = human edge.** Deciding is
-the agent's job, not a layer. A new file that's none of these probably belongs in one of them, not
-loose in `portia/`.
+`spec` + `catalog` = the durable artifacts · `agent` = judgment · `cli` + `ui` = human edges.**
+Deciding is the agent's job, not a layer. A new file that's none of these probably belongs in one of
+them, not loose in `portia/`.
 
 ## Branching — never work on `main` directly
 

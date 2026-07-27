@@ -60,8 +60,12 @@ not a gadget — a place you actually work.
      analysis **plus** the project context provided. This costs a model turn, so it is
      **on by default but opt-out-able** — **GUI: a toggle** on the data-selection panel;
      **CLI: `--no-interpret`**.
-3. **User can correct it.** The user can open that per-file interpretation/metadata and **edit it
-   manually** if the model misunderstood something. (Corrections are durable decisions.)
+3. ~~**User can correct it.**~~ — *built 2026-07-27. The source inspector has two routes, and they
+   write to the same place: **Edit** turns the summary into a text box and each role into a field,
+   with the check facts still on screen beside them; **Ask the copilot** takes a note about what it
+   missed and runs a turn that re-reads the source with that in hand. Both go through
+   `catalog.set_interpretation`, which writes judgment and never touches a measured fact, so a
+   correction survives a re-index either way. The project brief is editable from the toolbar.*
 4. **Group files + group context.** Files can be **grouped**, with **additional context attached
    to the group** — e.g. *"these three tables are external data related to our events."*
 
@@ -92,7 +96,28 @@ not a gadget — a place you actually work.
 
 ---
 
-## V0 — the app (specced 2026-07-26, not yet built)
+## V0 — the app (specced and built 2026-07-26)
+
+> **Built.** `portia/ui/`, launched with `python -m portia.ui`, behind the `ui` extra. The
+> no-terminal audit at the end of this section passes end to end: a project created, a brief
+> written, CSVs added and profiled, an interpret turn driven with its write confirmations approved
+> on screen, a spec run, and every artifact read — no shell. What it grew that this spec didn't
+> anticipate, and what it still doesn't do, is in `BACKLOG.md` → Interface. Three notes where the
+> build had to decide something this section left open:
+>
+> - **Where a source's catalog entry renders.** It replaces the workflow in the middle pane, with a
+>   "Back to workflow" out. The spec says clicking a source shows its entry and doesn't say where.
+>   It also shows the source's **rows**, which the catalog does not hold — the copilot never sees
+>   them, and a person reading the same screen usually wants to.
+> - **Opening a project is a folder chooser**, not a path field. `Browse…` shells out to the OS's own
+>   dialog (macOS today; the path field is the fallback elsewhere, and the only way to name a
+>   directory that does not exist yet, which a fresh test run needs).
+> - **Which action carries the accent.** `DESIGN.md` puts **Run** in the toolbar and **Go** in the
+>   transcript, and separately allows one solid accent fill per view — so V0 gives it to whichever
+>   is the way forward: **Go** until a spec has steps, **Run** once it does.
+> - **An acknowledged flag at the confirmation prompt names the flag and what it means, not what it
+>   would cost.** That number does not exist yet; it is `PLAN.md` item 2, and the banner is built to
+>   take it the day it does.
 
 *Direction, not a task list. The specifics of the middle panel should emerge from looking at it,
 not from this section.*

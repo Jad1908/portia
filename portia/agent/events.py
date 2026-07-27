@@ -20,6 +20,7 @@ from typing import Any
 TEXT = "text"  # the copilot talking
 THINKING = "thinking"  # reasoning, when the model surfaces it
 TOOL_CALL = "tool_call"  # a check or op was invoked
+TOOL_RESULT = "tool_result"  # the evidence it got back
 QUESTION = "question"  # a decision surfaced to the human
 ANSWER = "answer"  # what the human said back
 APPROVAL = "approval"  # a write is waiting on a yes/no
@@ -44,7 +45,9 @@ def from_message(message: Any) -> Iterator[Event]:
         ResultMessage,
         TextBlock,
         ThinkingBlock,
+        ToolResultBlock,
         ToolUseBlock,
+        UserMessage,
     )
 
     if isinstance(message, AssistantMessage):
@@ -61,6 +64,22 @@ def from_message(message: Any) -> Iterator[Event]:
                     {"name": block.name, "input": block.input, "id": block.id},
                 )
 
+    elif isinstance(message, UserMessage):
+        # What a check handed back. Without this a transcript records that
+        # `join_findings` was called and never what it returned — half a
+        # transcript, and the half that carries the evidence (docs/EVALUATION.md
+        # → the run log; docs/VISION.md → "tool results expandable inline").
+        for block in message.content if isinstance(message.content, list) else []:
+            if isinstance(block, ToolResultBlock):
+                yield Event(
+                    TOOL_RESULT,
+                    {
+                        "id": block.tool_use_id,
+                        "text": tool_result_text(block.content),
+                        "is_error": bool(block.is_error),
+                    },
+                )
+
     elif isinstance(message, ResultMessage):
         yield Event(
             RESULT,
@@ -71,6 +90,21 @@ def from_message(message: Any) -> Iterator[Event]:
                 "cost_usd": getattr(message, "total_cost_usd", None),
             },
         )
+
+
+def tool_result_text(content: Any) -> str:
+    """A tool result's content as one string, whatever shape the SDK used.
+
+    ``ToolResultBlock.content`` is a string, or a list of content dicts, or
+    ``None``. Flattening happens here rather than in each renderer so a terminal,
+    a log and a panel all read the same text.
+    """
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    parts = [str(part.get("text", "")) for part in content if isinstance(part, dict)]
+    return "\n".join(p for p in parts if p)
 
 
 def question_event(questions: list[dict]) -> Event:

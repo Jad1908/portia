@@ -30,8 +30,14 @@ from typing import Any
 import yaml
 
 from portia.checks.profiling import profile_path
+from portia.core.present import format_rate
 
 DEFAULT_DIR = ".portia"
+
+#: How an auto-drafted summary announces itself. ``_auto_summary`` writes it and
+#: :func:`is_interpreted` reads it, so "has anyone actually read this source yet"
+#: is one fact rather than a marker string copied into every surface that asks.
+AUTO_DRAFT_MARKER = "(auto-drafted from checks"
 
 # Column flags worth calling out in the auto-drafted prose summary. Plain
 # restatements of facts — not judgements.
@@ -75,6 +81,34 @@ def index_source(
     _write(src_file, _source_entry(str(data_path), profile, existing))
     _register(d, name)
     return src_file
+
+
+def remove_source(name: str, *, portia_dir: str | Path = DEFAULT_DIR) -> Path | None:
+    """Forget a source: drop its entry, its registration, and its group membership.
+
+    **The data file is not touched.** Un-indexing says "portia should stop
+    knowing about this", which is a statement about the catalog; deleting
+    someone's CSV because they tidied a sidebar is a different act entirely, and
+    not one a catalog function gets to make on their behalf.
+
+    A spec that already references the source keeps working — it resolves paths
+    from its own ``sources:`` block, not from the catalog. What breaks is
+    *recording a new step* against a name that is no longer indexed, which fails
+    loudly at `record_step`.
+    """
+    d = Path(portia_dir)
+    entry = d / "sources" / f"{name}.yaml"
+    removed = entry if entry.exists() else None
+    entry.unlink(missing_ok=True)
+
+    proj = d / "project.yaml"
+    if proj.exists():
+        data = _read(proj)
+        (data.get("sources") or {}).pop(name, None)
+        for group in data.get("groups") or []:
+            group["sources"] = [s for s in group.get("sources") or [] if s != name]
+        _write(proj, data)
+    return removed
 
 
 def set_interpretation(
@@ -217,8 +251,13 @@ def _auto_summary(profile: dict) -> str:
             watch.append(f"{col['name']} ({', '.join(hits)})")
     if watch:
         parts.append("Watch-outs: " + "; ".join(watch) + ".")
-    parts.append("(auto-drafted from checks — edit freely; the agent will refine this.)")
+    parts.append(f"{AUTO_DRAFT_MARKER} — edit freely; the agent will refine this.)")
     return " ".join(parts)
+
+
+def is_interpreted(entry: dict) -> bool:
+    """Whether a source's ``summary`` is a real read, or still the placeholder."""
+    return AUTO_DRAFT_MARKER not in (entry.get("summary") or "")
 
 
 def _register(d: Path, name: str) -> None:
@@ -242,7 +281,7 @@ def render_source(entry: dict) -> str:
         flags = f"  ⚑ {', '.join(c['flags'])}" if c["flags"] else ""
         lines.append(
             f"    {c['name']}  [role: {role}]  {c['inferred']}, "
-            f"{c['null_rate']:.0%} null, {c['n_distinct']} distinct{flags}"
+            f"{format_rate(c['null_rate'])} null, {c['n_distinct']} distinct{flags}"
         )
     return "\n".join(lines)
 

@@ -29,13 +29,21 @@ takes an ``input`` + ``transforms``, so a workflow can clean a column then join)
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 import yaml
 
-from portia.checks.outcome import BLOCKING_FLAGS, outcome_report, render_outcome
+from portia.checks.outcome import (
+    BLOCKING_FLAGS,
+    describe_contribution,
+    describe_grain,
+    outcome_report,
+    render_outcome,
+)
 from portia.core.io import load_frame
+from portia.core.present import format_rate, frame_to_markdown, inline
 from portia.ops import apply_join, apply_normalize, apply_sql
 from portia.ops.sql import render_text as render_sql
 
@@ -67,6 +75,26 @@ class StepResult:
         return sorted(hit - set(self.acknowledged))
 
 
+#: Where a step names a table it reads. ``join`` and ``normalize`` name one per
+#: field; ``sql`` declares a list, because a query may read several. This is the
+#: spec format's own fact, so it lives with the format rather than being restated
+#: by every reader — the agent's validator and the app's graph both consult it.
+REF_FIELDS = ("left", "right", "input")
+REF_LIST_FIELD = "inputs"
+
+
+def step_inputs(step: dict) -> list[str]:
+    """The tables a step reads, in the order it declares them.
+
+    A name here is either an indexed source or an earlier step's ``id`` — the
+    step itself doesn't distinguish, and neither does this. That is exactly the
+    edge in the workflow graph: *this step's output is that step's input*.
+    """
+    refs = [step.get(field) for field in REF_FIELDS]
+    refs += list(step.get(REF_LIST_FIELD) or [])
+    return [r for r in refs if isinstance(r, str) and r]
+
+
 def load_spec(path: str | Path) -> dict:
     """Parse a spec YAML file into a plain dict."""
     with open(path) as f:
@@ -96,6 +124,24 @@ def run_spec(spec: dict, *, base_dir: str | Path = ".") -> list[StepResult]:
         frames[step["id"]] = result.frame  # downstream steps may reference it
         results.append(result)
     return results
+
+
+def write_outputs(results: list[StepResult], out_dir: str | Path) -> list[Path]:
+    """Save each step's produced table as ``<out_dir>/<step id>.csv``.
+
+    Both human edges write outputs — ``cli.run --write`` and the app's Run — and
+    a table's filename is part of how a spec is read afterwards, so where it
+    lands is decided once, here, rather than in each renderer.
+    """
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    written = []
+    for r in results:
+        if r.frame is not None:
+            path = out / f"{r.id}.csv"
+            r.frame.to_csv(path, index=False)
+            written.append(path)
+    return written
 
 
 def _run_step(step: dict, frames: dict[str, pd.DataFrame]) -> StepResult:
@@ -209,3 +255,119 @@ def _render_step(r: StepResult) -> list[str]:
         # run should not have to open the spec to see what a step actually did.
         return [f"    {line}" for line in render_sql(p).splitlines()]
     return [f"    {p}"]
+
+
+# --- the saved run report ---------------------------------------------------
+
+#: Where a saved run report lands, and how it is named. A timestamp rather than
+#: a hash: what a reader wants from a directory of these is "which run was this",
+#: and colons are not portable in filenames.
+REPORT_STAMP = "%Y-%m-%dT%H-%M-%S"
+
+
+def write_report(
+    results: list[StepResult],
+    runs_dir: str | Path,
+    *,
+    spec_path: str | Path | None = None,
+    when: datetime | None = None,
+) -> Path:
+    """Save a run as markdown — the durable half of pressing Run.
+
+    ``run_spec`` produces measurements and hands them back; without this they
+    live only as long as the process that made them, and every previous run in
+    this project was written up by hand from a terminal (docs/EVALUATION.md).
+    `TECH_STACK.md` asks for exactly this: a generated report as a durable
+    summary, in a format that reviews in a PR.
+
+    Markdown rather than JSON because the audience is a person reading a diff.
+    The machine-readable stream is the run log's job, not this one's.
+    """
+    when = when or datetime.now()
+    out = Path(runs_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / f"{when.strftime(REPORT_STAMP)}.md"
+    path.write_text(render_markdown(results, spec_path=spec_path, when=when))
+    return path
+
+
+def render_markdown(
+    results: list[StepResult],
+    *,
+    spec_path: str | Path | None = None,
+    when: datetime | None = None,
+) -> str:
+    """One run as markdown: per step, the same four groups the app shows.
+
+    Provenance, outcome, drift and acknowledgement stay four separate sections
+    here too. They answer different questions, and a report that merges them into
+    a status is the mistake this project spent three runs unlearning.
+    """
+    blocking = sorted({flag for r in results for flag in r.blocking})
+    title = Path(spec_path).name if spec_path else "run"
+    stamp = (when or datetime.now()).strftime("%Y-%m-%d %H:%M")
+
+    # The heading reads; the path underneath is what ties the report back to the
+    # spec that produced it. A report you can't trace to its recipe is an anecdote.
+    summary = [f"`{spec_path}`"] if spec_path else []
+    summary.append(f"{len(results)} step(s)")
+    summary.append(f"**blocking: {', '.join(blocking)}**" if blocking else "no blocking flag")
+
+    lines = [f"# {title} — {stamp}", "", " · ".join(summary), ""]
+    for r in results:
+        lines += _report_step(r)
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _report_step(r: StepResult) -> list[str]:
+    lines = [f"## {r.id}  ({r.op})", ""]
+
+    if r.acknowledged:
+        # First, and never folded into a table. An override is the one thing in
+        # a report that must not be possible to skim past (docs/EVALUATION.md).
+        lines += [f"> **Acknowledged override:** `{', '.join(r.acknowledged)}`", ">"]
+        if r.rationale:
+            lines += [f"> {r.rationale}", ""]
+        else:
+            lines += [""]
+
+    lines += _report_table("provenance", {k: v for k, v in r.provenance.items() if k != "op"})
+    lines += _report_table("outcome", _outcome_rows(r.outcome))
+    if r.drift:
+        drift = {k: f"expected {d['expected']} · actual {d['actual']}" for k, d in r.drift.items()}
+        lines += _report_table("drift", drift)
+    if r.rationale and not r.acknowledged:
+        lines += ["### rationale", "", r.rationale, ""]
+    if r.frame is not None:
+        # The table itself, not just a description of it. A report you can read
+        # without the CSV open beside it is the one that gets read.
+        lines += ["### preview", "", frame_to_markdown(r.frame), ""]
+    return lines
+
+
+def _outcome_rows(outcome: dict) -> dict:
+    """The outcome report, flattened to one line per fact."""
+    if not outcome:
+        return {}
+    rows: dict[str, object] = {"produced": f"{outcome.get('n_rows')} × {outcome.get('n_cols')}"}
+    for key in ("newly_all_null_columns", "all_null_columns"):
+        if outcome.get(key):
+            rows[key] = outcome[key]
+    if outcome.get("null_rates"):
+        rows["null_rates"] = " · ".join(
+            f"{col} {format_rate(rate)}" for col, rate in outcome["null_rates"].items()
+        )
+    for name, contribution in (outcome.get("contribution") or {}).items():
+        rows[name] = describe_contribution(contribution)
+    if outcome.get("grain"):
+        rows["grain"] = describe_grain(outcome["grain"])
+    if outcome.get("flags"):
+        rows["flags"] = outcome["flags"]
+    return rows
+
+
+def _report_table(heading: str, rows: dict) -> list[str]:
+    if not rows:
+        return []
+    body = [f"| {k} | {inline(v)} |" for k, v in rows.items()]
+    return [f"### {heading}", "", "| field | value |", "| --- | --- |", *body, ""]

@@ -188,10 +188,16 @@ positive at small sizes to keep the cool surfaces airy.
 - Three panes: **files & artifacts** (left) · **workflow** (middle) · **transcript** (right).
 - The middle pane splits horizontally: **the graph on top, the run report below**, with a draggable
   divider. The report half is the taller of the two by default — it is where the evidence is.
-- Minimum viewport ~`1024×640`. Left default ~260px (collapsible). Right default ~380px
-  (toggleable). The workflow pane is always present and takes the remainder.
+- Minimum viewport ~`1024×640`. Left default 260px, transcript default 400px, both draggable and
+  both collapsible from the toolbar. The workflow pane is always present and takes the remainder.
+- **Pane minimums are pixels, not percentages** — 200px left, 330px transcript. A percentage floor
+  moves with the window, and the transcript holds the `question-form` and the `write-confirm`, the
+  two components this app exists for. Below its minimum it stops being worth having, and the honest
+  move at that point is to close it rather than to squeeze it.
 - Panes are divided by a 1px `{colors.hairline}` — no gutters, no shadows between them. The canvas
-  runs continuously behind all three.
+  runs continuously behind all three. **Every divider is draggable**, including the graph/report one:
+  a hairline at rest, taking `{colors.accent-primary}` only while it is being dragged, because it is
+  a pane edge first and a control second. Widths are percentages, so they survive a resized window.
 - Left sits on `{colors.canvas}`; workflow and transcript sit on `{colors.surface}`.
 
 ### Width behavior
@@ -323,7 +329,12 @@ These exist so a test run never needs a terminal (`VISION.md` → "The no-termin
 ### Middle pane, top — the graph
 
 **`workflow-graph`** — the spec as a DAG
-- Fill `{colors.surface}`, padding `{spacing.lg}`. Nodes are **steps**; an edge means *"this step's
+- Fill `{colors.surface}` with a **dot grid** — 1.5px `{colors.hairline-strong}` dots on a 20px
+  pitch. It says "this space is navigable" before you touch it, and gives the eye something to judge
+  panning against. Padding `{spacing.lg}`.
+- **Drag anywhere on the canvas to pan.** Cursor `grab` at rest, `grabbing` while dragging. Nodes do
+  **not** move: the layout is the recorded sequence of decisions, so dragging a card would either
+  mean nothing or imply the order can be rearranged, and neither is true. Nodes are **steps**; an edge means *"this step's
   output is that step's input"*, derived from `left`/`right`/`input`/`inputs`. Source tables appear
   as leaf nodes in a quieter treatment.
 - Layout is left-to-right in spec order. **Do not reorder nodes by anything measured** — the order
@@ -384,9 +395,23 @@ These exist so a test run never needs a terminal (`VISION.md` → "The no-termin
 
 ### Right pane — the copilot
 
+**`pane-tabs`** — **Copilot** | **Indexing**, at the top of the right pane
+- Active tab: `{colors.accent-text}` label with a 2px `{colors.accent-primary}` rule beneath.
+  Inactive: `{colors.mute}`. **No soft fill** — `{colors.accent-soft}` keeps its three jobs.
+- Two transcripts, not one filtered view. A goal you typed and the catalog work the app runs on your
+  behalf are different jobs with different rhythms, and interleaving them in one scroll made each
+  harder to read than it is alone.
+- **Each tab carries a dot when something is happening there**: `{colors.mute}` while a turn runs,
+  `{colors.accent-primary}` when that turn is *waiting on you*. This is not decoration — the engine
+  is single-turn, so a question parked behind the tab you are not looking at is indistinguishable
+  from a hung turn. For the same reason **the pane follows a decision**: starting a turn shows its
+  tab, and a question or write confirmation switches to its tab when it arrives.
+- Kind, never rank: the waiting dot takes the accent because it is asking for you, not because it
+  is worse than anything else on screen.
+
 **`transcript-pane`** — the live turn, and replayed past ones
 - Fill `{colors.surface}`, padding `{spacing.lg}`. Rows in event order, streamed as `session.run`
-  yields them.
+  yields them. One per tab.
 - **`goal-input`** pinned at the top: a `text-input` at `{typography.body-md}`, model/effort
   selectors as `segmented-control`s, and the `button-primary` **Go**. The model and effort in play
   are stated in `{colors.mute}` `{typography.caption}` for the duration of the turn — an expensive
@@ -450,12 +475,58 @@ questions-and-insights UX *is* the product" — and they get the most design att
 ### Chrome
 
 **`toolbar`** — the top bar
-- `{colors.canvas}`, 1px `{colors.hairline}` bottom rule. Holds: project name and its context
-  summary (left), a spec switcher, a spacer, then `button-primary` "Run" (right), the transcript
-  toggle, and the light/dark override.
+- `{colors.canvas}`, 1px `{colors.hairline}` bottom rule. Holds: the mark and the **session name**
+  (left), a spacer, then "Run", "Write outputs" and "Save report" (right), the files and transcript
+  toggles, and the light/dark override.
+- **No spec switcher.** A spec is an artifact and artifacts are chosen in the left pane, where the
+  sources, outputs and runs are. A second place to choose one is a second thing to keep in sync.
+- **Run writes nothing.** The two save actions beside it are how a result becomes durable, and both
+  are things you press rather than things that happen to you — the same rule as every other write
+  in the app.
+- **The session name is the open directory's name, and it is a button**: clicking it returns to the
+  project picker, which is how you move between projects. Disabled while a turn is running — a
+  switch mid-turn would leave the copilot writing into a directory the window has stopped watching.
+- **Not the project brief.** An earlier draft put the brief's first line here. The brief is the most
+  load-bearing text in the product and it is still not chrome: a paragraph of prose across the top
+  of every screen crowds out the one thing a toolbar is for, which is saying where you are. It is
+  currently visible nowhere in the app, which is a gap rather than a decision.
+
+**`dialog`** — a transient overlay (adding data)
+- `{colors.surface}` panel on the standard scrim, `{rounded.lg}`, one soft shadow — the exception to
+  the no-shadow rule. **No scale-in**: the panel appears at full size. Animation is not part of this
+  app's vocabulary, and a transition that depends on an animation frame shows an empty overlay on a
+  tab that isn't animating.
 
 **`keycap`** — `{colors.surface-card}` fill, `{colors.body}` `{typography.mono}`, padding `1px 6px`,
 `{rounded.xs}`.
+
+**`fact`** — one measured value as a small icon plus the number
+- 14px icon in `{colors.stone}`, value in `{typography.mono-sm}` `{colors.body}`, `{spacing.xs}`
+  between them. **The icon is shorthand and never the whole story** — every `fact` carries a tooltip
+  naming what it is, because a number nobody can name is worse than no number.
+- For places where the same handful of facts repeats down a long list. Anywhere else, use `kv`.
+
+**`turn-banner`** — what a turn is, when the app started it rather than you
+- `{colors.surface-elevated}`, 1px `{colors.hairline}`, `{rounded.md}`, padding `{spacing.sm}`
+  `{spacing.md}`. An icon, the kind (`Indexing`, `Re-reading`), the subject in `{typography.mono-sm}`,
+  and one `{typography.caption}` line saying what is actually running.
+- **Uncoloured on purpose** — it is a different *kind* of turn, not a more important one.
+- It exists because indexing and a goal you typed share one transcript, and a panel that renders them
+  identically is one you have to reconstruct from the tool calls. It also keeps the two halves of
+  indexing apart: profiling already happened and was free, interpretation is what costs a turn.
+
+**`column-row`** — one column of a source, in the source inspector
+- **Tracks are content-independent** (fixed px for the short facts, fractions for the text). Every
+  row is its own grid, so an `auto` track sizes to that row's content and nothing lines up with the
+  heading — which is exactly how it first shipped.
+- A row, not a card: name in `{typography.mono}` `{colors.ink}` (truncating), a
+  `type-chip` for the dtype, then `fact`s for **role**, **null rate** and **distinct**, then the
+  column's `flag-badge`s. Rows are separated by `{colors.hairline-soft}` inside a single
+  `{colors.hairline}` container.
+- A thirty-column source is the normal case. A labelled line per fact made three columns a
+  screenful; nothing is dropped here, it is laid out across rather than down.
+- The null rate is formatted exactly as `catalog.render_source` formats it for the terminal. The two
+  edges must never disagree about a rate.
 
 ### Removed (from the sibling project — do not implement)
 `primary-nav`, `footer-section`, `pricing-tier-card`, `hero-stripe-band`, `file-tree-row`
@@ -500,18 +571,28 @@ Their *visual language* lives on in the components above.
 
 ## Known Gaps
 
-- **Light-mode values are first-pass**, inherited and tuned by reasoning rather than capture; verify contrast on device.
-- **Hover states** are left to platform convention and not specified here.
-- **The graph's visual grammar is provisional.** Cards-are-steps and edges-are-data-dependency is V0's working answer to `VISION.md`'s open question; rendering it is how we find out whether it reads correctly. Expect this section to change.
-- **First-run chrome is specced** (`project-open`, `project-context`, `source-dropzone`) because
-  V0's bar is a full test run with no terminal. It is first-pass and unbuilt; the context panel in
-  particular deserves attention beyond a text box, since it carries more of the product's outcome
-  than any other control.
-- **Drag-and-drop file handling** in NiceGUI is unverified. If it proves awkward, the picker plus a
-  path field is an acceptable V0 fallback — the requirement is "no terminal", not "drag".
-- **Teal pill contrast on dark** — white on `#0D9488` sits just under 4.5:1 for 13px text; verify on device and darken toward `#0C7D72` if it reads weak.
+*V0 is built (`portia/ui/`). Gaps below are marked with what the build settled and what it didn't.*
+
+- **Light-mode values are first-pass**, inherited and tuned by reasoning rather than capture; verify contrast on device. *Light mode has now been looked at on screen and reads correctly; the values have still never been measured.*
+- **Hover states** are left to platform convention and not specified here. *V0 gives artifact rows and option rows a `{colors.surface-card}` hover and nothing else.*
+- **The graph's visual grammar is provisional.** Cards-are-steps and edges-are-data-dependency is V0's working answer to `VISION.md`'s open question; rendering it is how we find out whether it reads correctly. *First reading: on a two-source, one-step spec it is legible and unremarkable — which is the answer for the easy case only. It has not been seen on a multi-hop spec, and the layout is a fixed grid with no pan, zoom or collapse, so a long chain will run off the canvas before the grammar is what fails.*
+- ~~**First-run chrome is specced but unbuilt**~~ — *built: `project-open`, `project-context`, `source-dropzone`, `index-progress`. The context panel is still a text box with guidance beneath it, and it still deserves more than that.*
+- ~~**Drag-and-drop file handling is unverified**~~ — *still unverified. The sanctioned fallback is what shipped and what was tested: the picker, plus an "add by path" field that takes a file, a directory or a glob.*
+- **Teal pill contrast on dark** — white on `#0D9488` sits just under 4.5:1 for 13px text; verify on device and darken toward `#0C7D72` if it reads weak. *Unmeasured.*
 - **No syntax highlighting** in V0 code blocks. If SQL steps get long, revisit.
 - **The accent hue is decided: deep teal**, shared with the sibling project. Not a gap — a choice.
   It still lives in one token, so re-hueing stays a one-line change if that ever becomes wanted.
 - **Streaming states are unspecced.** What a `tool_call` row looks like while its result is still
-  pending, and how a long turn signals it is alive, need designing against a real run.
+  pending, and how a long turn signals it is alive, need designing against a real run. *V0's answer
+  is thin and now has a real run behind it: a spinner beside "the copilot is working", and the
+  transcript pinned to its newest row. A `tool_call` still looks identical whether its result is
+  seconds away or never coming.*
+- **Two rules met each other and had to be reconciled.** The toolbar holds **Run**, the transcript
+  holds **Go**, and at most one solid accent fill may be visible per view — so V0 gives the fill to
+  whichever is the way forward: **Go** until a spec has steps, **Run** once it does. Stated here
+  because it is a real decision, not an implementation detail.
+- **The framework fights the palette in two places.** Quasar paints its own components from
+  `--q-primary`, so that token is pointed at `{colors.accent-primary}` and everything unstyled lands
+  on portia's hue in both modes. Its `toggle` still insists on a solid brand fill for the selected
+  segment, so the `segmented-control` is built from `button-micro`s instead — the selected one takes
+  the `{colors.accent-soft}` wash this file specifies.

@@ -27,6 +27,7 @@ from __future__ import annotations
 import pandas as pd
 
 from portia.checks.profiling import null_rates
+from portia.core.present import count
 from portia.core.serialize import to_jsonable
 
 GRAIN_EXAMPLES = 5  # worst-offending grain keys shown when a grain claim fails
@@ -246,3 +247,38 @@ def render_outcome(outcome: dict) -> str:
     if outcome["flags"]:
         lines.append(f"    ⚑ {', '.join(outcome['flags'])}")
     return "\n".join(lines)
+
+
+def describe_contribution(contribution: dict) -> str:
+    """What one input actually put into the output, on one line.
+
+    Paired with `outcome_report` rather than living in a renderer, because every
+    surface says this and they must say it the same way: the app's report pane,
+    the saved markdown report, and anything else that grows one.
+    """
+    reached = contribution.get("n_columns")
+    contributed = contribution.get("contributed")
+    parts = [count(reached, "column") + " in output" if reached is not None else "—"]
+    if contributed is False:
+        parts.append("contributed nothing")
+    elif contributed is True:
+        parts.append("contributed")
+    else:
+        parts.append("no non-key columns to judge")
+    if contribution.get("columns_dropped"):
+        parts.append(f"dropped {', '.join(contribution['columns_dropped'])}")
+    return " · ".join(parts)
+
+
+def describe_grain(grain: dict) -> str:
+    """The caller's grain claim, and whether it held. Facts, not a verdict."""
+    keys = ", ".join(grain.get("keys") or [])
+    if not grain.get("measurable"):
+        missing = ", ".join(grain.get("missing_columns") or [])
+        return f"[{keys}] · not measurable · missing {missing}"
+    if grain.get("unique"):
+        return f"[{keys}] · unique · {count(grain.get('n_distinct', 0), 'row')}"
+    return (
+        f"[{keys}] · not unique · {count(grain.get('n_duplicated_keys', 0), 'duplicated key')}"
+        f" · up to {count(grain.get('max_multiplicity', 0), 'row')} each"
+    )
