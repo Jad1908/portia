@@ -16,9 +16,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from nicegui import app as ng_app
 from nicegui import ui
 
-CSS = Path(__file__).parent / "assets" / "portia.css"
+ASSETS = Path(__file__).parent / "assets"
+CSS = ASSETS / "portia.css"
+
+#: The mark. Lives in the package rather than the repo's `assets/` so it ships
+#: with a `pip install`, and downscaled from the 1024px original because it is
+#: never drawn larger than a few dozen pixels.
+LOGO_FILE = ASSETS / "cute-portia.png"
+LOGO_ROUTE = "/portia-assets"
+LOGO = f"{LOGO_ROUTE}/{LOGO_FILE.name}"
+
+ng_app.add_static_files(LOGO_ROUTE, ASSETS)
 
 _PRECONNECT = '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
 _INTER = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap"
@@ -41,3 +52,14 @@ def apply() -> ui.dark_mode:
 
 def next_mode(current: bool | None) -> bool | None:
     return _CYCLE[current]
+
+
+def logo(small: bool = False) -> ui.html:
+    """The mark.
+
+    A plain ``<img>`` rather than ``ui.image``: Quasar's QImg fades in on an
+    animation frame, and a logo that depends on a frame firing is a logo that is
+    sometimes missing.
+    """
+    css = "p-logo-sm" if small else "p-logo"
+    return ui.html(f'<img class="{css}" src="{LOGO}" alt="portia">')

@@ -30,3 +30,8 @@ venv/
 specs/agent_*.yaml
 # Tables a run wrote (`run --write out`, or the app's "Write outputs").
 out/
+
+# The 1024px logo original. What the app uses is the 256px copy that ships with
+# the package (portia/ui/assets/cute-portia.png); this one is 1.5 MB and trips
+# the large-file hook. Keep it somewhere, just not in git — unless we decide to.
+/cute-portia.png

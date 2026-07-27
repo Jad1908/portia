@@ -30,6 +30,7 @@ from typing import Any
 import yaml
 
 from portia.checks.profiling import profile_path
+from portia.core.serialize import format_rate
 
 DEFAULT_DIR = ".portia"
 
@@ -252,7 +253,7 @@ def render_source(entry: dict) -> str:
         flags = f"  ⚑ {', '.join(c['flags'])}" if c["flags"] else ""
         lines.append(
             f"    {c['name']}  [role: {role}]  {c['inferred']}, "
-            f"{c['null_rate']:.0%} null, {c['n_distinct']} distinct{flags}"
+            f"{format_rate(c['null_rate'])} null, {c['n_distinct']} distinct{flags}"
         )
     return "\n".join(lines)
 

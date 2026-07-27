@@ -11,7 +11,7 @@ import argparse
 
 from nicegui import ui
 
-from portia.ui import app
+from portia.ui import app, theme
 from portia.ui.state import APP
 
 DEFAULT_PORT = 8080
@@ -34,6 +34,7 @@ def main() -> None:
         host=args.host,
         port=args.port,
         title=app.TITLE,
+        favicon=theme.LOGO_FILE,
         # Auto: Quasar resolves it from prefers-color-scheme, and the toolbar's
         # override rides the same mechanism (portia/ui/theme.py).
         dark=None,

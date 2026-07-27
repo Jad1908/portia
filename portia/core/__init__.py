@@ -5,13 +5,14 @@ do the same way (get a DataFrame from a path; emit compact JSON evidence).
 """
 
 from portia.core.io import find_data_files, load_frame, supported_suffixes
-from portia.core.serialize import round_float, to_json, to_jsonable
+from portia.core.serialize import format_rate, round_float, to_json, to_jsonable
 
 __all__ = [
     "load_frame",
     "find_data_files",
     "supported_suffixes",
     "round_float",
+    "format_rate",
     "to_json",
     "to_jsonable",
 ]

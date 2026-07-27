@@ -20,12 +20,14 @@ Nothing here computes. Every number on screen came out of `checks`/`ops`/`spec`.
 
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 from typing import Any
 
 from nicegui import ui
 
 from portia.checks.outcome import BLOCKING_FLAGS
+from portia.core.serialize import format_rate
 from portia.ui import components as c
 from portia.ui import engine, graph
 from portia.ui.state import APP, OUTPUT, SOURCE
@@ -202,14 +204,14 @@ def _report_block(result: Any) -> None:
                 measured=result.outcome,
             )
 
-        _group("provenance", lambda: _provenance(result.provenance))
-        _group("outcome", lambda: _outcome(result.outcome, result.acknowledged))
         if result.drift:
             _group("drift", lambda: _drift(result.drift))
+        _group("provenance", lambda: _provenance(result.provenance))
+        _group("outcome", lambda: _outcome(result.outcome, result.acknowledged))
         if result.rationale and not result.acknowledged:
             _group("rationale", lambda: c.text(result.rationale))
         if result.frame is not None:
-            _group("table", lambda: c.table_preview(result.frame))
+            _table(result.frame)
     block.on("click", lambda i=result.id: _select_step(i))
 
 
@@ -219,13 +221,25 @@ def _group(label: str, body) -> None:
         body()
 
 
+def _table(frame) -> None:
+    """The produced table, one click away.
+
+    Inline it pushed everything below it off the screen, and the point of the
+    report is that the four groups can be read at a glance. The label carries
+    the shape, so the table is never a surprise you have to open to size up.
+    """
+    label = f"table · {c.count(len(frame), 'row')} × {c.count(frame.shape[1], 'column')}"
+    c.collapsed(label, lambda: c.table_preview(frame))
+
+
 def _provenance(provenance: dict) -> None:
     """What the op did. Never merged with what came out."""
-    for key, value in provenance.items():
-        if key == "flags":
-            _uncoloured_flags(value)
-        elif key != "op":
-            c.kv(key, value)
+    with c.kv_list():
+        for key, value in provenance.items():
+            if key == "flags":
+                c.kv(key, body=partial(_uncoloured_flags, value))
+            elif key != "op":  # already the chip in the header
+                c.kv(key, value)
 
 
 def _outcome(outcome: dict, acknowledged: list[str]) -> None:
@@ -233,16 +247,61 @@ def _outcome(outcome: dict, acknowledged: list[str]) -> None:
     if not outcome:
         c.caption("not measured")
         return
-    c.kv("rows × cols", f"{outcome.get('n_rows')} × {outcome.get('n_cols')}")
-    for key in ("newly_all_null_columns", "all_null_columns", "null_rates"):
-        if outcome.get(key):
-            c.kv(key, outcome[key])
-    for name, contribution in (outcome.get("contribution") or {}).items():
-        c.kv(name, contribution)
-    if outcome.get("grain"):
-        c.kv("grain", outcome["grain"])
-    for flag in outcome.get("flags") or []:
-        c.flag_badge(flag, c.flag_variant(flag, acknowledged))
+    with c.kv_list():
+        c.kv("produced", f"{outcome.get('n_rows')} × {outcome.get('n_cols')}")
+        for key in ("newly_all_null_columns", "all_null_columns"):
+            if outcome.get(key):
+                c.kv(key, outcome[key])
+        if outcome.get("null_rates"):
+            c.kv("null_rates", _rates(outcome["null_rates"]))
+        for name, contribution in (outcome.get("contribution") or {}).items():
+            c.kv(name, _contribution(contribution))
+        if outcome.get("grain"):
+            c.kv("grain", _grain(outcome["grain"]))
+        if outcome.get("flags"):
+            c.kv("flags", body=partial(_outcome_flags, outcome["flags"], acknowledged))
+
+
+def _rates(rates: dict) -> str:
+    """`customer_id 12% · notes 65%`, formatted the way the terminal formats it."""
+    return " · ".join(f"{col} {format_rate(rate)}" for col, rate in rates.items())
+
+
+def _contribution(contribution: dict) -> str:
+    """What one input actually put into the output, on one line."""
+    reached = contribution.get("n_columns")
+    contributed = contribution.get("contributed")
+    parts = [c.count(reached, "column") + " in output" if reached is not None else "—"]
+    if contributed is False:
+        parts.append("contributed nothing")
+    elif contributed is True:
+        parts.append("contributed")
+    else:
+        parts.append("no non-key columns to judge")
+    if contribution.get("columns_dropped"):
+        parts.append(f"dropped {', '.join(contribution['columns_dropped'])}")
+    return " · ".join(parts)
+
+
+def _grain(grain: dict) -> str:
+    """The claim, and whether it held — the engine's words, not a verdict."""
+    keys = ", ".join(grain.get("keys") or [])
+    if not grain.get("measurable"):
+        return (
+            f"[{keys}] · not measurable · missing {', '.join(grain.get('missing_columns') or [])}"
+        )
+    if grain.get("unique"):
+        return f"[{keys}] · unique · {c.count(grain.get('n_distinct', 0), 'row')}"
+    return (
+        f"[{keys}] · not unique · {c.count(grain.get('n_duplicated_keys', 0), 'duplicated key')}"
+        f" · up to {c.count(grain.get('max_multiplicity', 0), 'row')} each"
+    )
+
+
+def _outcome_flags(flags: list[str], acknowledged: list[str]) -> None:
+    with ui.element("div").classes("row-gap-xs"):
+        for flag in flags:
+            c.flag_badge(flag, c.flag_variant(flag, acknowledged))
 
 
 def _drift(drift: dict) -> None:
@@ -272,41 +331,58 @@ def _source_inspector(name: str) -> None:
         if entry is None:
             c.empty_note("no catalog entry")
             return
-        c.kv("file", entry.get("source", ""))
-        c.kv("candidate keys", entry.get("candidate_keys") or "(none)")
+        with c.kv_list():
+            c.kv("file", entry.get("source", ""))
+            c.kv("candidate_keys", entry.get("candidate_keys") or "(none)")
         _group("summary", lambda: c.text(entry.get("summary", "")))
         _group("columns", lambda: _columns(entry.get("columns") or []))
 
 
-#: The icon each per-column fact gets in the dense list. Shorthand only — every
-#: one carries a tooltip naming the fact, because a number nobody can name is
-#: worse than no number.
-ROLE_ICON = "label"
-NULL_ICON = "opacity"
-DISTINCT_ICON = "fingerprint"
+#: The per-column facts, each as (icon, heading). The **heading names the fact in
+#: words, once, at the top of the list**, and the icon repeats down the rows as
+#: the thing your eye tracks. Icons alone would be a legend nobody was given;
+#: words on every row would be the wall of labels this replaced.
+COLUMN_HEADINGS = (
+    ("table_rows", "column"),
+    ("data_object", "type"),
+    ("label", "role"),
+    ("opacity", "null"),
+    ("fingerprint", "distinct"),
+    ("flag", "flags"),
+)
 
 
 def _columns(columns: list[dict]) -> None:
-    """One row per column, not one card.
+    """A real table: headings once, values aligned under them.
 
     A source with thirty columns is the normal case, and a labelled line per fact
-    made three of them a screenful. The facts are the same ones and none is
-    dropped; they are just laid out across rather than down.
+    made three of them a screenful. Every fact the cards showed is still here.
     """
     with ui.element("div").classes("column-list"):
+        _column_headings()
         for col in columns:
             _column_row(col)
+
+
+def _column_headings() -> None:
+    with ui.element("div").classes("column-row column-head"):
+        for icon, heading in COLUMN_HEADINGS:
+            with ui.element("div").classes("column-heading"):
+                ui.icon(icon).classes("fact-icon")
+                ui.label(heading)
 
 
 def _column_row(col: dict) -> None:
     with ui.element("div").classes("column-row"):
         ui.label(col["name"]).classes("column-name").tooltip(col["name"])
-        c.chip(str(col.get("inferred", "")))
-        c.fact(ROLE_ICON, col.get("role") or "—", "role")
-        c.fact(NULL_ICON, _null_rate(col), "null rate")
-        c.fact(DISTINCT_ICON, col.get("n_distinct"), "distinct values")
-        for flag in col.get("flags") or []:
-            c.flag_badge(flag)
+        with ui.element("div"):
+            c.chip(str(col.get("inferred", "")))
+        c.mono(col.get("role") or "—", small=True)
+        c.mono(_null_rate(col), small=True)
+        c.mono(str(col.get("n_distinct", "—")), small=True)
+        with ui.element("div").classes("row-gap-xs"):
+            for flag in col.get("flags") or []:
+                c.flag_badge(flag)
 
 
 def _null_rate(col: dict) -> str:
@@ -315,8 +391,7 @@ def _null_rate(col: dict) -> str:
     Same number, same rounding, both edges — the day the two disagree about a
     rate is the day someone has to work out which one to believe.
     """
-    rate = col.get("null_rate")
-    return "—" if rate is None else f"{rate:.0%}"
+    return format_rate(col.get("null_rate"))
 
 
 async def _output_inspector(name: str) -> None:

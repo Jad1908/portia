@@ -91,6 +91,7 @@ def _project_label() -> None:
     says so. Disabled mid-turn: switching would leave the copilot writing into a
     directory the window has stopped looking at.
     """
+    theme.logo(small=True)
     label = c.button(
         APP.root.name or str(APP.root),
         _switch_project,

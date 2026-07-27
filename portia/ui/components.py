@@ -171,14 +171,53 @@ def collapsed(summary: str, body: Callable[[], Any]) -> ui.expansion:
     return exp
 
 
-def kv(key: str, value: Any, *, mono_value: bool = True) -> ui.element:
-    """One labelled line: metadata label, measured value. Compact enough to scan."""
-    with ui.element("div").classes("kv") as row:
-        ui.label(key).classes("kv-key")
-        ui.label(_as_yaml(value, flow=True)).classes(
-            "kv-value" if mono_value else "t-body c-body pre-wrap"
-        )
-    return row
+def kv_list() -> ui.element:
+    """A container whose `kv` rows share one label column, so values line up.
+
+    Ragged labels put every number at a different indent, which is most of what
+    made the first run report unreadable.
+    """
+    return ui.element("div").classes("kv-list")
+
+
+def kv(key: str, value: Any = None, *, body: Callable[[], Any] | None = None) -> None:
+    """One row of a `kv_list`: the engine's field name, then what it measured.
+
+    The key is the engine's own spelling (`left_dropped`, not "rows dropped from
+    the left"), because those are the names an `expect` block has to use — the
+    report is where you learn the vocabulary.
+    """
+    ui.label(key).classes("kv-key")
+    if body is not None:
+        with ui.element("div").classes("kv-value-slot"):
+            body()
+    else:
+        ui.label(inline(value)).classes("kv-value")
+
+
+def inline(value: Any) -> str:
+    """A measured value on one line, in words rather than punctuation.
+
+    ``{"left": 8, "right": 6}`` becomes ``left 8 · right 6`` and
+    ``{"left": ["customer_id"], "right": ["customer_id"]}`` becomes
+    ``left customer_id · right customer_id``. Both were being dumped as inline
+    YAML, braces and all, which is most of what made the report unreadable.
+    Anything genuinely nested still falls back to YAML rather than being flattened
+    into something that reads clearer than it is.
+    """
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return _scalar(value)
+    if isinstance(value, dict) and all(not isinstance(v, dict) for v in value.values()):
+        return " · ".join(f"{k} {inline(v)}" for k, v in value.items()) or "—"
+    if isinstance(value, list) and all(not isinstance(v, (dict, list)) for v in value):
+        return ", ".join(_scalar(v) for v in value) or "—"
+    return _as_yaml(value, flow=True)
+
+
+def _scalar(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return "—" if value is None else str(value)
 
 
 # --- artifact rows ----------------------------------------------------------
@@ -247,21 +286,22 @@ def acknowledged_banner(
 def _measured_facts(outcome: dict, flags: list[str]) -> None:
     """What the engine measured about the waived flags — its numbers, not ours."""
     grain = outcome.get("grain")
-    if grain and grain.get("measurable") and not grain.get("unique"):
-        kv("grain", grain["keys"])
-        kv("duplicated keys", grain.get("n_duplicated_keys"))
-        kv("max multiplicity", grain.get("max_multiplicity"))
-        for example in grain.get("examples") or []:
-            kv("example", example)
-    if grain and not grain.get("measurable"):
-        kv("missing columns", grain.get("missing_columns"))
-    if outcome.get("newly_all_null_columns"):
-        kv("became all-null", outcome["newly_all_null_columns"])
-    for name, contribution in (outcome.get("contribution") or {}).items():
-        if contribution.get("contributed") is False:
-            kv("contributed nothing", name)
-    if "empty_output" in flags:
-        kv("rows", outcome.get("n_rows"))
+    with kv_list():
+        if grain and grain.get("measurable") and not grain.get("unique"):
+            kv("grain", grain["keys"])
+            kv("duplicated keys", grain.get("n_duplicated_keys"))
+            kv("max multiplicity", grain.get("max_multiplicity"))
+            for example in grain.get("examples") or []:
+                kv("example", example)
+        if grain and not grain.get("measurable"):
+            kv("missing columns", grain.get("missing_columns"))
+        if outcome.get("newly_all_null_columns"):
+            kv("became all-null", outcome["newly_all_null_columns"])
+        for name, contribution in (outcome.get("contribution") or {}).items():
+            if contribution.get("contributed") is False:
+                kv("contributed nothing", name)
+        if "empty_output" in flags:
+            kv("rows", outcome.get("n_rows"))
 
 
 #: What each blocking flag means, in one line. Every one is a zero-condition —
@@ -322,7 +362,8 @@ def _field(key: str, value: Any) -> None:
             ui.label(key).classes("report-group-label")
             code_block(value if isinstance(value, str) else _as_yaml(value))
     else:
-        kv(key, value)
+        with kv_list():
+            kv(key, value)
 
 
 # --- table preview ----------------------------------------------------------

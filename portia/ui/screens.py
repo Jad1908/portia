@@ -33,9 +33,13 @@ from portia.ui.state import APP
 
 
 def project_open() -> None:
+    from portia.ui import theme
+
     with ui.element("div").classes("p-centered"):
         with ui.element("div").classes("p-centered-column"):
-            ui.label("portia").classes("t-display")
+            with ui.element("div").classes("row-gap-md"):
+                theme.logo()
+                ui.label("portia").classes("t-display")
             c.text(_OPEN_SUBTITLE, color="c-mute")
 
             path = (

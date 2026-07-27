@@ -608,6 +608,27 @@ html body {
   max-width: 100%;
 }
 
+/* The mark is a cut-out, so it sits on the canvas rather than in a tile. */
+.p-logo {
+  width: 64px;
+  height: 64px;
+  flex: 0 0 auto;
+  object-fit: contain;
+}
+.p-logo-sm {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  object-fit: contain;
+}
+
+.row-gap-md {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-md);
+  flex-wrap: wrap;
+}
+
 .p-empty-panel {
   border-radius: var(--r-xl);
   background: var(--accent-soft);
@@ -814,10 +835,15 @@ body.body--dark .step-card {
   border-color: color-mix(in srgb, var(--accent-primary) 60%, transparent);
 }
 
+/* The four groups stay visually separate — they answer different questions and
+ * collapsing them into one status is the mistake this project spent three runs
+ * unlearning. The rule is what makes that legible at a glance. */
 .report-group {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-xxs);
+  gap: var(--sp-xs);
+  padding-top: var(--sp-sm);
+  border-top: 1px solid var(--hairline-soft);
 }
 .report-group-label {
   font-size: 11px;
@@ -826,18 +852,25 @@ body.body--dark .step-card {
   text-transform: uppercase;
 }
 
-.kv {
-  display: flex;
-  gap: var(--sp-sm);
+/* One label column for the whole block, so the numbers line up. Ragged labels
+ * put every value at a different indent, which is most of what made the first
+ * run report unreadable. */
+.kv-list {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: var(--sp-md);
+  row-gap: var(--sp-xxs);
   align-items: baseline;
 }
 .kv-key {
+  font-family: var(--font-mono);
   font-size: 11px;
-  letter-spacing: 0.2px;
+  font-feature-settings: normal;
   color: var(--mute);
-  flex: 0 0 auto;
+  white-space: nowrap;
 }
-.kv-value {
+.kv-value,
+.kv-value-slot {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--body);
@@ -852,29 +885,53 @@ body.body--dark .step-card {
   overflow: hidden;
 }
 
+/* aligned columns: name · type · role · null · distinct · flags */
 .column-row {
-  display: flex;
+  display: grid;
+  /* the name earns some room; the flags earn more, since there can be several */
+  grid-template-columns:
+    minmax(110px, 0.8fr) minmax(64px, auto) minmax(80px, auto)
+    minmax(44px, auto) minmax(60px, auto) minmax(0, 2.2fr);
   align-items: center;
   gap: var(--sp-md);
   padding: var(--sp-xs) var(--sp-md);
   border-bottom: 1px solid var(--hairline-soft);
   min-width: 0;
-  flex-wrap: wrap;
+}
+.column-row > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .column-row:last-child {
   border-bottom: none;
 }
-.column-row:hover {
+.column-row:not(.column-head):hover {
   background: var(--surface-card);
 }
 .column-row .column-name {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--ink);
-  flex: 0 1 180px;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* the words, once, at the top — the icons below are what the eye tracks */
+.column-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-elevated);
+  border-bottom: 1px solid var(--hairline-strong);
+}
+.column-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: var(--mute);
+  text-transform: uppercase;
   white-space: nowrap;
 }
 
