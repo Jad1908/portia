@@ -9,9 +9,17 @@ import json
 import pandas as pd
 import pytest
 
-from portia.checks.join import join_report, render_text
+from portia.checks.join import (
+    join_findings,
+    join_findings_table,
+    join_report,
+    join_report_table,
+    render_text,
+)
+from portia.core import store
 from portia.core.serialize import to_json
-from portia.fixtures import sales_customers, sales_orders
+from portia.core.table import Table
+from portia.fixtures import city_events, hotels, otb, sales_customers, sales_orders
 
 
 @pytest.fixture(scope="module")
@@ -99,3 +107,94 @@ def test_missing_key_raises():
 def test_report_is_json_serializable_and_renders(report):
     assert json.loads(to_json(report))["relationship"] == "many:many"
     assert "many:many" in render_text(report)
+
+
+# --- the SQL implementation --------------------------------------------------
+
+
+@pytest.fixture
+def con():
+    c = store.memory()
+    yield c
+    c.close()
+
+
+def _pair(con, left, right, lname="l", rname="r"):
+    return Table.from_frame(left, lname, con), Table.from_frame(right, rname, con)
+
+
+def test_both_implementations_agree_on_the_fixtures(con):
+    """Same report from a frame and from a table, for every pair worth reporting."""
+    pairs = [
+        ((sales_orders(), sales_customers()), {"on": ["customer_id"]}),
+        ((otb(), hotels()), {"on": ["hotel_id"]}),
+        ((hotels(), city_events()), {"left_on": ["city"], "right_on": ["city_name"]}),
+        (
+            (otb(), city_events()),
+            {"left_on": ["hotel_id", "stay_date"], "right_on": ["city_name", "event_date"]},
+        ),
+    ]
+    for i, ((left, right), keys) in enumerate(pairs):
+        lt, rt = _pair(con, left, right, f"l{i}", f"r{i}")
+        assert join_report_table(lt, rt, **keys) == join_report(left, right, **keys)
+
+
+def test_a_mismatched_key_is_reported_rather_than_raised(con):
+    """DuckDB implements `BIGINT = VARCHAR` by casting and *throwing* on a value
+    that won't convert. A check that crashes cannot report the mismatch."""
+    lt, rt = _pair(con, pd.DataFrame({"k": [9000, 9001]}), pd.DataFrame({"k": ["H001", "H002"]}))
+    report = join_report_table(lt, rt, on="k")
+    assert report["key_dtype_match"] is False
+    assert "key_dtype_mismatch" in report["flags"] and "no_matches" in report["flags"]
+    assert report["joins"]["inner"]["result_rows"] == 0
+    # the samples come back in their own type, not the text the comparison used
+    assert report["overlap"]["sample_left_only"] == [9000, 9001]
+
+
+def test_an_int_key_still_matches_a_float_key(con):
+    """Both are 'numeric', so they are compared as numbers — as pandas aligns them."""
+    lt, rt = _pair(con, pd.DataFrame({"k": [1, 2]}), pd.DataFrame({"k": [1.0, 2.0]}))
+    report = join_report_table(lt, rt, on="k")
+    assert report["key_dtype_match"] is True
+    assert report["joins"]["inner"]["result_rows"] == 2
+
+
+def test_a_composite_key_is_evidence_as_a_list(con):
+    lt, rt = _pair(
+        con,
+        pd.DataFrame({"a": ["x"], "b": ["1"]}),
+        pd.DataFrame({"a": ["y"], "b": ["2"]}),
+    )
+    report = join_report_table(lt, rt, on=["a", "b"])
+    assert report["overlap"]["sample_left_only"] == [["x", "1"]]
+
+
+def test_a_missing_key_column_says_which(con):
+    lt, rt = _pair(con, pd.DataFrame({"a": [1]}), pd.DataFrame({"a": [1]}))
+    with pytest.raises(ValueError, match="missing key column"):
+        join_report_table(lt, rt, on="nope")
+
+
+def test_an_empty_side_reports_zeroes_not_an_error(con):
+    lt, rt = _pair(con, pd.DataFrame({"k": pd.Series([], dtype="int64")}), pd.DataFrame({"k": [1]}))
+    report = join_report_table(lt, rt, on="k")
+    assert report["joins"]["inner"]["result_rows"] == 0
+    assert report["overlap"]["left_coverage"] == 0.0
+    assert "no_matches" in report["flags"]
+
+
+def test_findings_agree_with_the_frame_implementation(con):
+    left, right = sales_orders(), sales_customers()
+    lt, rt = _pair(con, left, right, "fl", "fr")
+    assert join_findings_table(lt, rt, on="customer_id") == join_findings(
+        left, right, on="customer_id"
+    )
+
+
+def test_a_fan_out_is_counted_never_built(con):
+    """The claim the module docstring makes, at a size pandas could not merge."""
+    con.execute("CREATE TABLE big_l AS SELECT i % 1000 AS k FROM range(200000) t(i)")
+    con.execute("CREATE TABLE big_r AS SELECT i % 1000 AS k FROM range(200000) t(i)")
+    report = join_report_table(Table.from_name("big_l", con), Table.from_name("big_r", con), on="k")
+    assert report["joins"]["inner"]["result_rows"] == 1000 * 200 * 200
+    assert report["fan_out"]["max_left_to_right"] == 200

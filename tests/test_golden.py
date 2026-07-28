@@ -66,6 +66,12 @@ EXCEPTIONS: dict[str, dict[str, dict[str, str]]] = {
         "*": {"columns[].dtype": _TYPE_NAMES},
         "profile/otb": {"columns[].inferred": _DATE_TYPED},
         "profile/city_events": {"columns[].inferred": _DATE_TYPED},
+        # The same date typing, reaching the join check: `stay_date`/`event_date`
+        # are `datetime` keys rather than `string` ones. `key_dtype_match` is the
+        # field that drives a flag and it is deliberately *not* excepted — both
+        # sides moved together, so it still reports True.
+        "join_report/composite": {"key_dtypes": _DATE_TYPED},
+        "join_findings/composite": {"report.key_dtypes": _DATE_TYPED},
         "profile/messy_customers_builder": {
             "columns[].samples": _ONE_TYPE_PER_COLUMN,
             "columns[].top": _ONE_TYPE_PER_COLUMN,

@@ -161,7 +161,7 @@ class DuckDBBackend:
     name = "duckdb"
     #: Grows a step at a time as `docs/DUCKDB_MIGRATION.md` §8 lands. Everything
     #: absent from here still runs on pandas and is still frozen by the same files.
-    kinds = frozenset({"profile", "null_rates"})
+    kinds = frozenset({"profile", "null_rates", "join_report", "join_findings"})
 
     def __init__(self):
         self._con = None
@@ -189,6 +189,12 @@ class DuckDBBackend:
 
     def null_rates(self, table: Table) -> dict:
         return profiling.null_rates_table(table)
+
+    def join_report(self, left: Table, right: Table, **keys) -> dict:
+        return join_checks.join_report_table(left, right, **keys)
+
+    def join_findings(self, left: Table, right: Table, **keys) -> dict:
+        return join_checks.join_findings_table(left, right, **keys)
 
     def run_spec(self, spec: dict):
         raise NotImplementedError("spec cases are still pandas — see DuckDBBackend.kinds")

@@ -106,7 +106,7 @@ def profile_path(path: str | Path, **load_kwargs: Any) -> dict:
 
 def profile_table(table: Table, *, sample_values: int = SAMPLE_VALUES) -> dict:
     """A compact, JSON-serializable profile of ``table``, measured in SQL."""
-    kinds = {col: _duckdb_kind(dtype) for col, dtype in table.dtypes.items()}
+    kinds = {col: duckdb_kind(dtype) for col, dtype in table.dtypes.items()}
     dtypes = table.dtypes
 
     # Everything scalar, in one scan. The per-column extras below are single-column
@@ -243,7 +243,13 @@ def null_rates_table(table: Table) -> dict[str, float]:
     }
 
 
-def _duckdb_kind(dtype: str) -> str:
+def duckdb_kind(dtype: str) -> str:
+    """A DuckDB type name mapped onto a structural kind.
+
+    Public because `checks.join` needs the same mapping — one place knows what
+    DuckDB calls things, so a type the profiler understands can never be one the
+    join check silently treats as a string.
+    """
     name = str(dtype).upper()
     if name == "BOOLEAN":
         return BOOLEAN
