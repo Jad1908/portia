@@ -141,13 +141,25 @@ class Table:
     # --- the edges ----------------------------------------------------------
 
     def head(self, n: int = DEFAULT_HEAD) -> pd.DataFrame:
-        """The first ``n`` rows, as pandas. **The only way out of the database.**
+        """The first ``n`` rows, as pandas — **for rendering**.
 
-        Everything a human or a renderer sees is capped, so this is capped too.
-        A check that reaches for the whole table has stopped scaling, and this is
-        the one line where that would be visible.
+        One of only two ways out of the database, and both are capped. A check
+        that reaches for a whole table has stopped scaling, and these are the
+        lines where that would be visible.
         """
         return self.con.execute(f"SELECT * FROM ({self.query}) LIMIT {int(n)}").fetch_df()
+
+    def rows(self, n: int = DEFAULT_HEAD) -> list[tuple]:
+        """The first ``n`` rows as plain python values — **for evidence**.
+
+        The other capped exit, and the right one when the values are going into
+        an evidence dict rather than onto a screen. Going through pandas would
+        widen them first: a DuckDB ``DATE`` becomes a numpy ``datetime64``, and a
+        sample of ``2026-06-12`` reaches the copilot as ``2026-06-12 00:00:00``.
+        `core.serialize` knows how to narrow DuckDB's own types; it should not
+        have to undo pandas' on the way.
+        """
+        return self.con.execute(f"SELECT * FROM ({self.query}) LIMIT {int(n)}").fetchall()
 
     def to_csv(self, path: str | Path) -> None:
         """Write the table out. ``COPY … TO``, so it never passes through memory."""

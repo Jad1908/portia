@@ -40,8 +40,8 @@
       "distinct_rate": 0.95,
       "samples": [
         "Firm A0",
-        "Firm A0",
-        "Firm A0"
+        "Firm A26",
+        "Firm B27"
       ],
       "top": "Firm A0",
       "top_freq": 3,
@@ -58,7 +58,7 @@
       "n_distinct": 4,
       "distinct_rate": 0.1,
       "samples": [
-        "US",
+        "DE",
         "FR",
         "UK"
       ],
@@ -75,13 +75,14 @@
       "n_distinct": 38,
       "distinct_rate": 0.9744,
       "samples": [
-        " 6254.08 ",
-        "8972.27",
-        "7758.32"
+        " 2013.86 ",
+        " 2160.72 ",
+        " 3036.99 "
       ],
       "top": "7758.32",
       "top_freq": 2,
       "flags": [
+        "mixed_types",
         "leading_trailing_whitespace",
         "numeric_stored_as_text",
         "high_cardinality"
@@ -97,8 +98,8 @@
       "distinct_rate": 1.0,
       "samples": [
         "note 0",
-        "note 3",
-        "note 6"
+        "note 12",
+        "note 15"
       ],
       "top": "note 0",
       "top_freq": 1,
@@ -116,8 +117,6 @@
       "n_distinct": 1,
       "distinct_rate": 0.025,
       "samples": [
-        "import_v2",
-        "import_v2",
         "import_v2"
       ],
       "top": "import_v2",
@@ -149,13 +148,14 @@
       "distinct_rate": 1.0,
       "samples": [
         "0",
-        "ref-1",
-        "2"
+        "10",
+        "12"
       ],
       "top": "0",
       "top_freq": 1,
       "flags": [
         "possible_key",
+        "mixed_types",
         "high_cardinality"
       ]
     }

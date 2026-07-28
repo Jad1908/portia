@@ -39,8 +39,10 @@ from typing import Any
 
 from portia.checks import join as join_checks
 from portia.checks import profiling
+from portia.core import store
 from portia.core.io import load_frame
 from portia.core.serialize import to_json, to_jsonable
+from portia.core.table import Table
 from portia.ops.join import HOWS
 from portia.spec import StepResult, load_spec, run_spec
 
@@ -82,6 +84,13 @@ class Case:
 # --- the backends -----------------------------------------------------------
 
 
+#: Every kind of case there is. A backend declares the subset it can run, and
+#: `test_golden` skips the rest — that is how both implementations stay alive
+#: while the migration lands module by module (§7.3). The DuckDB set grows by one
+#: entry per step; when it holds all of these, the pandas path can be deleted.
+ALL_KINDS = frozenset({"profile", "null_rates", "join_report", "join_findings", "spec"})
+
+
 class PandasBackend:
     """Today's implementation. The DuckDB backend is a sibling of this class.
 
@@ -91,6 +100,7 @@ class PandasBackend:
     """
 
     name = "pandas"
+    kinds = ALL_KINDS
 
     def source(self, fixture: str):
         return load_frame(ROOT / MOCK_DIR / f"{fixture}.csv")
@@ -140,6 +150,53 @@ class PandasBackend:
         }
 
 
+class DuckDBBackend:
+    """The scale tier. Same cases, same evidence — measured in SQL.
+
+    Sources are **ingested**, exactly as a real project's are, so what the golden
+    files compare is the path the product actually takes rather than a view over
+    a CSV that nothing else uses.
+    """
+
+    name = "duckdb"
+    #: Grows a step at a time as `docs/DUCKDB_MIGRATION.md` §8 lands. Everything
+    #: absent from here still runs on pandas and is still frozen by the same files.
+    kinds = frozenset({"profile", "null_rates"})
+
+    def __init__(self):
+        self._con = None
+        self._ingested: set[str] = set()
+
+    @property
+    def con(self):
+        if self._con is None:
+            self._con = store.memory()
+        return self._con
+
+    def source(self, fixture: str) -> Table:
+        if fixture not in self._ingested:
+            store.ingest(self.con, ROOT / MOCK_DIR / f"{fixture}.csv", name=fixture)
+            self._ingested.add(fixture)
+        return store.table(self.con, fixture)
+
+    def builder(self, fixture: str) -> Table:
+        from portia import fixtures
+
+        return Table.from_frame(getattr(fixtures, fixture)(), f"{fixture}__frame", self.con)
+
+    def profile(self, table: Table) -> dict:
+        return profiling.profile_table(table)
+
+    def null_rates(self, table: Table) -> dict:
+        return profiling.null_rates_table(table)
+
+    def run_spec(self, spec: dict):
+        raise NotImplementedError("spec cases are still pandas — see DuckDBBackend.kinds")
+
+    def output(self, table) -> dict:
+        raise NotImplementedError("spec cases are still pandas — see DuckDBBackend.kinds")
+
+
 def _row_key(row: dict) -> str:
     """A total order over rows that survives mixed types and nulls.
 
@@ -151,7 +208,7 @@ def _row_key(row: dict) -> str:
     return json.dumps(row, sort_keys=True, default=str)
 
 
-BACKENDS = (PandasBackend(),)
+BACKENDS = (PandasBackend(), DuckDBBackend())
 
 
 # --- running a case ---------------------------------------------------------
@@ -486,9 +543,15 @@ def normalized(evidence: dict) -> Any:
     return json.loads(dumps(evidence))
 
 
+#: The backend the files are written from. Every other backend is compared
+#: *against* them, with its differences declared in `test_golden.EXCEPTIONS` —
+#: so the reference survives the deletion of the implementation that produced it.
+REFERENCE_BACKEND = BACKENDS[0]
+
+
 def write_all(backend: Any | None = None) -> list[Path]:
     """(Re)generate every golden file. Returns the paths written."""
-    backend = backend or BACKENDS[0]
+    backend = backend or REFERENCE_BACKEND
     GOLDEN_DIR.mkdir(parents=True, exist_ok=True)
     written = []
     for case in CASES:

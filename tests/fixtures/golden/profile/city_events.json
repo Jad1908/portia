@@ -12,11 +12,11 @@
       "n_distinct": 5,
       "distinct_rate": 0.7143,
       "samples": [
-        "Paris",
         " paris",
+        "Amsterdam",
         "Barcelona"
       ],
-      "top": "Barcelona",
+      "top": "Amsterdam",
       "top_freq": 2,
       "flags": [
         "leading_trailing_whitespace"
@@ -32,8 +32,7 @@
       "distinct_rate": 0.2857,
       "samples": [
         "2026-06-12",
-        "2026-06-12",
-        "2026-06-12"
+        "2026-06-13"
       ],
       "top": "2026-06-12",
       "top_freq": 6,
@@ -48,9 +47,9 @@
       "n_distinct": 6,
       "distinct_rate": 0.8571,
       "samples": [
-        "Tech Summit",
-        "Marathon",
-        "Mobile Congress"
+        "Canal Festival",
+        "Design Week",
+        "Food Fair"
       ],
       "top": "Mobile Congress",
       "top_freq": 2,
@@ -65,9 +64,9 @@
       "n_distinct": 6,
       "distinct_rate": 0.8571,
       "samples": [
-        15000,
-        40000,
-        90000
+        8000,
+        12000,
+        15000
       ],
       "min": 8000,
       "max": 90000,

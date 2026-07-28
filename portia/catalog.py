@@ -29,7 +29,7 @@ from typing import Any
 
 import yaml
 
-from portia.checks.profiling import profile_path
+from portia.checks.profiling import profile_table
 from portia.core import store
 from portia.core.present import format_rate
 
@@ -68,7 +68,6 @@ def index_source(
     *,
     portia_dir: str | Path = DEFAULT_DIR,
     con: Any | None = None,
-    **load_kwargs: Any,
 ) -> Path:
     """Ingest a data source into the store, profile it, and write its catalog entry.
 
@@ -93,11 +92,14 @@ def index_source(
     con = con or store.connect(d)
     try:
         ingestion = store.ingest(con, data_path, name=name)
+        # Profile the ingested copy, not the file. This is the step that makes a
+        # multi-GB source indexable at all: the same profile that cost 1883 MB
+        # through pandas is a handful of aggregates over columnar storage.
+        profile = profile_table(store.table(con, name))
     finally:
         if own_con:
             con.close()
 
-    profile = profile_path(str(data_path), **load_kwargs)
     src_file = d / "sources" / f"{name}.yaml"
     existing = _read(src_file) if src_file.exists() else None
     _write(src_file, _source_entry(str(data_path), profile, existing, ingestion))

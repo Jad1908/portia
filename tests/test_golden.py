@@ -28,16 +28,55 @@ from portia.ops.join import HOWS
 from portia.ops.normalize import TRANSFORM_OPS
 from tests.golden import BACKENDS, CASES, FIXTURES, GOLDEN_DIR, normalized, run_case
 
-#: Where a backend is *allowed* to differ from the frozen pandas evidence, and
-#: why. Keyed by backend name, then case name, then a dotted path into the
-#: evidence — ``columns[].dtype`` means "that field, in every element".
+_TYPE_NAMES = (
+    "Backend type names, not values. pandas says `int64` and `str`; DuckDB says "
+    "`BIGINT` and `VARCHAR`. Anticipated by §6.3 — `inferred` is the field that "
+    "carries the meaning, and it is *not* excepted here."
+)
+
+_DATE_TYPED = (
+    "DuckDB's sniffer types an ISO date column as DATE where pandas kept it as "
+    "text, so `inferred` reads `datetime` rather than `categorical`. Accepted "
+    "2026-07-27 as a consequence of typed ingest: a date is a date, and the "
+    "vocabulary is unchanged (pandas reports `datetime` for a real date column "
+    "too). Every other field on these columns still has to match."
+)
+
+_ONE_TYPE_PER_COLUMN = (
+    "This case profiles the *builder's* frame, whose `mixed_ref` is a pandas "
+    "`object` column holding both ints and strings. A database column has one "
+    "type, so bridging it makes every value text: samples `[0, 10, 12]` become "
+    "`['0', '10', '12']`. Inherent to having a schema, and confined to a fixture "
+    "that exists to hold an untyped column — the CSV on disk is text either way."
+)
+
+#: Where a backend is *allowed* to differ from the frozen reference evidence, and
+#: why. Keyed by backend name, then case name (``"*"`` for every case), then a
+#: dotted path into the evidence — ``columns[].dtype`` means "that field, in every
+#: element".
 #:
 #: Every entry is a decision recorded in `docs/DUCKDB_MIGRATION.md`. Nothing goes
 #: in here to make a test pass; an undocumented difference is a regression, and
 #: the point of §7.2 is that each exception has to be argued for in prose first.
-#:
-#: Empty while pandas is the only backend.
-EXCEPTIONS: dict[str, dict[str, dict[str, str]]] = {}
+#: An excepted path is a field the golden files stop protecting on that backend,
+#: so the list is meant to stay short and each entry is scoped as narrowly as it
+#: can be — a case name rather than ``"*"`` wherever the difference is local.
+EXCEPTIONS: dict[str, dict[str, dict[str, str]]] = {
+    "duckdb": {
+        "*": {"columns[].dtype": _TYPE_NAMES},
+        "profile/otb": {"columns[].inferred": _DATE_TYPED},
+        "profile/city_events": {"columns[].inferred": _DATE_TYPED},
+        "profile/messy_customers_builder": {
+            "columns[].samples": _ONE_TYPE_PER_COLUMN,
+            "columns[].top": _ONE_TYPE_PER_COLUMN,
+        },
+    },
+}
+
+
+def _exceptions(backend_name: str, case_name: str) -> dict[str, str]:
+    per_backend = EXCEPTIONS.get(backend_name, {})
+    return {**per_backend.get("*", {}), **per_backend.get(case_name, {})}
 
 
 def _prune(value, paths: dict[str, str]):
@@ -66,11 +105,13 @@ def _drop(node, parts: list[str]) -> None:
 @pytest.mark.parametrize("backend", BACKENDS, ids=lambda b: b.name)
 @pytest.mark.parametrize("case", CASES, ids=lambda c: c.name)
 def test_evidence_matches_golden(case, backend):
+    if case.kind not in backend.kinds:
+        pytest.skip(f"{backend.name} does not implement {case.kind} cases yet")
     assert case.path.exists(), (
         f"no golden file for {case.name} — generate it with `python -m tests.golden` "
         "and commit it as part of the change that added the case"
     )
-    excepted = EXCEPTIONS.get(backend.name, {}).get(case.name, {})
+    excepted = _exceptions(backend.name, case.name)
     expected = _prune(json.loads(case.path.read_text()), excepted)
     actual = _prune(normalized(run_case(case, backend)), excepted)
     assert actual == expected

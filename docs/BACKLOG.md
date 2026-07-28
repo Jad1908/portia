@@ -19,6 +19,17 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
   taxonomy — the agent computes ad-hoc; these are just handy starting points.
 - **Scale-aware evidence** — cap columns (not just rows) in `join_findings` samples; profile from a
   sample/schema rather than the full frame once data is too big to scan.
+- **A profile's memory is bounded by cardinality, not by the store** — measured 2026-07-28, see
+  `DUCKDB_MIGRATION.md` §13. Exact `count(DISTINCT)`, exact quantiles and the `top` group-by are all
+  O(n) or O(distinct). Approximating the quantiles is safe and 4× cheaper; approximating
+  `count(DISTINCT)` is **not**, because `possible_key` and `constant` are equality tests against it
+  and HyperLogLog came back 13.6% low on a 6M-row key. The interesting sub-problem: a cheap *exact*
+  answer to the only question `possible_key` asks — `count(DISTINCT c) = count(*)` — which does not
+  need the count itself.
+- **`handlers.profile_source` re-reads the file rather than the store.** It goes through
+  `profile_path`, which is DuckDB-backed and memory-bounded, but re-parses the CSV on every call
+  where a store read would be ~20× faster. Needs the project connection to reach `handlers`, which
+  is really the connection-lifecycle question step 9 has to answer anyway.
 
 ## Ops — execution (trusted transforms)
 

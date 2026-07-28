@@ -36,11 +36,11 @@
       "n_distinct": 5,
       "distinct_rate": 1.0,
       "samples": [
+        "Canal View",
         "Grand Riverside",
-        "Le Petit Nord",
-        "Marina Bay Suites"
+        "Le Petit Nord"
       ],
-      "top": "Grand Riverside",
+      "top": "Canal View",
       "top_freq": 1,
       "flags": [
         "possible_key",
@@ -56,11 +56,11 @@
       "n_distinct": 3,
       "distinct_rate": 0.6,
       "samples": [
-        "Paris",
-        "Paris",
-        "Barcelona"
+        "Amsterdam",
+        "Barcelona",
+        "Paris"
       ],
-      "top": "Paris",
+      "top": "Amsterdam",
       "top_freq": 2,
       "flags": []
     },
@@ -73,9 +73,9 @@
       "n_distinct": 3,
       "distinct_rate": 0.6,
       "samples": [
+        "ES",
         "FR",
-        "FR",
-        "ES"
+        "NL"
       ],
       "top": "FR",
       "top_freq": 2,
@@ -90,9 +90,9 @@
       "n_distinct": 5,
       "distinct_rate": 1.0,
       "samples": [
-        220,
+        64,
         85,
-        310
+        120
       ],
       "min": 64,
       "max": 310,

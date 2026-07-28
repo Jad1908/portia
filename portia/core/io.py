@@ -26,7 +26,7 @@ ingested store is 20× faster on column-scoped reads and 5.6× smaller on disk.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -34,19 +34,52 @@ import pandas as pd
 
 from portia.core.table import Table, quote_literal
 
+#: The text a CSV uses to mean "missing". This is **pandas' default set**, spelled
+#: out here so DuckDB can be told the same thing: left alone, DuckDB nulls only
+#: the empty string, so a column of ``N/A`` would read as 40 present values on one
+#: tier and 39 on the other — and a null rate that depends on which reader ran is
+#: exactly the quiet disagreement `core.present` exists to prevent.
+#:
+#: Kept as a literal rather than imported from `pandas.io.parsers.readers`, which
+#: is private. `tests/test_io.py` asserts pandas still nulls precisely these and
+#: nothing else, so the copy cannot drift without something going red.
+NA_TOKENS = (
+    "",
+    "#N/A",
+    "#N/A N/A",
+    "#NA",
+    "-1.#IND",
+    "-1.#QNAN",
+    "-NaN",
+    "-nan",
+    "1.#IND",
+    "1.#QNAN",
+    "<NA>",
+    "N/A",
+    "NA",
+    "NULL",
+    "NaN",
+    "None",
+    "n/a",
+    "nan",
+    "null",
+)
+
 
 @dataclass(frozen=True)
 class Format:
     """How one file format is read, on both tiers.
 
-    ``sql_reader`` is a DuckDB table function taking a path — ``read_csv_auto``,
-    and ``read_parquet`` the day Parquet lands. Registering a format means
-    filling in both fields; a format that only fills in one is a format that
-    silently doesn't work at scale.
+    ``sql_reader`` is a DuckDB table function taking a path — ``read_csv``, and
+    ``read_parquet`` the day Parquet lands — and ``sql_options`` are the settings
+    that make it agree with the pandas loader beside it. Registering a format
+    means filling in both halves; a format that only fills in one is a format
+    that silently doesn't work at scale.
     """
 
     read_frame: Callable[..., pd.DataFrame]
     sql_reader: str
+    sql_options: dict[str, Any] = field(default_factory=dict)
 
 
 def load_frame(path: str | Path, **kwargs: Any) -> pd.DataFrame:
@@ -70,7 +103,20 @@ def load_table(path: str | Path, con: Any, *, name: str | None = None) -> Table:
 def read_query(path: str | Path) -> str:
     """The ``SELECT`` that reads ``path`` in DuckDB. The one place a reader is named."""
     path = Path(path)
-    return f"SELECT * FROM {_format(path).sql_reader}({quote_literal(str(path.resolve()))})"
+    fmt = _format(path)
+    args = [quote_literal(str(path.resolve()))]
+    args += [f"{key}={_sql_value(value)}" for key, value in fmt.sql_options.items()]
+    return f"SELECT * FROM {fmt.sql_reader}({', '.join(args)})"
+
+
+def _sql_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (list, tuple)):
+        return "[" + ", ".join(_sql_value(v) for v in value) + "]"
+    if isinstance(value, str):
+        return quote_literal(value)
+    return str(value)
 
 
 def supported_suffixes() -> tuple[str, ...]:
@@ -136,5 +182,11 @@ def _load_csv(path: Path, **kwargs: Any) -> pd.DataFrame:
 # Register new formats here, once — both halves. e.g.
 # ".parquet": Format(read_frame=_load_parquet, sql_reader="read_parquet").
 _FORMATS: dict[str, Format] = {
-    ".csv": Format(read_frame=_load_csv, sql_reader="read_csv_auto"),
+    ".csv": Format(
+        read_frame=_load_csv,
+        sql_reader="read_csv",
+        # `read_csv` still sniffs types with options set — this only tells it what
+        # "missing" looks like, so both tiers agree on a null rate.
+        sql_options={"nullstr": list(NA_TOKENS)},
+    ),
 }
