@@ -165,6 +165,15 @@ class App:
     removing: str | None = None
     #: Whether the operator chose to get on with it without adding data yet.
     skipped_sources: bool = False
+    #: What indexing is doing right now, as a sentence to put on screen — empty
+    #: when nothing is running. Profiling twenty real extracts takes a minute,
+    #: and a window that says nothing for a minute reads as broken.
+    indexing_status: str = ""
+    #: Sources profiled but not yet read by the copilot. The interpretation turn
+    #: is deferred until the workspace is open, because that is the only screen
+    #: with a transcript to show it in — running it on the add-data screen meant
+    #: paying for a turn nobody could see.
+    pending_interpret: list[str] = field(default_factory=list)
     #: Whether they have left the add-data screen on purpose.
     #:
     #: Adding data used to move the screen on by itself, the moment the first

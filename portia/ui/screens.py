@@ -2,7 +2,7 @@
 
 These exist so a test run never needs a terminal (docs/VISION.md → "The
 no-terminal audit"): creating the project, writing its brief, and adding the
-CSVs are all in the window, or the bar is not met.
+data files are all in the window, or the bar is not met.
 
 Three states, in order:
 
@@ -193,25 +193,61 @@ def _save_context(text: str) -> None:
 
 
 def first_sources() -> None:
+    """Add data, then move on — and the action to move on is always on screen.
+
+    The column scrolls its *content* and pins the actions to the bottom. With
+    twenty files added the whole thing used to be 755px of column in a 727px
+    window: the heading was clipped off the top and the button that takes you to
+    the project went off the bottom, which reads as "nothing happened".
+    """
     with ui.element("div").classes("p-centered"):
-        with ui.element("div").classes("p-centered-column"):
-            ui.label("Add data").classes("t-heading-md")
-            c.text(_SOURCES_WHY, color="c-mute")
-            dropzone()
-            _added_so_far()
-            c.rule()
-            with ui.element("div").classes("row-gap-sm"):
-                if APP.sources:
-                    # Leaving is a decision now. Adding twenty files used to
-                    # move the screen on the instant the first one landed.
-                    c.button("Continue", _leave_add_data, kind="primary")
-                    c.caption(_CONTINUE_HINT)
-                else:
-                    # Unlike the brief, this is not a gate: an empty project is a
-                    # legitimate place to stand, and "Add data" waits in the left pane.
-                    c.button("Skip for now", _skip_sources, kind="secondary")
-                    c.caption(_SKIP_HINT)
-                c.button("Back", _back_to_picker, kind="secondary")
+        with ui.element("div").classes("p-centered-column add-data"):
+            with ui.element("div").classes("add-data-body"):
+                ui.label("Add data").classes("t-heading-md")
+                c.text(f"Drop {_formats()} in. {_SOURCES_WHY}", color="c-mute")
+                dropzone()
+                _progress()
+                _added_so_far()
+            with ui.element("div").classes("add-data-actions"):
+                c.rule()
+                with ui.element("div").classes("row-gap-sm"):
+                    if APP.sources:
+                        # Leaving is a decision, and it is the one that starts the
+                        # copilot reading — see `_leave_add_data`.
+                        c.button(_continue_label(), _leave_add_data, kind="primary")
+                        c.caption(_continue_hint())
+                    else:
+                        # Unlike the brief, this is not a gate: an empty project is a
+                        # legitimate place to stand, and "Add data" waits in the left pane.
+                        c.button("Skip for now", _skip_sources, kind="secondary")
+                        c.caption(_SKIP_HINT)
+                    c.button("Back", _back_to_picker, kind="secondary")
+
+
+@ui.refreshable
+def _progress() -> None:
+    """What indexing is doing, in words, while it does it.
+
+    Its own refreshable so it can be redrawn between files without rebuilding
+    the drop box underneath it — refreshing the whole screen mid-upload would
+    take the uploader with it.
+    """
+    if not APP.indexing_status:
+        return
+    with ui.element("div").classes("row-gap-sm indexing-status"):
+        ui.spinner(size="sm")
+        c.text(APP.indexing_status, color="c-mute")
+
+
+def _continue_label() -> str:
+    """The CTA says what it will do, including whether it spends money."""
+    return "Continue — and read them" if APP.interpret else "Continue to the project"
+
+
+def _continue_hint() -> str:
+    if APP.interpret:
+        return f"the copilot reads {c.count(len(APP.sources), 'source')} in the next screen"
+    return "you can add more later from the left pane"
 
 
 def _added_so_far() -> None:
@@ -231,11 +267,18 @@ def _added_so_far() -> None:
                 c.caption(c.count(len(entry.get("columns") or []), "col"))
 
 
-def _leave_add_data() -> None:
+async def _leave_add_data() -> None:
+    """Go to the project — and start the copilot reading, now that it can be seen.
+
+    The interpretation turn used to fire on this screen, which has no transcript:
+    you paid for a turn and watched a blank page. It runs here instead, after the
+    workspace is up, so it lands in the Indexing tab where it is legible.
+    """
     from portia.ui import app as app_module
 
     APP.left_add_data = True
     app_module.shell.refresh()
+    await _interpret_pending()
 
 
 def _skip_sources() -> None:
@@ -272,7 +315,9 @@ def build_add_dialog() -> None:
     with ui.dialog().props("transition-duration=0") as dialog:
         with ui.element("div").classes("write-confirm").style(DIALOG_WIDTH):
             ui.label("Add data").classes("t-heading-md")
+            c.text(f"Drop {_formats()} in. {_SOURCES_WHY}", color="c-mute")
             dropzone(on_done=dialog.close)
+            _progress()
             with ui.element("div").classes("row-gap-sm"):
                 c.button("Close", dialog.close, kind="secondary")
     _ADD_DIALOG = dialog
@@ -451,40 +496,90 @@ async def _add_by_path(raw: str, on_done) -> None:
 
 
 async def _index_and_interpret(paths: list[Path], on_done) -> None:
-    """Profile first — free, deterministic, always. Then, optionally, a turn."""
+    """Profile first — free, deterministic, always. Then, optionally, a turn.
+
+    ``on_done`` is the dialog's close. Its presence is also what tells us where
+    we are: from the dialog the workspace is already open, so the turn can run
+    immediately and be watched; from the add-data screen it waits for Continue.
+    """
     from portia.ui import app as app_module
-    from portia.ui import artifacts, turn
+    from portia.ui import artifacts
 
     if not paths:
         return
     unsupported = [p for p in paths if not _is_supported(p)]
     for path in unsupported:
-        ui.notify(f"can't read {path.name}")
+        ui.notify(f"can't read {path.name} — {_formats_sentence()}")
     paths = [p for p in paths if p not in unsupported]
     if not paths:
         return
 
-    names = await engine.index(paths, APP)
-    ui.notify(f"profiled {', '.join(names)}")
-    if on_done is not None:
+    def say(done: int, total: int, name: str) -> None:
+        APP.indexing_status = f"Profiling {name} — {done + 1} of {total}"
+        _progress.refresh()
+
+    APP.indexing_status = f"Reading {c.count(len(paths), 'file')}…"
+    _progress.refresh()
+    try:
+        names = await engine.index(paths, APP, on_progress=say)
+    finally:
+        APP.indexing_status = ""
+        _progress.refresh()
+
+    ui.notify(f"profiled {c.count(len(names), 'source')}")
+    APP.pending_interpret = [*APP.pending_interpret, *names]
+
+    from_dialog = on_done is not None
+    if from_dialog:
         on_done()
     app_module.shell.refresh()
     artifacts.pane.refresh()
 
-    if APP.interpret:
-        await turn.start(
-            prompts.task("index_batch", names=", ".join(repr(n) for n in names)),
-            model=APP.model or _default_model(),
-            effort=APP.effort,
-            kind=state.INDEXING,
-            label=", ".join(names),
-        )
+    # From the dialog the workspace is already on screen, so the turn is visible
+    # and can start now. From the add-data screen it waits for Continue.
+    if from_dialog:
+        await _interpret_pending()
+
+
+async def _interpret_pending() -> None:
+    """Spend the turn that reads what each source *is*, if one was asked for."""
+    from portia.ui import turn
+
+    names, APP.pending_interpret = APP.pending_interpret, []
+    if not (APP.interpret and names):
+        return
+    await turn.start(
+        prompts.task("index_batch", names=", ".join(repr(n) for n in names)),
+        model=APP.model or _default_model(),
+        effort=APP.effort,
+        kind=state.INDEXING,
+        label=", ".join(names),
+    )
 
 
 def _is_supported(path: Path) -> bool:
+    return path.suffix.lower() in _suffixes()
+
+
+def _suffixes() -> tuple[str, ...]:
     from portia.core.io import supported_suffixes
 
-    return path.suffix.lower() in supported_suffixes()
+    return supported_suffixes()
+
+
+def _formats() -> str:
+    """The formats portia reads, spelled the way a person would say them.
+
+    Read off the loader's registry rather than written down. This screen said
+    "CSV" in four places and stopped being true the day Parquet landed; a label
+    that can go stale is a label that will.
+    """
+    names = [s.lstrip(".").upper() for s in _suffixes()]
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " or " + names[-1]
+
+
+def _formats_sentence() -> str:
+    return f"portia reads {_formats()}"
 
 
 def _default_model() -> str:
@@ -505,14 +600,14 @@ _CONTEXT_SHAPE = (
     "Say what one row means, and which source is authoritative for what.",
     "Say what the result gets used for, and what would make it wrong.",
 )
-_SOURCES_WHY = "Drop CSVs in. They are copied into the project and profiled straight away."
+_SOURCES_WHY = "They are copied into the project and profiled straight away."
 _UPLOAD_REJECTED = (
     'the browser refused those files — add them with "Add from a path already on disk" instead, '
     "which copies them without sending them through the browser"
 )
 _CONTINUE_HINT = "you can add more later from the left pane"
 _SKIP_HINT = "you can add data later from the left pane"
-_DROP_LABEL = "Drop CSVs here, or click to pick"
+_DROP_LABEL = "Drop files here, or click to pick"
 _PATH_PLACEHOLDER = "…or a path, directory or glob already on disk"
 _INTERPRET_COST = "Profiling is free and always happens. This costs a model turn."
 _NO_DIALOG = "The add-data panel didn't load — reload the page."

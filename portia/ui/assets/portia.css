@@ -624,6 +624,37 @@ html body {
   max-width: 100%;
 }
 
+/* Add data: the content scrolls, the actions stay put.
+ *
+ * With twenty files added this column was 755px tall in a 727px window — the
+ * heading clipped off the top and the button that takes you to the project fell
+ * off the bottom, which reads as "nothing happened". Capping the column at the
+ * viewport and letting only the body scroll means the primary action is on
+ * screen no matter how much has been added. */
+.add-data {
+  max-height: 100vh;
+  overflow: hidden;
+}
+.add-data-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-lg);
+  min-height: 0;
+  overflow-y: auto;
+}
+.add-data-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-lg);
+  flex: 0 0 auto;
+}
+
+/* Indexing says what it is doing. A spinner on its own is the thing this
+ * replaces: it told you something was happening and nothing about what. */
+.indexing-status {
+  align-items: center;
+}
+
 /* The mark is a cut-out, so it sits on the canvas rather than in a tile. */
 .p-logo {
   width: 96px;

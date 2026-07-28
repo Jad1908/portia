@@ -5,7 +5,7 @@
 Requires the ui extra:  uv sync --extra ui --extra agent
 
 **The bar this has to clear is a full test run with no terminal.** Create the
-project, write its context, add the CSVs, index them, run a turn, answer its
+project, write its context, add the data, index it, run a turn, answer its
 questions, approve its writes, execute the spec, write the outputs, and read
 every artifact — all in the window. Any step that sends the operator back to a
 shell is a bug, because the thing being fixed is that tuning the loop across two

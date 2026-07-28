@@ -9,8 +9,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
+from portia import catalog
 from portia.checks.outcome import BLOCKING_FLAGS
 from portia.ui import state
 from portia.ui.state import App, Decision
@@ -177,3 +179,64 @@ def test_no_chooser_means_the_path_field_is_the_way_in(monkeypatch):
 
     monkeypatch.setattr(engine.sys, "platform", "linux")
     assert engine.can_browse() is False
+
+
+# --- adding data: say what is happening, and where to go next ----------------
+
+
+def test_indexing_reports_each_file_as_it_goes(tmp_path, monkeypatch):
+    """A window that says nothing for a minute reads as broken.
+
+    Twenty real extracts take that long, so `index` reports per file rather than
+    handing the whole list to one thread and returning when it is done.
+    """
+    import asyncio
+
+    from portia.ui import engine
+    from portia.ui.state import App
+
+    for i in range(3):
+        pd.DataFrame({"a": [1, 2], "b": ["x", "y"]}).to_csv(tmp_path / f"s{i}.csv", index=False)
+
+    # `open_project` chdirs into the project; the catalog resolves source paths
+    # relative to the working directory, so a test that skips that lies.
+    monkeypatch.chdir(tmp_path)
+    app = App()
+    app.root = tmp_path
+    app.portia_dir = ".portia"
+    catalog.init_project("test", portia_dir=app.portia_dir)
+
+    seen: list[tuple[int, int, str]] = []
+    names = asyncio.run(
+        engine.index(sorted(tmp_path.glob("*.csv")), app, on_progress=lambda *a: seen.append(a))
+    )
+
+    assert names == ["s0", "s1", "s2"]
+    assert seen == [(0, 3, "s0"), (1, 3, "s1"), (2, 3, "s2")]
+    assert len(app.sources) == 3  # and the catalog really was refreshed
+
+
+def test_the_add_data_copy_is_read_off_the_loader(monkeypatch):
+    """This screen said "CSV" in four places and stopped being true the day
+    Parquet landed. A label that can go stale is a label that will."""
+    from portia.ui import screens
+
+    monkeypatch.setattr(screens, "_suffixes", lambda: (".csv",))
+    assert screens._formats() == "CSV"
+
+    monkeypatch.setattr(screens, "_suffixes", lambda: (".csv", ".parquet"))
+    assert screens._formats() == "CSV or PARQUET"
+
+    monkeypatch.setattr(screens, "_suffixes", lambda: (".csv", ".json", ".parquet"))
+    assert screens._formats() == "CSV, JSON or PARQUET"
+
+
+def test_the_continue_button_says_whether_it_spends_money():
+    """The turn is deferred to this button, so the button has to admit it."""
+    from portia.ui import screens
+    from portia.ui.state import APP
+
+    APP.interpret = True
+    assert "read" in screens._continue_label()
+    APP.interpret = False
+    assert screens._continue_label() == "Continue to the project"
