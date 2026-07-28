@@ -107,12 +107,21 @@ Next, in order:
 4. **The scale tier — DuckDB (`docs/DUCKDB_MIGRATION.md`, specced 2026-07-27).** Promoted to the
    front because it is now a **blocker on the next real test**, not an eventual concern. The target
    dataset is ~20 PHQ tables, many multi-GB; pandas needs 4.8× a file's size to profile it and
-   `run_spec` holds every source and every intermediate at once. Measured: the same profile costs
-   122 MB and 0.3 s in DuckDB, and an 80M-row join — portia's fan-out case, the one that inflated
-   revenue in Run 5 — can be counted in 0.4 s without being built. pandas cannot measure that join
-   on real data at all. The guarantee is that **nothing the copilot reads changes**: same evidence
-   dicts, same provenance keys, same sandbox, enforced by golden-file parity tests written before
-   any implementation moves.
+   `run_spec` holds every source and every intermediate at once. The guarantee is that **nothing the
+   copilot reads changes**: same evidence dicts, same provenance keys, same sandbox, enforced by
+   golden-file parity tests written before any implementation moves.
+
+   **Steps 1–3 shipped 2026-07-28** (`duckdb-engine-parity`): 29 golden evidence files and a
+   dual-backend harness, `core/table.py` + the ingested `.portia/store.duckdb`, and
+   `checks/profiling.py` measured in SQL. Indexing is 8× faster and no longer routes a whole file
+   through pandas. **Two things measurement changed.** Three type-inference divergences turned up
+   where the spec predicted one — the worst being that DuckDB nulls only the empty string, so a
+   null rate would have depended on which reader ran (fixed at the loader, not excepted). And
+   **a profile's memory still scales with the file**, because `count(DISTINCT)`, exact quantiles
+   and the modal-value group-by are all O(n) or O(cardinality); approximating the count is *not*
+   available, since `possible_key` and `constant` are equality tests against it and HyperLogLog came
+   back 13.6% low on a 6M-row key. `DUCKDB_MIGRATION.md` §13 has the numbers; the join work
+   (steps 4–6) is next and is where the 80M-row fan-out case gets settled.
 
 5. **The run log** (`EVALUATION.md`, specced 2026-07-26). The more painful half of the surface
    problem: seven runs scored by hand off transcripts, and the app's transcript still dies with the
