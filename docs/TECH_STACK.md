@@ -21,54 +21,44 @@ infrastructure and frontend surface, stay in Python wherever we can, and keep th
   the SDK authenticates off the local Claude Code login with no `ANTHROPIC_API_KEY` set; how it
   meters is still open. portia itself writes **no auth code** — see `PLAN.md` → "Auth posture".
 
-## Data & compute — pandas-first, SQL only when scale forces it
+## Data & compute — DuckDB, with pandas at the edges
 
-- **pandas for the local MVP.** For local messy CSVs that fit in memory, pandas is the right
-  tool and fully sufficient: every deterministic check is bread-and-butter pandas — profiling
-  (`isna`, `nunique`, `describe`, dtypes), join row-conservation and fan-out (`merge` +
-  `groupby`/`value_counts`), duplicate detection (`duplicated`). You build the whole local phase
-  in what you already know.
-- **DuckDB — for scale, and now also for the escape hatch. SHIPPED 2026-07-26 (`ops/sql.py`), so
-  it is a hard runtime dependency today, not a scale-tier one.** *Decided 2026-07-25; built the
-  day after, because the hotel fixture's fatal fan-out has exactly one correct handling —
-  aggregate events to one row per city-date before joining — and no prewritten op could express
-  it. Reasoning in `BACKLOG.md` → "The escape hatch"; the short version is that SQL is the only
-  option that keeps the spec reviewable in a PR, keeps the filesystem/network away from the agent,
-  stays stable across versions, and survives the pandas → DuckDB → Snowflake seam.*
+*Rewritten 2026-07-28. This section used to say "pandas-first, SQL only when scale forces it".
+Scale forced it; `docs/DUCKDB_MIGRATION.md` is what happened.*
 
-  *Note what it is **not** used for yet: every frame still goes through
-  `core.io.load_frame` into pandas, and a SQL step runs over registered in-memory DataFrames. The
-  larger-than-memory tier below is still unbuilt — the dependency arrived early for expressiveness,
-  not for scale.*
-- **The scale tier is now measured and specced — `docs/DUCKDB_MIGRATION.md` (2026-07-27).** The
-  pandas ceiling is no longer theoretical: profiling one 396 MB CSV peaks at **1883 MB — 4.8× the
-  file — and takes 16.5 s**, while the same facts in DuckDB cost **122 MB and 0.3 s**, and an
-  80M-row join can be *counted* in 0.4 s / 228 MB without being built. Memory stops scaling with the
-  input and starts scaling with the answer. Read that document before touching `checks` or `ops`.
-- **DuckDB only for scale.** pandas has one hard limit — it loads everything into RAM — and the
-  product's premise is data too big to eyeball / too big to be local. DuckDB is the local answer:
-  `pip install duckdb`, **embedded (no server)**, reads larger-than-memory CSV/Parquet, and
-  **interoperates with pandas** — it queries a DataFrame directly and hands one back:
-  ```python
-  import duckdb, pandas as pd
-  df = pd.read_csv("messy.csv")
-  out = duckdb.sql("SELECT currency, COUNT(*) FROM df GROUP BY currency").df()  # → DataFrame
-  ```
-  So it's not pandas *or* DuckDB — you write pandas and drop into one SQL line only where you
-  need scale or a warehouse pushdown.
+- **DuckDB under the whole engine.** `pip install duckdb`, **embedded (no server)**, reads
+  larger-than-memory CSV and Parquet. A project ingests its sources into `.portia/store.duckdb`
+  and everything downstream — profiling, join diagnosis, the ops, `run_spec` — is a lazy relation
+  behind `core.table.Table`. Measured on real data: 4.82 GB across three tables indexes in 32 s,
+  a 50M × 3M join is diagnosed in 3.8 s, and **peak memory is bounded by the largest table rather
+  than the total**, which is what makes ~20 tables workable at all.
+- **Why ingest rather than query the files in place.** Two reasons, and the second is the real one:
+  columnar storage is ~20× faster on column-scoped reads, and — decisively — if a source *is* a
+  `read_csv` call then the agent's SQL needs file-reading rights, which is exactly what
+  `ops/sql.py` exists to withhold. Data inside the database means the hatch needs no filesystem
+  access at all. `DUCKDB_MIGRATION.md` §3.
+- **pandas is still here, at four edges, deliberately.** The fixtures (tiny, and the readable
+  definition of the test data), `load_frame` for small reads, the renderers, and the SQL hatch's
+  sandbox boundary. `tests/test_table.py` fails if anything *else* pulls a whole relation into
+  memory — the rule survives exactly as long as no one adds a `.df()`, so it is a test rather than
+  a convention.
+- **Parquet as well as CSV**, registered in the same one place. Parquet carries its schema, so the
+  CSV reader's sniffing stops being part of the answer; it is also ~4× smaller. Converting is a
+  `COPY … TO` one-liner and deliberately **not** a portia feature — rewriting someone's data is not
+  a data-harmonization concern.
 - **Snowflake tier via the Snowflake MCP server.** For the ~15–20-table tier, push computation to
   the warehouse and pull back only small results; never pull full tables. We are the MCP *client*
-  (BYO creds, local).
-- **Compute stays behind a checks layer.** Each check is a small function (e.g.
-  `join_report(left, right, keys) -> {...}`) returning structured evidence. Whether it counts
-  with pandas, DuckDB, or Snowflake is an implementation detail — so the copilot and the spec logic
-  never change.
-  - **Honest correction to "a swap, not a rewrite" (2026-07-27).** The seam does what it promised
-    where it matters most: the *evidence dicts, tool signatures and prompts are untouched* by the
-    DuckDB migration, which is the expensive half. But every *implementation* behind them has to be
-    rewritten — `profiling`, `join`, `outcome`, `apply_join`, `apply_normalize`, `run_spec`. The
-    seam bounds the blast radius; it does not make the change free. `DUCKDB_MIGRATION.md` §5 is the
-    file-by-file list.
+  (BYO creds, local). `core.table.Table` is the seam it plugs into — a name, a query, and a
+  connection is not a DuckDB-shaped idea.
+- **Compute stays behind a checks layer.** Each check is a small function returning structured
+  evidence. Whether it counts with DuckDB or Snowflake is an implementation detail — so the copilot
+  and the spec logic never change.
+  - **What the seam was actually worth (2026-07-28).** It did what it promised where it mattered:
+    the *evidence dicts, tool signatures and prompts were untouched* by the migration, and all ten
+    end-to-end golden cases came out byte-identical. But every *implementation* behind them had to
+    be rewritten. The seam bounds the blast radius; it does not make the change free. The stronger
+    lesson is that **the golden files did more work than the abstraction did** — freezing the
+    evidence before moving anything is what made the swap checkable rather than hopeful.
 - **Entity resolution:** `rapidfuzz` (+ optionally `recordlinkage` / `dedupe`) for blocking and
   fuzzy scoring.
 

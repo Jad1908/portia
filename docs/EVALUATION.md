@@ -19,6 +19,21 @@ far as a `record_step`. It answers three open questions at once — does it use 
 ask before acknowledging, and does the whole sequence read differently now that a correct move
 exists.
 
+> **The engine changed underneath every run here (2026-07-28).** Runs 1–7 were scored against a
+> pandas engine that no longer exists; the copilot now reads evidence produced by DuckDB. **The
+> scores still stand**, and that is a measured claim rather than an assumption: the DuckDB migration
+> froze all 29 evidence dicts first and every end-to-end case comes out byte-identical
+> (`docs/DUCKDB_MIGRATION.md` §7). Three things the copilot reads *did* change, deliberately, and a
+> re-run should not be surprised by them:
+>
+> - `samples` are now **distinct and ordered**, and `top` breaks ties by value. Both used to depend
+>   on row order, which is not a fact about the data.
+> - `mixed_types` was **redefined** as "some values parse as numeric and some do not". The old
+>   definition only ever fired on an in-memory fixture, never on a file.
+> - A date column now reads `inferred: datetime` rather than `categorical`, because DuckDB types it.
+>
+> Nothing else moved. `PROVENANCE_KEYS`, `BLOCKING_FLAGS` and every tool signature are unchanged.
+
 ---
 
 ## The rule that shapes everything here
