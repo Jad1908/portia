@@ -95,6 +95,13 @@ been shown to do.
    the engine's event stream. **The bar is met: a full test run with no terminal.** The claim this
    settles is that the loop is now *watchable*, not that it is good.
 
+   *Revised 2026-07-28 after watching it fail with twenty real files.* Adding data is now two
+   explicit steps: profiling reports per file and the screen keeps its primary action on screen at
+   any window height, and the **interpretation turn is deferred to Continue** so it runs in the
+   workspace where the Indexing tab can show it. It used to fire on a screen with no transcript,
+   which meant paying for a turn and watching a blank page. The lesson generalises: **the app's
+   test suite renders no tables and drives no flows**, so every one of these was found by hand.
+
 3. **The scale tier — DuckDB** (2026-07-28, `docs/DUCKDB_MIGRATION.md`). The engine is DuckDB
    throughout: `core/table.py`, the ingested store, all three checks, all three ops, `run_spec`, and
    the edges. pandas survives only in the fixtures, the loader's small-read path, the renderers, and

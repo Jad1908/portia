@@ -53,7 +53,8 @@ not a gadget — a place you actually work.
    - **GUI: a mandatory front panel.** The user fills it in before being allowed to do anything
      else in the project. Not a dismissible prompt, not a settings field found later.
    - **CLI: prompted on stdin** the first time a command runs in an uninitialized directory.
-2. **Add data manually + index.** The user adds CSVs by hand. Each added CSV is **indexed**:
+2. **Add data manually + index.** The user adds files by hand — CSV or Parquet, whatever
+   `core/io` registers. Each added source is **indexed**:
    - a **deterministic metadata analysis** runs (profiling — this is the engine's checks layer).
      This is free and **always happens**, and
    - the **model writes a short report** on *what it thinks this data is*, based on that metadata
@@ -100,7 +101,7 @@ not a gadget — a place you actually work.
 
 > **Built.** `portia/ui/`, launched with `python -m portia.ui`, behind the `ui` extra. The
 > no-terminal audit at the end of this section passes end to end: a project created, a brief
-> written, CSVs added and profiled, an interpret turn driven with its write confirmations approved
+> written, sources added and profiled, an interpret turn driven with its write confirmations approved
 > on screen, a spec run, and every artifact read — no shell. What it grew that this spec didn't
 > anticipate, and what it still doesn't do, is in `BACKLOG.md` → Interface. Three notes where the
 > build had to decide something this section left open:
@@ -133,7 +134,7 @@ not a gadget — a place you actually work.
 not from this section.*
 
 > **The bar V0 has to clear: a full test run with no terminal.** Not "less terminal" — none. Create
-> the project, write its context, add the CSVs, index them, run a turn, answer its questions,
+> the project, write its context, add the data, index it, run a turn, answer its questions,
 > approve its writes, execute the spec, write the outputs, and read every artifact — all in the
 > window. Any step that sends the operator back to a shell is a V0 bug, because the thing being
 > fixed is that tuning the loop across two surfaces is miserable.
@@ -204,7 +205,7 @@ the product's premise is most exposed — the context is what makes a column's m
 a generic brief produces generic judgment. Give it room, show the placeholder guidance, and do not
 let it be skipped. Writes `project.yaml` via `catalog.init_project`.
 
-**Project open, no sources.** A drop zone and a file picker. Dropped CSVs are copied into the
+**Project open, no sources.** A drop zone and a file picker. Dropped files are copied into the
 project directory, then **indexed** — which is two distinct things and the UI must show them as
 two, because one is free and one is not:
 
@@ -274,7 +275,8 @@ chat box implying a conversation the engine cannot hold. Past runs are replayabl
 The workflow this is built for, end to end, in one window, starting from nothing:
 
 1. Open a new project directory. Write the brief into the context panel.
-2. Drop the CSVs in. They profile instantly; the interpret turn runs, and you approve each
+2. Drop the data in. Profiling names each file as it goes; **Continue** takes you to the project
+   and starts the interpret turn there, where the Indexing tab can show it — you approve each
    `set_interpretation` — already a place where the copilot's judgment is worth reading.
 3. Pick a model and effort, type the goal, Go.
 4. Watch it climb the ladder — `describe` → `profile` → `join_findings` — with **tool results
@@ -298,7 +300,7 @@ regressed** — this is the checklist, not a nice-to-have.
 
 | Terminal today | In V0 |
 |---|---|
-| `mkdir ~/portia-runN` + copy CSVs in | Open-project path field · drop zone |
+| `mkdir ~/portia-runN` + copy data in | Open-project path field · drop zone |
 | `index --init "<brief>"` | Mandatory context panel → `catalog.init_project` |
 | `index .` (profiling half) | Automatic on drop → `catalog.index_source` |
 | `index .` (interpret half) | A turn, with its `set_interpretation` write confirmations |

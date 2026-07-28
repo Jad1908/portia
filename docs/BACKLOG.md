@@ -236,6 +236,14 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
   the report — so the preview collapses as fast as it opens. **Pre-existing**, not the migration:
   `main` has `_table(result.frame)` and `block.on("click", …)` in exactly the same arrangement. The
   fix is to stop the expansion's click propagating.
+- ~~**The add-data screen said nothing while it worked**~~ — *fixed 2026-07-28. Profiling reports
+  per file ("Profiling VBPPRED_EVENTS — 7 of 20"), the content scrolls so the primary action stays
+  on screen at any window height, and the interpretation turn is deferred to Continue so it runs
+  where the Indexing tab can show it. It used to fire on a screen with no transcript: you paid for
+  a turn and watched a blank page.*
+- **The add-data copy is derived from the loader; nothing else is.** `screens._formats()` reads
+  `supported_suffixes()`, so registering a format updates the screen with no edit. Worth doing the
+  same wherever else a format is named in prose — `VISION.md` had six.
 - **`tests/test_ui.py` renders nothing.** It covers state, badges, decisions and the folder chooser
   — and not one component that draws a table. That is why the preview bug above survived, and why
   the DuckDB migration's UI changes had to be checked by driving a browser by hand. A handful of

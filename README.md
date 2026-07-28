@@ -26,7 +26,7 @@ python -m portia.ui
 ```
 
 Open a project directory (it gets created if it isn't there), write a few lines about what the
-project *is*, drop your CSVs in, and go. Every question the copilot asks and every write it wants to
+project *is*, drop your data in — CSV or Parquet — and go. Every question the copilot asks and every write it wants to
 make stops on screen, with the evidence still next to it.
 
 Pressing **Run** executes the spec in memory; **Write outputs** saves the tables to `out/` and
