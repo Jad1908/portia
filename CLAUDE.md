@@ -13,9 +13,11 @@ stack, and product vision. Read them every session, before proposing changes or 
   rule — *color and prominence communicate kind, never rank* — which is "facts vs judgment" applied
   to pixels.
 - `docs/brief.md` — the original working brief (foundational context)
-- `docs/DUCKDB_MIGRATION.md` — **the scale tier**: why pandas caps us, the measurements, and the
-  file-by-file plan to move `checks`/`ops`/`spec` onto DuckDB without changing anything the copilot
-  reads. Required reading before touching `checks/`, `ops/`, or `core/io.py`.
+- `docs/DUCKDB_MIGRATION.md` — **the scale tier**, shipped 2026-07-28. Why pandas capped us, what
+  the swap cost, and — the part worth your time — **§6.1 and §13, where measurement contradicted the
+  plan**: the specced sandbox turned out to be impossible, and a profile's memory still scales with
+  cardinality because `possible_key` needs an exact `count(DISTINCT)`. Required reading before
+  touching `checks/`, `ops/`, `core/io.py`, or anything that looks like a performance fix.
 - `docs/BACKLOG.md` — parking lot of deferred ideas, by stream. Not required reading; scan it when
   picking the next thing to build, and **add to it whenever we postpone something mid-work.**
 
@@ -38,7 +40,10 @@ stack, and product vision. Read them every session, before proposing changes or 
   never rank, prioritize, score "impact", or suggest an answer** — that bakes context-free judgment
   into code that then fails on hard, subtle problems at scale. Invest in *richer observations*, not
   a decision layer. (The tool calls stay deterministic; the agent never writes its own analysis.)
-- **pandas-first**; DuckDB/SQL only when scale forces it (behind an abstracted checks layer).
+- **DuckDB throughout the engine** (migrated 2026-07-28, `docs/DUCKDB_MIGRATION.md`). pandas
+  survives in exactly four places and each is deliberate: the fixtures, `load_frame` for small
+  reads, the renderers, and the SQL hatch's sandbox boundary. `tests/test_table.py` fails if
+  anything else pulls a whole relation into memory.
 - **Budget: Claude Pro only** (no API, no Max) — develop on a cheaper, smaller model at low
   effort; keep loops token-lean (compact profiles/schemas, never raw data).
 - **Don't start building without agreed direction.** Ask before large scaffolding.
@@ -49,13 +54,14 @@ We will build *many* tools and checks. They must **compose**, not accumulate int
 ten different ways to do the same thing. These seams are non-negotiable; respect them before
 adding code, and extend them rather than working around them:
 
-- **One way to load data.** All file reading goes through **`portia.core.io.load_frame`**
-  (dispatches by format). Never call `pd.read_csv`/`read_parquet` in a tool, check, notebook, or
-  CLI — register new formats in `core/io.py`, once. This is also the pandas → DuckDB/Snowflake seam.
-  - **It has a hard ceiling, and it is measured.** pandas needs ~2.4× a CSV's size to hold it and
-    ~4.8× to profile it, and `run_spec` holds every source *and* every intermediate at once. Anything
-    past a few hundred MB per file does not work today. `docs/DUCKDB_MIGRATION.md` is the plan; until
-    it lands, do not add code that assumes a whole table fits in memory.
+- **One way to load data.** All file reading goes through **`portia.core.io`** — `load_table` for
+  the engine, `load_frame` only for small reads. Never call `pd.read_csv` or name a DuckDB reader
+  in a tool, check, notebook, or CLI: a format registers **both** its readers in `core/io.py`, once,
+  so support can't arrive on one tier and not the other. `NA_TOKENS` lives there too, because a null
+  rate that depends on which reader ran is the exact disagreement `core/present.py` exists to stop.
+  - **The currency is `core.table.Table`** — a name, a `SELECT`, and a connection. A handle, not
+    data. `head()` and `rows()` are the only ways out and both are capped; nothing else in `portia/`
+    may materialize a relation (there is a test).
 - **One way to emit evidence.** Checks return **compact, JSON-serializable dicts** built with
   **`portia.core.serialize`** (`to_jsonable`, `round_float`, `to_json`). Never hand-roll
   numpy→python coercion or float rounding — `int64` isn't JSON-serializable and `NaN` isn't valid JSON.
@@ -82,7 +88,9 @@ adding code, and extend them rather than working around them:
 
 **Package layout — one home per concern; don't let things pile up flat in `portia/`:**
 
-- `portia/core/` — shared seams: `io.py` (loading) · `serialize.py` (compact JSON evidence) ·
+- `portia/core/` — shared seams: `table.py` (**the currency** — a lazy relation) · `store.py` (a
+  project's ingested data, `.portia/store.duckdb`) · `io.py` (loading) · `serialize.py` (compact
+  JSON evidence) ·
   `present.py` (**one way to show a measured value to a human** — rates, counts, a value on one
   line. Every surface renders the same numbers; the day the terminal and the app disagree about a
   null rate is the day someone has to work out which one to believe.)
@@ -100,13 +108,17 @@ adding code, and extend them rather than working around them:
 - `portia/ops/` — the execution layer (**produces** data): `apply_join`, `apply_normalize`
   (coerce/clean columns), `apply_sql` (the escape hatch — one DuckDB `SELECT` over the tables the
   step declares in `inputs`, for work the prewritten ops can't express: aggregating, deduping,
-  filtering, deriving). Every op returns an `OpResult` (frame + unsuppressable provenance report).
-  Same swap seam as checks.
+  filtering, deriving). Every op returns an `OpResult` (a `Table` + unsuppressable provenance
+  report), so producing a step that fans out to 80M rows costs one `count(*)`.
   - **The hatch is sandboxed in two independent halves, and both stay.** `check_sql` refuses
-    anything that isn't a single `SELECT`, readably, before DuckDB is touched; the connection then
-    runs with `enable_external_access=False`. The string check is bypassable on purpose — it exists
-    to give a good error — and the config is what actually holds. `session.py` gives the agent no
+    anything that isn't a single `SELECT`, readably, before DuckDB is touched; the query then runs
+    on a connection holding **exactly the declared inputs and nothing else**, with
+    `enable_external_access=False`. The string check is bypassable on purpose — it exists to give a
+    good error — and the isolation is what actually holds. `session.py` gives the agent no
     filesystem tools; the hatch must never quietly hand them back.
+  - **Its inputs are materialized, so SQL steps are the one memory-bound op**, and that is a
+    consequence of the sandbox rather than an oversight — attaching the store instead was tried and
+    is infeasible (`DUCKDB_MIGRATION.md` §6.1). Don't "fix" it without reading that.
   - **Resist adding a prewritten op for something the hatch already does.** What the agent strains
     to express in SQL is the evidence for which op deserves promoting — build the op when a real
     run reaches for it, not before (`BACKLOG.md`).

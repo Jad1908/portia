@@ -28,9 +28,10 @@ engine are equally important** — the questions-and-insights UX *is* the produc
 ## Stack
 
 Python + **Claude Agent SDK** (agent loop, context management, **MCP-client**, custom tools).
-**pandas-first** for the local MVP; **DuckDB/SQL** introduced only for the too-big-for-memory
-tier and a **Snowflake tier (~15–20 tables)** via the Snowflake **MCP server**, behind an
-abstracted checks layer. UI: a Python-authored, serious (non-gadgety) framework —
+**DuckDB** under the whole engine since 2026-07-28 — sources are ingested into a per-project
+`.portia/store.duckdb` and everything downstream is a lazy relation — with a **Snowflake tier
+(~15–20 tables)** via the Snowflake **MCP server** to come, plugging into the same `core.table`
+seam. pandas stays for fixtures, small reads and rendering. UI: a Python-authored, serious (non-gadgety) framework —
 **NiceGUI** (Vue under the hood) — sitting on the engine's event stream. Model is a config knob.
 
 **Full stack + reasoning: see `TECH_STACK.md`.**
