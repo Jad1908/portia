@@ -81,9 +81,9 @@ def test_head_is_capped_and_returns_pandas(t):
     assert list(head.columns) == ["city", "rooms"]
 
 
-def test_to_csv_round_trips(t, tmp_path, con):
+def test_copy_to_round_trips(t, tmp_path, con):
     out = tmp_path / "stays.csv"
-    t.to_csv(out)
+    t.copy_to(out, options="HEADER, DELIMITER ','")
     assert pd.read_csv(out).shape == (4, 2)
 
 
@@ -128,6 +128,12 @@ def test_quoting_escapes():
 #: Everything else must go through `Table.head` / `Table.rows`, which are capped.
 MATERIALIZERS = {
     "portia/core/table.py": "head() itself — a LIMIT, which is the capped exit",
+    "portia/core/io.py": (
+        "`load_frame` is *defined* as the whole file in memory — it says so in the "
+        "module docstring, and it is the small-read convenience the engine no "
+        "longer calls. The Parquet loader reads through DuckDB rather than adding "
+        "pyarrow, which is why it shows up here at all when the CSV one does not."
+    ),
     "portia/ops/sql.py": (
         "the escape hatch's sandbox boundary: the declared inputs cross into a "
         "connection that holds nothing else, which is what makes the guarantee "
@@ -160,3 +166,13 @@ def test_nothing_new_pulls_a_whole_relation_into_memory():
         "migration removed — use Table.head/rows, or add the file to "
         "MATERIALIZERS with the reason:\n  " + "\n  ".join(offenders)
     )
+
+
+def test_a_timezone_aware_timestamp_survives_both_exits(con):
+    """DuckDB needs `pytz` to hand a TIMESTAMPTZ back to python, and says so by
+    raising when it meets one. Real data met one on the first try, which broke
+    every sample and every preview of that table."""
+    con.execute("CREATE TABLE stamps AS SELECT TIMESTAMPTZ '2024-01-01 10:00:00+00' AS t")
+    table = Table.from_name("stamps", con)
+    assert len(table.rows(1)) == 1  # the evidence exit
+    assert len(table.head(1)) == 1  # the rendering exit

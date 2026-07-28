@@ -175,10 +175,16 @@ class Table:
         """
         return self.con.execute(f"SELECT * FROM ({self.query}) LIMIT {int(n)}").fetchall()
 
-    def to_csv(self, path: str | Path) -> None:
-        """Write the table out. ``COPY … TO``, so it never passes through memory."""
+    def copy_to(self, path: str | Path, *, options: str = "") -> None:
+        """Write the table out. ``COPY … TO``, so it never passes through memory.
+
+        The primitive, not the entry point: what ``options`` a format needs is
+        registered in `core.io`, and `core.io.write_table` is the one thing that
+        picks them. Call that unless you are the one implementing a format.
+        """
         target = quote_literal(str(Path(path)))
-        self.con.execute(f"COPY ({self.query}) TO {target} (HEADER, DELIMITER ',')")
+        suffix = f" ({options})" if options else ""
+        self.con.execute(f"COPY ({self.query}) TO {target}{suffix}")
 
     # --- making one ---------------------------------------------------------
 

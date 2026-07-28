@@ -43,7 +43,7 @@ from portia.checks.outcome import (
     render_outcome,
 )
 from portia.core import store
-from portia.core.io import load_table
+from portia.core.io import load_table, write_table
 from portia.core.present import format_rate, frame_to_markdown, inline
 from portia.core.table import Table
 from portia.ops import apply_join, apply_normalize, apply_sql
@@ -154,9 +154,9 @@ def write_outputs(results: list[StepResult], out_dir: str | Path) -> list[Path]:
     written = []
     for r in results:
         if r.table is not None:
-            path = out / f"{r.id}.csv"
-            r.table.to_csv(path)  # COPY … TO, so it never passes through memory
-            written.append(path)
+            # `write_table` dispatches on the extension, so pointing this at
+            # `.parquet` is the only change a parquet output would need.
+            written.append(write_table(r.table, out / f"{r.id}.csv"))
     return written
 
 
