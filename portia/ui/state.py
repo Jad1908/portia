@@ -165,6 +165,14 @@ class App:
     removing: str | None = None
     #: Whether the operator chose to get on with it without adding data yet.
     skipped_sources: bool = False
+    #: Whether they have left the add-data screen on purpose.
+    #:
+    #: Adding data used to move the screen on by itself, the moment the first
+    #: source landed. That reads as a teleport when you are adding twenty files:
+    #: the screen you are working on vanishes mid-task, and you never see what
+    #: arrived. Leaving is now a decision — `Continue` — so the screen can show
+    #: what it added and you can add another batch before moving on.
+    left_add_data: bool = False
     show_transcript: bool = True
     show_files: bool = True
 

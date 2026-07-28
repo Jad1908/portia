@@ -198,13 +198,44 @@ def first_sources() -> None:
             ui.label("Add data").classes("t-heading-md")
             c.text(_SOURCES_WHY, color="c-mute")
             dropzone()
+            _added_so_far()
             c.rule()
             with ui.element("div").classes("row-gap-sm"):
-                # Unlike the brief, this is not a gate: an empty project is a
-                # legitimate place to stand, and "Add data" waits in the left pane.
-                c.button("Skip for now", _skip_sources, kind="secondary")
+                if APP.sources:
+                    # Leaving is a decision now. Adding twenty files used to
+                    # move the screen on the instant the first one landed.
+                    c.button("Continue", _leave_add_data, kind="primary")
+                    c.caption(_CONTINUE_HINT)
+                else:
+                    # Unlike the brief, this is not a gate: an empty project is a
+                    # legitimate place to stand, and "Add data" waits in the left pane.
+                    c.button("Skip for now", _skip_sources, kind="secondary")
+                    c.caption(_SKIP_HINT)
                 c.button("Back", _back_to_picker, kind="secondary")
-                c.caption(_SKIP_HINT)
+
+
+def _added_so_far() -> None:
+    """What has landed, on the screen that landed it.
+
+    Without this the only feedback was a toast that names twenty files and then
+    goes away. The list is capped and scrolls: it is a receipt, not the pane.
+    """
+    if not APP.sources:
+        return
+    c.section_header(f"Added · {c.count(len(APP.sources), 'source')}")
+    with ui.element("div").classes("added-list"):
+        for name, entry in APP.sources.items():
+            with ui.element("div").classes("added-row"):
+                ui.icon("table_chart").classes("fact-icon")
+                c.mono(name, small=True)
+                c.caption(c.count(len(entry.get("columns") or []), "col"))
+
+
+def _leave_add_data() -> None:
+    from portia.ui import app as app_module
+
+    APP.left_add_data = True
+    app_module.shell.refresh()
 
 
 def _skip_sources() -> None:
@@ -323,6 +354,7 @@ def dropzone(*, on_done=None) -> None:
                 multiple=True,
                 auto_upload=True,
                 on_multi_upload=lambda e: _dropped(e.files, on_done),
+                on_rejected=lambda _: _rejected(),
                 label=_DROP_LABEL,
             ).props("flat")
             upload.on("click", js_handler=_PICK_ON_CLICK.format(id=upload.id))
@@ -350,19 +382,61 @@ def _add_by_path_field(on_done) -> None:
 
 
 def _interpret_toggle() -> None:
-    """Profiling is free; interpretation is a model turn. Never blur the two."""
+    """Profiling is free; interpretation is a model turn. Never blur the two.
+
+    The model and effort belong here rather than only in the Copilot pane: this
+    is where that turn is actually bought, and reading twenty sources is a
+    different-sized job from answering one question. Same two controls, same
+    bound state — picking here is picking for the copilot too, which is why they
+    are not a second setting.
+    """
+    from portia.agent.session import DEFAULT_MODEL, EFFORTS, MODELS
+
     with ui.element("div").classes("stack-xs"):
-        ui.switch("Have the copilot read what each source is").classes("p-toggle").bind_value(
-            APP, "interpret"
+        (
+            ui.switch("Have the copilot read what each source is")
+            .classes("p-toggle")
+            .bind_value(APP, "interpret")
+            # The model controls appear with the cost they belong to, so turning
+            # this off has to take them away rather than leave a dead setting.
+            .on_value_change(_refresh_shell)
         )
+        if APP.interpret:
+            APP.model = APP.model or DEFAULT_MODEL
+            with ui.element("div").classes("row-gap-sm"):
+                ui.select(list(MODELS), value=APP.model).props(
+                    "borderless dense options-dense new-value-mode=add-unique use-input"
+                ).classes("p-field p-field-mono").bind_value(APP, "model")
+            c.segmented(EFFORTS, APP.effort, _set_indexing_effort)
         c.caption(_INTERPRET_COST)
+
+
+def _set_indexing_effort(effort: str) -> None:
+    APP.effort = effort
+    _refresh_shell()
+
+
+def _refresh_shell() -> None:
+    from portia.ui import app as app_module
+
+    app_module.shell.refresh()
 
 
 async def _dropped(files, on_done) -> None:
     paths = []
     for upload in files:
-        paths.append(engine.store_upload(upload.name, await upload.read(), APP))
+        paths.append(await engine.store_upload(upload, APP))
     await _index_and_interpret(paths, on_done)
+
+
+def _rejected() -> None:
+    """A refused file has to say so.
+
+    The browser marks every file in the batch with a red triangle and explains
+    nothing — and because the drop is one request, one refusal reddens all
+    twenty. Whatever the reason, it belongs on screen rather than in a colour.
+    """
+    ui.notify(_UPLOAD_REJECTED)
 
 
 async def _add_by_path(raw: str, on_done) -> None:
@@ -432,6 +506,11 @@ _CONTEXT_SHAPE = (
     "Say what the result gets used for, and what would make it wrong.",
 )
 _SOURCES_WHY = "Drop CSVs in. They are copied into the project and profiled straight away."
+_UPLOAD_REJECTED = (
+    'the browser refused those files — add them with "Add from a path already on disk" instead, '
+    "which copies them without sending them through the browser"
+)
+_CONTINUE_HINT = "you can add more later from the left pane"
 _SKIP_HINT = "you can add data later from the left pane"
 _DROP_LABEL = "Drop CSVs here, or click to pick"
 _PATH_PLACEHOLDER = "…or a path, directory or glob already on disk"

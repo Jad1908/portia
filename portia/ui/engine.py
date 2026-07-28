@@ -88,6 +88,10 @@ def open_project(path: str | Path, app: App) -> Path:
     app.skipped_sources = False
     app.editing = app.asking = app.removing = None
     refresh_catalog(app)
+    # A project that already has data is not being set up, so it opens on the
+    # workspace. The add-data screen is for the first time, and for whenever
+    # someone asks for it from the left pane.
+    app.left_add_data = bool(app.sources)
     remember(root)
     return root
 
@@ -179,11 +183,19 @@ def set_interpretation(
 # --- adding data ------------------------------------------------------------
 
 
-def store_upload(name: str, content: bytes, app: App) -> Path:
-    """Copy a dropped file into the project's data directory."""
-    target = app.root / DATA_DIR / Path(name).name
+async def store_upload(upload, app: App) -> Path:
+    """Copy a dropped file into the project's data directory.
+
+    Streams, through the upload's own ``save``. This used to be
+    ``write_bytes(await upload.read())``, and ``read()`` pulls the whole file
+    into memory — which throws away the spooling the upload already did and
+    turns a twenty-file drop of real extracts into twenty files' worth of RAM at
+    once. The rest of the engine stopped holding whole tables; the front door
+    should not be the one place that still does.
+    """
+    target = app.root / DATA_DIR / Path(upload.name).name
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(content)
+    await upload.save(target)
     return target
 
 
