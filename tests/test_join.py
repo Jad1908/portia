@@ -16,7 +16,6 @@ from portia.checks.join import (
     join_report_table,
     render_text,
 )
-from portia.core import store
 from portia.core.serialize import to_json
 from portia.core.table import Table
 from portia.fixtures import city_events, hotels, otb, sales_customers, sales_orders
@@ -110,13 +109,6 @@ def test_report_is_json_serializable_and_renders(report):
 
 
 # --- the SQL implementation --------------------------------------------------
-
-
-@pytest.fixture
-def con():
-    c = store.memory()
-    yield c
-    c.close()
 
 
 def _pair(con, left, right, lname="l", rname="r"):

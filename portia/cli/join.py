@@ -10,8 +10,9 @@ from __future__ import annotations
 import argparse
 import json
 
-from portia.checks.join import join_findings, render_findings
-from portia.core.io import load_frame
+from portia.checks.join import join_findings_table, render_findings
+from portia.core import store
+from portia.core.io import load_table
 
 
 def main() -> None:
@@ -24,9 +25,12 @@ def main() -> None:
     parser.add_argument("--json", action="store_true", help="emit the raw findings as JSON")
     args = parser.parse_args()
 
-    findings = join_findings(
-        load_frame(args.left),
-        load_frame(args.right),
+    # One connection: a join reads both sides at once, and DuckDB cannot join
+    # across handles.
+    con = store.memory()
+    findings = join_findings_table(
+        load_table(args.left, con),
+        load_table(args.right, con),
         on=args.on,
         left_on=args.left_on,
         right_on=args.right_on,

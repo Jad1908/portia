@@ -58,6 +58,10 @@ MOCK_DIR = "data/mock"
 #: Deliberately not `present.PREVIEW_ROWS` — that number is a UI decision.
 OUTPUT_ROWS = 5
 
+#: How large a step's output may get before the harness refuses to sort it in
+#: python. Generous for a fixture, small enough to be an obvious mistake.
+SORTABLE_ROWS = 10_000
+
 FIXTURES = (
     "messy_customers",
     "sales_customers",
@@ -100,7 +104,12 @@ class PandasBackend:
     """
 
     name = "pandas"
-    kinds = ALL_KINDS
+    #: Everything except `spec`. The ops and `run_spec` were migrated outright
+    #: rather than dual-pathed: the golden files *are* the frozen pandas
+    #: reference, so keeping a second implementation alive to reproduce them
+    #: would have been checking a copy against itself (§7.3's dual path buys
+    #: nothing once the file exists).
+    kinds = ALL_KINDS - {"spec"}
 
     def source(self, fixture: str):
         return load_frame(ROOT / MOCK_DIR / f"{fixture}.csv")
@@ -121,9 +130,6 @@ class PandasBackend:
 
     def join_findings(self, left, right, **keys) -> dict:
         return join_checks.join_findings(left, right, **keys)
-
-    def run_spec(self, spec: dict) -> list[StepResult]:
-        return run_spec(spec, base_dir=ROOT)
 
     def output(self, frame) -> dict:
         """A step's produced table, small and comparable across backends.
@@ -161,7 +167,7 @@ class DuckDBBackend:
     name = "duckdb"
     #: Grows a step at a time as `docs/DUCKDB_MIGRATION.md` §8 lands. Everything
     #: absent from here still runs on pandas and is still frozen by the same files.
-    kinds = frozenset({"profile", "null_rates", "join_report", "join_findings"})
+    kinds = ALL_KINDS
 
     def __init__(self):
         self._con = None
@@ -196,11 +202,36 @@ class DuckDBBackend:
     def join_findings(self, left: Table, right: Table, **keys) -> dict:
         return join_checks.join_findings_table(left, right, **keys)
 
-    def run_spec(self, spec: dict):
-        raise NotImplementedError("spec cases are still pandas — see DuckDBBackend.kinds")
+    def run_spec(self, spec: dict) -> list[StepResult]:
+        return run_spec(spec, base_dir=ROOT, con=store.memory())
 
     def output(self, table) -> dict:
-        raise NotImplementedError("spec cases are still pandas — see DuckDBBackend.kinds")
+        """A step's produced table, ordered exactly as `PandasBackend.output` orders it.
+
+        It has to be the *same* order, not merely a deterministic one: these
+        cases are compared against files the pandas implementation wrote, and
+        that comparison is the only thing checking the migrated ops produce the
+        right rows. So the sort happens in python, over every row, rather than as
+        an `ORDER BY ALL` — which would sort by column position where `_row_key`
+        sorts by column name.
+
+        Reading every row is safe here and nowhere else: these are fixtures. The
+        cap makes that assumption fail loudly if someone adds a big case.
+        """
+        if table is None:
+            return {}
+        n_rows = table.count()
+        assert n_rows <= SORTABLE_ROWS, (
+            f"{table.name} produced {n_rows} rows — golden cases are fixtures, and this "
+            "one is large enough that reading it all to sort a 5-row preview is wrong"
+        )
+        columns = table.columns
+        rows = [
+            {c: to_jsonable(v) for c, v in zip(columns, row, strict=True)}
+            for row in table.rows(n_rows)
+        ]
+        rows.sort(key=_row_key)
+        return {"n_rows": n_rows, "columns": columns, "head": rows[:OUTPUT_ROWS]}
 
 
 def _row_key(row: dict) -> str:
@@ -261,7 +292,7 @@ def _step_evidence(result: StepResult, backend: Any) -> dict:
         "acknowledged": result.acknowledged,
         "blocking": result.blocking,
         "rationale": result.rationale,
-        "output": backend.output(result.frame),
+        "output": backend.output(result.table),
     }
 
 

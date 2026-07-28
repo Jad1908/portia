@@ -14,13 +14,6 @@ from portia.core import store
 MOCK = Path(__file__).resolve().parents[1] / "data" / "mock"
 
 
-@pytest.fixture
-def con():
-    c = store.memory()
-    yield c
-    c.close()
-
-
 def test_ingest_makes_the_data_queryable(con):
     store.ingest(con, MOCK / "otb.csv")
     assert store.table_names(con) == ["otb"]

@@ -31,19 +31,21 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
-import pandas as pd
 import yaml
 
 from portia.checks.outcome import (
     BLOCKING_FLAGS,
     describe_contribution,
     describe_grain,
-    outcome_report,
+    outcome_report_table,
     render_outcome,
 )
-from portia.core.io import load_frame
+from portia.core import store
+from portia.core.io import load_table
 from portia.core.present import format_rate, frame_to_markdown, inline
+from portia.core.table import Table
 from portia.ops import apply_join, apply_normalize, apply_sql
 from portia.ops.sql import render_text as render_sql
 
@@ -54,7 +56,9 @@ class StepResult:
     op: str
     provenance: dict
     drift: dict = field(default_factory=dict)
-    frame: pd.DataFrame | None = None
+    #: The table this step produced — a lazy handle, so holding every step's
+    #: output for the life of a session costs a query string each, not the data.
+    table: Table | None = None
     rationale: str | None = None  # the recorded "why" — documentation, not executed
     #: Post-conditions measured on the frame this step produced (`checks.outcome`).
     #: `provenance` says what the op did; this says what came out — the difference
@@ -107,21 +111,33 @@ def save_spec(spec: dict, path: str | Path) -> None:
         yaml.safe_dump(spec, f, sort_keys=False, default_flow_style=False)
 
 
-def run_spec(spec: dict, *, base_dir: str | Path = ".") -> list[StepResult]:
+def run_spec(spec: dict, *, base_dir: str | Path = ".", con: Any | None = None) -> list[StepResult]:
     """Load the sources, execute the steps in order, and detect drift per step.
 
     A step's output is registered under its ``id``, so a later step can consume
     it as a source (workflow chaining, per docs/VISION.md).
+
+    **Nothing is materialized.** Sources and step outputs alike are relations, so
+    a run holds a query string per step rather than every intermediate at once —
+    which is what `run_spec` used to do, and the reason a session's memory grew
+    with the length of the workflow rather than the size of the answer.
+
+    ``con`` is the connection the tables live on. Left unset, one is created and
+    kept alive by the results that reference it, so a caller can go on previewing
+    and writing outputs after the run returns.
     """
     base = Path(base_dir)
-    frames: dict[str, pd.DataFrame] = {
-        name: load_frame(base / rel) for name, rel in (spec.get("sources") or {}).items()
+    con = con or store.memory()
+    tables: dict[str, Table] = {
+        name: load_table(base / rel, con, name=name)
+        for name, rel in (spec.get("sources") or {}).items()
     }
 
     results: list[StepResult] = []
     for step in spec.get("steps", []):
-        result = _run_step(step, frames)
-        frames[step["id"]] = result.frame  # downstream steps may reference it
+        result = _run_step(step, tables)
+        if result.table is not None:
+            tables[step["id"]] = result.table  # downstream steps may reference it
         results.append(result)
     return results
 
@@ -137,41 +153,42 @@ def write_outputs(results: list[StepResult], out_dir: str | Path) -> list[Path]:
     out.mkdir(parents=True, exist_ok=True)
     written = []
     for r in results:
-        if r.frame is not None:
+        if r.table is not None:
             path = out / f"{r.id}.csv"
-            r.frame.to_csv(path, index=False)
+            r.table.to_csv(path)  # COPY … TO, so it never passes through memory
             written.append(path)
     return written
 
 
-def _run_step(step: dict, frames: dict[str, pd.DataFrame]) -> StepResult:
+def _run_step(step: dict, tables: dict[str, Table]) -> StepResult:
     op = step["op"]
     if op == "join":
         # NB: the spec field is `keys`, not `on` — `on` is a reserved boolean in
         # YAML 1.1 (parses to True), so it can't be used as a mapping key.
         left, right = step["left"], step["right"]
         out = apply_join(
-            frames[left],
-            frames[right],
+            tables[left],
+            tables[right],
             how=step.get("how", "inner"),
             on=step.get("keys"),
             left_on=step.get("left_on"),
             right_on=step.get("right_on"),
+            name=step["id"],
         )
-        # Insertion order is load-bearing: it's how pandas' `_x`/`_y` collision
+        # Insertion order is load-bearing: it's how the `_x`/`_y` collision
         # suffixes are traced back to a side (see `checks.outcome`).
-        inputs = {left: frames[left], right: frames[right]}
+        inputs = {left: tables[left], right: tables[right]}
         key_columns = _join_key_columns(step)
     elif op == "normalize":
         name = step["input"]
-        out = apply_normalize(frames[name], step["transforms"])
-        inputs, key_columns = {name: frames[name]}, {}
+        out = apply_normalize(tables[name], step["transforms"], name=step["id"])
+        inputs, key_columns = {name: tables[name]}, {}
     elif op == "sql":
         # Only the declared inputs are visible to the query, so an undeclared
         # table is a missing-table error rather than a silent dependency — and
         # `outcome_report` can still say which input contributed nothing.
-        inputs = {name: frames[name] for name in step["inputs"]}
-        out = apply_sql(inputs, step["sql"])
+        inputs = {name: tables[name] for name in step["inputs"]}
+        out = apply_sql(inputs, step["sql"], name=step["id"])
         key_columns = {}
     else:
         raise ValueError(f"unknown op {op!r} in step {step.get('id')!r}")
@@ -181,9 +198,11 @@ def _run_step(step: dict, frames: dict[str, pd.DataFrame]) -> StepResult:
         op=op,
         provenance=out.provenance,
         drift=_drift(step.get("expect"), out.provenance),
-        frame=out.frame,
+        table=out.table,
         rationale=step.get("rationale"),
-        outcome=outcome_report(out.frame, inputs=inputs, keys=key_columns, grain=step.get("grain")),
+        outcome=outcome_report_table(
+            out.table, inputs=inputs, keys=key_columns, grain=step.get("grain")
+        ),
         acknowledged=list(step.get("acknowledge") or []),
     )
 
@@ -338,10 +357,10 @@ def _report_step(r: StepResult) -> list[str]:
         lines += _report_table("drift", drift)
     if r.rationale and not r.acknowledged:
         lines += ["### rationale", "", r.rationale, ""]
-    if r.frame is not None:
+    if r.table is not None:
         # The table itself, not just a description of it. A report you can read
         # without the CSV open beside it is the one that gets read.
-        lines += ["### preview", "", frame_to_markdown(r.frame), ""]
+        lines += ["### preview", "", frame_to_markdown(r.table), ""]
     return lines
 
 

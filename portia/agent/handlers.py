@@ -27,10 +27,11 @@ from typing import Any
 
 from portia import catalog, spec
 from portia.agent import prompts
-from portia.checks.join import join_findings as _join_findings
+from portia.checks.join import join_findings_table as _join_findings
 from portia.checks.outcome import BLOCKING_FLAGS
-from portia.checks.profiling import profile_frame, profile_path
-from portia.core.io import load_frame
+from portia.checks.profiling import profile_path, profile_table
+from portia.core import store
+from portia.core.io import load_table
 from portia.core.serialize import to_json
 from portia.ops import join as join_op
 from portia.ops import normalize as normalize_op
@@ -168,7 +169,7 @@ def profile_source(source: str, portia_dir: str = catalog.DEFAULT_DIR) -> dict:
     asking: what do this table's columns look like *now*, after the step ran.
     """
     if STEP_REF in source:
-        profile = profile_frame(_step_frame(source))
+        profile = profile_table(_step_table(source))
         return {
             "source": source,
             "summary": "",
@@ -255,9 +256,10 @@ def join_findings(
 
     Call this **before** deciding anything about a merge.
     """
+    con = store.memory()
     return _join_findings(
-        _frame(left, portia_dir),
-        _frame(right, portia_dir),
+        _table(left, portia_dir, con),
+        _table(right, portia_dir, con),
         on=keys,
         left_on=left_on,
         right_on=right_on,
@@ -383,28 +385,30 @@ def run_spec(spec_path: str) -> dict:
 # --- internals --------------------------------------------------------------
 
 
-def _frame(ref: str, portia_dir: str):
+def _table(ref: str, portia_dir: str, con=None):
     """Resolve a table reference: an indexed source, or an earlier step's output.
 
-    All file reading goes through ``core.io.load_frame``.
+    All file reading goes through ``core.io.load_table``. A ``con`` is passed
+    when two references have to end up on the *same* connection — a join check
+    reads both sides at once, and DuckDB cannot join across handles.
     """
     if STEP_REF in ref:
-        return _step_frame(ref)
+        return _step_table(ref, con)
     try:
-        return load_frame(_source_path(ref, portia_dir))
+        return load_table(_source_path(ref, portia_dir), con or store.memory(), name=ref)
     except ValueError as exc:
         # Almost certainly a step id. Without this the message reads as "that
         # table doesn't exist", when the truth is "not by that name".
         raise ValueError(f"{exc}. For a table an earlier step produced: {_STEP_REF_HINT}") from exc
 
 
-def _step_frame(ref: str):
-    """Materialize the table an earlier step produced, by re-running up to it.
+def _step_table(ref: str, con=None):
+    """Reach the table an earlier step produced, by re-running up to it.
 
     Only up to it: a later step may be the one being diagnosed and may not run
     at all yet. Executing the prefix is what ``record_step`` already does to
     measure a candidate, so this adds no new machinery — it just makes the same
-    frame reachable to a *read-only* check, before anything is written.
+    table reachable to a *read-only* check, before anything is written.
     """
     spec_path, _, step_id = ref.partition(STEP_REF)
     doc = spec.load_spec(spec_path)
@@ -413,7 +417,8 @@ def _step_frame(ref: str):
     if step_id not in ids:
         known = ", ".join(ids) or "(no steps yet)"
         raise ValueError(f"no step {step_id!r} in {spec_path} — have: {known}")
-    return spec.run_spec({**doc, "steps": steps[: ids.index(step_id) + 1]})[-1].frame
+    prefix = {**doc, "steps": steps[: ids.index(step_id) + 1]}
+    return spec.run_spec(prefix, con=con or store.memory())[-1].table
 
 
 def _entry(source: str, portia_dir: str) -> dict:

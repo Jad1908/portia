@@ -8,15 +8,7 @@ import duckdb
 import pandas as pd
 import pytest
 
-from portia.core import store
 from portia.core.table import Table, quote_ident, quote_literal
-
-
-@pytest.fixture
-def con():
-    c = store.memory()
-    yield c
-    c.close()
 
 
 @pytest.fixture

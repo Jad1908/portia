@@ -12,7 +12,7 @@ What the app is allowed to call, and why each is on the list:
 - ``catalog.load_catalog`` — what the left pane and the source inspector show
 - ``spec.load_spec`` / ``spec.run_spec`` / ``spec.write_outputs`` /
   ``spec.write_report`` — the Run button and what it can save
-- ``core.io.load_frame`` — previewing an output CSV (the one way to load data)
+- ``core.io.load_table`` — previewing an output CSV (the one way to load data)
 - ``core.io.find_data_files`` — resolving what "add by path" points at
 - ``agent.session.run`` — a turn, driven with the app's own answer/confirm
 
@@ -38,7 +38,8 @@ from pathlib import Path
 
 from portia import catalog
 from portia import spec as spec_module
-from portia.core.io import find_data_files, load_frame
+from portia.core import store
+from portia.core.io import find_data_files, load_table
 from portia.ui import state as State
 from portia.ui.state import App
 
@@ -294,9 +295,14 @@ async def write_outputs(app: App) -> list[Path]:
     return written
 
 
-async def read_frame(path: Path):
-    """Load a produced CSV for preview — through the one loader, like everything else."""
-    return await asyncio.to_thread(load_frame, path)
+async def read_table(path: Path):
+    """A produced CSV as a lazy table — through the one loader, like everything else.
+
+    Nothing is read here. The pane that shows it asks for a count and fifteen
+    rows; before this it loaded the whole file to show those fifteen, which was a
+    straight bug the moment an output got large.
+    """
+    return load_table(path, store.memory())
 
 
 # --- reloading the spec after the copilot has written to it -----------------

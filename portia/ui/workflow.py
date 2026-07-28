@@ -212,8 +212,8 @@ def _report_block(result: Any) -> None:
         _group("outcome", lambda: _outcome(result.outcome, result.acknowledged))
         if result.rationale and not result.acknowledged:
             _group("rationale", lambda: c.text(result.rationale))
-        if result.frame is not None:
-            _table(result.frame)
+        if result.table is not None:
+            _table(result.table)
     block.on("click", lambda i=result.id: _select_step(i))
 
 
@@ -223,15 +223,16 @@ def _group(label: str, body) -> None:
         body()
 
 
-def _table(frame) -> None:
+def _table(table) -> None:
     """The produced table, one click away.
 
     Inline it pushed everything below it off the screen, and the point of the
     report is that the four groups can be read at a glance. The label carries
     the shape, so the table is never a surprise you have to open to size up.
     """
-    label = f"preview · {c.count(len(frame), 'row')} × {c.count(frame.shape[1], 'column')}"
-    c.collapsed(label, lambda: c.table_preview(frame))
+    total, head = c.table_shape(table)
+    label = f"preview · {c.count(total, 'row')} × {c.count(head.shape[1], 'column')}"
+    c.collapsed(label, lambda: c.table_preview(table))
 
 
 def _provenance(provenance: dict) -> None:
@@ -302,7 +303,7 @@ async def _source_inspector(name: str) -> None:
     place in the app where the difference between the two views is deliberate.
     """
     entry = APP.sources.get(name)
-    frame = await _source_frame(entry) if entry else None
+    frame = await _source_table(entry) if entry else None
     editing = APP.editing == name
     with ui.element("div").classes("p-scroll p-pad stack-lg"):
         _inspector_header(name, "the catalog's entry for this source")
@@ -503,13 +504,13 @@ def _spend() -> str:
     return f"costs a turn on {APP.model or _default_model()}{effort}"
 
 
-async def _source_frame(entry: dict):
+async def _source_table(entry: dict):
     """The source's rows, or None if the file has moved since it was indexed."""
     path = APP.root / str(entry.get("source", ""))
     if not path.exists():
         return None
     try:
-        return await engine.read_frame(path)
+        return await engine.read_table(path)
     except Exception:  # noqa: BLE001 — a missing preview must not blank the pane
         return None
 
@@ -592,7 +593,7 @@ async def _output_inspector(name: str) -> None:
         if not path.exists():
             c.empty_note("that file is gone")
             return
-        c.table_preview(await engine.read_frame(path))
+        c.table_preview(await engine.read_table(path))
 
 
 def _inspector_header(name: str, note: str) -> None:

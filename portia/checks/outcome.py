@@ -34,7 +34,7 @@ import pandas as pd
 
 from portia.checks.profiling import null_rates
 from portia.core.present import count
-from portia.core.serialize import to_jsonable
+from portia.core.serialize import round_float, to_jsonable
 from portia.core.table import Table, quote_ident
 
 GRAIN_EXAMPLES = 5  # worst-offending grain keys shown when a grain claim fails
@@ -139,8 +139,6 @@ def _non_null_counts(table: Table) -> tuple[int, dict[str, int]]:
 
 
 def _rate(n_null: int, n: int) -> float:
-    from portia.core.serialize import round_float
-
     return round_float(n_null / n) if n else 0.0
 
 

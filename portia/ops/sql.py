@@ -29,8 +29,7 @@ from __future__ import annotations
 
 import re
 
-import pandas as pd
-
+from portia.core.table import Table, quote_ident
 from portia.ops.base import OpResult
 
 #: Every field this op reports — see ``ops.join.PROVENANCE_KEYS`` for why.
@@ -106,13 +105,29 @@ def check_sql(sql: str) -> None:
         )
 
 
-def apply_sql(frames: dict[str, pd.DataFrame], sql: str) -> OpResult:
-    """Run one SELECT over the named frames, returning the table + provenance.
+def apply_sql(inputs: dict[str, Table], sql: str, *, name: str = "sql") -> OpResult:
+    """Run one SELECT over the named tables, returning the table + provenance.
 
-    ``frames`` is the step's *declared* inputs, and only those are registered:
+    ``inputs`` is the step's *declared* inputs, and only those are registered:
     naming a table the step didn't declare is an error rather than a silent
     dependency. That declaration is what lets `checks.outcome` still report
     which input contributed nothing — the measurement Run 2 didn't have.
+
+    **The declared inputs are materialized, and that is the sandbox's price.**
+    `docs/DUCKDB_MIGRATION.md` §6.1 preferred attaching the project store
+    read-only and exposing views for the declared inputs. Probing killed it, on
+    two independent counts: DuckDB refuses ``ATTACH`` outright when
+    ``enable_external_access=False``, so the attach and the filesystem lock
+    cannot both be had; and with the store attached, ``store.anything`` remains
+    reachable by a schema-qualified name, so the only thing standing between the
+    agent and an undeclared table would be :func:`check_sql` — the half this
+    module says out loud is bypassable and exists to give a good error.
+
+    So the connection here holds **exactly** the declared inputs and nothing
+    else, which is the one arrangement where the guarantee does not depend on
+    reading the query correctly. This is the single place in the engine where a
+    whole relation leaves the database, and it is deliberate rather than
+    overlooked (§13 of the migration doc).
     """
     import duckdb
 
@@ -121,24 +136,65 @@ def apply_sql(frames: dict[str, pd.DataFrame], sql: str) -> OpResult:
     # Read-only by construction: an in-memory database with no external access,
     # so `COPY … TO`, `read_csv()` and extension installs fail inside DuckDB even
     # if `check_sql` were fooled into passing them through.
-    con = duckdb.connect(":memory:", config={"enable_external_access": False})
+    sandbox = duckdb.connect(":memory:", config={"enable_external_access": False})
     try:
-        for name, frame in frames.items():
-            con.register(name, frame)
-        out = con.execute(sql).fetch_df()
+        input_rows = {}
+        for input_name, table in inputs.items():
+            frame = table.con.execute(table.query).fetch_df()
+            input_rows[input_name] = int(len(frame))
+            staging = f"__portia_raw_{input_name}"
+            sandbox.register(staging, frame)
+            # The declared input, with the types it actually had. See `_cast`.
+            sandbox.execute(
+                f"CREATE VIEW {quote_ident(input_name)} AS "
+                f"SELECT {_cast(table.dtypes)} FROM {quote_ident(staging)}"
+            )
+        result = sandbox.sql(sql)
+        # The types the *query* produced, captured before the trip back out.
+        types = dict(zip(result.columns, (str(t) for t in result.types), strict=True))
+        out = result.df()
     finally:
-        con.close()
+        sandbox.close()
 
+    con = next(iter(inputs.values())).con if inputs else duckdb.connect(":memory:")
     provenance = {
         "op": "sql",
         "sql": sql.strip(),
-        "inputs": sorted(frames),
-        "input_rows": {name: int(len(f)) for name, f in frames.items()},
+        "inputs": sorted(inputs),
+        "input_rows": input_rows,
         "result_rows": int(len(out)),
         "columns": [str(c) for c in out.columns],
         "flags": [],
     }
-    return OpResult(frame=out, provenance=provenance)
+    table = _restore_types(Table.from_frame(out, name, con), types)
+    return OpResult(table=table, provenance=provenance)
+
+
+def _cast(types: dict[str, str]) -> str:
+    """A select list restoring every column to a named type.
+
+    The data crosses the sandbox boundary through pandas, twice, and pandas has
+    no date type — so a ``DATE`` column arrives inside the sandbox as a
+    ``TIMESTAMP`` and leaves it the same way. The query would then be written
+    against a type its input never had, and a step downstream would join
+    ``2026-06-12`` against ``2026-06-12 00:00:00``, or report it to the copilot
+    that way. The boundary has to be crossed; it should not also be a place
+    where types quietly change. So both crossings are repaired, on the way in
+    from the declared input's own schema and on the way out from the schema the
+    query produced.
+    """
+    return ", ".join(
+        f"CAST({quote_ident(col)} AS {sql_type}) AS {quote_ident(col)}"
+        for col, sql_type in types.items()
+    )
+
+
+def _restore_types(table: Table, types: dict[str, str]) -> Table:
+    """The result, back in the schema the query produced. See :func:`_cast`."""
+    select = _cast(types)
+    if not select:
+        return table
+    return Table(name=table.name, query=f"SELECT {select} FROM ({table.query})", con=table.con)
 
 
 def render_text(provenance: dict) -> str:

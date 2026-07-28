@@ -113,13 +113,6 @@ def test_output_is_json_serializable(profile):
 # --- the SQL implementation --------------------------------------------------
 
 
-@pytest.fixture
-def con():
-    c = store.memory()
-    yield c
-    c.close()
-
-
 def _table(con, frame, name="t"):
     return Table.from_frame(frame, name, con)
 

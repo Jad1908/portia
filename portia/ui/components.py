@@ -24,6 +24,7 @@ from nicegui import ui
 
 from portia.checks.outcome import BLOCKING_FLAGS
 from portia.core.present import as_yaml, count, inline
+from portia.core.table import Table
 from portia.ui.state import PREVIEW_ROWS
 
 #: `flag-badge` variants. Three, and no others (DESIGN.md).
@@ -352,22 +353,38 @@ def _field(key: str, value: Any) -> None:
 # --- table preview ----------------------------------------------------------
 
 
-def table_preview(frame: pd.DataFrame, *, limit: int = PREVIEW_ROWS) -> None:
-    """The produced frame. Nulls are visible, never blank and never zero."""
-    if frame is None:
+def table_preview(data, *, limit: int = PREVIEW_ROWS) -> None:
+    """The produced table. Nulls are visible, never blank and never zero.
+
+    Takes a `core.table.Table` or a DataFrame. Given a Table it reads `limit`
+    rows and one count — so previewing a step that produced 80 million rows costs
+    what previewing ten costs, and `workflow._table` no longer has to load a
+    whole output to put a shape in a label.
+    """
+    if data is None:
         empty_note("no table")
         return
-    if frame.empty:
-        empty_note(f"0 rows × {count(frame.shape[1], 'column')}")
+    total, head = table_shape(data, limit)
+    if total == 0:
+        empty_note(f"0 rows × {count(head.shape[1], 'column')}")
         return
 
-    head = frame.head(limit)
-    numeric = {c for c in frame.columns if pd.api.types.is_numeric_dtype(frame[c])}
+    frame = head
+    numeric = {c for c in head.columns if pd.api.types.is_numeric_dtype(head[c])}
     with ui.element("div").classes("table-preview"):
         ui.html(_table_html(head, numeric))
-    caption(
-        f"showing {len(head)} of {count(len(frame), 'row')} · {count(frame.shape[1], 'column')}"
-    )
+    caption(f"showing {len(head)} of {count(total, 'row')} · {count(frame.shape[1], 'column')}")
+
+
+def table_shape(data, limit: int = PREVIEW_ROWS):
+    """``(total rows, the first `limit` of them as pandas)`` — Table or DataFrame.
+
+    One place both panes ask, so the number under a table and the number in the
+    label above it can never come from two different counts.
+    """
+    if isinstance(data, Table):
+        return data.preview(limit)
+    return len(data), data.head(limit)
 
 
 def _table_html(head: pd.DataFrame, numeric: set) -> str:

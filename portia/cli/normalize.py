@@ -11,7 +11,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from portia.core.io import load_frame
+from portia.core import store
+from portia.core.io import load_table
 from portia.ops.normalize import apply_normalize, render_text
 
 
@@ -35,12 +36,12 @@ def main() -> None:
     if not transforms:
         parser.error("give at least one of --strip/--lower/--to-numeric/--to-string")
 
-    result = apply_normalize(load_frame(args.file), transforms)
+    result = apply_normalize(load_table(args.file, store.memory()), transforms)
     print(render_text(result.provenance))
 
     if args.out:
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-        result.frame.to_csv(args.out, index=False)
+        result.table.to_csv(args.out)
         print(f"\nwrote {args.out}")
 
 

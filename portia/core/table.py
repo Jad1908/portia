@@ -149,6 +149,20 @@ class Table:
         """
         return self.con.execute(f"SELECT * FROM ({self.query}) LIMIT {int(n)}").fetch_df()
 
+    def preview(self, n: int = DEFAULT_HEAD) -> tuple[int, pd.DataFrame]:
+        """``(total rows, the first n of them)`` — everything a preview needs.
+
+        Both numbers come from **one fresh cursor**, for the reason :meth:`using`
+        exists: the app builds a table on a worker thread and renders it on the
+        main one, and DuckDB connections are not thread-safe. Asking here rather
+        than at each call site means no renderer has to remember that.
+
+        Together, not separately, so the count under a table and the count in the
+        label above it can never disagree.
+        """
+        handle = self.using(self.con.cursor())
+        return handle.count(), handle.head(n)
+
     def rows(self, n: int = DEFAULT_HEAD) -> list[tuple]:
         """The first ``n`` rows as plain python values — **for evidence**.
 
