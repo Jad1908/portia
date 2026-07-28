@@ -305,6 +305,14 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
   `possible_key` and `constant` are equality tests against it and HyperLogLog came back 13.6% low on
   a 6M-row key. The interesting sub-problem: a cheap *exact* answer to the only question
   `possible_key` asks — `count(DISTINCT c) = count(*)` — which does not need the count itself.
+- **Ingesting Parquet inflates it ~2.3x on disk, which undoes much of converting.** Measured
+  2026-07-28: a 266 MB ZSTD Parquet extract (14.4M rows) becomes 602 MB in the store, and a real
+  project of 6.2 GB of Parquet produced a **19.2 GB** `store.duckdb`. DuckDB's native format
+  compresses, but not as hard as Parquet+ZSTD. The ingest decision (`DUCKDB_MIGRATION.md` §3) was
+  argued on CSV, where ingest is both faster *and* smaller; for Parquet only the first half holds.
+  Worth revisiting: a Parquet source is already columnar and already typed, so the read-speed
+  argument is weak, and the sandbox argument (§6.1) is the only one left — which a view over the
+  file would satisfy just as well if the hatch stopped needing the store to be the only namespace.
 - **`store.connect` sets no `memory_limit`, so DuckDB helps itself to 75% of RAM.** A 2 GB limit did
   the same work in the same wall time at 5.0 GB peak instead of 6.8, because DuckDB spilled rather
   than failed. A conservative default looks close to free — but 2 GB was ample for that workload and
