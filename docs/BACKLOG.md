@@ -241,6 +241,16 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
 - **Context bundle** — a token-lean projection of the catalog for the agent to consume; and a
   drift-like "facts changed since summary written" signal.
 
+## Interface — the app
+
+- **The run report's table preview cannot be opened.** Found 2026-07-28 by driving the app in a
+  browser (the first time this widget has been). Clicking the `preview · N rows × M columns`
+  expansion bubbles up to the step block's `on("click")`, which calls `_select_step` and re-renders
+  the report — so the preview collapses as fast as it opens. **Pre-existing**, not the migration:
+  `main` has `_table(result.frame)` and `block.on("click", …)` in exactly the same arrangement. The
+  fix is to stop the expansion's click propagating, and the lesson is that `tests/test_ui.py`
+  covers state and badges and **nothing that renders a table**, so nobody found out.
+
 ## Interface — the surface
 
 - ~~**The three-panel app**~~ — **V0 shipped 2026-07-26** (`portia/ui/`, `python -m portia.ui`).
