@@ -30,9 +30,6 @@ matters more here than anywhere: the attribution is what makes
 
 from __future__ import annotations
 
-import pandas as pd
-
-from portia.checks.profiling import null_rates
 from portia.core.present import count
 from portia.core.serialize import round_float, to_jsonable
 from portia.core.table import Table, quote_ident
@@ -65,43 +62,6 @@ BLOCKING_FLAGS = frozenset(
 
 
 def outcome_report(
-    frame: pd.DataFrame,
-    *,
-    inputs: dict[str, pd.DataFrame],
-    keys: dict[str, list[str]] | None = None,
-    grain: list[str] | None = None,
-) -> dict:
-    """What is true of ``frame``, given the ``inputs`` that produced it.
-
-    ``inputs`` maps each referenced name to the table that went in, **in the
-    order the op consumed them** (left, then right) — that ordering is what makes
-    the ``_x``/``_y`` collision suffixes traceable back to a side.
-
-    ``keys`` names each input's join key columns, which are excluded from the
-    contribution measurement: a key exists on both sides by construction, so
-    counting it would make a join that matched nothing look as though both sides
-    had contributed.
-
-    ``grain`` is the caller's claim about what one output row is meant to be. The
-    claim is theirs; whether it holds is measured here.
-    """
-    n_rows = int(len(frame))
-    return _assemble(
-        n_rows=n_rows,
-        columns=[str(c) for c in frame.columns],
-        non_null={str(c): int(frame[c].notna().sum()) for c in frame.columns},
-        rates=null_rates(frame),
-        input_columns={name: [str(c) for c in df.columns] for name, df in inputs.items()},
-        input_non_null={
-            name: {str(c): int(df[c].notna().sum()) for c in df.columns}
-            for name, df in inputs.items()
-        },
-        keys=keys or {},
-        grain=_frame_grain(frame, grain) if (grain and n_rows) else None,
-    )
-
-
-def outcome_report_table(
     table: Table,
     *,
     inputs: dict[str, Table],
@@ -329,31 +289,6 @@ def _table_grain(table: Table, grain: list[str]) -> dict:
         n_duplicated=n_duplicated,
         worst=[([to_jsonable(v) for v in row[:-1]], int(row[-1])) for row in rows],
     )
-
-
-def _frame_grain(frame: pd.DataFrame, grain: list[str]) -> dict:
-    keys = [str(c) for c in grain]
-    early = _grain(keys, [c for c in keys if c not in frame.columns])
-    if early:
-        return early
-
-    counts = frame.groupby(keys, dropna=False).size()
-    duplicated = counts[counts > 1]
-    duplicated = duplicated.loc[sorted(duplicated.index, key=str)].sort_values(
-        ascending=False, kind="stable"
-    )
-    return _grain_report(
-        keys,
-        n_distinct=int(len(counts)),
-        n_duplicated=int(len(duplicated)),
-        worst=[(_key_values(key), int(n)) for key, n in duplicated.head(GRAIN_EXAMPLES).items()],
-    )
-
-
-def _key_values(key) -> list:
-    """A groupby index entry as a list — scalar for one key, tuple for several."""
-    values = key if isinstance(key, tuple) else (key,)
-    return [to_jsonable(v) for v in values]
 
 
 def render_outcome(outcome: dict) -> str:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pathlib
+import re
 from concurrent.futures import ThreadPoolExecutor
 
 import duckdb
@@ -118,3 +120,43 @@ def test_awkward_identifiers_survive(con):
 def test_quoting_escapes():
     assert quote_ident('a"b') == '"a""b"'
     assert quote_literal("it's") == "'it''s'"
+
+
+# --- the rule that keeps the migration honest --------------------------------
+
+#: The only places a whole relation is allowed to become a DataFrame, and why.
+#: Everything else must go through `Table.head` / `Table.rows`, which are capped.
+MATERIALIZERS = {
+    "portia/core/table.py": "head() itself — a LIMIT, which is the capped exit",
+    "portia/ops/sql.py": (
+        "the escape hatch's sandbox boundary: the declared inputs cross into a "
+        "connection that holds nothing else, which is what makes the guarantee "
+        "independent of reading the query correctly (§6.1). It is also why SQL "
+        "steps stay memory-bound, and that is written down rather than hidden."
+    ),
+}
+
+_PULLS_EVERYTHING = re.compile(r"\.(?:fetch_df|fetchdf|to_df|df)\s*\(\s*\)")
+
+
+def test_nothing_new_pulls_a_whole_relation_into_memory():
+    """§4's rule, as a test instead of a grep someone has to remember to run.
+
+    "Memory scales with the answer" survives exactly as long as no one adds a
+    `.df()`. The two exceptions are listed above with their reasons; a third
+    needs one too, and needs it argued for before it is added here.
+    """
+    package = pathlib.Path(__file__).resolve().parents[1] / "portia"
+    offenders = [
+        f"{rel}:{i}  {line.strip()}"
+        for path in sorted(package.rglob("*.py"))
+        for rel in [path.relative_to(package.parent).as_posix()]
+        if rel not in MATERIALIZERS
+        for i, line in enumerate(path.read_text().splitlines(), 1)
+        if _PULLS_EVERYTHING.search(line)
+    ]
+    assert not offenders, (
+        "these read an entire relation into memory, which is the ceiling the "
+        "migration removed — use Table.head/rows, or add the file to "
+        "MATERIALIZERS with the reason:\n  " + "\n  ".join(offenders)
+    )

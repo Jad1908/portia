@@ -9,21 +9,23 @@ So this module is two things and nothing else:
 
 - **A case list** — every check and every op, over every fixture, as data rather
   than as code. A case names what to run and on what; it does not know how.
-- **A backend** — the *how*. :class:`PandasBackend` is today's implementation.
-  The DuckDB one is added beside it and the same cases run against both, which
-  is what §7.3 means by "keep both implementations alive during the migration".
+- **A backend** — the *how*. The cases don't know it exists.
 
-Regenerate the files with ``python -m tests.golden``. **Regenerating is not a
-way to fix a failing test** — a diff in ``tests/fixtures/golden/`` is the finding.
-Commit it only when the change is intended and the reason is written down.
+**The files are the pre-migration reference.** They were written by the pandas
+engine, before any of it moved (commit "Freeze today's evidence"), and that is
+where their authority comes from — they are evidence from an implementation that
+could not have been wrong in the same way the new one is. That implementation no
+longer exists, so **regenerating them now would rewrite the reference from the
+thing it is supposed to be checking.** ``python -m tests.golden`` therefore
+demands ``--regenerate`` and says so. A diff under ``tests/fixtures/golden/`` is
+a finding, not a chore; commit one only with the reason written down.
 
 Two deliberate choices worth knowing:
 
 - **Cases load from ``data/mock/*.csv``, not from the builders.** That is the
-  path the migration replaces (``load_frame`` → ``load_table``) and the one the
-  copilot exercises. The CSV round-trip changes dtypes, so the one signal that
-  only exists in memory — ``mixed_types``, which needs a pandas ``object``
-  column — gets its own explicit case.
+  path the copilot exercises, and the one whose type inference the migration
+  changed. One case profiles a builder's frame instead, to pin what bridging an
+  untyped pandas column into a typed store does to it.
 - **Ops are exercised through ``run_spec`` rather than called directly.** A spec
   is how an op is actually reached in production, it carries the ``outcome``
   measurement and the drift check with it, and it exercises chaining. One kind of
@@ -40,7 +42,6 @@ from typing import Any
 from portia.checks import join as join_checks
 from portia.checks import profiling
 from portia.core import store
-from portia.core.io import load_frame
 from portia.core.serialize import to_json, to_jsonable
 from portia.core.table import Table
 from portia.ops.join import HOWS
@@ -88,86 +89,20 @@ class Case:
 # --- the backends -----------------------------------------------------------
 
 
-#: Every kind of case there is. A backend declares the subset it can run, and
-#: `test_golden` skips the rest — that is how both implementations stay alive
-#: while the migration lands module by module (§7.3). The DuckDB set grows by one
-#: entry per step; when it holds all of these, the pandas path can be deleted.
-ALL_KINDS = frozenset({"profile", "null_rates", "join_report", "join_findings", "spec"})
-
-
-class PandasBackend:
-    """Today's implementation. The DuckDB backend is a sibling of this class.
-
-    Every method here is a seam the migration moves. Nothing else in this module
-    imports pandas, so the second backend is a matter of writing the same eight
-    methods against `core.table.Table` — not of rewriting the cases.
-    """
-
-    name = "pandas"
-    #: Everything except `spec`. The ops and `run_spec` were migrated outright
-    #: rather than dual-pathed: the golden files *are* the frozen pandas
-    #: reference, so keeping a second implementation alive to reproduce them
-    #: would have been checking a copy against itself (§7.3's dual path buys
-    #: nothing once the file exists).
-    kinds = ALL_KINDS - {"spec"}
-
-    def source(self, fixture: str):
-        return load_frame(ROOT / MOCK_DIR / f"{fixture}.csv")
-
-    def builder(self, fixture: str):
-        from portia import fixtures
-
-        return getattr(fixtures, fixture)()
-
-    def profile(self, data) -> dict:
-        return profiling.profile_frame(data)
-
-    def null_rates(self, data) -> dict:
-        return profiling.null_rates(data)
-
-    def join_report(self, left, right, **keys) -> dict:
-        return join_checks.join_report(left, right, **keys)
-
-    def join_findings(self, left, right, **keys) -> dict:
-        return join_checks.join_findings(left, right, **keys)
-
-    def output(self, frame) -> dict:
-        """A step's produced table, small and comparable across backends.
-
-        Rows are **ordered by their own values**, not left in the order the op
-        emitted them, because emission order is not a fact about the data. DuckDB
-        already proves it: the same ``GROUP BY`` over the same seven rows returns
-        three different orderings across six runs (parallel hash aggregation), so
-        an order-sensitive preview fails at random today and would fail on every
-        case once the engine is DuckDB throughout. Sorted, this still catches the
-        thing it is here for — a join that produced the *wrong rows*.
-        """
-        if frame is None:
-            return {}
-        rows = [
-            {str(k): to_jsonable(v) for k, v in record.items()}
-            for record in frame.to_dict("records")
-        ]
-        rows.sort(key=_row_key)
-        return {
-            "n_rows": int(len(frame)),
-            "columns": [str(c) for c in frame.columns],
-            "head": rows[:OUTPUT_ROWS],
-        }
-
-
 class DuckDBBackend:
-    """The scale tier. Same cases, same evidence — measured in SQL.
+    """The engine, as the cases reach it. Same evidence, measured in SQL.
 
     Sources are **ingested**, exactly as a real project's are, so what the golden
     files compare is the path the product actually takes rather than a view over
     a CSV that nothing else uses.
+
+    The pandas backend that used to sit beside this one is gone with the
+    implementations it called (`docs/DUCKDB_MIGRATION.md` §8, step 10). The class
+    stays because it is the seam a second tier plugs into — Snowflake is the
+    stated next one — and because `EXCEPTIONS` is keyed on its name.
     """
 
     name = "duckdb"
-    #: Grows a step at a time as `docs/DUCKDB_MIGRATION.md` §8 lands. Everything
-    #: absent from here still runs on pandas and is still frozen by the same files.
-    kinds = ALL_KINDS
 
     def __init__(self):
         self._con = None
@@ -191,29 +126,27 @@ class DuckDBBackend:
         return Table.from_frame(getattr(fixtures, fixture)(), f"{fixture}__frame", self.con)
 
     def profile(self, table: Table) -> dict:
-        return profiling.profile_table(table)
+        return profiling.profile(table)
 
     def null_rates(self, table: Table) -> dict:
-        return profiling.null_rates_table(table)
+        return profiling.null_rates(table)
 
     def join_report(self, left: Table, right: Table, **keys) -> dict:
-        return join_checks.join_report_table(left, right, **keys)
+        return join_checks.join_report(left, right, **keys)
 
     def join_findings(self, left: Table, right: Table, **keys) -> dict:
-        return join_checks.join_findings_table(left, right, **keys)
+        return join_checks.join_findings(left, right, **keys)
 
     def run_spec(self, spec: dict) -> list[StepResult]:
         return run_spec(spec, base_dir=ROOT, con=store.memory())
 
     def output(self, table) -> dict:
-        """A step's produced table, ordered exactly as `PandasBackend.output` orders it.
+        """A step's produced table, ordered by the row's own values.
 
-        It has to be the *same* order, not merely a deterministic one: these
-        cases are compared against files the pandas implementation wrote, and
-        that comparison is the only thing checking the migrated ops produce the
-        right rows. So the sort happens in python, over every row, rather than as
-        an `ORDER BY ALL` — which would sort by column position where `_row_key`
-        sorts by column name.
+        Ordered rather than left as the op emitted it, because emission order is
+        not a fact about the data: the same ``GROUP BY`` over the same seven rows
+        returns three different orderings across six runs. Sorted, this still
+        catches the thing it is here for — a step that produced the *wrong rows*.
 
         Reading every row is safe here and nowhere else: these are fixtures. The
         cap makes that assumption fail loudly if someone adds a big case.
@@ -245,7 +178,7 @@ def _row_key(row: dict) -> str:
     return json.dumps(row, sort_keys=True, default=str)
 
 
-BACKENDS = (PandasBackend(), DuckDBBackend())
+BACKENDS = (DuckDBBackend(),)
 
 
 # --- running a case ---------------------------------------------------------
@@ -580,15 +513,13 @@ def normalized(evidence: dict) -> Any:
     return json.loads(dumps(evidence))
 
 
-#: The backend the files are written from. Every other backend is compared
-#: *against* them, with its differences declared in `test_golden.EXCEPTIONS` —
-#: so the reference survives the deletion of the implementation that produced it.
-REFERENCE_BACKEND = BACKENDS[0]
-
-
 def write_all(backend: Any | None = None) -> list[Path]:
-    """(Re)generate every golden file. Returns the paths written."""
-    backend = backend or REFERENCE_BACKEND
+    """(Re)generate every golden file. Returns the paths written.
+
+    Read the module docstring first: this overwrites the reference the migration
+    is checked against.
+    """
+    backend = backend or BACKENDS[0]
     GOLDEN_DIR.mkdir(parents=True, exist_ok=True)
     written = []
     for case in CASES:
@@ -599,5 +530,11 @@ def write_all(backend: Any | None = None) -> list[Path]:
 
 
 if __name__ == "__main__":
+    import sys
+
+    if "--regenerate" not in sys.argv:
+        print(__doc__.split("**The files are the pre-migration reference.**")[1].strip())
+        print("\nPass --regenerate if that is genuinely what you mean.")
+        raise SystemExit(1)
     for path in write_all():
         print(path.relative_to(ROOT))

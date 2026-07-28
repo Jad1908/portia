@@ -111,17 +111,24 @@ Next, in order:
    copilot reads changes**: same evidence dicts, same provenance keys, same sandbox, enforced by
    golden-file parity tests written before any implementation moves.
 
-   **Steps 1–3 shipped 2026-07-28** (`duckdb-engine-parity`): 29 golden evidence files and a
-   dual-backend harness, `core/table.py` + the ingested `.portia/store.duckdb`, and
-   `checks/profiling.py` measured in SQL. Indexing is 8× faster and no longer routes a whole file
-   through pandas. **Two things measurement changed.** Three type-inference divergences turned up
-   where the spec predicted one — the worst being that DuckDB nulls only the empty string, so a
-   null rate would have depended on which reader ran (fixed at the loader, not excepted). And
-   **a profile's memory still scales with the file**, because `count(DISTINCT)`, exact quantiles
-   and the modal-value group-by are all O(n) or O(cardinality); approximating the count is *not*
-   available, since `possible_key` and `constant` are equality tests against it and HyperLogLog came
-   back 13.6% low on a 6M-row key. `DUCKDB_MIGRATION.md` §13 has the numbers; the join work
-   (steps 4–6) is next and is where the 80M-row fan-out case gets settled.
+   **Shipped 2026-07-28** across two branches (`duckdb-engine-parity`, `duckdb-checks-and-ops`).
+   The engine is DuckDB throughout: `core/table.py`, the ingested `.portia/store.duckdb`, all three
+   checks, all three ops, `run_spec`, and the edges. pandas survives only in the fixtures, the
+   loader's small-read path, and the renderers — and a test now fails if anything else pulls a whole
+   relation into memory. The guarantee held where it counts: **all ten `spec` golden cases come out
+   byte-identical to evidence the pandas engine wrote**, and the 80M-row fan-out that inflated
+   revenue in Run 5 is reported in 0.1 s without being built.
+
+   **Three things measurement changed, and they are the part worth reading.** Type inference
+   diverged three ways where the spec predicted one — worst being that DuckDB nulls only the empty
+   string, so a null rate would have depended on which reader ran (fixed at the loader, not
+   excepted). The specced sandbox design was **infeasible**: DuckDB refuses `ATTACH` when external
+   access is off, and a qualified name reaches undeclared tables anyway, so SQL steps stay
+   memory-bound. And **a profile's memory still scales with the file** — `count(DISTINCT)`, exact
+   quantiles and the modal-value group-by are all O(n) or O(cardinality), and approximating the
+   count is *not* available: `possible_key` and `constant` are equality tests against it, and
+   HyperLogLog came back 13.6% low on a 6M-row key. `DUCKDB_MIGRATION.md` §13 has the numbers.
+   **The PHQ test can start; run it expecting cardinality to be the ceiling, not the store.**
 
 5. **The run log** (`EVALUATION.md`, specced 2026-07-26). The more painful half of the surface
    problem: seven runs scored by hand off transcripts, and the app's transcript still dies with the

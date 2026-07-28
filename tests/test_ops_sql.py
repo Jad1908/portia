@@ -13,7 +13,7 @@ import json
 import pandas as pd
 import pytest
 
-from portia.checks.outcome import GRAIN_NOT_UNIQUE, outcome_report_table
+from portia.checks.outcome import GRAIN_NOT_UNIQUE, outcome_report
 from portia.ops import apply_join, apply_sql
 from portia.ops.sql import PROVENANCE_KEYS, SqlNotAllowed, check_sql, render_text
 
@@ -72,7 +72,7 @@ def test_the_fan_out_has_a_resolution_now(events, bookings, table):
         left_on=["city", "stay_date"],
         right_on=["city_name", "event_date"],
     )
-    report = outcome_report_table(
+    report = outcome_report(
         joined.table,
         inputs={"bookings": bookings_t, "events": per_city_date.table},
         grain=["booking_id"],
@@ -95,7 +95,7 @@ def test_without_the_aggregate_the_same_join_still_fans_out(events, bookings, ta
         left_on=["city", "stay_date"],
         right_on=["city_name", "event_date"],
     )
-    report = outcome_report_table(joined.table, inputs={"b": bookings_t}, grain=["booking_id"])
+    report = outcome_report(joined.table, inputs={"b": bookings_t}, grain=["booking_id"])
 
     assert joined.table.count() > len(bookings)
     assert GRAIN_NOT_UNIQUE in report["flags"]

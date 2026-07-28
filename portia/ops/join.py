@@ -17,7 +17,7 @@ than one that filters.
 
 from __future__ import annotations
 
-from portia.checks.join import join_report_table
+from portia.checks.join import join_report
 from portia.checks.outcome import MERGE_SUFFIXES
 from portia.core.table import Table, quote_ident
 from portia.ops.base import OpResult
@@ -68,7 +68,7 @@ def apply_join(
     if how not in HOWS:
         raise ValueError(f"how must be one of {HOWS}, got {how!r}")
 
-    diagnosis = join_report_table(left, right, on=on, left_on=left_on, right_on=right_on)
+    diagnosis = join_report(left, right, on=on, left_on=left_on, right_on=right_on)
     lkeys = diagnosis["keys"]["left"]
     rkeys = diagnosis["keys"]["right"]
 

@@ -39,7 +39,7 @@ from portia.checks.outcome import (
     BLOCKING_FLAGS,
     describe_contribution,
     describe_grain,
-    outcome_report_table,
+    outcome_report,
     render_outcome,
 )
 from portia.core import store
@@ -200,9 +200,7 @@ def _run_step(step: dict, tables: dict[str, Table]) -> StepResult:
         drift=_drift(step.get("expect"), out.provenance),
         table=out.table,
         rationale=step.get("rationale"),
-        outcome=outcome_report_table(
-            out.table, inputs=inputs, keys=key_columns, grain=step.get("grain")
-        ),
+        outcome=outcome_report(out.table, inputs=inputs, keys=key_columns, grain=step.get("grain")),
         acknowledged=list(step.get("acknowledge") or []),
     )
 

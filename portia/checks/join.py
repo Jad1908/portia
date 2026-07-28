@@ -33,9 +33,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pandas as pd
-from pandas.api import types as ptypes
-
 from portia.checks.profiling import BOOLEAN, DATETIME, NUMERIC_KINDS, duckdb_kind
 from portia.core.serialize import round_float, to_jsonable
 from portia.core.table import Table, quote_ident
@@ -46,55 +43,6 @@ LOW_COVERAGE = 0.5  # left match rate below this -> "low_overlap"
 
 
 def join_report(
-    left: pd.DataFrame,
-    right: pd.DataFrame,
-    on: str | list[str] | None = None,
-    *,
-    left_on: str | list[str] | None = None,
-    right_on: str | list[str] | None = None,
-) -> dict:
-    """Report the consequences of joining ``left`` to ``right`` on the keys.
-
-    Provide either ``on`` (same key name(s) both sides) or both ``left_on`` and
-    ``right_on`` (differently named keys). Mirrors ``pandas.merge`` vocabulary.
-    """
-    lkeys, rkeys = _resolve_keys(on, left_on, right_on)
-    _require_columns(left.columns, lkeys, "left")
-    _require_columns(right.columns, rkeys, "right")
-
-    L = _frame_side(left, lkeys)
-    R = _frame_side(right, rkeys)
-
-    # Align multiplicity counts on key value; NaN where a key is absent one side.
-    counts = pd.concat([L["counts"].rename("l"), R["counts"].rename("r")], axis=1)
-    shared = counts[counts["l"].notna() & counts["r"].notna()]
-    left_only = counts[counts["l"].notna() & counts["r"].isna()]
-    right_only = counts[counts["r"].notna() & counts["l"].isna()]
-
-    overlap = {
-        "inner_rows": int((shared["l"] * shared["r"]).sum()),
-        "matched_left": int(shared["l"].sum()),
-        "matched_right": int(shared["r"].sum()),
-        "n_shared_keys": int(len(shared)),
-        "n_left_only_keys": int(len(left_only)),
-        "n_right_only_keys": int(len(right_only)),
-        "left_only_rows": int(left_only["l"].sum()),
-        "right_only_rows": int(right_only["r"].sum()),
-        "max_left_to_right": int(shared["r"].max()) if len(shared) else 0,
-        "max_right_to_left": int(shared["l"].max()) if len(shared) else 0,
-    }
-    return _assemble(
-        lkeys,
-        rkeys,
-        L,
-        R,
-        overlap,
-        sample_left_only=[_key_value(k) for k in sorted(left_only.index, key=str)[:SAMPLE_KEYS]],
-        sample_right_only=[_key_value(k) for k in sorted(right_only.index, key=str)[:SAMPLE_KEYS]],
-    )
-
-
-def join_report_table(
     left: Table,
     right: Table,
     on: str | list[str] | None = None,
@@ -427,7 +375,7 @@ def _unmatched_keys(this: Table, keys: list[str], other: Table, other_keys: list
     return [_key_value(row[0] if len(row) == 1 else tuple(row)) for row in rows]
 
 
-def join_findings_table(
+def join_findings(
     left: Table,
     right: Table,
     on: str | list[str] | None = None,
@@ -437,7 +385,7 @@ def join_findings_table(
 ) -> dict:
     """:func:`join_findings`, measured in SQL."""
     lkeys, rkeys = _resolve_keys(on, left_on, right_on)
-    report = join_report_table(left, right, on=on, left_on=left_on, right_on=right_on)
+    report = join_report(left, right, on=on, left_on=left_on, right_on=right_on)
     comparable = report["key_dtype_match"]
 
     evidence = {
@@ -489,119 +437,6 @@ def _table_fan_out(left: Table, lkeys, right: Table, rkeys, comparable) -> list[
             "n_right": int(row[n + 1]),
         }
         for row in rows
-    ]
-
-
-# --- the pandas implementation (kept until the migration lands) -------------
-
-
-def _frame_side(df: pd.DataFrame, keys: list[str]) -> dict:
-    n_rows = int(len(df))
-    null_mask = df[keys].isna().any(axis=1)
-    null_rows = int(null_mask.sum())
-    counts = df.loc[~null_mask].groupby(keys, dropna=True).size()
-    max_mult = int(counts.max()) if len(counts) else 0
-    return {
-        "n_rows": n_rows,
-        "null_rows": null_rows,
-        "counts": counts,
-        "n_distinct": int(len(counts)),
-        "n_duplicated": int((counts > 1).sum()),
-        "max_mult": max_mult,
-        "unique": max_mult <= 1,
-        "kinds": [_frame_key_kind(df[c]) for c in keys],
-    }
-
-
-def _frame_key_kind(s: pd.Series) -> str:
-    if ptypes.is_bool_dtype(s):
-        return "boolean"
-    if ptypes.is_datetime64_any_dtype(s):
-        return "datetime"
-    if ptypes.is_numeric_dtype(s):
-        return "numeric"
-    return "string"
-
-
-def join_findings(
-    left: pd.DataFrame,
-    right: pd.DataFrame,
-    on: str | list[str] | None = None,
-    *,
-    left_on: str | list[str] | None = None,
-    right_on: str | list[str] | None = None,
-) -> dict:
-    """Evidence package for a join: the full report (facts) **plus samples of the
-    actual rows** behind each anomaly — unmatched, null-keyed, fan-out.
-
-    So a reasoning agent can judge *materiality* from real examples ("are these 2
-    dropped rows my biggest accounts, or noise?") instead of a count. Contains no
-    ranking and no recommendation: what matters, and what to ask, is the agent's
-    call. Row samples are capped (token-lean); at scale we'd also cap columns.
-    """
-    lkeys, rkeys = _resolve_keys(on, left_on, right_on)
-    _require_columns(left.columns, lkeys, "left")
-    _require_columns(right.columns, rkeys, "right")
-    report = join_report(left, right, on=on, left_on=left_on, right_on=right_on)
-
-    lsig, lnull = _key_sig(left, lkeys)
-    rsig, rnull = _key_sig(right, rkeys)
-    left_keys = set(lsig[~lnull])
-    right_keys = set(rsig[~rnull])
-
-    evidence = {
-        "unmatched_left_rows": _sample_rows(left, ~lnull & ~lsig.isin(right_keys)),
-        "unmatched_right_rows": _sample_rows(right, ~rnull & ~rsig.isin(left_keys)),
-        "null_key_left_rows": _sample_rows(left, lnull),
-        "null_key_right_rows": _sample_rows(right, rnull),
-        "fan_out_examples": _fan_out_examples(lsig[~lnull], rsig[~rnull]),
-    }
-    return {"report": report, "evidence": evidence}
-
-
-def _key_sig(df: pd.DataFrame, keys: list[str]) -> tuple[pd.Series, pd.Series]:
-    """A per-row key signature (scalar for a single key, tuple for composite) and
-    a null mask — a row is null-keyed if any key component is null."""
-    null = df[keys].isna().any(axis=1)
-    if len(keys) == 1:
-        return df[keys[0]], null
-    return pd.Series([tuple(r) for r in df[keys].to_numpy()], index=df.index), null
-
-
-def _sample_rows(df: pd.DataFrame, mask: pd.Series, k: int = SAMPLE_ROWS) -> list[dict]:
-    # Ordered by the row's own values rather than by position, for the reason
-    # `profiling.SAMPLE_VALUES` gives: a LIMIT with no ORDER BY is not a fact.
-    # to_dict("records") keeps each column's own dtype (int stays int); iterrows
-    # would upcast a mixed row to float.
-    selected = _sorted_rows(df.loc[mask])
-    return [
-        {c: to_jsonable(v) for c, v in rec.items()} for rec in selected.head(k).to_dict("records")
-    ]
-
-
-def _sorted_rows(df: pd.DataFrame) -> pd.DataFrame:
-    """Every column, left to right — DuckDB's ``ORDER BY ALL``."""
-    if df.empty:
-        return df
-    try:
-        return df.sort_values(by=list(df.columns), kind="stable")
-    except TypeError:  # an object column holding more than one python type
-        return df.loc[df.astype(str).apply(tuple, axis=1).sort_values(kind="stable").index]
-
-
-def _fan_out_examples(lsig: pd.Series, rsig: pd.Series) -> list[dict]:
-    """Shared keys duplicated on either side (the source of row multiplication),
-    worst first. Aligned via concat so int/float keys match like join_report."""
-    counts = pd.concat([lsig.value_counts().rename("l"), rsig.value_counts().rename("r")], axis=1)
-    dup = counts[
-        counts["l"].notna() & counts["r"].notna() & ((counts["l"] > 1) | (counts["r"] > 1))
-    ]
-    dup = dup.assign(prod=dup["l"] * dup["r"])
-    # Ties broken by the key, so the answer doesn't depend on hash order.
-    dup = dup.loc[sorted(dup.index, key=str)].sort_values("prod", ascending=False, kind="stable")
-    return [
-        {"key": _key_value(k), "n_left": int(row["l"]), "n_right": int(row["r"])}
-        for k, row in dup.head(SAMPLE_KEYS).iterrows()
     ]
 
 

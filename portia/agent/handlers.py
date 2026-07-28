@@ -27,9 +27,10 @@ from typing import Any
 
 from portia import catalog, spec
 from portia.agent import prompts
-from portia.checks.join import join_findings_table as _join_findings
+from portia.checks import profiling
+from portia.checks.join import join_findings as _join_findings
 from portia.checks.outcome import BLOCKING_FLAGS
-from portia.checks.profiling import profile_path, profile_table
+from portia.checks.profiling import profile_path
 from portia.core import store
 from portia.core.io import load_table
 from portia.core.serialize import to_json
@@ -169,7 +170,7 @@ def profile_source(source: str, portia_dir: str = catalog.DEFAULT_DIR) -> dict:
     asking: what do this table's columns look like *now*, after the step ran.
     """
     if STEP_REF in source:
-        profile = profile_table(_step_table(source))
+        profile = profiling.profile(_step_table(source))
         return {
             "source": source,
             "summary": "",

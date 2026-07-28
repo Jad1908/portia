@@ -1,10 +1,11 @@
 # The DuckDB migration — the scale tier
 
-*Specced 2026-07-27. **Steps 1–3 landed 2026-07-28** on `duckdb-engine-parity` — golden files, the
-`Table` abstraction and the store, and `checks/profiling.py` on SQL. Direction plus the parts that
-genuinely need deciding up front — per `CLAUDE.md`, a plan gives vision, stack and watch-outs; the
-specifics emerge from real work. The watch-outs here are unusually concrete because three of them
-will silently corrupt behaviour if they are discovered late.*
+*Specced 2026-07-27. **Complete 2026-07-28** — steps 1–3 on `duckdb-engine-parity`, steps 4–10 on
+`duckdb-checks-and-ops`. The engine is DuckDB throughout; pandas survives only where §9 says it
+should. Direction plus the parts that genuinely need deciding up front — per `CLAUDE.md`, a plan
+gives vision, stack and watch-outs; the specifics emerge from real work. The watch-outs here were
+unusually concrete because three of them would have silently corrupted behaviour if discovered
+late; **two of the three turned out to be wrong**, and §6.1 and §13 say how.*
 
 > **What real work already changed in this document.** §1's headline — *"memory stops scaling with
 > the file and starts scaling with the answer"* — **is not true of a portia profile**, measured. It
@@ -280,12 +281,30 @@ agent could name any table in the store, not just its declared inputs.
 **The design that preserves both.** Keep opening a separate, restricted connection per SQL step.
 Give it access to exactly the declared inputs and nothing else. Options, in preference order:
 
-1. `ATTACH '…/store.duckdb' AS store (READ_ONLY)` on a connection with `enable_external_access=False`,
-   then create **views for the declared inputs only** and query those. Nothing else is nameable
-   without a `store.` prefix, and that prefix can be refused by the existing string check.
-2. If (1) proves leaky, materialise the declared inputs into the restricted connection with
-   `CREATE TEMP TABLE … AS SELECT …` — correct and airtight, but it materialises, so it only holds
-   for inputs small enough to fit. Acceptable as a fallback, not as the default.
+1. ~~`ATTACH '…/store.duckdb' AS store (READ_ONLY)` on a connection with
+   `enable_external_access=False`, then create **views for the declared inputs only**.~~
+   **Infeasible — probed 2026-07-28, and it fails twice over.** DuckDB refuses `ATTACH` outright
+   when `enable_external_access=False` (`Permission Error: Cannot access file`), so the attach and
+   the filesystem lock cannot both be had. And even with external access left on, `store.anything`
+   stays reachable by a schema-qualified name — `USE sandbox` hides undeclared tables from
+   *unqualified* names only. That leaves `check_sql` as the sole barrier, and this module's whole
+   posture is that the string check is bypassable and **the config is what actually holds**.
+   (Two useful facts found on the way: `SET enable_external_access=false` *does* work at runtime and
+   cannot be undone, and `DETACH` breaks any view defined over the detached database.)
+2. **This is the implementation.** The declared inputs are materialised into the restricted
+   connection, which then holds exactly them and nothing else — the one arrangement where the
+   guarantee does not depend on reading the query correctly.
+
+**The cost, stated plainly: SQL steps stay memory-bound.** Every other op is a relation; this one
+crosses a process boundary, so its inputs are read into memory. Making it lazy needs step outputs to
+live in the store (§12) *and* a parse-tree check on table references to replace what isolation
+currently provides for free. Both are real work and neither is a migration task.
+
+**The crossing also ate types**, which was not anticipated: pandas has no date type, so a `DATE`
+input arrived in the sandbox as a `TIMESTAMP` and left as one, and the next step would have joined
+`2026-06-12` against `2026-06-12 00:00:00`. Both crossings are now repaired from the schema either
+side actually had — the boundary has to be crossed, but it should not also be a place where types
+quietly change.
 
 **This needs a test that tries to escape**: a step whose SQL names an undeclared table must fail,
 and a step whose SQL calls `read_csv` must fail, exactly as they do today. `tests/test_ops_sql.py`
@@ -381,18 +400,21 @@ Each step ends green, and nothing after step 2 is a big-bang.
 3. ~~**`checks/profiling.py`**~~ — **done 2026-07-28.** 8× faster; the memory win is smaller than
    this document assumed — see §13. The rules (`_semantic`, `_flags`) are shared by both
    implementations rather than written twice, which is what keeps parity structural.
-4. **`checks/join.py`** — unlocks `join_findings` on real data, which is what the copilot calls
-   before deciding anything.
-5. **`checks/outcome.py`** — §6.2 lives here.
-6. **`ops/join.py`, `ops/normalize.py`** — with the explicit suffix convention.
-7. **`ops/sql.py`** — §6.1, the sandbox. Do it after the rest so the restricted-connection design is
-   tested against a working store.
-8. **`spec.run_spec`** — relations end to end.
-9. **`ui/` + `cli/`** — previews, `read_table`, `write_outputs`.
-10. **Delete the pandas implementations** and the dual-path switch. Keep the golden files.
+4. ~~**`checks/join.py`**~~ — **done.** 80M result rows reported in 0.1 s at 384 MB, never built.
+5. ~~**`checks/outcome.py`**~~ — **done.** §6.2 held.
+6. ~~**`ops/join.py`, `ops/normalize.py`**~~ — **done**, with the suffixes now produced deliberately.
+7. ~~**`ops/sql.py`**~~ — **done, and not as specced.** See §6.1.
+8. ~~**`spec.run_spec`**~~ — **done.** Relations end to end; a run holds a query per step.
+9. ~~**`ui/` + `cli/`**~~ — **done.** `read_table`, `Table.preview`, `COPY … TO` for outputs.
+10. ~~**Delete the pandas implementations**~~ — **done.** `checks/` has one implementation each.
+    The golden files stay, and `python -m tests.golden` now demands `--regenerate`: they were
+    written by the engine that predates the migration, and that is the whole of their authority.
 
-Steps 1–3 are worth a PR on their own: they are separable, they are most of the memory win for
-indexing, and they let the PHQ test start.
+Steps 4–10 collapsed the dual path rather than carrying it. §7.3 wanted both implementations alive
+so the cases could run against each; once the *files* existed, running the old implementation to
+reproduce them was checking a copy against itself. What replaced it: all ten `spec` cases came out
+**byte-identical** to evidence the pandas engine wrote, which is the same claim with fewer moving
+parts.
 
 ---
 
