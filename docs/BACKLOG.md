@@ -19,6 +19,20 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
   taxonomy — the agent computes ad-hoc; these are just handy starting points.
 - **Scale-aware evidence** — cap columns (not just rows) in `join_findings` samples; profile from a
   sample/schema rather than the full frame once data is too big to scan.
+- **`store.connect` sets no `memory_limit`, so DuckDB helps itself to 75% of RAM.** Measured
+  2026-07-28 on 4.82 GB of CSV: indexing peaked at 6.8 GB with the default, and at **5.0 GB with
+  `memory_limit=2GB` — in the same wall time**, because DuckDB spilled instead of failing. A
+  conservative default (with an override) would stop portia competing with the rest of the machine
+  for what looks like no speed cost. Not done unilaterally: 2 GB was ample for *this* workload, and
+  a genuine large sort might thrash. Decide against PHQ data.
+- **`fan_out` fires on a many:1 join that cannot inflate anything.** Seen on the 50M x 3M scale
+  test: `relationship: many:1`, `result_rows` equal to the left's row count, and `fan_out` in the
+  flags anyway — because `max_right_to_left` counts how many left rows share a key, which is ~17
+  for any real fact-to-dimension join. Pre-existing (the frozen `otb_hotels` evidence has it too),
+  and harmless at fixture size. At scale it means **the copilot sees `fan_out` on nearly every
+  dimension join**, which is how a real signal gets learned as noise. The fix is probably to flag on
+  what actually multiplies the *result*, not on either side's multiplicity — but that changes a flag
+  the copilot reads, so it needs its own review.
 - **A profile's memory is bounded by cardinality, not by the store** — measured 2026-07-28, see
   `DUCKDB_MIGRATION.md` §13. Exact `count(DISTINCT)`, exact quantiles and the `top` group-by are all
   O(n) or O(distinct). Approximating the quantiles is safe and 4× cheaper; approximating
