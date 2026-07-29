@@ -161,7 +161,10 @@ adding code, and extend them rather than working around them:
     corrections are never clobbered (facts vs judgment, applied to updates).
   - `portia/runlog.py` — the **run log** (*what the copilot did*): one JSONL per turn in
     `.portia/runs/`, one `Event` per line under a header naming model, effort, prompt and portia
-    sha. Read with `python -m portia.cli.runs`. Two rules hold it in place. **It is teed at the
+    sha. Read with `python -m portia.cli.runs`. **Project-local, with no central store and nothing
+    that prunes** — a turn only means something beside the catalog it read, so deleting a project
+    deletes its turns and nothing aggregates across them (`EVALUATION.md` → "Where the logs live").
+    Two rules hold it in place. **It is teed at the
     edges** (`cli/chat.run_and_render`, `ui/turn`) and never inside the engine — the moment
     `events.py` writes files it stops being a seam and becomes a logging framework. And
     **`summary` counts; it never scores.** Rungs pulled, questions asked, writes refused, ops

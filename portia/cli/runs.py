@@ -12,6 +12,18 @@ live. What it adds is the half the live terminal drops on purpose: tool results,
 questions, answers and write confirmations. Those are what the run is worth
 reading for, and `docs/BACKLOG.md` asks for the live view to stay as it was so
 transcripts stay comparable to the runs already scored against them.
+
+Both verbs read one project — the one `--dir` points at, defaulting to `.portia`
+under the current directory. It takes an absolute path, so another project's
+turns need no copying:
+
+    python -m portia.cli.runs --dir ~/portia-run7/.portia list
+    python -m portia.cli.runs show ~/portia-run7/.portia/runs/2026-07-29T16-32-57.jsonl
+
+``show`` checks whether its argument is a file before treating it as a run name,
+so a log that has been moved is still readable — its header names the model,
+effort, prompt, cwd and portia sha, which is what makes it self-describing
+enough to read away from the project that produced it.
 """
 
 from __future__ import annotations
