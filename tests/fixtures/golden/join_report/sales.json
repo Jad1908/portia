@@ -1,0 +1,83 @@
+{
+  "keys": {
+    "left": [
+      "customer_id"
+    ],
+    "right": [
+      "customer_id"
+    ]
+  },
+  "left": {
+    "n_rows": 8,
+    "n_null_keys": 1,
+    "n_distinct_keys": 5,
+    "n_duplicated_keys": 2,
+    "max_key_multiplicity": 2,
+    "unique_keys": false
+  },
+  "right": {
+    "n_rows": 6,
+    "n_null_keys": 0,
+    "n_distinct_keys": 5,
+    "n_duplicated_keys": 1,
+    "max_key_multiplicity": 2,
+    "unique_keys": false
+  },
+  "key_dtypes": {
+    "left": [
+      "numeric"
+    ],
+    "right": [
+      "numeric"
+    ]
+  },
+  "key_dtype_match": true,
+  "relationship": "many:many",
+  "overlap": {
+    "n_shared_keys": 4,
+    "n_left_only_keys": 1,
+    "n_right_only_keys": 1,
+    "left_coverage": 0.75,
+    "right_coverage": 0.8333,
+    "sample_left_only": [
+      7777.0
+    ],
+    "sample_right_only": [
+      1004.0
+    ]
+  },
+  "fan_out": {
+    "max_left_to_right": 2,
+    "max_right_to_left": 2,
+    "result_per_matched_left": 1.3333
+  },
+  "joins": {
+    "inner": {
+      "result_rows": 8,
+      "left_dropped": 2,
+      "right_dropped": 1
+    },
+    "left": {
+      "result_rows": 10,
+      "left_dropped": 0,
+      "right_dropped": 1
+    },
+    "right": {
+      "result_rows": 9,
+      "left_dropped": 2,
+      "right_dropped": 0
+    },
+    "outer": {
+      "result_rows": 11,
+      "left_dropped": 0,
+      "right_dropped": 0
+    }
+  },
+  "flags": [
+    "many_to_many",
+    "left_rows_dropped",
+    "fan_out",
+    "null_keys",
+    "right_rows_dropped"
+  ]
+}

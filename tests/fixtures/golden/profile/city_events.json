@@ -1,0 +1,81 @@
+{
+  "n_rows": 7,
+  "n_cols": 4,
+  "candidate_keys": [],
+  "columns": [
+    {
+      "name": "city_name",
+      "dtype": "str",
+      "inferred": "categorical",
+      "n_null": 0,
+      "null_rate": 0.0,
+      "n_distinct": 5,
+      "distinct_rate": 0.7143,
+      "samples": [
+        " paris",
+        "Amsterdam",
+        "Barcelona"
+      ],
+      "top": "Amsterdam",
+      "top_freq": 2,
+      "flags": [
+        "leading_trailing_whitespace"
+      ]
+    },
+    {
+      "name": "event_date",
+      "dtype": "str",
+      "inferred": "categorical",
+      "n_null": 0,
+      "null_rate": 0.0,
+      "n_distinct": 2,
+      "distinct_rate": 0.2857,
+      "samples": [
+        "2026-06-12",
+        "2026-06-13"
+      ],
+      "top": "2026-06-12",
+      "top_freq": 6,
+      "flags": []
+    },
+    {
+      "name": "event_name",
+      "dtype": "str",
+      "inferred": "categorical",
+      "n_null": 0,
+      "null_rate": 0.0,
+      "n_distinct": 6,
+      "distinct_rate": 0.8571,
+      "samples": [
+        "Canal Festival",
+        "Design Week",
+        "Food Fair"
+      ],
+      "top": "Mobile Congress",
+      "top_freq": 2,
+      "flags": []
+    },
+    {
+      "name": "expected_attendance",
+      "dtype": "int64",
+      "inferred": "integer",
+      "n_null": 0,
+      "null_rate": 0.0,
+      "n_distinct": 6,
+      "distinct_rate": 0.8571,
+      "samples": [
+        8000,
+        12000,
+        15000
+      ],
+      "min": 8000,
+      "max": 90000,
+      "mean": 40000.0,
+      "std": 35725.8077,
+      "q25": 13500.0,
+      "median": 25000.0,
+      "q75": 65000.0,
+      "flags": []
+    }
+  ]
+}

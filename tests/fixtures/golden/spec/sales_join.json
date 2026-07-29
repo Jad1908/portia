@@ -1,0 +1,114 @@
+{
+  "steps": [
+    {
+      "id": "orders_with_customers",
+      "op": "join",
+      "provenance": {
+        "op": "join",
+        "how": "left",
+        "keys": {
+          "left": [
+            "customer_id"
+          ],
+          "right": [
+            "customer_id"
+          ]
+        },
+        "relationship": "many:many",
+        "input_rows": {
+          "left": 8,
+          "right": 6
+        },
+        "result_rows": 10,
+        "predicted_rows": 10,
+        "matches_prediction": true,
+        "left_dropped": 0,
+        "right_dropped": 1,
+        "flags": [
+          "many_to_many",
+          "left_rows_dropped",
+          "fan_out",
+          "null_keys",
+          "right_rows_dropped"
+        ]
+      },
+      "drift": {},
+      "outcome": {
+        "n_rows": 10,
+        "n_cols": 4,
+        "empty": false,
+        "null_rates": {
+          "customer_id": 0.1,
+          "name": 0.2
+        },
+        "all_null_columns": [],
+        "newly_all_null_columns": [],
+        "contribution": {
+          "orders": {
+            "columns_in_output": [
+              "amount",
+              "order_id"
+            ],
+            "n_columns": 2,
+            "columns_dropped": [],
+            "contributed": true
+          },
+          "customers": {
+            "columns_in_output": [
+              "name"
+            ],
+            "n_columns": 1,
+            "columns_dropped": [],
+            "contributed": true
+          }
+        },
+        "grain": null,
+        "flags": []
+      },
+      "acknowledged": [],
+      "blocking": [],
+      "rationale": "left, not inner: 2 orders reference customers missing from the dimension table (and 1 has a null key). An inner join would silently drop real orders — surfaced by join_findings, so we keep them as unmatched.",
+      "output": {
+        "n_rows": 10,
+        "columns": [
+          "order_id",
+          "customer_id",
+          "amount",
+          "name"
+        ],
+        "head": [
+          {
+            "order_id": 9006,
+            "customer_id": null,
+            "amount": 10,
+            "name": null
+          },
+          {
+            "order_id": 9005,
+            "customer_id": 7777.0,
+            "amount": 15,
+            "name": null
+          },
+          {
+            "order_id": 9001,
+            "customer_id": 1001.0,
+            "amount": 20,
+            "name": "Bravo"
+          },
+          {
+            "order_id": 9001,
+            "customer_id": 1001.0,
+            "amount": 20,
+            "name": "Bravo-dup"
+          },
+          {
+            "order_id": 9007,
+            "customer_id": 1003.0,
+            "amount": 25,
+            "name": "Delta"
+          }
+        ]
+      }
+    }
+  ]
+}

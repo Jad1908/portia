@@ -1,9 +1,15 @@
 # The DuckDB migration — the scale tier
 
-*Specced 2026-07-27, not started. Direction plus the parts that genuinely need deciding up front —
-per `CLAUDE.md`, a plan gives vision, stack and watch-outs; the specifics emerge from real work.
-The watch-outs here are unusually concrete because three of them will silently corrupt behaviour if
-they are discovered late.*
+*Specced 2026-07-27. **Steps 1–3 landed 2026-07-28** on `duckdb-engine-parity` — golden files, the
+`Table` abstraction and the store, and `checks/profiling.py` on SQL. Direction plus the parts that
+genuinely need deciding up front — per `CLAUDE.md`, a plan gives vision, stack and watch-outs; the
+specifics emerge from real work. The watch-outs here are unusually concrete because three of them
+will silently corrupt behaviour if they are discovered late.*
+
+> **What real work already changed in this document.** §1's headline — *"memory stops scaling with
+> the file and starts scaling with the answer"* — **is not true of a portia profile**, measured. It
+> holds for the aggregates it was measured on and fails for the three the profile actually needs.
+> §13 has the numbers. Read it before quoting §1.
 
 **Read `TECH_STACK.md` → "Data & compute" and `CLAUDE.md` → "Code conventions" first.** This document
 assumes both.
@@ -103,10 +109,11 @@ copy. `.portia/store.duckdb` belongs in `.gitignore`, like the rest of `.portia/
 Re-index refreshes facts and preserves judgment — that rule (`catalog`, the update rule) extends
 unchanged: re-ingesting refreshes the table, prose and roles survive.
 
-> **Open question for the first session.** Whether ingestion happens eagerly at index time (simple,
-> predictable, one wait) or lazily on first query (fast index, surprising pause later). Eager is the
-> recommendation — indexing is already the moment the user expects work to happen, and `index-progress`
-> in `DESIGN.md` already shows profiling as a distinct free step, which ingestion joins.
+> **Decided 2026-07-28: eager.** Ingestion happens in `catalog.index_source`, which then profiles
+> the ingested table rather than the file. Indexing is already the moment the user expects work to
+> happen, and `index-progress` in `DESIGN.md` already shows profiling as a distinct step, which
+> ingestion joins. Measured cost on a 261 MB CSV: 0.6 s to ingest, and the store is 2.7× smaller
+> than the source.
 
 ---
 
@@ -314,20 +321,32 @@ about is preserved. The divergence is an all-null column, which `_infer_semantic
 to `"empty"` — so the *reported* value agrees. **Lock that down with a parity test rather than
 trusting it.**
 
-Two decisions to make explicitly:
+**Both decided 2026-07-28, and the probe above was incomplete — there were three divergences, not
+one.** Measured across all six fixtures, the full list and what was done about each:
 
-- **`mixed_types` has no SQL equivalent.** Today it means "more than one Python type among non-null
-  values", which only exists because pandas `object` columns can hold anything. In a typed store a
-  column has one type. The honest options are (a) drop the flag and say so in `EVALUATION.md`,
-  or (b) redefine it as "some values parse as numeric and some do not" — close to what it detects in
-  practice, and still a fact. **Recommendation: (b), with the redefinition written into the
-  profiling docstring**, because the flag exists to catch a real data problem that survives the
-  storage change.
-- **Ingest typed, or all-VARCHAR?** Typed is smaller, faster, and lets numeric aggregates run
-  without casts. All-VARCHAR preserves maximum signal but makes every numeric stat a cast and inflates
-  the store. **Recommendation: typed**, since the probe shows the signal-carrying columns stay
-  `VARCHAR` under DuckDB's sniffer anyway — but verify on PHQ data before committing, because a
-  sniffer that types a dirty column as `BIGINT` would erase a flag portia is supposed to raise.
+| divergence | decision |
+|---|---|
+| `legacy_col` — `float64` vs `VARCHAR` | As predicted. `_infer_semantic` normalises an all-null column to `"empty"`, so the *reported* value agrees. `dtype` is a declared golden exception. |
+| **`stay_date` / `event_date` — `str` vs `DATE`** | **Not predicted.** DuckDB's sniffer types ISO dates; pandas kept them text. **Accepted**: a date is a date, `inferred` reads `datetime`, and the vocabulary is unchanged. Consequence to watch: `join._dtype_kind` now returns `datetime` for these, so a DATE key joined to a VARCHAR key raises `key_dtype_mismatch` where pandas said nothing — correct, since DuckDB does need the cast, but it is a new flag on old data. |
+| **`N/A` and 17 other tokens** | **Not predicted, and the worst of the three.** pandas nulls its default NA set; DuckDB nulls only the empty string. `messy_customers.signup_amount` would have read 40 present values on one tier and 39 on the other — a **null rate that depends on which reader ran**. Fixed at the source: `core.io.NA_TOKENS` is pandas' set, passed to DuckDB as `nullstr`, with a test asserting both tiers null precisely those tokens and no others. |
+
+- **`mixed_types`: redefined, per the recommendation.** It now means "some values parse as numeric
+  and some do not", on **both** tiers. Worth knowing: the old definition was already dead on the
+  path that matters — a CSV round-trip makes an `object` column uniformly text, so `mixed_types`
+  only ever fired on an in-memory fixture and never on a file. The redefinition makes it fire where
+  the problem actually lives, and it fires on `messy_customers.signup_amount` too, alongside
+  `numeric_stored_as_text`. The overlap is intended: one says "this is really a number column",
+  the other says "not all of it is".
+- **Ingest typed, confirmed.** Every signal-carrying column stays `VARCHAR` under the sniffer —
+  `signup_amount` (numbers with whitespace, plus `pending`) and `mixed_ref` (half numeric) both do.
+  `tests/test_store.py` pins that rather than trusting it. Still verify on PHQ data.
+- **Two evidence fields were made deterministic, deliberately, on both tiers.** `top` broke ties by
+  row order and `samples` was "the first three rows". Neither is a fact about the data — half the
+  fixture columns have a tied mode, and a `LIMIT` with no `ORDER BY` promises nothing, so DuckDB
+  returns a different three each run once a scan goes parallel. `top` now breaks ties by value, and
+  `samples` are **distinct and ordered** (ordering alone made them worse: `country` became
+  `['DE', 'DE', 'DE']`). The golden files were regenerated for this; it is a change to what the
+  copilot reads, and it is a change from an artifact to a measurement.
 
 ---
 
@@ -355,11 +374,13 @@ before touching an implementation.
 
 Each step ends green, and nothing after step 2 is a big-bang.
 
-1. **Golden files** (§7.1–7.2). No behaviour change.
-2. **`core/table.py` + `load_table` + the store** (§3, §4), with ingestion in `catalog.index_source`
-   and nothing else using it yet. `Table.from_frame` for tests.
-3. **`checks/profiling.py`** — the biggest win, and the one whose parity is easiest to check.
-   Landing this alone makes indexing multi-GB files possible.
+1. ~~**Golden files**~~ — **done 2026-07-28.** 29 cases, `tests/golden.py` + `tests/test_golden.py`.
+   Cases are data and the backend is swappable, so each step adds a `kinds` entry to
+   `DuckDBBackend` rather than a new test.
+2. ~~**`core/table.py` + `load_table` + the store**~~ — **done 2026-07-28.**
+3. ~~**`checks/profiling.py`**~~ — **done 2026-07-28.** 8× faster; the memory win is smaller than
+   this document assumed — see §13. The rules (`_semantic`, `_flags`) are shared by both
+   implementations rather than written twice, which is what keeps parity structural.
 4. **`checks/join.py`** — unlocks `join_findings` on real data, which is what the copilot calls
    before deciding anything.
 5. **`checks/outcome.py`** — §6.2 lives here.
@@ -423,10 +444,71 @@ Two separable questions, then:
 
 ## 12. Open questions
 
-- Eager vs lazy ingestion (§3).
-- Typed vs all-VARCHAR ingest — decide against real PHQ data (§6.3).
-- `mixed_types`: drop or redefine (§6.3).
-- Exact vs `approx_count_distinct` — exact measured cheap at 4M rows; find the crossover, and label
-  the estimate in the evidence dict wherever approximation wins (§2.4).
+- ~~Eager vs lazy ingestion~~ — **eager** (§3).
+- ~~Typed vs all-VARCHAR ingest~~ — **typed**, confirmed on the fixtures; still verify on PHQ (§6.3).
+- ~~`mixed_types`: drop or redefine~~ — **redefined** (§6.3).
+- **Exact vs approximate — now the migration's central open question, and bigger than it looked.**
+  It was written as a footnote about `approx_count_distinct`. §13 is what measurement made of it.
 - Whether the store should also hold **step outputs**, so a run's intermediates survive the session
   and `Runs` can show a real table rather than a saved report. Attractive, and out of scope here.
+
+---
+
+## 13. What measurement changed: a profile is still O(n) in memory
+
+*Added 2026-07-28, after landing steps 1–3. This supersedes the impression §1 and §2 give.*
+
+Profiling one CSV, end to end, peak RSS of the whole process (5 columns: two numeric, one
+low-cardinality text, one all-distinct text, one date):
+
+| CSV | pandas | DuckDB |
+|---|---|---|
+| 63 MB | 456 MB | 535 MB |
+| 129 MB | 860 MB | 852 MB |
+| 261 MB | 1569 MB | 1283 MB |
+
+**Both grow linearly with the file.** DuckDB's slope is shallower — ~4.7× the file against pandas'
+~5.6× — and it is **8× faster** (7.6 s → 0.9 s at 129 MB, which is a real and sufficient reason to
+have done this). But the promise in §2 was that memory would stop tracking the input, and on this
+workload it does not.
+
+§1 is not wrong; it measured different aggregates. A profile needs three that are inherently
+expensive, all exact, measured on 6M rows:
+
+| aggregate | exact | approximate | accurate enough? |
+|---|---|---|---|
+| `count(DISTINCT)` × 5 cols | 658 MB | **161 MB** | **No — see below** |
+| `quantile_cont([.25,.5,.75])` × 2 cols | 502 MB | **124 MB** | Yes — within 0.1% |
+| `GROUP BY col` for `top`/`top_freq` | O(cardinality) | — | n/a |
+
+One free win was taken already: asking for three quartiles as three expressions buffers the column
+three times (650 MB), and as one list-valued aggregate buffers it once (326 MB), for identical
+values. That is in the code.
+
+**The rest is not a drop-in, and this is the finding.** `approx_count_distinct` is HyperLogLog, and
+its error is fatal *specifically where the number feeds a flag*:
+
+- `n_distinct` for a 200-value column came back as **203**. `constant` fires on `n_distinct == 1`.
+- `n_distinct` for a 6,000,000-value key came back as **5,185,212 — 13.6% low**. `possible_key`
+  fires on `n_distinct == n_rows`, and it is what fills `candidate_keys`, which is what the copilot
+  reads when deciding what to join on.
+
+So §2.4's rule — *label the estimate and it is honest* — **is not sufficient here.** A labelled
+estimate is fine for a quartile, which is descriptive. An estimated `possible_key` is not a
+labelled fact, it is a **wrong one**: a key that is not unique, presented as a candidate. That is
+the failure mode this project exists to prevent, arriving through the back door of a performance
+optimisation.
+
+The shape of the answer is probably a split rather than a switch:
+
+- **Keep exact** anything a flag depends on — `count(DISTINCT)` — and accept that it is O(cardinality).
+  A cheaper exact test for the specific question `possible_key` asks (`count(DISTINCT c) = count(*)`)
+  may exist, and would be worth more than approximating the count itself.
+- **Approximate** the purely descriptive numbers — the quartiles — and label them in the evidence
+  dict, which is a prompt change and gets its own review (§10).
+- **Decide what `samples` and `top` are worth**: distinct-and-ordered samples cost a full
+  `DISTINCT` (262 MB at 3M rows) where an unordered `LIMIT 3` costs nothing — but an unordered
+  `LIMIT` is not reproducible, which is why they are the way they are (§6.3).
+
+Until that is settled, **profiling remains bounded by cardinality, not by the store.** The PHQ test
+should be run with that expectation rather than the one §1 sets.

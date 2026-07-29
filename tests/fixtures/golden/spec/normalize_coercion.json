@@ -1,0 +1,142 @@
+{
+  "steps": [
+    {
+      "id": "amounts",
+      "op": "normalize",
+      "provenance": {
+        "op": "normalize",
+        "input_rows": 40,
+        "transforms": [
+          {
+            "column": "signup_amount",
+            "op": "strip",
+            "n_changed": 8
+          },
+          {
+            "column": "signup_amount",
+            "op": "to_numeric",
+            "n_converted": 38,
+            "n_failed": 1,
+            "sample_failed": [
+              "pending"
+            ]
+          },
+          {
+            "column": "country",
+            "op": "lower",
+            "n_changed": 40
+          },
+          {
+            "column": "customer_id",
+            "op": "to_string",
+            "n_changed": 40
+          }
+        ],
+        "flags": [
+          "coercion_failures"
+        ]
+      },
+      "drift": {},
+      "outcome": {
+        "n_rows": 40,
+        "n_cols": 8,
+        "empty": false,
+        "null_rates": {
+          "notes": 0.65,
+          "legacy_col": 1.0
+        },
+        "all_null_columns": [
+          "legacy_col"
+        ],
+        "newly_all_null_columns": [],
+        "contribution": {
+          "messy_customers": {
+            "columns_in_output": [
+              "country",
+              "customer_id",
+              "legacy_col",
+              "mixed_ref",
+              "name",
+              "notes",
+              "signup_amount",
+              "source"
+            ],
+            "n_columns": 8,
+            "columns_dropped": [],
+            "contributed": true
+          }
+        },
+        "grain": null,
+        "flags": []
+      },
+      "acknowledged": [],
+      "blocking": [],
+      "rationale": null,
+      "output": {
+        "n_rows": 40,
+        "columns": [
+          "customer_id",
+          "name",
+          "country",
+          "signup_amount",
+          "notes",
+          "source",
+          "legacy_col",
+          "mixed_ref"
+        ],
+        "head": [
+          {
+            "customer_id": "1004",
+            "name": "Firm E4",
+            "country": "de",
+            "signup_amount": 3008.36,
+            "notes": null,
+            "source": "import_v2",
+            "legacy_col": null,
+            "mixed_ref": "4"
+          },
+          {
+            "customer_id": "1010",
+            "name": "Firm K10",
+            "country": "de",
+            "signup_amount": 3036.99,
+            "notes": null,
+            "source": "import_v2",
+            "legacy_col": null,
+            "mixed_ref": "10"
+          },
+          {
+            "customer_id": "1013",
+            "name": "Firm N13",
+            "country": "de",
+            "signup_amount": 4455.87,
+            "notes": null,
+            "source": "import_v2",
+            "legacy_col": null,
+            "mixed_ref": "ref-13"
+          },
+          {
+            "customer_id": "1014",
+            "name": "Firm O14",
+            "country": "de",
+            "signup_amount": 5049.93,
+            "notes": null,
+            "source": "import_v2",
+            "legacy_col": null,
+            "mixed_ref": "14"
+          },
+          {
+            "customer_id": "1024",
+            "name": "Firm Y24",
+            "country": "de",
+            "signup_amount": 366.41,
+            "notes": "note 24",
+            "source": "import_v2",
+            "legacy_col": null,
+            "mixed_ref": "24"
+          }
+        ]
+      }
+    }
+  ]
+}

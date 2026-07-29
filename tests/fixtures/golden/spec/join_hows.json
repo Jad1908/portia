@@ -1,0 +1,443 @@
+{
+  "steps": [
+    {
+      "id": "orders_customers_inner",
+      "op": "join",
+      "provenance": {
+        "op": "join",
+        "how": "inner",
+        "keys": {
+          "left": [
+            "customer_id"
+          ],
+          "right": [
+            "customer_id"
+          ]
+        },
+        "relationship": "many:many",
+        "input_rows": {
+          "left": 8,
+          "right": 6
+        },
+        "result_rows": 8,
+        "predicted_rows": 8,
+        "matches_prediction": true,
+        "left_dropped": 2,
+        "right_dropped": 1,
+        "flags": [
+          "many_to_many",
+          "left_rows_dropped",
+          "fan_out",
+          "null_keys",
+          "right_rows_dropped"
+        ]
+      },
+      "drift": {},
+      "outcome": {
+        "n_rows": 8,
+        "n_cols": 4,
+        "empty": false,
+        "null_rates": {},
+        "all_null_columns": [],
+        "newly_all_null_columns": [],
+        "contribution": {
+          "orders": {
+            "columns_in_output": [
+              "amount",
+              "order_id"
+            ],
+            "n_columns": 2,
+            "columns_dropped": [],
+            "contributed": true
+          },
+          "customers": {
+            "columns_in_output": [
+              "name"
+            ],
+            "n_columns": 1,
+            "columns_dropped": [],
+            "contributed": true
+          }
+        },
+        "grain": null,
+        "flags": []
+      },
+      "acknowledged": [],
+      "blocking": [],
+      "rationale": null,
+      "output": {
+        "n_rows": 8,
+        "columns": [
+          "order_id",
+          "customer_id",
+          "amount",
+          "name"
+        ],
+        "head": [
+          {
+            "order_id": 9001,
+            "customer_id": 1001.0,
+            "amount": 20,
+            "name": "Bravo"
+          },
+          {
+            "order_id": 9001,
+            "customer_id": 1001.0,
+            "amount": 20,
+            "name": "Bravo-dup"
+          },
+          {
+            "order_id": 9007,
+            "customer_id": 1003.0,
+            "amount": 25,
+            "name": "Delta"
+          },
+          {
+            "order_id": 9002,
+            "customer_id": 1001.0,
+            "amount": 30,
+            "name": "Bravo"
+          },
+          {
+            "order_id": 9002,
+            "customer_id": 1001.0,
+            "amount": 30,
+            "name": "Bravo-dup"
+          }
+        ]
+      }
+    },
+    {
+      "id": "orders_customers_left",
+      "op": "join",
+      "provenance": {
+        "op": "join",
+        "how": "left",
+        "keys": {
+          "left": [
+            "customer_id"
+          ],
+          "right": [
+            "customer_id"
+          ]
+        },
+        "relationship": "many:many",
+        "input_rows": {
+          "left": 8,
+          "right": 6
+        },
+        "result_rows": 10,
+        "predicted_rows": 10,
+        "matches_prediction": true,
+        "left_dropped": 0,
+        "right_dropped": 1,
+        "flags": [
+          "many_to_many",
+          "left_rows_dropped",
+          "fan_out",
+          "null_keys",
+          "right_rows_dropped"
+        ]
+      },
+      "drift": {},
+      "outcome": {
+        "n_rows": 10,
+        "n_cols": 4,
+        "empty": false,
+        "null_rates": {
+          "customer_id": 0.1,
+          "name": 0.2
+        },
+        "all_null_columns": [],
+        "newly_all_null_columns": [],
+        "contribution": {
+          "orders": {
+            "columns_in_output": [
+              "amount",
+              "order_id"
+            ],
+            "n_columns": 2,
+            "columns_dropped": [],
+            "contributed": true
+          },
+          "customers": {
+            "columns_in_output": [
+              "name"
+            ],
+            "n_columns": 1,
+            "columns_dropped": [],
+            "contributed": true
+          }
+        },
+        "grain": null,
+        "flags": []
+      },
+      "acknowledged": [],
+      "blocking": [],
+      "rationale": null,
+      "output": {
+        "n_rows": 10,
+        "columns": [
+          "order_id",
+          "customer_id",
+          "amount",
+          "name"
+        ],
+        "head": [
+          {
+            "order_id": 9006,
+            "customer_id": null,
+            "amount": 10,
+            "name": null
+          },
+          {
+            "order_id": 9005,
+            "customer_id": 7777.0,
+            "amount": 15,
+            "name": null
+          },
+          {
+            "order_id": 9001,
+            "customer_id": 1001.0,
+            "amount": 20,
+            "name": "Bravo"
+          },
+          {
+            "order_id": 9001,
+            "customer_id": 1001.0,
+            "amount": 20,
+            "name": "Bravo-dup"
+          },
+          {
+            "order_id": 9007,
+            "customer_id": 1003.0,
+            "amount": 25,
+            "name": "Delta"
+          }
+        ]
+      }
+    },
+    {
+      "id": "orders_customers_right",
+      "op": "join",
+      "provenance": {
+        "op": "join",
+        "how": "right",
+        "keys": {
+          "left": [
+            "customer_id"
+          ],
+          "right": [
+            "customer_id"
+          ]
+        },
+        "relationship": "many:many",
+        "input_rows": {
+          "left": 8,
+          "right": 6
+        },
+        "result_rows": 9,
+        "predicted_rows": 9,
+        "matches_prediction": true,
+        "left_dropped": 2,
+        "right_dropped": 0,
+        "flags": [
+          "many_to_many",
+          "left_rows_dropped",
+          "fan_out",
+          "null_keys",
+          "right_rows_dropped"
+        ]
+      },
+      "drift": {},
+      "outcome": {
+        "n_rows": 9,
+        "n_cols": 4,
+        "empty": false,
+        "null_rates": {
+          "order_id": 0.1111,
+          "amount": 0.1111
+        },
+        "all_null_columns": [],
+        "newly_all_null_columns": [],
+        "contribution": {
+          "orders": {
+            "columns_in_output": [
+              "amount",
+              "order_id"
+            ],
+            "n_columns": 2,
+            "columns_dropped": [],
+            "contributed": true
+          },
+          "customers": {
+            "columns_in_output": [
+              "name"
+            ],
+            "n_columns": 1,
+            "columns_dropped": [],
+            "contributed": true
+          }
+        },
+        "grain": null,
+        "flags": []
+      },
+      "acknowledged": [],
+      "blocking": [],
+      "rationale": null,
+      "output": {
+        "n_rows": 9,
+        "columns": [
+          "order_id",
+          "customer_id",
+          "amount",
+          "name"
+        ],
+        "head": [
+          {
+            "order_id": 9001.0,
+            "customer_id": 1001.0,
+            "amount": 20.0,
+            "name": "Bravo"
+          },
+          {
+            "order_id": 9001.0,
+            "customer_id": 1001.0,
+            "amount": 20.0,
+            "name": "Bravo-dup"
+          },
+          {
+            "order_id": 9007.0,
+            "customer_id": 1003.0,
+            "amount": 25.0,
+            "name": "Delta"
+          },
+          {
+            "order_id": 9002.0,
+            "customer_id": 1001.0,
+            "amount": 30.0,
+            "name": "Bravo"
+          },
+          {
+            "order_id": 9002.0,
+            "customer_id": 1001.0,
+            "amount": 30.0,
+            "name": "Bravo-dup"
+          }
+        ]
+      }
+    },
+    {
+      "id": "orders_customers_outer",
+      "op": "join",
+      "provenance": {
+        "op": "join",
+        "how": "outer",
+        "keys": {
+          "left": [
+            "customer_id"
+          ],
+          "right": [
+            "customer_id"
+          ]
+        },
+        "relationship": "many:many",
+        "input_rows": {
+          "left": 8,
+          "right": 6
+        },
+        "result_rows": 11,
+        "predicted_rows": 11,
+        "matches_prediction": true,
+        "left_dropped": 0,
+        "right_dropped": 0,
+        "flags": [
+          "many_to_many",
+          "left_rows_dropped",
+          "fan_out",
+          "null_keys",
+          "right_rows_dropped"
+        ]
+      },
+      "drift": {},
+      "outcome": {
+        "n_rows": 11,
+        "n_cols": 4,
+        "empty": false,
+        "null_rates": {
+          "order_id": 0.0909,
+          "customer_id": 0.0909,
+          "amount": 0.0909,
+          "name": 0.1818
+        },
+        "all_null_columns": [],
+        "newly_all_null_columns": [],
+        "contribution": {
+          "orders": {
+            "columns_in_output": [
+              "amount",
+              "order_id"
+            ],
+            "n_columns": 2,
+            "columns_dropped": [],
+            "contributed": true
+          },
+          "customers": {
+            "columns_in_output": [
+              "name"
+            ],
+            "n_columns": 1,
+            "columns_dropped": [],
+            "contributed": true
+          }
+        },
+        "grain": null,
+        "flags": []
+      },
+      "acknowledged": [],
+      "blocking": [],
+      "rationale": null,
+      "output": {
+        "n_rows": 11,
+        "columns": [
+          "order_id",
+          "customer_id",
+          "amount",
+          "name"
+        ],
+        "head": [
+          {
+            "order_id": 9006.0,
+            "customer_id": null,
+            "amount": 10.0,
+            "name": null
+          },
+          {
+            "order_id": 9005.0,
+            "customer_id": 7777.0,
+            "amount": 15.0,
+            "name": null
+          },
+          {
+            "order_id": 9001.0,
+            "customer_id": 1001.0,
+            "amount": 20.0,
+            "name": "Bravo"
+          },
+          {
+            "order_id": 9001.0,
+            "customer_id": 1001.0,
+            "amount": 20.0,
+            "name": "Bravo-dup"
+          },
+          {
+            "order_id": 9007.0,
+            "customer_id": 1003.0,
+            "amount": 25.0,
+            "name": "Delta"
+          }
+        ]
+      }
+    }
+  ]
+}

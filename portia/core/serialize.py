@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import math
+from decimal import Decimal
 from typing import Any
 
 FLOAT_ROUND = 4  # decimal places for every reported float, everywhere
@@ -25,11 +26,21 @@ def round_float(x: float) -> float:
 
 
 def to_jsonable(v: Any) -> Any:
-    """Coerce a single numpy/pandas scalar to a JSON-serializable python value."""
+    """Coerce a single scalar to a JSON-serializable python value.
+
+    Handles what both tiers hand back: numpy and pandas scalars from a frame, and
+    DuckDB's own types from a query. ``Decimal`` is called out because it is the
+    one that would otherwise land in the evidence as a *string* — the ``str()``
+    fallback is right for a date and wrong for a number, and a price the copilot
+    reads as ``"1.5"`` rather than ``1.5`` is a quiet type error in a prompt.
+    Dates and UUIDs do want the fallback: ISO text is the JSON form.
+    """
     if v is None:
         return None
     if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
         return None
+    if isinstance(v, Decimal):
+        return None if v.is_nan() or v.is_infinite() else round_float(float(v))
     item = getattr(v, "item", None)
     if callable(item):  # numpy scalar -> python scalar
         try:

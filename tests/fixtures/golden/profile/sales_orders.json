@@ -1,0 +1,80 @@
+{
+  "n_rows": 8,
+  "n_cols": 3,
+  "candidate_keys": [
+    "order_id",
+    "amount"
+  ],
+  "columns": [
+    {
+      "name": "order_id",
+      "dtype": "int64",
+      "inferred": "integer",
+      "n_null": 0,
+      "null_rate": 0.0,
+      "n_distinct": 8,
+      "distinct_rate": 1.0,
+      "samples": [
+        9000,
+        9001,
+        9002
+      ],
+      "min": 9000,
+      "max": 9007,
+      "mean": 9003.5,
+      "std": 2.4495,
+      "q25": 9001.75,
+      "median": 9003.5,
+      "q75": 9005.25,
+      "flags": [
+        "possible_key"
+      ]
+    },
+    {
+      "name": "customer_id",
+      "dtype": "float64",
+      "inferred": "float",
+      "n_null": 1,
+      "null_rate": 0.125,
+      "n_distinct": 5,
+      "distinct_rate": 0.7143,
+      "samples": [
+        1000.0,
+        1001.0,
+        1002.0
+      ],
+      "min": 1000.0,
+      "max": 7777.0,
+      "mean": 1969.4286,
+      "std": 2560.8985,
+      "q25": 1001.0,
+      "median": 1002.0,
+      "q75": 1002.5,
+      "flags": []
+    },
+    {
+      "name": "amount",
+      "dtype": "int64",
+      "inferred": "integer",
+      "n_null": 0,
+      "null_rate": 0.0,
+      "n_distinct": 8,
+      "distinct_rate": 1.0,
+      "samples": [
+        10,
+        15,
+        20
+      ],
+      "min": 10,
+      "max": 50,
+      "mean": 29.375,
+      "std": 14.5006,
+      "q25": 18.75,
+      "median": 27.5,
+      "q75": 41.25,
+      "flags": [
+        "possible_key"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,95 @@
+{
+  "keys": {
+    "left": [
+      "hotel_id",
+      "stay_date"
+    ],
+    "right": [
+      "city_name",
+      "event_date"
+    ]
+  },
+  "left": {
+    "n_rows": 14,
+    "n_null_keys": 0,
+    "n_distinct_keys": 12,
+    "n_duplicated_keys": 2,
+    "max_key_multiplicity": 2,
+    "unique_keys": false
+  },
+  "right": {
+    "n_rows": 7,
+    "n_null_keys": 0,
+    "n_distinct_keys": 6,
+    "n_duplicated_keys": 1,
+    "max_key_multiplicity": 2,
+    "unique_keys": false
+  },
+  "key_dtypes": {
+    "left": [
+      "string",
+      "string"
+    ],
+    "right": [
+      "string",
+      "string"
+    ]
+  },
+  "key_dtype_match": true,
+  "relationship": "many:many",
+  "overlap": {
+    "n_shared_keys": 0,
+    "n_left_only_keys": 12,
+    "n_right_only_keys": 6,
+    "left_coverage": 0.0,
+    "right_coverage": 0.0,
+    "sample_left_only": [
+      "('H001', '2026-06-12')",
+      "('H001', '2026-06-13')",
+      "('H001', '2026-06-20')",
+      "('H002', '2026-06-12')",
+      "('H002', '2026-06-14')"
+    ],
+    "sample_right_only": [
+      "(' paris', '2026-06-12')",
+      "('Amsterdam', '2026-06-12')",
+      "('Barcelona', '2026-06-12')",
+      "('Barcelona', '2026-06-13')",
+      "('Lyon', '2026-06-12')"
+    ]
+  },
+  "fan_out": {
+    "max_left_to_right": 0,
+    "max_right_to_left": 0,
+    "result_per_matched_left": 0.0
+  },
+  "joins": {
+    "inner": {
+      "result_rows": 0,
+      "left_dropped": 14,
+      "right_dropped": 7
+    },
+    "left": {
+      "result_rows": 14,
+      "left_dropped": 0,
+      "right_dropped": 7
+    },
+    "right": {
+      "result_rows": 7,
+      "left_dropped": 14,
+      "right_dropped": 0
+    },
+    "outer": {
+      "result_rows": 21,
+      "left_dropped": 0,
+      "right_dropped": 0
+    }
+  },
+  "flags": [
+    "no_matches",
+    "many_to_many",
+    "left_rows_dropped",
+    "low_overlap",
+    "right_rows_dropped"
+  ]
+}

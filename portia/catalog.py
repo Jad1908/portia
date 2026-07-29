@@ -29,7 +29,8 @@ from typing import Any
 
 import yaml
 
-from portia.checks.profiling import profile_path
+from portia.checks.profiling import profile_table
+from portia.core import store
 from portia.core.present import format_rate
 
 DEFAULT_DIR = ".portia"
@@ -63,27 +64,52 @@ def init_project(project_context: str = "", *, portia_dir: str | Path = DEFAULT_
 
 
 def index_source(
-    data_path: str | Path, *, portia_dir: str | Path = DEFAULT_DIR, **load_kwargs: Any
+    data_path: str | Path,
+    *,
+    portia_dir: str | Path = DEFAULT_DIR,
+    con: Any | None = None,
 ) -> Path:
-    """Profile a data source and write/refresh its catalog entry.
+    """Ingest a data source into the store, profile it, and write its catalog entry.
 
     Facts are (re)computed from the data; a pre-existing ``summary`` and any set
     ``role`` values are preserved. Registers the source in ``project.yaml``.
+
+    **Ingestion is eager** — it happens here, at index time, rather than lazily on
+    first query (`docs/DUCKDB_MIGRATION.md` §3). Indexing is already the moment
+    the user is waiting for work to happen, and the alternative is a fast index
+    followed by a surprising pause later.
+
+    ``con`` is the project's open store connection. A caller that holds one
+    should pass it: DuckDB takes a write lock on the file, so two open handles to
+    the same store collide.
     """
     data_path = Path(data_path)
     name = data_path.stem
     d = Path(portia_dir)
     (d / "sources").mkdir(parents=True, exist_ok=True)
 
-    profile = profile_path(str(data_path), **load_kwargs)
+    own_con = con is None
+    con = con or store.connect(d)
+    try:
+        ingestion = store.ingest(con, data_path, name=name)
+        # Profile the ingested copy, not the file. This is the step that makes a
+        # multi-GB source indexable at all: the same profile that cost 1883 MB
+        # through pandas is a handful of aggregates over columnar storage.
+        profile = profile_table(store.table(con, name))
+    finally:
+        if own_con:
+            con.close()
+
     src_file = d / "sources" / f"{name}.yaml"
     existing = _read(src_file) if src_file.exists() else None
-    _write(src_file, _source_entry(str(data_path), profile, existing))
+    _write(src_file, _source_entry(str(data_path), profile, existing, ingestion))
     _register(d, name)
     return src_file
 
 
-def remove_source(name: str, *, portia_dir: str | Path = DEFAULT_DIR) -> Path | None:
+def remove_source(
+    name: str, *, portia_dir: str | Path = DEFAULT_DIR, con: Any | None = None
+) -> Path | None:
     """Forget a source: drop its entry, its registration, and its group membership.
 
     **The data file is not touched.** Un-indexing says "portia should stop
@@ -95,11 +121,24 @@ def remove_source(name: str, *, portia_dir: str | Path = DEFAULT_DIR) -> Path | 
     from its own ``sources:`` block, not from the catalog. What breaks is
     *recording a new step* against a name that is no longer indexed, which fails
     loudly at `record_step`.
+
+    The store's **copy** of the data does go, though: it exists only because the
+    catalog knows about the source, so leaving it behind would be a growing pile
+    of data nothing references.
     """
     d = Path(portia_dir)
     entry = d / "sources" / f"{name}.yaml"
     removed = entry if entry.exists() else None
     entry.unlink(missing_ok=True)
+
+    if store.store_path(d).exists():
+        own_con = con is None
+        con = con or store.connect(d)
+        try:
+            store.forget(con, name)
+        finally:
+            if own_con:
+                con.close()
 
     proj = d / "project.yaml"
     if proj.exists():
@@ -207,7 +246,9 @@ def load_catalog(portia_dir: str | Path = DEFAULT_DIR) -> dict:
 # --- building an entry ------------------------------------------------------
 
 
-def _source_entry(source: str, profile: dict, existing: dict | None) -> dict:
+def _source_entry(
+    source: str, profile: dict, existing: dict | None, ingestion: dict | None = None
+) -> dict:
     existing = existing or {}
     prev_roles = {c["name"]: c.get("role") for c in existing.get("columns", [])}
     columns = [
@@ -216,12 +257,22 @@ def _source_entry(source: str, profile: dict, existing: dict | None) -> dict:
     ]
     return {
         "source": source,
+        # When the store's copy was made, and what the file looked like then —
+        # so a file edited afterwards is detectable rather than silently stale.
+        # A fact, so re-indexing refreshes it. The path is not repeated here;
+        # `source` above is the one place a location is written down.
+        "ingestion": ingestion or existing.get("ingestion"),
         # Layer 1 — prose read. Preserved across re-index (judgment, not fact).
         "summary": existing.get("summary") or _auto_summary(profile),
         "candidate_keys": profile["candidate_keys"],
         # Layer 2 — per-column detail. Facts refreshed; `role` preserved.
         "columns": columns,
     }
+
+
+def is_stale(entry: dict) -> bool:
+    """Whether this source's file has changed since the store ingested it."""
+    return store.is_stale(entry.get("ingestion"), entry.get("source"))
 
 
 def _column_facts(col: dict) -> dict:

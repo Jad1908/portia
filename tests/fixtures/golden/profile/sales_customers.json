@@ -1,0 +1,51 @@
+{
+  "n_rows": 6,
+  "n_cols": 2,
+  "candidate_keys": [
+    "name"
+  ],
+  "columns": [
+    {
+      "name": "customer_id",
+      "dtype": "int64",
+      "inferred": "integer",
+      "n_null": 0,
+      "null_rate": 0.0,
+      "n_distinct": 5,
+      "distinct_rate": 0.8333,
+      "samples": [
+        1000,
+        1001,
+        1002
+      ],
+      "min": 1000,
+      "max": 1004,
+      "mean": 1001.8333,
+      "std": 1.472,
+      "q25": 1001.0,
+      "median": 1001.5,
+      "q75": 1002.75,
+      "flags": []
+    },
+    {
+      "name": "name",
+      "dtype": "str",
+      "inferred": "text",
+      "n_null": 0,
+      "null_rate": 0.0,
+      "n_distinct": 6,
+      "distinct_rate": 1.0,
+      "samples": [
+        "Alpha",
+        "Bravo",
+        "Bravo-dup"
+      ],
+      "top": "Alpha",
+      "top_freq": 1,
+      "flags": [
+        "possible_key",
+        "high_cardinality"
+      ]
+    }
+  ]
+}

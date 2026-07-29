@@ -1,0 +1,134 @@
+{
+  "steps": [
+    {
+      "id": "orders_customers",
+      "op": "join",
+      "provenance": {
+        "op": "join",
+        "how": "inner",
+        "keys": {
+          "left": [
+            "customer_id"
+          ],
+          "right": [
+            "customer_id"
+          ]
+        },
+        "relationship": "many:many",
+        "input_rows": {
+          "left": 8,
+          "right": 6
+        },
+        "result_rows": 8,
+        "predicted_rows": 8,
+        "matches_prediction": true,
+        "left_dropped": 2,
+        "right_dropped": 1,
+        "flags": [
+          "many_to_many",
+          "left_rows_dropped",
+          "fan_out",
+          "null_keys",
+          "right_rows_dropped"
+        ]
+      },
+      "drift": {},
+      "outcome": {
+        "n_rows": 8,
+        "n_cols": 4,
+        "empty": false,
+        "null_rates": {},
+        "all_null_columns": [],
+        "newly_all_null_columns": [],
+        "contribution": {
+          "orders": {
+            "columns_in_output": [
+              "amount",
+              "order_id"
+            ],
+            "n_columns": 2,
+            "columns_dropped": [],
+            "contributed": true
+          },
+          "customers": {
+            "columns_in_output": [
+              "name"
+            ],
+            "n_columns": 1,
+            "columns_dropped": [],
+            "contributed": true
+          }
+        },
+        "grain": {
+          "keys": [
+            "order_id"
+          ],
+          "measurable": true,
+          "unique": false,
+          "n_distinct": 6,
+          "n_duplicated_keys": 2,
+          "max_multiplicity": 2,
+          "examples": [
+            {
+              "order_id": 9001,
+              "n_rows": 2
+            },
+            {
+              "order_id": 9002,
+              "n_rows": 2
+            }
+          ]
+        },
+        "flags": [
+          "grain_not_unique"
+        ]
+      },
+      "acknowledged": [],
+      "blocking": [
+        "grain_not_unique"
+      ],
+      "rationale": null,
+      "output": {
+        "n_rows": 8,
+        "columns": [
+          "order_id",
+          "customer_id",
+          "amount",
+          "name"
+        ],
+        "head": [
+          {
+            "order_id": 9001,
+            "customer_id": 1001.0,
+            "amount": 20,
+            "name": "Bravo"
+          },
+          {
+            "order_id": 9001,
+            "customer_id": 1001.0,
+            "amount": 20,
+            "name": "Bravo-dup"
+          },
+          {
+            "order_id": 9007,
+            "customer_id": 1003.0,
+            "amount": 25,
+            "name": "Delta"
+          },
+          {
+            "order_id": 9002,
+            "customer_id": 1001.0,
+            "amount": 30,
+            "name": "Bravo"
+          },
+          {
+            "order_id": 9002,
+            "customer_id": 1001.0,
+            "amount": 30,
+            "name": "Bravo-dup"
+          }
+        ]
+      }
+    }
+  ]
+}
