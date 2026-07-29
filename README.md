@@ -1,7 +1,22 @@
 <div align="center">
-  <img src="assets/the-portia-spider.jpg" alt="portia" width="280">
+  <img src="portia/ui/assets/cute-portia.png" alt="" width="104" align="middle">
+  &nbsp;&nbsp;&nbsp;
+  <img src="assets/the-portia-spider.jpg" alt="Portia, the jumping spider" width="260" align="middle">
+
   <h1>portia</h1>
   <p><strong>Start catching the bugs in your data.</strong></p>
+
+  <p>
+    <img alt="python 3.11+" src="https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white">
+    <img alt="engine: DuckDB" src="https://img.shields.io/badge/engine-DuckDB-FFF000?logo=duckdb&logoColor=black">
+    <img alt="copilot: Claude" src="https://img.shields.io/badge/copilot-Claude-D97757?logo=anthropic&logoColor=white">
+    <img alt="numbers: deterministic" src="https://img.shields.io/badge/numbers-deterministic-44cc11">
+    <img alt="the model sees evidence, not rows" src="https://img.shields.io/badge/model%20sees-evidence,%20not%20rows-44cc11">
+    <img alt="spec: git-diffable YAML" src="https://img.shields.io/badge/spec-git--diffable%20YAML-007ec6">
+  </p>
+
+  <sub>Named after <a href="https://en.wikipedia.org/wiki/Portia_(spider)"><em>Portia</em></a>, the jumping
+  spider that stalks other spiders — it studies a web, plans a detour out of sight of its prey, and takes it.</sub>
 </div>
 
 ---
