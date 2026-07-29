@@ -1,16 +1,20 @@
 # The DuckDB migration — the scale tier
 
-*Specced 2026-07-27. **Complete 2026-07-28** — steps 1–3 on `duckdb-engine-parity`, steps 4–10 on
-`duckdb-checks-and-ops`. The engine is DuckDB throughout; pandas survives only where §9 says it
-should. Direction plus the parts that genuinely need deciding up front — per `CLAUDE.md`, a plan
-gives vision, stack and watch-outs; the specifics emerge from real work. The watch-outs here were
-unusually concrete because three of them would have silently corrupted behaviour if discovered
-late; **two of the three turned out to be wrong**, and §6.1 and §13 say how.*
+*Specced 2026-07-27, **complete 2026-07-28**. This is now a **record, not a plan** — the engine is
+DuckDB throughout and the code is the better description of what it does. What is kept here is what
+the code cannot say about itself: the decisions and why they were taken, and — more usefully — the
+places where measurement contradicted the plan.*
 
-> **What real work already changed in this document.** §1's headline — *"memory stops scaling with
-> the file and starts scaling with the answer"* — **is not true of a portia profile**, measured. It
-> holds for the aggregates it was measured on and fails for the three the profile actually needs.
-> §13 has the numbers. Read it before quoting §1.
+**If you read three things, read §6.1, §6.3 and §13.** Between them:
+
+> - The sandbox design in §6.1 was **impossible**, on two independent counts.
+> - Type inference diverged **three ways** where §6.3 predicted one, and the unpredicted one would
+>   have made a null rate depend on which reader ran.
+> - §1's headline — *"memory stops scaling with the file and starts scaling with the answer"* — **is
+>   not true of a portia profile**. §13 has the numbers. Read it before quoting §1.
+>
+> Predicting in advance was still worth it: §6 named the right three places to look. It got two of
+> the three answers wrong.
 
 **Read `TECH_STACK.md` → "Data & compute" and `CLAUDE.md` → "Code conventions" first.** This document
 assumes both.
@@ -77,7 +81,16 @@ impossible today and routine after this work.
    `ops/sql.py` runs with `enable_external_access=False`. Both hold afterwards. See §6.1.
 6. **The CLI and the app stay two renderers of one engine**, and continue to agree on every number.
 
-The mechanism that enforces all of this is in §7. Build it first.
+**How it turned out.** (1) held, with three declared exceptions, all in `tests/test_golden.py` with
+their reasons: backend type names, `inferred` on a date column DuckDB types and pandas did not, and
+a pandas `object` column stringifying when it enters a typed store. (2), (3), (5) and (6) held
+unchanged. (4) held by *not* approximating — §13 explains why `approx_count_distinct` turned out to
+be unavailable rather than merely unlabelled.
+
+Two evidence fields were changed on purpose rather than preserved: `top` broke ties by row order and
+`samples` was "the first three rows", and neither is a fact about the data — a `LIMIT` with no
+`ORDER BY` returns a different three each run once a scan goes parallel. Both are now deterministic
+on both tiers, and the golden files were regenerated with the reason recorded.
 
 ---
 
@@ -120,9 +133,15 @@ unchanged: re-ingesting refreshes the table, prose and roles survive.
 
 ## 4. The abstraction: `Table`
 
-Today the currency is `pd.DataFrame`. It becomes a small wrapper — **not** a raw
-`DuckDBPyRelation`, because the checks should not each learn DuckDB's API, and because a wrapper is
-where the pandas → DuckDB → Snowflake seam actually lives (`TECH_STACK.md`).
+The currency is no longer `pd.DataFrame` but a small wrapper — **not** a raw `DuckDBPyRelation`,
+because the checks should not each learn DuckDB's API, and because a wrapper is where the
+DuckDB → Snowflake seam lives (`TECH_STACK.md`).
+
+*The shape below is what was specced; `core/table.py` is what was built, and it differs in two
+ways worth knowing.* It holds **the query text, not a bound relation** — a relation belongs to the
+connection that made it, and rebinding to a thread's own `con.cursor()` has to be free. And there
+are **two exits, not one**: `head()` for rendering and `rows()` for evidence, because a DuckDB
+`DATE` routed through pandas reaches the copilot as `2026-06-12 00:00:00`.
 
 ```python
 # portia/core/table.py   (new)
@@ -162,112 +181,19 @@ intermittent, hard-to-reproduce corruption — it is worth a test that hammers c
 
 ---
 
-## 5. Module by module
+## 5. Module by module — *done, and the code is the record*
 
-Everything that touches pandas today, and what it becomes. Nothing here is optional; a half-migrated
-path re-introduces the memory ceiling at whichever step is left behind.
-
-### `core/`
-
-| File | Change |
-|---|---|
-| `io.py` | Add `load_table(path, con)`; keep `load_frame` for small reads. `find_data_files` unchanged. Register new formats (`.parquet`) here, once, as today. |
-| `table.py` | **New.** §4. |
-| `present.py` | `frame_to_markdown` takes a `Table` and calls `head(PREVIEW_ROWS)`. `format_rate`, `inline`, `count`, `as_yaml` unchanged. |
-| `serialize.py` | Unchanged in shape. `to_jsonable` must also coerce DuckDB's returned types (`decimal.Decimal`, `datetime.date`, `uuid.UUID`) — today it only anticipates numpy. **Add tests for those.** |
-
-### `checks/` — diagnosis
-
-**`profiling.py`.** The heaviest rewrite and the biggest win. One `SELECT` per table computes
-`n_rows` plus, per column, `count(*)`, `count(col)`, `count(DISTINCT col)`, `min`, `max`; numeric
-columns add `avg`, `stddev_samp`, `quantile_cont([.25,.5,.75])`; non-numeric add `mode()`/top-freq
-via a small `GROUP BY … ORDER BY count DESC LIMIT 1`. `samples` becomes `SELECT col FROM t WHERE col
-IS NOT NULL LIMIT 3`.
-
-The flags, one by one, because two of them are traps:
-
-| Flag | SQL |
-|---|---|
-| `all_null` | `count(col) = 0` |
-| `constant` | `count(DISTINCT col) = 1` |
-| `possible_key` | `count(col) = count(*) AND count(DISTINCT col) = count(*)` |
-| `high_null` | `1 - count(col)/count(*) >= 0.5` |
-| `high_cardinality` | `count(DISTINCT col)/count(col) >= 0.9`, text columns only |
-| `leading_trailing_whitespace` | `count(*) FILTER (WHERE col <> trim(col)) > 0` |
-| `numeric_stored_as_text` | `avg(CASE WHEN try_cast(col AS DOUBLE) IS NOT NULL THEN 1 ELSE 0 END) >= 0.9`, text only — **trap, see §6.3** |
-| `mixed_types` | **No direct equivalent — see §6.3.** |
-
-`null_rates()` becomes one `SELECT` of per-column null fractions; it stays split out for the same
-reason as today (a post-condition should not pay for quantiles).
-
-**`join.py`.** The module docstring already claims the right thing — *"computed from the key columns
-alone… we can say a join explodes 50M rows to 2B without ever building it"* — and the implementation
-finally delivers it. The algorithm translates directly:
-
-```sql
-WITH l AS (SELECT k, count(*) n FROM left  WHERE k IS NOT NULL GROUP BY k),
-     r AS (SELECT k, count(*) n FROM right WHERE k IS NOT NULL GROUP BY k)
-SELECT sum(l.n * r.n)  AS inner_rows,
-       sum(l.n)        AS matched_left,
-       max(r.n)        AS max_left_to_right, ...
-FROM l JOIN r USING (k)
-```
-with `FULL OUTER JOIN` variants for `left_only` / `right_only` counts and `LIMIT 5` for
-`sample_left_only` / `sample_right_only`. `join_findings`' example rows become
-`SELECT … WHERE key NOT IN (SELECT …) LIMIT 3` — anti-joins, which DuckDB does well.
-`_dtype_kind` maps DuckDB types to the same four kinds (`numeric`/`string`/`datetime`/`boolean`);
-**the four kinds must not change**, because `key_dtype_match` drives a flag.
-
-**`outcome.py`.** `n_rows`, `n_cols`, `empty`, `null_rates`, `all_null_columns` are aggregates.
-`_grain_report` is `GROUP BY grain HAVING count(*) > 1` plus `ORDER BY count(*) DESC LIMIT 5` for
-examples. `contribution`/`_attribute` is the delicate one — see §6.2. `describe_contribution` and
-`describe_grain` are pure string formatting and do not change.
-
-### `ops/` — execution
-
-| File | Change |
-|---|---|
-| `base.py` | `OpResult.frame` → `OpResult.table`. Provenance dict untouched. |
-| `join.py` | `pd.merge` → a SQL join producing a relation. `result_rows` needs `count(*)` on the result — cheap (0.4 s / 80M rows). `matches_prediction` still compares it to the prediction. **Collision suffixes become explicit — §6.2.** |
-| `normalize.py` | `strip`→`trim`, `lower`→`lower`, `to_numeric`→`try_cast(col AS DOUBLE)`, `to_string`→`CAST(col AS VARCHAR)`. `n_changed` / `n_converted` / `n_failed` become `count(*) FILTER (…)`. `sample_failed` is `WHERE col IS NOT NULL AND try_cast(col) IS NULL LIMIT 5`. `fill` becomes `coalesce`. |
-| `sql.py` | `check_sql` **unchanged** — same string guard, same `FORBIDDEN` list. `apply_sql` stops registering pandas frames and instead runs against the store. **§6.1 is about this function.** |
-
-### `spec.py`
-
-`run_spec` stops loading sources into a dict of frames and builds a dict of `Table`s instead.
-`frames[step["id"]] = result.frame` becomes a registered relation, so chaining still works and
-nothing is materialised. `StepResult.frame` → `.table`. `write_outputs` uses `COPY … TO`.
-`render_markdown`'s preview uses `head()`.
-
-### `catalog.py`
-
-`index_source` gains ingestion (§3) and records `ingested_at` + the source file's `mtime`/`size`.
-The update rule is unchanged: facts refresh, prose and roles are preserved.
-
-### `agent/`
-
-`handlers.py`: `_frame`/`_step_frame` become `_table`/`_step_table`. `profile_source` currently
-re-reads the file on every call — against the store it becomes a set of aggregates, which is the
-single biggest cost reduction in the copilot loop. **No tool signature changes and no prompt
-changes**, which is the point.
-
-### `ui/`
-
-`engine.read_frame` → `read_table`; `components.table_preview` takes a `Table` and calls `head()`;
-`workflow._source_frame` stops loading whole files to show 15 rows (a straight bug at multi-GB).
-`APP.results` holding every step's output stops being a memory problem, because a `Table` is a
-handle rather than data.
-
-### `fixtures/` and `tests/`
-
-Fixtures keep building pandas frames — they are tiny and they are the readable definition of the
-test data. `Table.from_frame` bridges them. Most test bodies change one line.
-
----
+Every module named here was migrated. Listing what each one became is now a worse description of
+the engine than the engine is: read `core/table.py`, `checks/`, `ops/` and `spec.py`. What is kept
+below is only what the code cannot say about itself — the traps, and what measurement contradicted.
 
 ## 6. The three traps
 
-Each of these will produce *plausible but wrong* behaviour if handled late.
+*Each of these would have produced plausible but wrong behaviour if handled late. **Two of the
+three were wrong as written** — the sandbox design was impossible, and type inference diverged three
+ways rather than one. The suffix trap, §6.2, was correct and held. Read this section as the record
+of what predicting-in-advance was actually worth: it named the right three places to look, and got
+two of the three answers wrong.*
 
 ### 6.1 The escape hatch's sandbox
 
@@ -369,54 +295,25 @@ one.** Measured across all six fixtures, the full list and what was done about e
 
 ---
 
-## 7. Parity testing — build this first
+## 7. Parity testing — *built first, and it was the best decision here*
 
-This is the mechanism that makes "everything keeps working" checkable rather than hopeful.
+29 golden evidence files, written by the pandas engine before anything moved, and a test that
+compares against them. The mechanism and its rules live in `tests/golden.py`; the one thing worth
+repeating outside it is **why regenerating them is guarded**: they are evidence from an
+implementation that could not have been wrong in the same way the new one is, and that is the whole
+of their authority. `python -m tests.golden --regenerate` exists and says so before it runs.
 
-1. **Freeze the current behaviour.** Before changing any implementation, add a test that runs every
-   check and op over every fixture (`messy_customers`, `sales_*`, `hotels`/`otb`/`city_events`) with
-   today's pandas code and writes the evidence dicts to `tests/fixtures/golden/*.json`. Commit them.
-2. **Assert the new implementation reproduces them**, key by key. Differences are allowed only where
-   this document says so, and each exception is an explicit, commented entry in the test.
-3. **Keep both implementations alive during the migration**, selected by a parameter, so the golden
-   tests run against both in CI until the pandas path is deleted.
-4. **Add a scale test** that is skipped by default (marker: `slow`): generate ~1 GB, assert peak RSS
-   stays under a cap. Without it, the ceiling creeps back in the first time someone adds a `.df()`.
-5. **Add a concurrency test** for the cursor-per-thread rule (§4).
+What this bought, concretely: all ten end-to-end `spec` cases came out **byte-identical** after
+every op, `run_spec`, and the outcome checks were rewritten. The abstraction bounded the blast
+radius; the files are what made the swap *checkable*.
 
-The golden files are the deliverable that makes this migration reversible. Write them on day one,
-before touching an implementation.
+## 8. Order of work — *done*
 
----
-
-## 8. Order of work
-
-Each step ends green, and nothing after step 2 is a big-bang.
-
-1. ~~**Golden files**~~ — **done 2026-07-28.** 29 cases, `tests/golden.py` + `tests/test_golden.py`.
-   Cases are data and the backend is swappable, so each step adds a `kinds` entry to
-   `DuckDBBackend` rather than a new test.
-2. ~~**`core/table.py` + `load_table` + the store**~~ — **done 2026-07-28.**
-3. ~~**`checks/profiling.py`**~~ — **done 2026-07-28.** 8× faster; the memory win is smaller than
-   this document assumed — see §13. The rules (`_semantic`, `_flags`) are shared by both
-   implementations rather than written twice, which is what keeps parity structural.
-4. ~~**`checks/join.py`**~~ — **done.** 80M result rows reported in 0.1 s at 384 MB, never built.
-5. ~~**`checks/outcome.py`**~~ — **done.** §6.2 held.
-6. ~~**`ops/join.py`, `ops/normalize.py`**~~ — **done**, with the suffixes now produced deliberately.
-7. ~~**`ops/sql.py`**~~ — **done, and not as specced.** See §6.1.
-8. ~~**`spec.run_spec`**~~ — **done.** Relations end to end; a run holds a query per step.
-9. ~~**`ui/` + `cli/`**~~ — **done.** `read_table`, `Table.preview`, `COPY … TO` for outputs.
-10. ~~**Delete the pandas implementations**~~ — **done.** `checks/` has one implementation each.
-    The golden files stay, and `python -m tests.golden` now demands `--regenerate`: they were
-    written by the engine that predates the migration, and that is the whole of their authority.
-
-Steps 4–10 collapsed the dual path rather than carrying it. §7.3 wanted both implementations alive
-so the cases could run against each; once the *files* existed, running the old implementation to
-reproduce them was checking a copy against itself. What replaced it: all ten `spec` cases came out
-**byte-identical** to evidence the pandas engine wrote, which is the same claim with fewer moving
-parts.
-
----
+Ten steps, landed across five branches (`duckdb-migration-spec` → `duckdb-engine-parity` →
+`duckdb-checks-and-ops` → `ui-add-data` → `parquet-format`). Each branch tip passes its own suite.
+The sequencing advice that held up: **freeze the evidence first**, and do the sandbox last so the
+restricted-connection design is tested against a working store — which is how §6.1 was found to be
+impossible before it was built on.
 
 ## 9. What stays pandas — deliberately
 
@@ -441,7 +338,7 @@ parts.
 
 ---
 
-## 11. Before starting: a cheaper answer to the PHQ question
+## 11. A referentially-consistent subset — still worth building
 
 The migration is worth doing regardless. But the test that motivated it — *can the copilot work out
 how ~20 PHQ tables relate?* — may not need it, and it is worth knowing that before spending the time.
@@ -457,22 +354,32 @@ fixture we can keep and score against an answer key like `hotels.answers.yaml`.
 **Naive per-table sampling would not work**: independently sampled tables stop sharing keys, every
 join looks empty, and the test measures nothing. The subset has to follow the foreign keys.
 
-Two separable questions, then:
+Two separable questions, and the migration only answered one of them:
 
-1. *Can it reason about these schemas?* — a subset answers this now.
-2. *Does portia hold up at real scale?* — this migration answers that.
+1. *Can it reason about these schemas?* — **still open.** A subset answers it.
+2. *Does portia hold up at real scale?* — **answered: yes**, within the ceiling §13 describes.
+
+Scale is no longer the reason to want the subset. **Repeatability is** — a fixture you can re-run
+in seconds and score against an answer key is what turns a copilot run from an anecdote into a
+measurement, and `EVALUATION.md` has seven anecdotes.
 
 ---
 
 ## 12. Open questions
 
-- ~~Eager vs lazy ingestion~~ — **eager** (§3).
-- ~~Typed vs all-VARCHAR ingest~~ — **typed**, confirmed on the fixtures; still verify on PHQ (§6.3).
-- ~~`mixed_types`: drop or redefine~~ — **redefined** (§6.3).
-- **Exact vs approximate — now the migration's central open question, and bigger than it looked.**
-  It was written as a footnote about `approx_count_distinct`. §13 is what measurement made of it.
-- Whether the store should also hold **step outputs**, so a run's intermediates survive the session
-  and `Runs` can show a real table rather than a saved report. Attractive, and out of scope here.
+Answered by the work: ingestion is **eager** (§3); ingest is **typed** (§6.3); `mixed_types` was
+**redefined** rather than dropped (§6.3); the sandbox is **isolation, not attachment** (§6.1).
+
+Still open:
+
+- **Exact vs approximate.** Written here as a footnote about `approx_count_distinct`; measurement
+  made it the central one. §13.
+- **`store.connect` sets no `memory_limit`**, so DuckDB helps itself to 75% of RAM. A 2 GB limit did
+  the same work in the same wall time at 5.0 GB peak instead of 6.8 — but 2 GB was ample for that
+  workload and might not be for a large sort. Decide against PHQ data.
+- **Whether the store should also hold step outputs**, so a run's intermediates survive the session
+  and `Runs` can show a real table rather than a saved report. Now also the prerequisite for making
+  SQL steps lazy (§6.1), which is the one op still bounded by memory.
 
 ---
 

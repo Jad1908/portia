@@ -29,10 +29,11 @@ engine are equally important** — the questions-and-insights UX *is* the produc
 
 Python + **Claude Agent SDK** (agent loop, context management, **MCP-client**, custom tools).
 **DuckDB** under the whole engine since 2026-07-28 — sources are ingested into a per-project
-`.portia/store.duckdb` and everything downstream is a lazy relation — with a **Snowflake tier
-(~15–20 tables)** via the Snowflake **MCP server** to come, plugging into the same `core.table`
-seam. pandas stays for fixtures, small reads and rendering. UI: a Python-authored, serious (non-gadgety) framework —
-**NiceGUI** (Vue under the hood) — sitting on the engine's event stream. Model is a config knob.
+`.portia/store.duckdb` (CSV or Parquet) and everything downstream is a lazy relation — with a
+**Snowflake tier (~15–20 tables)** via the Snowflake **MCP server** to come, plugging into the same
+`core.table` seam. pandas stays for fixtures, small reads and rendering. UI: a Python-authored,
+serious (non-gadgety) framework — **NiceGUI** (Vue under the hood) — sitting on the engine's event
+stream. Model is a config knob.
 
 **Full stack + reasoning: see `TECH_STACK.md`.**
 
@@ -56,16 +57,19 @@ the interactive copilot loop over it (the questions-and-insights UX, emitting a 
 a decision stream) → the surface where those questions are asked and answered. The interactive
 layer is **core, not deferred**; its shape is still to be designed (the user's vision).
 
-**Where we are (2026-07-26).** The engine is built (`checks`, `ops`, `spec`, `catalog`), so is
+**Where we are (2026-07-28).** The engine is built (`checks`, `ops`, `spec`, `catalog`), so is
 the copilot loop (`portia/agent/` — in-process MCP server, layered context, `AskUserQuestion`
 routed to a human, spec writing, chat CLI), and so is **V0 of the app** (`portia/ui/`) — the loop
-now runs in one window, with no terminal. The **verification loop** now exists too: recording a
+now runs in one window, with no terminal. The **verification loop** exists too: recording a
 step executes it, `checks/outcome.py` measures the table it produced, and a step that hits a zero
 is refused rather than written.
 
-**What is not built is scale.** The engine is pandas throughout, so it needs several times a file's
-size in RAM to look at it, and the next real test is ~20 PHQ tables, many multi-GB. Measured
-2026-07-27 and specced in **`docs/DUCKDB_MIGRATION.md`**, now item 4 below.
+**Scale is now built.** The engine is DuckDB throughout — sources are ingested into a per-project
+`.portia/store.duckdb` and everything downstream is a lazy relation. Measured end to end on real
+PHQ data: 4.82 GB across three tables indexes in 32 s, a 50M × 3M join is diagnosed in 3.8 s, and a
+full spec run over 50M rows takes 27 s. **Peak memory is bounded by the largest table, not the
+total**, which is the property that makes ~20 tables workable. Item 4 below, and
+`docs/DUCKDB_MIGRATION.md` for what it cost and what it found.
 
 **This is not yet a working copilot.** The loop has now faced a
 model four times (Runs 3–6 in `EVALUATION.md`). Each fix closed one escape and revealed the next:
@@ -78,71 +82,77 @@ Runs 1–5 failures now read as **capability rather than architecture**. Read **
 before building on top of any of it — it separates what the engine can do from what the copilot has
 been shown to do.
 
-Next, in order:
+**Run 8 (2026-07-29) moved that diagnosis, and it is the first run on the real data.** 23 PHQ
+sources, 4.8 GB indexed, a read-only goal. The model planned a two-path join, annotated its own
+gaps *"Critical Unknowns (Need to Measure)"*, and **measured none of them** — zero `profile_source`,
+zero `join_findings` — then asked permission to measure. Both joins it proposed match **0 keys**,
+which two 0.02 s queries established afterwards; one of them was on a 4-value, 51%-null column
+called `LOCATION` that turns out to be a site-quality grade. **The engine is no longer the
+constraint.** The nearest candidate cause is in our own prompt, which still calls profiling
+*"Expensive… Not for browsing"* from when that described pandas.
 
-1. ~~**The escape hatch**~~ — **shipped 2026-07-26** (`ops/sql.py`): the agent declares `inputs`
-   and authors one DuckDB `SELECT`, captured verbatim and measured by the same harness as every
-   other op. `ops = {join, normalize, sql}`. The fixture's fatal fan-out now has a handling the
-   spec can express, and built by hand it produces the answer key's table exactly — 14 rows,
-   revenue 136,240, zero inflation. **Next is to watch a model use it**: every previous run failed
-   at a point where no correct move existed, so the whole sequence needs re-reading once one does.
-   Resist promoting `aggregate`/`filter`/`dedupe` into prewritten ops until runs show which shape
-   is actually reached for (`BACKLOG.md`).
-2. **Make the consequence of a zero a computed fact, rendered where the human answers.** Run 5's
+**Shipped, in the order it happened:**
+
+1. **The escape hatch** (2026-07-26, `ops/sql.py`). The agent declares `inputs` and authors one
+   DuckDB `SELECT`, captured verbatim and measured by the same harness as every other op.
+   `ops = {join, normalize, sql}`. Built by hand it produces the hotel answer key exactly — 14 rows,
+   revenue 136,240, zero inflation. **No model has yet been watched reaching for it** (Run 7 made
+   zero `sql` calls), so resist promoting `aggregate`/`filter`/`dedupe` into prewritten ops until
+   real runs show which shape is actually reached for (`BACKLOG.md`).
+
+2. **The surface — V0 of the app** (2026-07-26, `portia/ui/`, `python -m portia.ui`). Three panes on
+   the engine's event stream. **The bar is met: a full test run with no terminal.** The claim this
+   settles is that the loop is now *watchable*, not that it is good.
+
+   *Revised 2026-07-28 after watching it fail with twenty real files.* Adding data is now two
+   explicit steps: profiling reports per file and the screen keeps its primary action on screen at
+   any window height, and the **interpretation turn is deferred to Continue** so it runs in the
+   workspace where the Indexing tab can show it. It used to fire on a screen with no transcript,
+   which meant paying for a turn and watching a blank page. The lesson generalises: **the app's
+   test suite renders no tables and drives no flows**, so every one of these was found by hand.
+
+3. **The scale tier — DuckDB** (2026-07-28, `docs/DUCKDB_MIGRATION.md`). The engine is DuckDB
+   throughout: `core/table.py`, the ingested store, all three checks, all three ops, `run_spec`, and
+   the edges. pandas survives only in the fixtures, the loader's small-read path, the renderers, and
+   the SQL hatch's sandbox boundary — and a test fails if anything else pulls a whole relation into
+   memory. **All ten `spec` golden cases come out byte-identical to evidence the pandas engine
+   wrote**, and the 80M-row fan-out that inflated revenue in Run 5 is reported in 0.1 s without being
+   built. Parquet reads and writes too (~4× smaller on real extracts).
+
+   **What measurement changed is the part worth reading** — §6.1, §6.3 and §13: three
+   type-inference divergences where the spec predicted one, a sandbox design that turned out to be
+   impossible, and a profile whose memory still scales with cardinality rather than with the answer.
+
+**Next, in order:**
+
+4. **The PHQ test — begun 2026-07-29, and it already changed the next question.** 23 sources are
+   indexed and interpreted, and the engine held: cardinality is the ceiling as §13 predicted, not
+   the store. The first goal turn is **Run 8**, and it says the constraint has moved from the engine
+   to the copilot — it planned a join over 4.8 GB without measuring anything. So the useful order
+   now is: **fix the prompt's cost signal first (`BACKLOG.md` → Agent), then re-run the same goal.**
+   A model that won't call `profile_source` makes every other finding on this dataset unreadable.
+   Still true and still worth doing before reading much into a run: `fan_out` fires on every
+   fact-to-dimension join because it reads either side's key multiplicity rather than the result's,
+   which at this scale is how a real warning gets learned as noise.
+
+5. **Make the consequence of a zero a computed fact, rendered where the human answers.** Run 5's
    override was taken alone, and the instruction it skipped ("tell the user what a total would be
    off by") asks for a number that is nowhere in the agent's evidence. Compute what a row
    multiplication does to each measure column and put it at the confirmation prompt, so consent is
-   informed whether or not the agent cooperates. Demoted below the hatch by Run 6, which stated the
-   consequence unprompted — but only qualitatively, and no capable model has yet been watched
-   reaching a blocking flag.
+   informed whether or not the agent cooperates. No capable model has yet been watched reaching a
+   blocking flag.
 
-3. ~~**The surface — V0 of the app.**~~ — **shipped 2026-07-26** (`portia/ui/`,
-   `python -m portia.ui`, `ui` extra). Three panes on the engine's event stream, driving a turn
-   through `agent/ask.py`'s injected `answer`/`confirm`. **The bar is met: a full test run with no
-   terminal** — project creation, the brief, adding and profiling sources, the interpret turn with
-   its write confirmations, the spec run, and every artifact, all in one window. The engine gained
-   exactly one thing it was already missing (`events.TOOL_RESULT`); everything else is a renderer.
-   *The claim this settles is that the loop is now **watchable**, not that it is good* — what the
-   copilot does with a question is still scored by hand in `EVALUATION.md`.
-
-4. **The scale tier — DuckDB (`docs/DUCKDB_MIGRATION.md`, specced 2026-07-27).** Promoted to the
-   front because it is now a **blocker on the next real test**, not an eventual concern. The target
-   dataset is ~20 PHQ tables, many multi-GB; pandas needs 4.8× a file's size to profile it and
-   `run_spec` holds every source and every intermediate at once. The guarantee is that **nothing the
-   copilot reads changes**: same evidence dicts, same provenance keys, same sandbox, enforced by
-   golden-file parity tests written before any implementation moves.
-
-   **Shipped 2026-07-28** across two branches (`duckdb-engine-parity`, `duckdb-checks-and-ops`).
-   The engine is DuckDB throughout: `core/table.py`, the ingested `.portia/store.duckdb`, all three
-   checks, all three ops, `run_spec`, and the edges. pandas survives only in the fixtures, the
-   loader's small-read path, and the renderers — and a test now fails if anything else pulls a whole
-   relation into memory. The guarantee held where it counts: **all ten `spec` golden cases come out
-   byte-identical to evidence the pandas engine wrote**, and the 80M-row fan-out that inflated
-   revenue in Run 5 is reported in 0.1 s without being built.
-
-   **Three things measurement changed, and they are the part worth reading.** Type inference
-   diverged three ways where the spec predicted one — worst being that DuckDB nulls only the empty
-   string, so a null rate would have depended on which reader ran (fixed at the loader, not
-   excepted). The specced sandbox design was **infeasible**: DuckDB refuses `ATTACH` when external
-   access is off, and a qualified name reaches undeclared tables anyway, so SQL steps stay
-   memory-bound. And **a profile's memory still scales with the file** — `count(DISTINCT)`, exact
-   quantiles and the modal-value group-by are all O(n) or O(cardinality), and approximating the
-   count is *not* available: `possible_key` and `constant` are equality tests against it, and
-   HyperLogLog came back 13.6% low on a 6M-row key. `DUCKDB_MIGRATION.md` §13 has the numbers.
-   **The PHQ test can start; run it expecting cardinality to be the ceiling, not the store.**
-
-5. **The run log** (`EVALUATION.md`, specced 2026-07-26). The more painful half of the surface
+6. **The run log** (`EVALUATION.md`, specced 2026-07-26). The more painful half of the surface
    problem: seven runs scored by hand off transcripts, and the app's transcript still dies with the
    window. One JSONL per turn, teed at the edge in `cli/chat.run_turn` and the app's turn driver.
    `events.TOOL_RESULT` — its other prerequisite — landed with the app.
 
-> **A cheaper answer to the question that motivated the migration.** The copilot never sees data,
-> only profiles — so its judgment on a 5 GB table and on a *referentially-consistent subset* of it
-> is nearly the same. Slicing every table to rows reachable from a chosen set of ids preserves
-> schemas, key overlap, spelling mismatches and fan-out, and tests the reasoning question today at
-> 1/100th the size. (Naive per-table sampling does not: independently sampled tables stop sharing
-> keys and every join looks empty.) Scale and judgment are separable questions; only one of them
-> needs the migration. `DUCKDB_MIGRATION.md` §11.
+> **A referentially-consistent subset is still worth building.** The copilot never sees data, only
+> profiles — so slicing every table to rows reachable from a chosen set of ids preserves schemas,
+> key overlap, spelling mismatches and fan-out, and gives a fixture small enough to re-run cheaply
+> and score against an answer key. (Naive per-table sampling does not: independently sampled tables
+> stop sharing keys and every join looks empty.) Scale is no longer the reason to want it —
+> **repeatability is.** `DUCKDB_MIGRATION.md` §11.
 
 ## Budget & model discipline
 

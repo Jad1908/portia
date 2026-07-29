@@ -19,12 +19,6 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
   taxonomy — the agent computes ad-hoc; these are just handy starting points.
 - **Scale-aware evidence** — cap columns (not just rows) in `join_findings` samples; profile from a
   sample/schema rather than the full frame once data is too big to scan.
-- **`store.connect` sets no `memory_limit`, so DuckDB helps itself to 75% of RAM.** Measured
-  2026-07-28 on 4.82 GB of CSV: indexing peaked at 6.8 GB with the default, and at **5.0 GB with
-  `memory_limit=2GB` — in the same wall time**, because DuckDB spilled instead of failing. A
-  conservative default (with an override) would stop portia competing with the rest of the machine
-  for what looks like no speed cost. Not done unilaterally: 2 GB was ample for *this* workload, and
-  a genuine large sort might thrash. Decide against PHQ data.
 - **`fan_out` fires on a many:1 join that cannot inflate anything.** Seen on the 50M x 3M scale
   test: `relationship: many:1`, `result_rows` equal to the left's row count, and `fan_out` in the
   flags anyway — because `max_right_to_left` counts how many left rows share a key, which is ~17
@@ -33,17 +27,12 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
   dimension join**, which is how a real signal gets learned as noise. The fix is probably to flag on
   what actually multiplies the *result*, not on either side's multiplicity — but that changes a flag
   the copilot reads, so it needs its own review.
-- **A profile's memory is bounded by cardinality, not by the store** — measured 2026-07-28, see
-  `DUCKDB_MIGRATION.md` §13. Exact `count(DISTINCT)`, exact quantiles and the `top` group-by are all
-  O(n) or O(distinct). Approximating the quantiles is safe and 4× cheaper; approximating
-  `count(DISTINCT)` is **not**, because `possible_key` and `constant` are equality tests against it
-  and HyperLogLog came back 13.6% low on a 6M-row key. The interesting sub-problem: a cheap *exact*
-  answer to the only question `possible_key` asks — `count(DISTINCT c) = count(*)` — which does not
-  need the count itself.
 - **`handlers.profile_source` re-reads the file rather than the store.** It goes through
-  `profile_path`, which is DuckDB-backed and memory-bounded, but re-parses the CSV on every call
-  where a store read would be ~20× faster. Needs the project connection to reach `handlers`, which
-  is really the connection-lifecycle question step 9 has to answer anyway.
+  `profile_path`, which is DuckDB-backed and memory-bounded, but re-parses the source file on every
+  call where a store read would be ~20× faster. Needs the project connection to reach `handlers`,
+  which is really the connection-lifecycle question step 9 has to answer anyway. **Run 8 raises the
+  stakes**: the fix above wants the model calling `profile_source` far more often than it does
+  today, and this is the path that call takes.
 
 ## Ops — execution (trusted transforms)
 
@@ -133,6 +122,17 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
   case — it surfaces as `empty_output` or `source_did_not_contribute`, derived from the output
   rather than from the op's flags. The immutability message no longer says "pick another id".*
   **Verified against the engine, not yet against the agent** — see `EVALUATION.md`.
+- **The prompt still prices profiling as expensive, and DuckDB made it nearly free.**
+  `prompts/tools/profile_source.md` says *"Expensive — the detailed rung"* and *"Not for browsing"*;
+  `copilot.md` says *"Climbing costs tokens, so don't browse."* Both were written against a pandas
+  engine that read a whole file to profile it. Post-migration a profile is a DuckDB aggregate —
+  Run 8 measured two candidate joins over a 100M-row store in **0.02 s each**, after the model had
+  declined to measure them and asked permission instead. What is still costly is the **tokens of
+  the returned evidence**, not the work, and the prompt conflates the two. Separate them: keep
+  "don't dump twenty profiles into context", drop the language that reads as "this call is
+  expensive". **Cheap to try, with a clean before/after against Run 8** — the same shape of
+  experiment as the `prompts.tool()` line-collapsing one below, and these two should not be run in
+  the same session or neither result means anything.
 - **A grain claim can be widened until it passes — the loop's open hole.** Run 3 was refused on
   `grain: [booking_id]`, then recorded `grain: [booking_id, event_name]` and passed: `event_name`
   is the column the fan-out varies over, so the claim is a tautology. It didn't override the gate,
@@ -201,6 +201,14 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
   cloud Hobby tier: 50k units/month, 30-day retention, 2 seats). The SDK drives Claude Code as a
   *subprocess*, so client auto-instrumentation sees nothing — `events.py` is the only sane
   emission point, which is also why the JSONL is not throwaway work.
+- **Outputs are hardcoded to CSV, on an engine that now reads and writes Parquet.**
+  `spec.write_outputs` builds `out / f"{r.id}.csv"`, so a multi-GB result lands as CSV — the format
+  the Parquet work exists to get away from, and the one whose type sniffing we removed from the
+  answer. The plumbing is already there: `write_table` dispatches on the extension and the code
+  comment beside that line says pointing it at `.parquet` is the whole change. What is missing is
+  the *decision* — a project-level output format, or per-spec, and whether the human-opens-it-in-
+  Excel argument (see the item below) outweighs it. Note the two pull opposite ways, so decide them
+  together.
 - **Generated data has nowhere to live.** `run_spec --write` dumps `<step-id>.csv` and nothing
   knows it exists. Needs: a **code-owned** layout (`outputs/` at the project root for the data —
   users open these in Excel — index entry in `.portia/`), auto-profiling (free) but **not**
@@ -248,8 +256,28 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
   expansion bubbles up to the step block's `on("click")`, which calls `_select_step` and re-renders
   the report — so the preview collapses as fast as it opens. **Pre-existing**, not the migration:
   `main` has `_table(result.frame)` and `block.on("click", …)` in exactly the same arrangement. The
-  fix is to stop the expansion's click propagating, and the lesson is that `tests/test_ui.py`
-  covers state and badges and **nothing that renders a table**, so nobody found out.
+  fix is to stop the expansion's click propagating.
+- ~~**The add-data screen said nothing while it worked**~~ — *fixed 2026-07-28. Profiling reports
+  per file ("Profiling VBPPRED_EVENTS — 7 of 20"), the content scrolls so the primary action stays
+  on screen at any window height, and the interpretation turn is deferred to Continue so it runs
+  where the Indexing tab can show it. It used to fire on a screen with no transcript: you paid for
+  a turn and watched a blank page.*
+- **The left pane can only see specs in `specs/`, and nothing makes the agent write there.**
+  `ui/engine.specs_in()` globs `<root>/specs/*.yaml`, non-recursively. The path is the agent's
+  choice — `record_step` takes whatever it is given, and `specs/<name>.yaml` is a *hint* in prompt
+  text, not a constraint. A spec written to `phq.yaml` or `output/spec.yaml` therefore exists, runs,
+  and is invisible in the app, which reads as "it didn't create one". Two candidate fixes and they
+  are not equivalent: glob the project recursively (the pane shows what is there), or make
+  `record_step` refuse a path outside `specs/` (the tree stays predictable, which is what
+  `BACKLOG`'s "generated data has nowhere to live" item also wants). Prefer the second.
+- **The add-data copy is derived from the loader; nothing else is.** `screens._formats()` reads
+  `supported_suffixes()`, so registering a format updates the screen with no edit. Worth doing the
+  same wherever else a format is named in prose — `VISION.md` had six.
+- **`tests/test_ui.py` renders nothing.** It covers state, badges, decisions and the folder chooser
+  — and not one component that draws a table. That is why the preview bug above survived, and why
+  the DuckDB migration's UI changes had to be checked by driving a browser by hand. A handful of
+  tests that call `components.table_preview` and `workflow._table` with a real `Table` would have
+  caught both.
 
 ## Interface — the surface
 
@@ -295,30 +323,41 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
 
 ## Scale — data tiers
 
-- **DuckDB tier — specced 2026-07-27, `docs/DUCKDB_MIGRATION.md`. Promoted out of the backlog into
-  `PLAN.md` item 4, because it is now a blocker rather than an eventual concern.** The measurements
-  that moved it: profiling one 396 MB CSV costs **1883 MB and 16.5 s** in pandas (4.8× the file) and
-  **122 MB / 0.3 s** in DuckDB; an 80M-row join — portia's fan-out case — can be *counted* in 0.4 s
-  without being built, which pandas cannot do at all on real data. Read the spec before touching
-  `checks` or `ops`; three of its traps (the escape hatch's sandbox, pandas' `_x`/`_y` suffixes that
-  `outcome` depends on, and type-inference parity) corrupt behaviour quietly if found late.
-- **Indexing does not leak, and that was worth knowing.** Profiling the same file four times:
-  620 → 728 → 832 → 777 MB — it plateaus, the frame is released, the memory is reused. RSS never
-  returns to the OS (allocator, not a leak), so the process looks like it permanently holds ~3.5× the
-  largest file. Sequential indexing of many files costs roughly the *largest* one, not the sum.
-- **Profiling cost is text columns, overwhelmingly.** At 2M rows: int column 0.03 s, high-cardinality
-  text column 2.45 s — ~80×. The causes are a Python-level `isinstance` pass over every value in
-  `profiling._flags`, plus `nunique`/`value_counts` building hash tables over every distinct value.
-  Both vanish in SQL; noted here in case the migration is ever descoped.
-- **A referentially-consistent subset extractor.** The copilot never sees data, only profiles — so
-  slicing every table to rows reachable from a chosen set of ids preserves schemas, key overlap,
-  spelling mismatches and fan-out, and tests the *judgment* question at 1/100th the size, today.
-  Naive per-table sampling does **not** work: independently sampled tables stop sharing keys and
-  every join looks empty. Worth building as a fixture generator whether or not the migration lands
-  first (`DUCKDB_MIGRATION.md` §11).
-- **Snowflake tier** via the Snowflake MCP server — push compute to the warehouse, pull small results.
-  The `Table` abstraction the DuckDB migration introduces is the seam it will use; the migration
-  should not close that door.
+- ~~**DuckDB tier**~~ — *shipped 2026-07-28, `docs/DUCKDB_MIGRATION.md`. The engine is DuckDB
+  throughout. Measured on real PHQ data: 4.82 GB across three tables indexes in 32 s, a 50M x 3M
+  join is diagnosed in 3.8 s, and peak memory is bounded by the largest table rather than the total.
+  Two of the three traps the spec named turned out to be wrong; §6.1 and §13 are the record.*
+- **A profile's memory is bounded by cardinality, not by the store** — the one part of the scale
+  promise that did not land. Exact `count(DISTINCT)`, exact quantiles and the modal-value group-by
+  are all O(n) or O(distinct), so peak RSS is still ~2.2x the largest file. Approximating the
+  quantiles is safe and 4x cheaper; approximating `count(DISTINCT)` is **not**, because
+  `possible_key` and `constant` are equality tests against it and HyperLogLog came back 13.6% low on
+  a 6M-row key. The interesting sub-problem: a cheap *exact* answer to the only question
+  `possible_key` asks — `count(DISTINCT c) = count(*)` — which does not need the count itself.
+- **Ingesting Parquet inflates it ~2.3x on disk, which undoes much of converting.** Measured
+  2026-07-28: a 266 MB ZSTD Parquet extract (14.4M rows) becomes 602 MB in the store, and a real
+  project of 6.2 GB of Parquet produced a **19.2 GB** `store.duckdb`. DuckDB's native format
+  compresses, but not as hard as Parquet+ZSTD. The ingest decision (`DUCKDB_MIGRATION.md` §3) was
+  argued on CSV, where ingest is both faster *and* smaller; for Parquet only the first half holds.
+  Worth revisiting: a Parquet source is already columnar and already typed, so the read-speed
+  argument is weak, and the sandbox argument (§6.1) is the only one left — which a view over the
+  file would satisfy just as well if the hatch stopped needing the store to be the only namespace.
+- **`store.connect` sets no `memory_limit`, so DuckDB helps itself to 75% of RAM.** A 2 GB limit did
+  the same work in the same wall time at 5.0 GB peak instead of 6.8, because DuckDB spilled rather
+  than failed. A conservative default looks close to free — but 2 GB was ample for that workload and
+  might not be for a large sort. Decide against PHQ data.
+- **SQL steps are the one memory-bound op.** The escape hatch materialises its declared inputs,
+  because that isolation is what makes the sandbox independent of reading the query correctly
+  (§6.1). Making it lazy needs step outputs in the store *and* a parse-tree check on table
+  references to replace what isolation currently gives for free.
+- **A referentially-consistent subset extractor.** Slicing every table to rows reachable from a
+  chosen set of ids preserves schemas, key overlap, spelling mismatches and fan-out. Naive
+  per-table sampling does **not**: independently sampled tables stop sharing keys and every join
+  looks empty. Scale is no longer the reason to want it — **repeatability is**, and `EVALUATION.md`
+  has seven anecdotes and no re-runnable fixture.
+- **Snowflake tier** via the Snowflake MCP server — push compute to the warehouse, pull small
+  results. `core.table.Table` is the seam: a name, a query and a connection is not a DuckDB-shaped
+  idea, which was the point of building it that way.
 
 ## Core / infra
 
@@ -328,7 +367,14 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
   neutral and is where it stands today. It is product positioning on the exact point the user
   cares about, so it is theirs to call — **don't quietly write it either way**. One line, whichever
   it is.
-- **More loaders** — Parquet (and beyond) in `core/io._LOADERS`; one line each.
+- ~~**More loaders — Parquet**~~ — *shipped 2026-07-28. `core/io._FORMATS` now registers a reader,
+  its options and how to write the format back, so a format you can load but not save can't happen.
+  Next one is genuinely one entry.*
+- **`uv`'s cache prunes under disk pressure and takes the venv's dev tools with it.** Hit three
+  times on 2026-07-28 while real data filled the disk: `pytest`, `ruff`, `mypy` and `pre-commit`
+  are hardlinks into `~/.cache/uv`, so they vanish and every command fails with
+  `No module named pytest`. Fix is `uv pip install -e ".[dev]"`. Worth a line in the README if it
+  bites anyone else.
 - **CI** — run the hooks + tests on each PR. *Declined for now (2026-07); revisit if collaborators join.*
 
 ## Validation & product (from the brief §9)
