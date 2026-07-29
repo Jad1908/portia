@@ -54,11 +54,17 @@ We will build *many* tools and checks. They must **compose**, not accumulate int
 ten different ways to do the same thing. These seams are non-negotiable; respect them before
 adding code, and extend them rather than working around them:
 
-- **One way to load data.** All file reading goes through **`portia.core.io`** — `load_table` for
-  the engine, `load_frame` only for small reads. Never call `pd.read_csv` or name a DuckDB reader
-  in a tool, check, notebook, or CLI: a format registers **both** its readers in `core/io.py`, once,
-  so support can't arrive on one tier and not the other. `NA_TOKENS` lives there too, because a null
-  rate that depends on which reader ran is the exact disagreement `core/present.py` exists to stop.
+- **One way to load data, and one way to write it.** All file I/O goes through **`portia.core.io`**
+  — `load_table` for the engine, `load_frame` only for small reads, `write_table` for output. Never
+  call `pd.read_csv` or name a DuckDB reader in a tool, check, notebook, or CLI: a format registers
+  its reader, its options **and how to write it back** in `core/io.py`, once, so support can't
+  arrive on one tier and not the other, and a format you can load but not save is a trap you find
+  at the end of a long run. `NA_TOKENS` lives there too, because a null rate that depends on which
+  reader ran is the exact disagreement `core/present.py` exists to stop.
+  - **CSV and Parquet.** Parquet carries its schema, so the CSV reader's sniffing stops being part
+    of the answer — and it is ~3.3× smaller (measured, ZSTD, on a real extract). Converting is a
+    one-off `COPY … TO … (FORMAT PARQUET, COMPRESSION ZSTD)`, not something portia ships: a tool
+    that rewrites someone's data is not a data-harmonization concern.
   - **The currency is `core.table.Table`** — a name, a `SELECT`, and a connection. A handle, not
     data. `head()` and `rows()` are the only ways out and both are capped; nothing else in `portia/`
     may materialize a relation (there is a test).

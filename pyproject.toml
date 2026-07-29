@@ -6,6 +6,11 @@ requires-python = ">=3.11"
 dependencies = [
     "duckdb>=1.5.5",
     "pandas>=2.0",
+    # DuckDB needs it to hand a TIMESTAMP WITH TIME ZONE back to python, and
+    # says so only by raising when it meets one. Real data met one immediately:
+    # a PHQ extract with a tz-aware column made every sample and every preview
+    # of that table fail. Small, pure python, and not optional in practice.
+    "pytz>=2024.1",
     "pyyaml>=6.0",
 ]
 

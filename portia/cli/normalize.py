@@ -12,7 +12,7 @@ import argparse
 from pathlib import Path
 
 from portia.core import store
-from portia.core.io import load_table
+from portia.core.io import load_table, write_table
 from portia.ops.normalize import apply_normalize, render_text
 
 
@@ -41,7 +41,7 @@ def main() -> None:
 
     if args.out:
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-        result.table.to_csv(args.out)
+        write_table(result.table, args.out)
         print(f"\nwrote {args.out}")
 
 
