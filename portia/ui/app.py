@@ -48,7 +48,7 @@ async def shell() -> None:
         screens.project_open()
     elif not engine.has_context(APP):
         screens.project_context()
-    elif not APP.sources and not APP.skipped_sources:
+    elif not APP.left_add_data and not APP.skipped_sources:
         screens.first_sources()
     else:
         await _window()

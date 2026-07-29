@@ -624,6 +624,37 @@ html body {
   max-width: 100%;
 }
 
+/* Add data: the content scrolls, the actions stay put.
+ *
+ * With twenty files added this column was 755px tall in a 727px window — the
+ * heading clipped off the top and the button that takes you to the project fell
+ * off the bottom, which reads as "nothing happened". Capping the column at the
+ * viewport and letting only the body scroll means the primary action is on
+ * screen no matter how much has been added. */
+.add-data {
+  max-height: 100vh;
+  overflow: hidden;
+}
+.add-data-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-lg);
+  min-height: 0;
+  overflow-y: auto;
+}
+.add-data-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-lg);
+  flex: 0 0 auto;
+}
+
+/* Indexing says what it is doing. A spinner on its own is the thing this
+ * replaces: it told you something was happening and nothing about what. */
+.indexing-status {
+  align-items: center;
+}
+
 /* The mark is a cut-out, so it sits on the canvas rather than in a tile. */
 .p-logo {
   width: 96px;
@@ -657,7 +688,14 @@ html body {
   border: 1px dashed var(--hairline-strong);
   border-radius: var(--r-lg);
   box-shadow: none;
-  max-height: none;
+  /* Quasar caps the uploader and scrolls its file list; this used to say
+   * `max-height: none`, which is fine for three files and wrong for twenty —
+   * the list grew past the screen in both directions and took the Continue
+   * button with it. The cap is back, a little taller than Quasar's default so
+   * a handful of files still show without scrolling. */
+  max-height: 320px;
+  display: flex;
+  flex-direction: column;
   /* the whole box is the target, so the whole box says so */
   cursor: pointer;
 }
@@ -685,6 +723,35 @@ html body {
   font-size: 12px;
   padding: 0 var(--sp-lg) var(--sp-md);
   min-height: 0;
+  /* the file list is what scrolls; the header stays put above it */
+  flex: 1 1 auto;
+  overflow-y: auto;
+}
+/* The header must not shrink away when the list fills the box. */
+.dropzone .q-uploader__header {
+  flex: 0 0 auto;
+}
+
+/* What has been added so far, on the screen that added it. Capped for the same
+ * reason the drop box is: a receipt for twenty files is still a receipt. */
+.added-list {
+  width: 100%;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+.added-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  min-width: 0;
+  padding: var(--sp-xs) var(--sp-md);
+  border-bottom: 1px solid var(--hairline);
+}
+.added-row:last-child {
+  border-bottom: none;
 }
 
 /* ── left pane — files & artifacts ────────────────────────────────────────── */

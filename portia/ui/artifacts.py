@@ -45,7 +45,7 @@ def pane() -> None:
 def _sources() -> None:
     c.section_header("Sources")
     if not APP.sources:
-        c.empty_note("No data indexed yet. Add a CSV to begin.")
+        c.empty_note("No data indexed yet. Add a file to begin.")
         return
     for name, entry in APP.sources.items():
         columns = len(entry.get("columns") or [])

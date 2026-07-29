@@ -12,7 +12,7 @@ What the app is allowed to call, and why each is on the list:
 - ``catalog.load_catalog`` — what the left pane and the source inspector show
 - ``spec.load_spec`` / ``spec.run_spec`` / ``spec.write_outputs`` /
   ``spec.write_report`` — the Run button and what it can save
-- ``core.io.load_table`` — previewing an output CSV (the one way to load data)
+- ``core.io.load_table`` — previewing a produced table (the one way to load data)
 - ``core.io.find_data_files`` — resolving what "add by path" points at
 - ``agent.session.run`` — a turn, driven with the app's own answer/confirm
 
@@ -20,7 +20,7 @@ The one thing here that isn't the engine is ``browse_for_folder``: the OS's own
 folder chooser, because picking a directory by typing its absolute path is not a
 thing anyone should be asked to do.
 
-Blocking work (profiling a CSV, executing a spec) is pandas and would freeze the
+Blocking work (profiling a source, executing a spec) hits the database and would freeze the
 websocket, so it goes through ``asyncio.to_thread``. Nothing here formats
 anything for a human — that is the panes' job.
 """
@@ -88,6 +88,10 @@ def open_project(path: str | Path, app: App) -> Path:
     app.skipped_sources = False
     app.editing = app.asking = app.removing = None
     refresh_catalog(app)
+    # A project that already has data is not being set up, so it opens on the
+    # workspace. The add-data screen is for the first time, and for whenever
+    # someone asks for it from the left pane.
+    app.left_add_data = bool(app.sources)
     remember(root)
     return root
 
@@ -179,11 +183,19 @@ def set_interpretation(
 # --- adding data ------------------------------------------------------------
 
 
-def store_upload(name: str, content: bytes, app: App) -> Path:
-    """Copy a dropped file into the project's data directory."""
-    target = app.root / DATA_DIR / Path(name).name
+async def store_upload(upload, app: App) -> Path:
+    """Copy a dropped file into the project's data directory.
+
+    Streams, through the upload's own ``save``. This used to be
+    ``write_bytes(await upload.read())``, and ``read()`` pulls the whole file
+    into memory — which throws away the spooling the upload already did and
+    turns a twenty-file drop of real extracts into twenty files' worth of RAM at
+    once. The rest of the engine stopped holding whole tables; the front door
+    should not be the one place that still does.
+    """
+    target = app.root / DATA_DIR / Path(upload.name).name
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(content)
+    await upload.save(target)
     return target
 
 
@@ -203,24 +215,41 @@ def resolve_data(target: str) -> list[Path]:
     return find_data_files(target)
 
 
-async def index(paths: list[Path], app: App) -> list[str]:
+async def index(paths: list[Path], app: App, *, on_progress=None) -> list[str]:
     """Profile each file into the catalog. Deterministic, free, always happens.
 
     The *interpretation* half is a model turn and is deliberately not here — the
     UI has to show them as two things because one of them costs money.
+
+    **One file per hop, so the screen can say which one.** This used to hand the
+    whole list to a single thread and come back when it was done, which for twenty
+    real extracts is a minute of a window that says nothing. ``on_progress(done,
+    total, name)`` is called before each file, on the event loop, so a caller can
+    redraw between them.
     """
-    names = await asyncio.to_thread(_index_all, paths, app.portia_dir, app.root)
+    con = await asyncio.to_thread(store.connect, app.catalog_dir)
+    names = []
+    try:
+        for done, path in enumerate(paths):
+            if on_progress is not None:
+                on_progress(done, len(paths), path.stem)
+            names.append(await asyncio.to_thread(_index_one, path, app.portia_dir, app.root, con))
+    finally:
+        await asyncio.to_thread(con.close)
     refresh_catalog(app)
     return names
 
 
-def _index_all(paths: list[Path], portia_dir: str, root: Path) -> list[str]:
-    names = []
-    for path in paths:
-        relative = path.resolve().relative_to(root) if path.resolve().is_relative_to(root) else path
-        catalog.index_source(relative, portia_dir=portia_dir)
-        names.append(path.stem)
-    return names
+def _index_one(path: Path, portia_dir: str, root: Path, con) -> str:
+    """One source into the store and the catalog, on the project's own connection.
+
+    The connection is shared across the batch deliberately: DuckDB takes a write
+    lock on the store, so opening one per file is both slower and a collision
+    waiting to happen.
+    """
+    relative = path.resolve().relative_to(root) if path.resolve().is_relative_to(root) else path
+    catalog.index_source(relative, portia_dir=portia_dir, con=con)
+    return path.stem
 
 
 # --- specs, runs, outputs ---------------------------------------------------
@@ -296,7 +325,7 @@ async def write_outputs(app: App) -> list[Path]:
 
 
 async def read_table(path: Path):
-    """A produced CSV as a lazy table — through the one loader, like everything else.
+    """A produced table, read lazily — through the one loader, like everything else.
 
     Nothing is read here. The pane that shows it asks for a count and fifteen
     rows; before this it loaded the whole file to show those fifteen, which was a
