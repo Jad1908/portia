@@ -215,12 +215,25 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
   - **A source's catalog entry replaces the workflow pane** while you read it, rather than sitting
     somewhere the graph stays visible. It works and it is discoverable ("Back to workflow"), but
     the middle pane is now two things.
-  - **The graph is a fixed grid.** No pan, no zoom, no collapsing a long chain; nodes are a uniform
-    size and a spec with many steps will run off the canvas before it stops reading.
+  - ~~**The graph is a fixed grid**~~ — *drag-to-pan and a dot grid landed 2026-07-27. Still no
+    zoom, no collapsing a long chain, and nodes are a uniform size that cannot be moved (deliberate:
+    the layout is the recorded sequence of decisions).*
   - **A denied write leaves no note in the spec.** The transcript records it; nothing durable does.
-  - **Nothing is editable.** `VISION.md` scoped that out on purpose; correcting an interpretation
-    still means opening the YAML.
+  - ~~**Nothing is editable**~~ — *fixed 2026-07-27: the brief is editable from the toolbar, and a
+    source's summary and roles are editable in place or correctable by asking the copilot
+    (`tasks/reinterpret.md`). Both write through `catalog.set_interpretation`, which touches
+    judgment and never a measured fact.*
   - **Drag-and-drop is unverified.** The picker and the "add by path" field are what got tested.
+  - **Groups are invisible in the UI.** The engine has them fully — `catalog.set_group`, a write
+    tool the copilot can call, and `agent/context.py` renders them into the L1 brief so a group
+    genuinely changes what the copilot sees. The app shows none of it: you cannot see a group, make
+    one, or assign to one, and if the copilot creates one during indexing the only way to know is to
+    open `project.yaml`. The read side is nearly free (they are already in `APP.catalog["groups"]`);
+    the real question is whether the left pane nests sources under group headings (cleaner, bigger
+    restructure of `artifacts.py`) or lists groups as a separate section (quick, slightly redundant).
+    Membership editing needs multi-select, the fiddliest widget in the app.
+  - **The source preview loads the whole file to show 15 rows.** Fine today, a straight bug at
+    multi-GB — fixed by the DuckDB migration, listed here so it is not lost if that slips.
 - **A copilot turn still disappears when the window does.** *Half of this closed 2026-07-27: a
   **spec run** can be saved as markdown (`Save report` → `runs/*.md`, or `cli.run --report`), and the
   left pane lists them.* What is still unwritten is the **turn** — questions asked, answers given,
@@ -238,9 +251,30 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
 
 ## Scale — data tiers
 
-- **DuckDB tier** — larger-than-memory local CSV/Parquet behind the same checks/ops interface (swap,
-  not rewrite). Also the natural home for the SQL escape hatch.
+- **DuckDB tier — specced 2026-07-27, `docs/DUCKDB_MIGRATION.md`. Promoted out of the backlog into
+  `PLAN.md` item 4, because it is now a blocker rather than an eventual concern.** The measurements
+  that moved it: profiling one 396 MB CSV costs **1883 MB and 16.5 s** in pandas (4.8× the file) and
+  **122 MB / 0.3 s** in DuckDB; an 80M-row join — portia's fan-out case — can be *counted* in 0.4 s
+  without being built, which pandas cannot do at all on real data. Read the spec before touching
+  `checks` or `ops`; three of its traps (the escape hatch's sandbox, pandas' `_x`/`_y` suffixes that
+  `outcome` depends on, and type-inference parity) corrupt behaviour quietly if found late.
+- **Indexing does not leak, and that was worth knowing.** Profiling the same file four times:
+  620 → 728 → 832 → 777 MB — it plateaus, the frame is released, the memory is reused. RSS never
+  returns to the OS (allocator, not a leak), so the process looks like it permanently holds ~3.5× the
+  largest file. Sequential indexing of many files costs roughly the *largest* one, not the sum.
+- **Profiling cost is text columns, overwhelmingly.** At 2M rows: int column 0.03 s, high-cardinality
+  text column 2.45 s — ~80×. The causes are a Python-level `isinstance` pass over every value in
+  `profiling._flags`, plus `nunique`/`value_counts` building hash tables over every distinct value.
+  Both vanish in SQL; noted here in case the migration is ever descoped.
+- **A referentially-consistent subset extractor.** The copilot never sees data, only profiles — so
+  slicing every table to rows reachable from a chosen set of ids preserves schemas, key overlap,
+  spelling mismatches and fan-out, and tests the *judgment* question at 1/100th the size, today.
+  Naive per-table sampling does **not** work: independently sampled tables stop sharing keys and
+  every join looks empty. Worth building as a fixture generator whether or not the migration lands
+  first (`DUCKDB_MIGRATION.md` §11).
 - **Snowflake tier** via the Snowflake MCP server — push compute to the warehouse, pull small results.
+  The `Table` abstraction the DuckDB migration introduces is the seam it will use; the migration
+  should not close that door.
 
 ## Core / infra
 

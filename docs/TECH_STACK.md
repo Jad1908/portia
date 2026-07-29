@@ -40,6 +40,11 @@ infrastructure and frontend surface, stay in Python wherever we can, and keep th
   `core.io.load_frame` into pandas, and a SQL step runs over registered in-memory DataFrames. The
   larger-than-memory tier below is still unbuilt — the dependency arrived early for expressiveness,
   not for scale.*
+- **The scale tier is now measured and specced — `docs/DUCKDB_MIGRATION.md` (2026-07-27).** The
+  pandas ceiling is no longer theoretical: profiling one 396 MB CSV peaks at **1883 MB — 4.8× the
+  file — and takes 16.5 s**, while the same facts in DuckDB cost **122 MB and 0.3 s**, and an
+  80M-row join can be *counted* in 0.4 s / 228 MB without being built. Memory stops scaling with the
+  input and starts scaling with the answer. Read that document before touching `checks` or `ops`.
 - **DuckDB only for scale.** pandas has one hard limit — it loads everything into RAM — and the
   product's premise is data too big to eyeball / too big to be local. DuckDB is the local answer:
   `pip install duckdb`, **embedded (no server)**, reads larger-than-memory CSV/Parquet, and
@@ -56,8 +61,14 @@ infrastructure and frontend surface, stay in Python wherever we can, and keep th
   (BYO creds, local).
 - **Compute stays behind a checks layer.** Each check is a small function (e.g.
   `join_report(left, right, keys) -> {...}`) returning structured evidence. Whether it counts
-  with pandas, DuckDB, or Snowflake is an implementation detail — so pandas → DuckDB/Snowflake is
-  a **swap, not a rewrite**, and the copilot/spec logic never changes.
+  with pandas, DuckDB, or Snowflake is an implementation detail — so the copilot and the spec logic
+  never change.
+  - **Honest correction to "a swap, not a rewrite" (2026-07-27).** The seam does what it promised
+    where it matters most: the *evidence dicts, tool signatures and prompts are untouched* by the
+    DuckDB migration, which is the expensive half. But every *implementation* behind them has to be
+    rewritten — `profiling`, `join`, `outcome`, `apply_join`, `apply_normalize`, `run_spec`. The
+    seam bounds the blast radius; it does not make the change free. `DUCKDB_MIGRATION.md` §5 is the
+    file-by-file list.
 - **Entity resolution:** `rapidfuzz` (+ optionally `recordlinkage` / `dedupe`) for blocking and
   fuzzy scoring.
 

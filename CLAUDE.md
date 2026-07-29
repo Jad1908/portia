@@ -13,6 +13,9 @@ stack, and product vision. Read them every session, before proposing changes or 
   rule — *color and prominence communicate kind, never rank* — which is "facts vs judgment" applied
   to pixels.
 - `docs/brief.md` — the original working brief (foundational context)
+- `docs/DUCKDB_MIGRATION.md` — **the scale tier**: why pandas caps us, the measurements, and the
+  file-by-file plan to move `checks`/`ops`/`spec` onto DuckDB without changing anything the copilot
+  reads. Required reading before touching `checks/`, `ops/`, or `core/io.py`.
 - `docs/BACKLOG.md` — parking lot of deferred ideas, by stream. Not required reading; scan it when
   picking the next thing to build, and **add to it whenever we postpone something mid-work.**
 
@@ -49,6 +52,10 @@ adding code, and extend them rather than working around them:
 - **One way to load data.** All file reading goes through **`portia.core.io.load_frame`**
   (dispatches by format). Never call `pd.read_csv`/`read_parquet` in a tool, check, notebook, or
   CLI — register new formats in `core/io.py`, once. This is also the pandas → DuckDB/Snowflake seam.
+  - **It has a hard ceiling, and it is measured.** pandas needs ~2.4× a CSV's size to hold it and
+    ~4.8× to profile it, and `run_spec` holds every source *and* every intermediate at once. Anything
+    past a few hundred MB per file does not work today. `docs/DUCKDB_MIGRATION.md` is the plan; until
+    it lands, do not add code that assumes a whole table fits in memory.
 - **One way to emit evidence.** Checks return **compact, JSON-serializable dicts** built with
   **`portia.core.serialize`** (`to_jsonable`, `round_float`, `to_json`). Never hand-roll
   numpy→python coercion or float rounding — `int64` isn't JSON-serializable and `NaN` isn't valid JSON.
