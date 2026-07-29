@@ -14,6 +14,13 @@ escape hatch to Haiku and watched it **never reach for it** — the fixture's fa
 correct handling the spec can express, and the model did not take it. Read Runs 5, 6 and 7 below
 before trusting either the gate or the good news.
 
+**Run 8 (2026-07-29) moved the diagnosis.** First run on real data — 23 PHQ sources, 4.8 GB — and
+the model planned a join without measuring anything: zero `profile_source`, zero `join_findings`,
+and it ended by *asking permission* to measure. The joins it proposed match **0 keys**, which two
+0.02 s queries said afterwards. The engine is no longer the constraint; the copilot's reluctance to
+use it is. A candidate cause sits in our own prompt, which still calls profiling **"Expensive…
+Not for browsing"** from when that was true of pandas.
+
 **The one run that would move this forward:** `claude-opus-5`, reaching `chat ask` and getting as
 far as a `record_step`. It answers three open questions at once — does it use the hatch, does it
 ask before acknowledging, and does the whole sequence read differently now that a correct move
@@ -563,6 +570,90 @@ Whether that caused the section to be skipped is **unknown and not asserted here
 plausible contributor, it got worse when the file more than doubled, and unwrapping *within*
 paragraphs while keeping blank lines and list starts is a small change. It touches every prompt the
 model reads, so it deserves its own before/after against this run — filed in `BACKLOG.md`.
+
+---
+
+## Run 8 (2026-07-29) — the first run on real data. It plans, and it does not measure. **Fails.**
+
+`claude-haiku-4-5` at low effort, ~$0.09, on the PHQ project: **23 indexed sources, 4.8 GB, largest
+table 102M rows**, catalog written by a prior indexing session. The goal was framed read-only —
+join the 34,214-row golden hotel list to PHQ event data — and it wrote nothing, as asked.
+
+**This run is not scored against `pass_criteria` and cannot be.** There is no answer key for real
+data; that is the whole reason the fixture exists. What it can settle is behavioural, and it
+settles one thing cleanly: **whether the model climbs the disclosure ladder when the answer is one
+free tool call away.**
+
+It does not. Across the whole turn: several `describe_source` calls, **zero `profile_source`, zero
+`join_findings`**. It produced a well-organised two-path join plan, annotated its own gaps
+`(unknown key, needs checking)`, gave it a section headed *"Critical Unknowns (Need to Measure)"* —
+and closed by asking permission to do the measuring:
+
+> *"What I'd recommend measuring next: Profile `VBPPRED_TR_LOCMAP`… Do you want me to measure those
+> three things, or would you prefer to tell me which path you want to take?"*
+
+The prompt had told it, in as many words, to measure what each join would do before claiming
+anything.
+
+### What one `count(*)` would have said
+
+Its Path B was built on `VBPPRED_TR_LOCMAP`, which it called *"the bridge"* for 34,214 hotels.
+**That table has 56 rows** — a hand-maintained region lookup (Noord-Holland → Amsterdam,
+Illinois → Chicago). It cannot bridge anything at that cardinality.
+
+Then the two joins it asked permission for, run afterwards on the same store:
+
+| proposed join | distinct keys matched |
+|---|---|
+| `golden.LOCATION` = `DETAILS.LOCATION_NAME` | **0 of 4** |
+| `golden.ADDRESS_3_CITY` = `DETAILS.LOCATION_NAME` | **0 of 5,722** |
+
+**0.02 s each.** And the evidence says *why* immediately, which is the part that matters:
+`golden.LOCATION` is not a place. Its four values are `PRIME LOCATION`, `SECONDARY LOCATION`,
+`OTHER LOCATION AND SUBURBS`, `TO FILL`, and it is **51.4% null** — a site-quality grade. The model
+proposed joining on it because the name reads like a place; it never looked at a value or a
+distinct count, both of which are in `profile_source`'s ordinary output.
+
+`ADDRESS_3_CITY` *is* a real city column, and dirty in the way this project exists to surface:
+`' MALTA'` with a leading space, `'"COEUR D&#39,ALENE"'` with HTML-escaped punctuation.
+
+### A candidate cause, and this one is in our own prompt
+
+Run 7's candidate cause was formatting. This one is wording, and it is more likely.
+
+`profile_source.md` opens its second paragraph with **"Expensive — the detailed rung"** and closes
+it with **"Not for browsing."** `copilot.md` frames the ladder as *"start with the cheap one and
+climb only when you need to… Climbing costs tokens, so don't browse."*
+
+Both were written when profiling meant pandas reading a whole file. **The DuckDB migration made the
+computation nearly free** — the measurements above cost 0.02 s against a 100M-row store — but the
+prompt still prices it as scarce, and it is the only cost signal the model has. A model told a rung
+is expensive and not for browsing, facing 23 sources, doing exactly what it was told to do, looks
+like this.
+
+What is genuinely still expensive is the **tokens of the returned evidence**, not the work. The
+prompt conflates the two. Separating them is a small edit with a clean before/after against this
+run — filed in `BACKLOG.md`. **Not asserted as the cause**: it is one plausible contributor, on a
+model that has under-reached in five consecutive runs.
+
+### What this run is evidence for
+
+**The engine got fast enough that the copilot's caution is now the bottleneck.** Every measurement
+in this write-up used tools the model already had, on data it already had indexed, at a cost it
+would not have noticed. Nothing here is an engine gap.
+
+It also does **not** support building a layer that flags "suspicious" columns for it. A 4-value
+column named `LOCATION` next to a real `ADDRESS_3_CITY` is exactly the judgment call the agent
+exists to make, and the distinct count that gives it away is already in the evidence. Ranking that
+for the model is the deterministic-planner mistake this project already reversed — see `CLAUDE.md`
+→ "facts vs judgment". **The fix is to stop discouraging the call, not to make the call for it.**
+
+### A caveat on this write-up
+
+Only the last 90 lines of the transcript were kept, so *how it ended* is characterised with
+confidence and the **full tool-call sequence is not**. The `describe_source`-only claim is from that
+tail plus the absence of any profile in the session's output. This is the run-log gap
+(`PLAN.md` item 6) biting for the eighth consecutive run, and this time it degraded a finding.
 
 ---
 

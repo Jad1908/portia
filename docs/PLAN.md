@@ -82,6 +82,15 @@ Runs 1–5 failures now read as **capability rather than architecture**. Read **
 before building on top of any of it — it separates what the engine can do from what the copilot has
 been shown to do.
 
+**Run 8 (2026-07-29) moved that diagnosis, and it is the first run on the real data.** 23 PHQ
+sources, 4.8 GB indexed, a read-only goal. The model planned a two-path join, annotated its own
+gaps *"Critical Unknowns (Need to Measure)"*, and **measured none of them** — zero `profile_source`,
+zero `join_findings` — then asked permission to measure. Both joins it proposed match **0 keys**,
+which two 0.02 s queries established afterwards; one of them was on a 4-value, 51%-null column
+called `LOCATION` that turns out to be a site-quality grade. **The engine is no longer the
+constraint.** The nearest candidate cause is in our own prompt, which still calls profiling
+*"Expensive… Not for browsing"* from when that described pandas.
+
 **Shipped, in the order it happened:**
 
 1. **The escape hatch** (2026-07-26, `ops/sql.py`). The agent declares `inputs` and authors one
@@ -116,11 +125,15 @@ been shown to do.
 
 **Next, in order:**
 
-4. **The PHQ test — the one all of this was waiting for.** ~20 tables, now indexable. Two things to
-   expect rather than discover: **cardinality, not the store, is the ceiling** (§13), and `fan_out`
-   fires on every fact-to-dimension join because it reads either side's key multiplicity rather than
-   the result's — at this scale that is how a real warning gets learned as noise. Worth fixing that
-   flag before reading much into a run.
+4. **The PHQ test — begun 2026-07-29, and it already changed the next question.** 23 sources are
+   indexed and interpreted, and the engine held: cardinality is the ceiling as §13 predicted, not
+   the store. The first goal turn is **Run 8**, and it says the constraint has moved from the engine
+   to the copilot — it planned a join over 4.8 GB without measuring anything. So the useful order
+   now is: **fix the prompt's cost signal first (`BACKLOG.md` → Agent), then re-run the same goal.**
+   A model that won't call `profile_source` makes every other finding on this dataset unreadable.
+   Still true and still worth doing before reading much into a run: `fan_out` fires on every
+   fact-to-dimension join because it reads either side's key multiplicity rather than the result's,
+   which at this scale is how a real warning gets learned as noise.
 
 5. **Make the consequence of a zero a computed fact, rendered where the human answers.** Run 5's
    override was taken alone, and the instruction it skipped ("tell the user what a total would be

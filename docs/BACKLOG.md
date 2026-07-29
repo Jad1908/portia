@@ -28,9 +28,11 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
   what actually multiplies the *result*, not on either side's multiplicity — but that changes a flag
   the copilot reads, so it needs its own review.
 - **`handlers.profile_source` re-reads the file rather than the store.** It goes through
-  `profile_path`, which is DuckDB-backed and memory-bounded, but re-parses the CSV on every call
-  where a store read would be ~20× faster. Needs the project connection to reach `handlers`, which
-  is really the connection-lifecycle question step 9 has to answer anyway.
+  `profile_path`, which is DuckDB-backed and memory-bounded, but re-parses the source file on every
+  call where a store read would be ~20× faster. Needs the project connection to reach `handlers`,
+  which is really the connection-lifecycle question step 9 has to answer anyway. **Run 8 raises the
+  stakes**: the fix above wants the model calling `profile_source` far more often than it does
+  today, and this is the path that call takes.
 
 ## Ops — execution (trusted transforms)
 
@@ -120,6 +122,17 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
   case — it surfaces as `empty_output` or `source_did_not_contribute`, derived from the output
   rather than from the op's flags. The immutability message no longer says "pick another id".*
   **Verified against the engine, not yet against the agent** — see `EVALUATION.md`.
+- **The prompt still prices profiling as expensive, and DuckDB made it nearly free.**
+  `prompts/tools/profile_source.md` says *"Expensive — the detailed rung"* and *"Not for browsing"*;
+  `copilot.md` says *"Climbing costs tokens, so don't browse."* Both were written against a pandas
+  engine that read a whole file to profile it. Post-migration a profile is a DuckDB aggregate —
+  Run 8 measured two candidate joins over a 100M-row store in **0.02 s each**, after the model had
+  declined to measure them and asked permission instead. What is still costly is the **tokens of
+  the returned evidence**, not the work, and the prompt conflates the two. Separate them: keep
+  "don't dump twenty profiles into context", drop the language that reads as "this call is
+  expensive". **Cheap to try, with a clean before/after against Run 8** — the same shape of
+  experiment as the `prompts.tool()` line-collapsing one below, and these two should not be run in
+  the same session or neither result means anything.
 - **A grain claim can be widened until it passes — the loop's open hole.** Run 3 was refused on
   `grain: [booking_id]`, then recorded `grain: [booking_id, event_name]` and passed: `event_name`
   is the column the fan-out varies over, so the claim is a tautology. It didn't override the gate,
@@ -188,6 +201,14 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
   cloud Hobby tier: 50k units/month, 30-day retention, 2 seats). The SDK drives Claude Code as a
   *subprocess*, so client auto-instrumentation sees nothing — `events.py` is the only sane
   emission point, which is also why the JSONL is not throwaway work.
+- **Outputs are hardcoded to CSV, on an engine that now reads and writes Parquet.**
+  `spec.write_outputs` builds `out / f"{r.id}.csv"`, so a multi-GB result lands as CSV — the format
+  the Parquet work exists to get away from, and the one whose type sniffing we removed from the
+  answer. The plumbing is already there: `write_table` dispatches on the extension and the code
+  comment beside that line says pointing it at `.parquet` is the whole change. What is missing is
+  the *decision* — a project-level output format, or per-spec, and whether the human-opens-it-in-
+  Excel argument (see the item below) outweighs it. Note the two pull opposite ways, so decide them
+  together.
 - **Generated data has nowhere to live.** `run_spec --write` dumps `<step-id>.csv` and nothing
   knows it exists. Needs: a **code-owned** layout (`outputs/` at the project root for the data —
   users open these in Excel — index entry in `.portia/`), auto-profiling (free) but **not**
@@ -241,6 +262,14 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
   on screen at any window height, and the interpretation turn is deferred to Continue so it runs
   where the Indexing tab can show it. It used to fire on a screen with no transcript: you paid for
   a turn and watched a blank page.*
+- **The left pane can only see specs in `specs/`, and nothing makes the agent write there.**
+  `ui/engine.specs_in()` globs `<root>/specs/*.yaml`, non-recursively. The path is the agent's
+  choice — `record_step` takes whatever it is given, and `specs/<name>.yaml` is a *hint* in prompt
+  text, not a constraint. A spec written to `phq.yaml` or `output/spec.yaml` therefore exists, runs,
+  and is invisible in the app, which reads as "it didn't create one". Two candidate fixes and they
+  are not equivalent: glob the project recursively (the pane shows what is there), or make
+  `record_step` refuse a path outside `specs/` (the tree stays predictable, which is what
+  `BACKLOG`'s "generated data has nowhere to live" item also wants). Prefer the second.
 - **The add-data copy is derived from the loader; nothing else is.** `screens._formats()` reads
   `supported_suffixes()`, so registering a format updates the screen with no edit. Worth doing the
   same wherever else a format is named in prose — `VISION.md` had six.
