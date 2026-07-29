@@ -797,6 +797,12 @@ the spec did not say:
   before it was built: it invites reading two columns of counts as better-and-worse, which is the
   one thing this section says the numbers cannot support. Find the two runs in `list`, read them.
 
+The app got the same thing the same day: a **Turns** section in the left pane, and a replay in the
+middle one — the summary above it computed by `engine.turn_summary`, which *is* `runlog.summary`,
+so the window and `cli.runs` cannot quote two different numbers for how often the copilot asked.
+Replaying reuses the transcript panel's own renderers, and building it caught a real reading bug:
+drawing both the question **and** its answer listed every question twice, which reads as the
+copilot having asked it twice. A resolved question is one row, exactly as the live panel shows it.
+
 **Not yet done:** no run has been scored *using* it, so its value is argued rather than
-demonstrated — the first real test is Run 9. It also does not surface in the app yet; the Runs pane
-still lists only saved spec reports.
+demonstrated — the first real test is Run 9.

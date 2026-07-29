@@ -190,6 +190,25 @@ def find(name: str, portia_dir: str | Path = DEFAULT_DIR) -> Path | None:
     return next((p for p in candidates if p.stem == name or p.stem.startswith(name)), None)
 
 
+def read_header(path: str | Path) -> dict[str, Any]:
+    """Just the header, without parsing the transcript under it.
+
+    A list of turns wants the model and the prompt and nothing else, and a
+    transcript is mostly tool results — a profile of a wide table is kilobytes.
+    Reading one line to draw one row keeps a pane that redraws on every event
+    from re-parsing every past run each time.
+    """
+    with Path(path).open(encoding="utf-8") as handle:
+        first = handle.readline()
+    try:
+        record = json.loads(first)
+    except ValueError:
+        return {}
+    if not isinstance(record, dict) or record.get("kind") != HEADER:
+        return {}
+    return record.get("data") or {}
+
+
 def read(path: str | Path) -> Run:
     """Parse a log back into a header and a list of events.
 

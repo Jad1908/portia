@@ -30,7 +30,7 @@ from portia.checks.outcome import BLOCKING_FLAGS, describe_contribution, describ
 from portia.core.present import format_rate
 from portia.ui import components as c
 from portia.ui import engine, graph, state
-from portia.ui.state import APP, OUTPUT, RUN, SOURCE
+from portia.ui.state import APP, OUTPUT, RUN, SOURCE, TURN
 
 #: How tall the graph half sits by default, as a percentage. The report half is
 #: the taller of the two — it is where the evidence is (DESIGN.md → Layout).
@@ -46,6 +46,8 @@ async def pane() -> None:
         await _output_inspector(name)
     elif kind == RUN:
         await _run_inspector(name)
+    elif kind == TURN:
+        await _turn_inspector(name)
     else:
         _workflow()
 
@@ -584,6 +586,75 @@ async def _run_inspector(name: str) -> None:
             c.empty_note("that report is gone")
             return
         c.markdown(await engine.read_text(path))
+
+
+async def _turn_inspector(name: str) -> None:
+    """A logged copilot turn, replayed (`portia/runlog.py`).
+
+    Here rather than in the right pane on purpose. The right pane is the *live*
+    copilot, and reading a past turn should not cost you the turn you are in the
+    middle of; this is also the widest pane, which is what a transcript wants.
+
+    The counts above it are the engine's — `engine.turn_summary`, the same
+    function `cli.runs` prints — because the day the window and the terminal
+    disagree about how many times the copilot asked, someone has to work out
+    which to believe.
+    """
+    from portia.ui import transcript
+
+    path = engine.turn_path(APP, name)
+    with ui.element("div").classes("p-scroll p-pad stack-lg"):
+        _inspector_header(name, "a copilot turn, as it happened")
+        if not path.exists():
+            c.empty_note("that turn is gone")
+            return
+        run = await engine.read_turn(path)
+        _turn_facts(engine.turn_summary(run))
+        c.rule()
+        transcript.replay(run)
+
+
+def _turn_facts(summary: dict) -> None:
+    """What the turn was and what it did — counts, in uniform badges.
+
+    Every one of these is a cost-and-behaviour descriptor and none of them is a
+    verdict: "asked three times" is neither good nor bad without knowing whether
+    it should have (docs/EVALUATION.md). So they are the same size, in a fixed
+    order, with no colour to say one matters more — `DESIGN.md`'s rule that
+    prominence communicates kind and never rank.
+    """
+    with ui.element("div").classes("stack-sm"):
+        with ui.element("div").classes("row-gap-sm"):
+            c.mono(str(summary.get("model") or "?"), color="c-ink")
+            if summary.get("effort"):
+                c.caption(f"effort {summary['effort']}")
+            c.caption(str(summary.get("started") or ""))
+            if summary.get("portia_sha"):
+                c.caption(f"portia {summary['portia_sha']}")
+        ui.label(str(summary.get("prompt") or "")).classes("t-body c-body pre-wrap")
+        with ui.element("div").classes("row-gap-sm"):
+            c.fact("build", summary.get("tools"), "tool calls")
+            c.fact("help_outline", summary.get("questions"), "questions asked")
+            c.fact("edit_note", summary.get("approved"), "writes allowed")
+            c.fact("block", summary.get("refused"), "writes refused")
+            c.fact("swap_vert", _tokens(summary), "tokens in / out")
+            c.fact("payments", _turn_cost(summary), "estimated cost")
+        if summary.get("sequence"):
+            c.collapsed(
+                "tools, in the order they were called",
+                lambda: c.mono(" → ".join(summary["sequence"]), color="c-mute", small=True),
+            )
+
+
+def _tokens(summary: dict) -> str:
+    """Whole input, not the SDK's uncached field — see `runlog._tokens`."""
+    sent, got = summary.get("input_tokens"), summary.get("output_tokens")
+    return "—" if sent is None or got is None else f"{sent:,} / {got:,}"
+
+
+def _turn_cost(summary: dict) -> str:
+    cost = summary.get("cost_usd")
+    return "—" if not cost else f"~${cost:.4f}"
 
 
 async def _output_inspector(name: str) -> None:

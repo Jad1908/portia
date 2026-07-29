@@ -180,6 +180,11 @@ adding code, and extend them rather than working around them:
   - **`ui/engine.py` is the only module in here that calls the engine**, and **nothing in `ui/`
     computes**. A panel that wants a number the engine doesn't expose is a signal to add it to
     `checks`/`spec`, not to calculate it in a widget.
+  - **Runs and Turns are two sections because they are two artifacts.** A *run* executed a spec
+    (markdown, project-root `runs/`); a *turn* was the copilot deciding what the spec should say
+    (JSONL, `.portia/runs/`, `runlog.py`). Selecting a turn replays it through `transcript`'s own
+    renderers — one set of renderers, live and replayed, or the window ends up with a second
+    opinion about a turn that is already written down.
   - `state.py` and `graph.py` import no NiceGUI, so the app's logic is testable without a browser.
   - The look lives in `ui/assets/portia.css` as `DESIGN.md`'s tokens — not in Python strings, and
     not in NiceGUI APIs, so swapping the framework stays cheap (`TECH_STACK.md`).

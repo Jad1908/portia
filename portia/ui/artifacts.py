@@ -18,27 +18,29 @@ from nicegui import ui
 from portia import catalog
 from portia.ui import components as c
 from portia.ui import engine
-from portia.ui.state import APP, OUTPUT, RUN, SOURCE, SPEC
+from portia.ui.state import APP, OUTPUT, RUN, SOURCE, SPEC, TURN
 
-ICON = {SOURCE: "table_chart", SPEC: "account_tree", OUTPUT: "description", RUN: "history"}
+ICON = {
+    SOURCE: "table_chart",
+    SPEC: "account_tree",
+    OUTPUT: "description",
+    RUN: "history",
+    TURN: "forum",
+}
 
-#: A spec run can be saved (Save report → `runs/*.md`). A **copilot turn** still
-#: cannot: the run log is specced but unbuilt (docs/EVALUATION.md), so say which
-#: half exists rather than implying every past turn is somewhere to be found.
 RUNS_NOTE = "No saved runs. Press Run, then Save report."
-TURNS_NOTE = (
-    "Copilot turns aren't logged yet — a turn lives in the transcript until the window closes."
-)
+TURNS_NOTE = "No copilot turns yet. Type a goal and press Go."
 
 
 @ui.refreshable
 def pane() -> None:
-    """Sources · Specs · Outputs · Runs, in that order."""
+    """Sources · Specs · Outputs · Runs · Turns, in that order."""
     with ui.element("div").classes("p-scroll"):
         _sources()
         _specs()
         _outputs()
         _runs()
+        _turns()
     _add_data_affordance()
 
 
@@ -104,7 +106,40 @@ def _runs() -> None:
             selected=APP.is_selected(RUN, path.name),
             on_click=lambda p=path: _select(RUN, p.name),
         )
-    c.empty_note(TURNS_NOTE)
+
+
+def _turns() -> None:
+    """Logged copilot turns — its own section, and its own word.
+
+    A *run* executed a spec; a *turn* was the copilot deciding what the spec
+    should say. Two artifacts, two headings: the pane's job is to say what
+    portia knows about, and one heading covering both would make "run" mean two
+    things in the one place that has to be unambiguous.
+
+    The model is the meta, because it is the thing you are usually looking for.
+    `EVALUATION.md` can only compare two runs when they differ in the model and
+    effort and nothing else, so that is the first question asked of this list.
+    """
+    c.section_header("Turns")
+    turns = engine.turns_in(APP)
+    if not turns:
+        c.empty_note(TURNS_NOTE)
+        return
+    for path in turns:
+        c.artifact_row(
+            name=path.stem,
+            icon=ICON[TURN],
+            meta=_turn_meta(path),
+            selected=APP.is_selected(TURN, path.name),
+            on_click=lambda p=path: _select(TURN, p.name),
+        )
+
+
+def _turn_meta(path: Path) -> str:
+    """The turn's model, short enough for a 260px pane."""
+    header = engine.turn_header(path)
+    model = str(header.get("model") or "")
+    return model.replace("claude-", "")
 
 
 def _add_data_affordance() -> None:

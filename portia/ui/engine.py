@@ -15,6 +15,10 @@ What the app is allowed to call, and why each is on the list:
 - ``core.io.load_table`` — previewing a produced table (the one way to load data)
 - ``core.io.find_data_files`` — resolving what "add by path" points at
 - ``agent.session.run`` — a turn, driven with the app's own answer/confirm
+- ``runlog.runs_in`` / ``read`` / ``read_header`` / ``summary`` — past copilot
+  turns for the Turns section and the replay. The summary in particular: those
+  counts are the engine's, so the window and `cli.runs` cannot end up quoting
+  two different numbers for how often the copilot asked.
 
 The one thing here that isn't the engine is ``browse_for_folder``: the OS's own
 folder chooser, because picking a directory by typing its absolute path is not a
@@ -36,7 +40,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from portia import catalog
+from portia import catalog, runlog
 from portia import spec as spec_module
 from portia.core import store
 from portia.core.io import find_data_files, load_table
@@ -48,7 +52,10 @@ from portia.ui.state import App
 DATA_DIR = "data"
 OUT_DIR = "out"
 
-#: Saved run reports. The Runs section of the left pane lists these.
+#: Saved *spec run* reports, at the project root. The Runs section lists these;
+#: the Turns section lists copilot turns, which are a different artifact living
+#: inside `.portia/` (`runlog.RUNS_DIR`). Same word, two things — hence two
+#: sections and two headings.
 RUNS_DIR = "runs"
 
 #: Recently opened projects. Not project state, so it lives with the user rather
@@ -313,6 +320,41 @@ async def write_report(app: App) -> Path | None:
 
 async def read_text(path: Path) -> str:
     return await asyncio.to_thread(path.read_text)
+
+
+# --- logged copilot turns ---------------------------------------------------
+
+
+def turns_in(app: App) -> list[Path]:
+    """Logged copilot turns, newest first (`portia/runlog.py`).
+
+    Not the same thing as `runs_in`, which lists saved *spec run* reports. A
+    turn is how the recipe was decided; a run is what the recipe did.
+    """
+    return runlog.runs_in(app.catalog_dir)
+
+
+def turn_path(app: App, name: str) -> Path:
+    """Where a named turn's log lives. Resolved here, so no panel has to know
+    that turns sit inside `.portia/` while saved run reports sit beside it."""
+    return app.catalog_dir / runlog.RUNS_DIR / name
+
+
+def turn_header(path: Path) -> dict:
+    """A turn's header alone — one line, for drawing a list row."""
+    return runlog.read_header(path)
+
+
+async def read_turn(path: Path) -> runlog.Run:
+    """One logged turn, off disk. A long transcript is a file read, so it goes
+    to a thread like every other read here."""
+    return await asyncio.to_thread(runlog.read, path)
+
+
+def turn_summary(run: runlog.Run) -> dict:
+    """The turn's own counts. Computed by the engine, never by a panel — the
+    app must not arrive at a different number than `cli.runs` does."""
+    return runlog.summary(run)
 
 
 async def write_outputs(app: App) -> list[Path]:
