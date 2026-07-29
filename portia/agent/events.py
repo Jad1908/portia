@@ -24,8 +24,16 @@ TOOL_RESULT = "tool_result"  # the evidence it got back
 QUESTION = "question"  # a decision surfaced to the human
 ANSWER = "answer"  # what the human said back
 APPROVAL = "approval"  # a write is waiting on a yes/no
+APPROVAL_RESULT = "approval_result"  # …and what the human said
 RESULT = "result"  # the turn ended
 ERROR = "error"
+
+#: The in-process MCP server namespaces every portia tool. That prefix is an
+#: artifact of how the SDK is wired, not part of the name anyone means, so
+#: stripping it is knowledge about the event's own data rather than a rendering
+#: choice — which is why it lives here and not in five renderers, all of which
+#: had grown their own copy of the same `.replace`.
+TOOL_PREFIX = "mcp__portia__"
 
 
 @dataclass(frozen=True)
@@ -120,3 +128,20 @@ def question_event(questions: list[dict]) -> Event:
 def answer_event(answers: dict[str, Any]) -> Event:
     """The human's reply — question text -> chosen label(s) or free text."""
     return Event(ANSWER, {"answers": answers})
+
+
+def approval_result_event(tool_name: str, allowed: bool) -> Event:
+    """Whether the human let a write through.
+
+    `APPROVAL` says a write stopped for a yes/no; on its own it never says which
+    was given, so a stream carrying only that can't answer *"how many writes
+    were refused"* — one of the few things a run log can measure without an
+    answer key (docs/EVALUATION.md → the run log). The engine already knows the
+    answer here; it just wasn't telling anyone.
+    """
+    return Event(APPROVAL_RESULT, {"name": tool_name, "allowed": bool(allowed)})
+
+
+def tool_label(name: str) -> str:
+    """A tool name as a human means it — `mcp__portia__profile_source` → `profile_source`."""
+    return name.replace(TOOL_PREFIX, "")

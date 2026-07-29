@@ -17,6 +17,7 @@ import asyncio
 import sys
 from typing import Any
 
+from portia import runlog
 from portia.agent import events, prompts
 
 # --- rendering (formatting lives at the edge, never in the engine) -----------
@@ -28,7 +29,7 @@ def render(event: events.Event) -> None:
     elif event.kind == events.THINKING:
         print("  · thinking…")
     elif event.kind == events.TOOL_CALL:
-        name = event.data["name"].replace("mcp__portia__", "")
+        name = events.tool_label(event.data["name"])
         detail = event.data.get("input") or {}
         args = ", ".join(f"{k}={v!r}" for k, v in detail.items() if k != "portia_dir")
         print(f"  → {name}({args[:120]})")
@@ -99,7 +100,7 @@ def _parse(reply: str, options: list[dict]) -> Any:
 
 
 async def confirm_write(tool_name: str, tool_input: dict) -> bool:
-    name = tool_name.replace("mcp__portia__", "")
+    name = events.tool_label(tool_name)
     print(f"\n  !  {name} wants to write:")
     for key, value in tool_input.items():
         if key == "portia_dir":
@@ -115,15 +116,22 @@ async def confirm_write(tool_name: str, tool_input: dict) -> bool:
 async def run_and_render(
     prompt: str, *, model: str, effort: str | None = None, cwd: str, portia_dir: str
 ) -> None:
-    """Drive one copilot turn and render its events. Shared with `cli.index`.
+    """Drive one copilot turn, render its events, and log them.
 
     The banner is not decoration: the default is deliberately a small model
     (`PLAN.md` → Budget & model discipline) and a run on a flagship costs orders
     of magnitude more. A turn should never be able to spend that silently.
+
+    The log is a tee, and it belongs here rather than in the engine: this is the
+    edge, and `agent/events.py` stays a seam rather than becoming a logging
+    framework (`portia/runlog.py`). What the terminal *shows* is unchanged — the
+    log keeps the events the renderer drops, which is most of the point.
     """
     from portia.agent import session
 
     print(f"  [{model}{', effort ' + effort if effort else ''}]")
+    log = runlog.start(portia_dir, prompt=prompt, model=model, effort=effort, cwd=cwd)
+    print(f"  [logging to {log.path}]")
 
     async for event in session.run(
         prompt,
@@ -134,6 +142,7 @@ async def run_and_render(
         cwd=cwd,
         portia_dir=portia_dir,
     ):
+        log.event(event)
         render(event)
 
 

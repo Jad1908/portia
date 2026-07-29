@@ -40,7 +40,6 @@ from portia.ui.state import APP, Decision
 FREE_TEXT = "text"
 CHOSEN = "chosen"
 
-TOOL_PREFIX = "mcp__portia__"
 ARG_CHARS = 160
 
 
@@ -234,7 +233,7 @@ def _event(event: events.Event) -> None:
 
 
 def _tool_call(data: dict) -> None:
-    name = str(data.get("name", "")).replace(TOOL_PREFIX, "")
+    name = events.tool_label(str(data.get("name", "")))
     arguments = {k: v for k, v in (data.get("input") or {}).items() if k != "portia_dir"}
     rendered = ", ".join(f"{k}={v!r}" for k, v in arguments.items())
     with ui.element("div").classes("tr-tool"):
@@ -356,7 +355,7 @@ TARGET_FIELDS = ("spec_path", "source", "name")
 
 
 def _write_confirm(decision: Decision) -> None:
-    name = str(decision.payload["name"]).replace(TOOL_PREFIX, "")
+    name = events.tool_label(str(decision.payload["name"]))
     payload = decision.payload["input"]
     step = payload.get("step") or {}
     acknowledge = list(step.get("acknowledge") or [])
@@ -387,7 +386,7 @@ def _resolve_write(decision: Decision, allowed: bool) -> None:
 
 
 def _resolved_write(decision: Decision) -> None:
-    name = str(decision.payload["name"]).replace(TOOL_PREFIX, "")
+    name = events.tool_label(str(decision.payload["name"]))
     outcome = "allowed" if decision.outcome else "declined"
     with ui.element("div").classes("transcript-row"):
         with ui.element("div").classes("row-gap-sm"):

@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from portia import runlog
 from portia.agent import events
 from portia.ui import engine, state
 from portia.ui.state import APP, Decision
@@ -63,6 +64,11 @@ async def start(
         transcript.pane.refresh()
         return
 
+    # The window's copy of a turn dies with the window; this is the durable one
+    # (`portia/runlog.py`). Teed here, at the edge, for the same reason the CLI
+    # tees in `run_turn` — the engine must not learn it is being observed.
+    log = runlog.start(APP.portia_dir, prompt=prompt, model=model, effort=effort, cwd=str(APP.root))
+
     try:
         async for event in session.run(
             prompt,
@@ -73,7 +79,7 @@ async def start(
             cwd=str(APP.root),
             portia_dir=APP.portia_dir,
         ):
-            _record(event, stream)
+            _record(event, stream, log)
     except asyncio.CancelledError:
         turn.error = "interrupted"
         raise
@@ -86,8 +92,14 @@ async def start(
         transcript.pane.refresh()
 
 
-def _record(event: events.Event, stream: state.Stream) -> None:
+def _record(event: events.Event, stream: state.Stream, log: runlog.Log) -> None:
     from portia.ui import transcript
+
+    # Logged before the panel's own bookkeeping: the events the transcript drops
+    # are ones it has *already rendered* from inside the callback that produced
+    # them, and a log missing every question and every write confirmation would
+    # be missing the decisions the run is worth reading for.
+    log.event(event)
 
     if event.kind in _OWNED:
         return

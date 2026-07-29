@@ -735,9 +735,10 @@ block is written to be machine-checkable when we get there.
 
 ---
 
-## The run log (specced 2026-07-26, not yet built)
+## The run log (specced 2026-07-26, shipped 2026-07-29)
 
-*Direction, not a task list.*
+*Direction, not a task list. What shipped is at the end; the spec is kept above it because the
+reasoning is what makes the artifact legible.*
 
 **The problem it solves.** Six runs are recorded above and every one was scored by hand, from a
 terminal transcript, some of it pasted twice and some lost to a `^C`. Two runs got conflated while
@@ -771,4 +772,31 @@ operation into a prewritten op) · turns, tokens, cost.
 assistant's messages and the final result, but never the message carrying **tool results** — so
 today a log would record that `join_findings` was called and never what it returned. Half a
 transcript. Adding a `TOOL_RESULT` event serves the log and the app's transcript panel at once, and
-is worth doing before either.
+is worth doing before either. *`TOOL_RESULT` landed 2026-07-26 with the app.*
+
+### What shipped, 2026-07-29
+
+`portia/runlog.py` + `python -m portia.cli.runs {list,show}`. The spec above survived contact
+almost intact — one JSONL per turn under `.portia/runs/`, a header line, teed at both edges
+(`cli/chat.run_and_render` and `ui/turn`), no infrastructure. Four things are worth knowing that
+the spec did not say:
+
+- **A second engine change was needed, and it is smaller than it sounds.** `APPROVAL` announced
+  that a write had stopped for a yes/no and never said which was given, so *"how many writes were
+  refused"* — a metric this document specced — was not derivable from the stream at all.
+  `events.APPROVAL_RESULT` now carries it. The engine always knew; it just wasn't saying.
+- **The SDK's `input_tokens` is a trap, and the first real run through the module caught it.** It
+  counts only the *uncached* input: a turn that sent 14,651 tokens reported **17**, because the L0
+  system prompt and the L1 brief are pushed on every turn and are precisely what the cache holds.
+  `summary` reports the whole of it and says how much was cached. A run log that quoted the raw
+  field would have made every turn look cheap — in the artifact built to measure cost.
+- **`show` replays through `cli/chat.render`**, so a past run reads the way it read live, plus the
+  half the live terminal drops on purpose (tool results, questions, answers, confirmations). The
+  live renderer is unchanged, so the runs already scored above stay comparable.
+- **Comparison was cut deliberately.** A side-by-side of two runs was specced here and dropped
+  before it was built: it invites reading two columns of counts as better-and-worse, which is the
+  one thing this section says the numbers cannot support. Find the two runs in `list`, read them.
+
+**Not yet done:** no run has been scored *using* it, so its value is argued rather than
+demonstrated — the first real test is Run 9. It also does not surface in the app yet; the Runs pane
+still lists only saved spec reports.

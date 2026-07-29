@@ -51,7 +51,9 @@ def build_can_use_tool(
             return PermissionResultAllow(updated_input={"questions": questions, "answers": answers})
 
         emit(events.Event(events.APPROVAL, {"name": tool_name, "input": input_data}))
-        if await confirm(tool_name, input_data):
+        allowed = await confirm(tool_name, input_data)
+        emit(events.approval_result_event(tool_name, allowed))
+        if allowed:
             return PermissionResultAllow(updated_input=input_data)
         return PermissionResultDeny(
             message=(

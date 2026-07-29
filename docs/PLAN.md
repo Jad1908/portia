@@ -142,10 +142,13 @@ constraint.** The nearest candidate cause is in our own prompt, which still call
    informed whether or not the agent cooperates. No capable model has yet been watched reaching a
    blocking flag.
 
-6. **The run log** (`EVALUATION.md`, specced 2026-07-26). The more painful half of the surface
-   problem: seven runs scored by hand off transcripts, and the app's transcript still dies with the
-   window. One JSONL per turn, teed at the edge in `cli/chat.run_turn` and the app's turn driver.
-   `events.TOOL_RESULT` — its other prerequisite — landed with the app.
+6. ~~**The run log**~~ — *engine half shipped 2026-07-29 (`EVALUATION.md` → "What shipped").*
+   `portia/runlog.py` writes one JSONL per turn, teed at both edges; `python -m portia.cli.runs`
+   lists and replays. It caught one thing on its first real run worth carrying into any cost claim:
+   the SDK's `input_tokens` excludes cached input, so a 14,651-token turn reported **17** — and
+   nearly all of a portia turn's input is the pushed L0/L1 context, i.e. exactly the cached part.
+   **Still open:** the app's transcript dies with the window — the Runs pane lists saved spec
+   reports and not turns, so the log is CLI-only for now.
 
 > **A referentially-consistent subset is still worth building.** The copilot never sees data, only
 > profiles — so slicing every table to rows reachable from a chosen set of ids preserves schemas,
