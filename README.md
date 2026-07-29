@@ -1,9 +1,10 @@
 <div align="center">
-  <img src="portia/ui/assets/cute-portia.png" alt="" width="104" align="middle">
-  &nbsp;&nbsp;&nbsp;
-  <img src="assets/the-portia-spider.jpg" alt="Portia, the jumping spider" width="260" align="middle">
+  <img src="assets/the-portia-spider.jpg" alt="Portia, the jumping spider" width="260">
 
-  <h1>portia</h1>
+  <h1>
+    <img src="portia/ui/assets/cute-portia.png" alt="" width="80" align="middle">
+    portia
+  </h1>
   <p><strong>Start catching the bugs in your data.</strong></p>
 
   <p>
