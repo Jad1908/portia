@@ -7,9 +7,10 @@ different and, for the migration, more valuable claim: the copilot reads these
 dicts, so a changed shape is a changed prompt (§2.1).
 
 When a case fails, the useful question is never "how do I make it pass". It is
-"did I mean to change this?". If yes, run ``python -m tests.golden``, read the
-diff in ``tests/fixtures/golden/``, and commit it with the reason. If no, the
-test just caught the thing it exists to catch.
+"did I mean to change this?" — and usually the answer is no, and the test just
+caught the thing it exists to catch. The files were written by the pandas engine
+before any of it moved, which is where their authority comes from; regenerating
+them is a deliberate act, guarded, and explained in `tests/golden.py`.
 
 Also asserted here, so the case list can't quietly stop covering the engine:
 every fixture is profiled, every op runs, every transform runs, every join type
@@ -66,6 +67,12 @@ EXCEPTIONS: dict[str, dict[str, dict[str, str]]] = {
         "*": {"columns[].dtype": _TYPE_NAMES},
         "profile/otb": {"columns[].inferred": _DATE_TYPED},
         "profile/city_events": {"columns[].inferred": _DATE_TYPED},
+        # The same date typing, reaching the join check: `stay_date`/`event_date`
+        # are `datetime` keys rather than `string` ones. `key_dtype_match` is the
+        # field that drives a flag and it is deliberately *not* excepted — both
+        # sides moved together, so it still reports True.
+        "join_report/composite": {"key_dtypes": _DATE_TYPED},
+        "join_findings/composite": {"report.key_dtypes": _DATE_TYPED},
         "profile/messy_customers_builder": {
             "columns[].samples": _ONE_TYPE_PER_COLUMN,
             "columns[].top": _ONE_TYPE_PER_COLUMN,
@@ -105,11 +112,9 @@ def _drop(node, parts: list[str]) -> None:
 @pytest.mark.parametrize("backend", BACKENDS, ids=lambda b: b.name)
 @pytest.mark.parametrize("case", CASES, ids=lambda c: c.name)
 def test_evidence_matches_golden(case, backend):
-    if case.kind not in backend.kinds:
-        pytest.skip(f"{backend.name} does not implement {case.kind} cases yet")
     assert case.path.exists(), (
-        f"no golden file for {case.name} — generate it with `python -m tests.golden` "
-        "and commit it as part of the change that added the case"
+        f"no golden file for {case.name} — generate it with "
+        "`python -m tests.golden --regenerate` and commit it with the case that needs it"
     )
     excepted = _exceptions(backend.name, case.name)
     expected = _prune(json.loads(case.path.read_text()), excepted)
@@ -165,7 +170,7 @@ def test_every_blocking_flag_is_frozen_somewhere():
 
 
 def test_prune_removes_nested_and_repeated_paths():
-    """The exception mechanism itself — unexercised until a second backend lands."""
+    """The exception mechanism itself, on a shape no live case happens to hit."""
     evidence = {
         "n_rows": 3,
         "columns": [{"name": "a", "dtype": "int64"}, {"name": "b", "dtype": "object"}],

@@ -29,7 +29,7 @@ from typing import Any
 
 import yaml
 
-from portia.checks.profiling import profile_table
+from portia.checks import profiling
 from portia.core import store
 from portia.core.present import format_rate
 
@@ -95,7 +95,7 @@ def index_source(
         # Profile the ingested copy, not the file. This is the step that makes a
         # multi-GB source indexable at all: the same profile that cost 1883 MB
         # through pandas is a handful of aggregates over columnar storage.
-        profile = profile_table(store.table(con, name))
+        profile = profiling.profile(store.table(con, name))
     finally:
         if own_con:
             con.close()

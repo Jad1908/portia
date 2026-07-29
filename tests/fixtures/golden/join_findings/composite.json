@@ -45,18 +45,48 @@
       "left_coverage": 0.0,
       "right_coverage": 0.0,
       "sample_left_only": [
-        "('H001', '2026-06-12')",
-        "('H001', '2026-06-13')",
-        "('H001', '2026-06-20')",
-        "('H002', '2026-06-12')",
-        "('H002', '2026-06-14')"
+        [
+          "H001",
+          "2026-06-12"
+        ],
+        [
+          "H001",
+          "2026-06-13"
+        ],
+        [
+          "H001",
+          "2026-06-20"
+        ],
+        [
+          "H002",
+          "2026-06-12"
+        ],
+        [
+          "H002",
+          "2026-06-14"
+        ]
       ],
       "sample_right_only": [
-        "(' paris', '2026-06-12')",
-        "('Amsterdam', '2026-06-12')",
-        "('Barcelona', '2026-06-12')",
-        "('Barcelona', '2026-06-13')",
-        "('Lyon', '2026-06-12')"
+        [
+          " paris",
+          "2026-06-12"
+        ],
+        [
+          "Amsterdam",
+          "2026-06-12"
+        ],
+        [
+          "Barcelona",
+          "2026-06-12"
+        ],
+        [
+          "Barcelona",
+          "2026-06-13"
+        ],
+        [
+          "Lyon",
+          "2026-06-12"
+        ]
       ]
     },
     "fan_out": {
@@ -120,22 +150,22 @@
     ],
     "unmatched_right_rows": [
       {
-        "city_name": "Paris",
-        "event_date": "2026-06-12",
-        "event_name": "Tech Summit",
-        "expected_attendance": 15000
-      },
-      {
         "city_name": " paris",
         "event_date": "2026-06-12",
         "event_name": "Marathon",
         "expected_attendance": 40000
       },
       {
-        "city_name": "Barcelona",
+        "city_name": "Amsterdam",
         "event_date": "2026-06-12",
-        "event_name": "Mobile Congress",
-        "expected_attendance": 90000
+        "event_name": "Canal Festival",
+        "expected_attendance": 25000
+      },
+      {
+        "city_name": "Amsterdam",
+        "event_date": "2026-06-12",
+        "event_name": "Design Week",
+        "expected_attendance": 12000
       }
     ],
     "null_key_left_rows": [],

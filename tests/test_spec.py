@@ -37,7 +37,7 @@ def test_run_spec_executes_and_matches(project):
     r = results[0]
     assert r.provenance["result_rows"] == 10
     assert r.has_drift is False
-    assert r.frame is not None and len(r.frame) == 10
+    assert r.table is not None and r.table.count() == 10
 
 
 def test_drift_detected_when_source_changes(project):
@@ -153,7 +153,7 @@ def test_a_sql_step_runs_chains_and_shows_its_query(project):
 
     assert results[0].provenance["op"] == "sql"
     assert results[0].outcome["grain"]["unique"] is True
-    assert "n_orders" in results[1].frame.columns  # it really chained
+    assert "n_orders" in results[1].table.columns  # it really chained
 
     text = render_text(results)
     assert "COUNT(*) AS n_orders" in text

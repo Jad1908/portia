@@ -16,6 +16,8 @@ from typing import Any
 
 import yaml
 
+from portia.core.table import Table
+
 #: How much of a table a preview shows. One number for every surface: the app's
 #: table panels and the saved report both cut here, so "showing 15 of 40" means
 #: the same thing wherever you read it.
@@ -32,13 +34,24 @@ def count(n: int, word: str) -> str:
     return f"{n} {word}" if n == 1 else f"{n} {word}s"
 
 
-def frame_to_markdown(frame: Any, *, rows: int = PREVIEW_ROWS, cols: int = PREVIEW_COLS) -> str:
+def frame_to_markdown(data: Any, *, rows: int = PREVIEW_ROWS, cols: int = PREVIEW_COLS) -> str:
     """The head of a table as markdown, and an honest count of what was cut.
 
     For the saved run report: a report you can read without the CSV beside it is
     worth more than one that only describes a table in the abstract.
+
+    Takes a `core.table.Table` or a DataFrame. The Table path reads `rows` rows
+    and asks for a count — so previewing a step that produced 80 million rows
+    costs the same as previewing one that produced ten, and the "showing 15 of N"
+    line is still honest about the N.
     """
-    if frame is None or len(frame) == 0:
+    if data is None:
+        return "_(no rows)_"
+    if isinstance(data, Table):
+        total, frame = data.count(), data.head(rows)
+    else:
+        total, frame = len(data), data
+    if total == 0:
         return "_(no rows)_"
 
     shown = frame.iloc[:rows, :cols]
@@ -52,7 +65,7 @@ def frame_to_markdown(frame: Any, *, rows: int = PREVIEW_ROWS, cols: int = PREVI
         for row in shown.itertuples(index=False, name=None)
     ]
 
-    note = f"_showing {count(len(shown), 'row')} of {count(len(frame), 'row')}"
+    note = f"_showing {count(len(shown), 'row')} of {count(total, 'row')}"
     if frame.shape[1] > cols:
         note += f", {count(len(names), 'column')} of {count(frame.shape[1], 'column')}"
     lines += ["", note + "_"]

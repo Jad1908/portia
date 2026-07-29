@@ -8,7 +8,7 @@ copilot needs to decide what to ask about.
 Rigor lives here — every number comes from a reproducible query, never from
 eyeballing. See docs/PLAN.md ("Deterministic code detects and measures").
 
-**Two implementations, one set of rules.** :func:`profile_table` measures with
+**Two implementations, one set of rules.** :func:`profile` measures with
 SQL and :func:`profile_frame` measures with pandas, but neither one decides what
 a measurement *means*: what counts as a key, as high-null, as text rather than a
 category, is :func:`_semantic` and :func:`_flags`, which take plain numbers and
@@ -26,9 +26,6 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-
-import pandas as pd
-from pandas.api import types as ptypes
 
 from portia.core import store
 from portia.core.io import load_table
@@ -94,7 +91,7 @@ def profile_path(path: str | Path, **load_kwargs: Any) -> dict:
     """
     con = store.memory()
     try:
-        prof = profile_table(load_table(path, con), **load_kwargs)
+        prof = profile(load_table(path, con), **load_kwargs)
     finally:
         con.close()
     prof["source"] = str(path)
@@ -104,9 +101,9 @@ def profile_path(path: str | Path, **load_kwargs: Any) -> dict:
 # --- the SQL implementation -------------------------------------------------
 
 
-def profile_table(table: Table, *, sample_values: int = SAMPLE_VALUES) -> dict:
+def profile(table: Table, *, sample_values: int = SAMPLE_VALUES) -> dict:
     """A compact, JSON-serializable profile of ``table``, measured in SQL."""
-    kinds = {col: _duckdb_kind(dtype) for col, dtype in table.dtypes.items()}
+    kinds = {col: duckdb_kind(dtype) for col, dtype in table.dtypes.items()}
     dtypes = table.dtypes
 
     # Everything scalar, in one scan. The per-column extras below are single-column
@@ -228,7 +225,7 @@ def _table_top(table: Table, col: str) -> tuple[Any, int] | None:
     return to_jsonable(value), int(freq)
 
 
-def null_rates_table(table: Table) -> dict[str, float]:
+def null_rates(table: Table) -> dict[str, float]:
     """Per-column null rate, in one pass. See :func:`null_rates`."""
     columns = table.columns
     if not columns:
@@ -243,7 +240,13 @@ def null_rates_table(table: Table) -> dict[str, float]:
     }
 
 
-def _duckdb_kind(dtype: str) -> str:
+def duckdb_kind(dtype: str) -> str:
+    """A DuckDB type name mapped onto a structural kind.
+
+    Public because `checks.join` needs the same mapping — one place knows what
+    DuckDB calls things, so a type the profiler understands can never be one the
+    join check silently treats as a string.
+    """
     name = str(dtype).upper()
     if name == "BOOLEAN":
         return BOOLEAN
@@ -256,125 +259,6 @@ def _duckdb_kind(dtype: str) -> str:
     if name in _DUCKDB_STRINGS:
         return STRING
     return OTHER
-
-
-# --- the pandas implementation (kept until the migration lands) -------------
-
-
-def profile_frame(df: pd.DataFrame, *, sample_values: int = SAMPLE_VALUES) -> dict:
-    """Return a compact, JSON-serializable profile of ``df``."""
-    columns = [_frame_column(df[col], sample_values=sample_values) for col in df.columns]
-    return _profile(int(len(df)), int(df.shape[1]), columns)
-
-
-def null_rates(df: pd.DataFrame) -> dict[str, float]:
-    """Per-column null rate — the one slice of a profile a post-condition needs.
-
-    Split out so ``checks.outcome`` can measure a produced table without paying
-    for quantiles and value counts on every column of every step of every run,
-    and without having to strip the ``samples`` (raw values) a full profile
-    carries and a post-condition has no business handling.
-    """
-    n = len(df)
-    return {str(col): round_float(df[col].isna().mean()) if n else 0.0 for col in df.columns}
-
-
-def _frame_column(s: pd.Series, *, sample_values: int) -> dict:
-    kind = _frame_kind(s)
-    n = int(len(s))
-    non_null = s.dropna()
-    n_non_null = int(len(non_null))
-    n_distinct = int(non_null.nunique())
-
-    out = _column_base(
-        name=str(s.name),
-        dtype=str(s.dtype),
-        kind=kind,
-        n=n,
-        n_non_null=n_non_null,
-        n_distinct=n_distinct,
-        samples=_samples(non_null, sample_values),
-    )
-
-    if kind in NUMERIC_KINDS and n_non_null:
-        # describe()-style stats: shape + spread, so the agent can reason about a
-        # numeric column without seeing it (skew, outliers, tight-vs-spread).
-        q = non_null.quantile([0.25, 0.5, 0.75])
-        out["min"] = to_jsonable(non_null.min())
-        out["max"] = to_jsonable(non_null.max())
-        out["mean"] = round_float(float(non_null.mean()))
-        out["std"] = round_float(float(non_null.std())) if n_non_null > 1 else None
-        out["q25"] = to_jsonable(q.loc[0.25])
-        out["median"] = to_jsonable(q.loc[0.5])
-        out["q75"] = to_jsonable(q.loc[0.75])
-    elif n_non_null and kind != BOOLEAN:
-        # describe()'s 'top'/'freq': the modal value, ties broken by value so the
-        # answer doesn't depend on row order (see `_table_top`).
-        counts = _sorted_index(non_null.value_counts()).sort_values(ascending=False, kind="stable")
-        out["top"] = to_jsonable(counts.index[0])
-        out["top_freq"] = int(counts.iloc[0])
-
-    parseable = pd.to_numeric(non_null, errors="coerce").notna().sum() if n_non_null else 0
-    out["flags"] = _flags(
-        kind,
-        n=n,
-        n_non_null=n_non_null,
-        n_distinct=n_distinct,
-        n_whitespace=_frame_whitespace(non_null) if kind == STRING else 0,
-        n_numeric=int(parseable),
-    )
-    return out
-
-
-def _frame_kind(s: pd.Series) -> str:
-    if ptypes.is_bool_dtype(s):
-        return BOOLEAN
-    if ptypes.is_datetime64_any_dtype(s):
-        return DATETIME
-    if ptypes.is_integer_dtype(s):
-        return INTEGER
-    if ptypes.is_float_dtype(s):
-        return FLOAT
-    if ptypes.is_numeric_dtype(s):
-        return NUMERIC
-    # Legacy ``object`` columns and pandas' native ``str`` dtype (default since
-    # pandas 3.0) alike, or these flags would never fire.
-    if ptypes.is_object_dtype(s) or ptypes.is_string_dtype(s):
-        return STRING
-    return OTHER
-
-
-def _frame_whitespace(non_null: pd.Series) -> int:
-    """Values with leading or trailing space. Only strings can have any."""
-    str_vals = non_null[non_null.map(lambda v: isinstance(v, str))]
-    if not len(str_vals):
-        return 0
-    return int((str_vals != str_vals.str.strip()).sum())
-
-
-def _samples(non_null: pd.Series, k: int) -> list:
-    """Example values — distinct and ordered. See :data:`SAMPLE_VALUES` for why."""
-    return [to_jsonable(v) for v in _sorted(non_null.drop_duplicates()).head(k).tolist()]
-
-
-def _sorted(values: pd.Series) -> pd.Series:
-    """Ascending, tolerating an object column holding more than one python type.
-
-    Only the fixtures' in-memory frames ever hit the fallback — a CSV round-trip
-    makes such a column uniformly text — and it exists so that case sorts rather
-    than raising.
-    """
-    try:
-        return values.sort_values(kind="stable")
-    except TypeError:
-        return values.loc[values.map(str).sort_values(kind="stable").index]
-
-
-def _sorted_index(counts: pd.Series) -> pd.Series:
-    try:
-        return counts.sort_index(kind="stable")
-    except TypeError:
-        return counts.reindex(sorted(counts.index, key=str))
 
 
 # --- the rules, shared by both implementations ------------------------------

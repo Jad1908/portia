@@ -104,14 +104,14 @@
         "n_right": 2
       },
       {
-        "key": "Paris",
-        "n_left": 2,
-        "n_right": 1
-      },
-      {
         "key": "Barcelona",
         "n_left": 1,
         "n_right": 2
+      },
+      {
+        "key": "Paris",
+        "n_left": 2,
+        "n_right": 1
       }
     ]
   }

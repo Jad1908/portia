@@ -120,6 +120,30 @@ def test_task_templates_are_all_covered_by_the_test_above():
 # --- the boundary: no instruction text inside code ---------------------------
 
 
+#: Markers that identify a literal as query text rather than prose. Two or more
+#: must appear, in upper case, which is how SQL is written in this codebase and
+#: is not how English is.
+_SQL_MARKERS = ("SELECT ", "FROM ", "WHERE ", "JOIN ", "GROUP BY", "ORDER BY", "COPY ", "CREATE ")
+
+
+def _is_query_text(literal: str) -> bool:
+    """A query is not a prompt.
+
+    The rule below exists because text the **model** reads has to be reviewable
+    as prose in a file — `record_step`'s description lost a sentence while buried
+    in a decorator argument and the copilot started telling users to go use dbt.
+    A parameterised `SELECT` in `checks/` or `ops/` is neither read by the model
+    nor improved by being torn away from the code that builds it; the join check's
+    overlap query *is* the check, and splitting it to satisfy a character count
+    would make the one thing worth reading harder to read.
+
+    Deliberately narrow, and it matches fragments as well as whole statements —
+    an f-string's literal chunks are separate AST nodes, so the piece between two
+    placeholders has to be recognisable on its own.
+    """
+    return sum(marker in literal for marker in _SQL_MARKERS) >= 2
+
+
 def _long_string_literals(path: pathlib.Path):
     """Every non-docstring string literal over the threshold, with its line."""
     tree = ast.parse(path.read_text())
@@ -132,7 +156,11 @@ def _long_string_literals(path: pathlib.Path):
     }
     for node in ast.walk(tree):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            if node.value not in docstrings and len(node.value) > MAX_INLINE_STRING:
+            if (
+                node.value not in docstrings
+                and len(node.value) > MAX_INLINE_STRING
+                and not _is_query_text(node.value)
+            ):
                 yield node.lineno, len(node.value), node.value
         elif isinstance(node, ast.JoinedStr):  # an f-string prompt would hide here
             literal = "".join(
@@ -140,7 +168,7 @@ def _long_string_literals(path: pathlib.Path):
                 for v in node.values
                 if isinstance(v, ast.Constant) and isinstance(v.value, str)
             )
-            if len(literal) > MAX_INLINE_STRING:
+            if len(literal) > MAX_INLINE_STRING and not _is_query_text(literal):
                 yield node.lineno, len(literal), literal
 
 
@@ -180,3 +208,15 @@ def test_every_tool_description_comes_from_a_file():
             f'tool at line {call.lineno} inlines its description; use prompts.tool("<name>")'
         )
         assert ast.unparse(description).startswith("prompts.tool(")
+
+
+def test_the_query_exemption_cannot_swallow_prose():
+    """The escape hatch in the rule above, kept narrow enough to be safe."""
+    assert _is_query_text("SELECT a, count(*) FROM t GROUP BY a")
+    assert _is_query_text("), count(*) FILTER (WHERE l.ln IS NOT NULL) FROM l JOIN r ON x")
+    # Instruction text, including text that happens to talk about SQL.
+    assert not _is_query_text(
+        "Write a single SELECT over the tables you declare in inputs. Explain your reasoning "
+        "to the user before recording the step, and never assert a number you did not measure."
+    )
+    assert not _is_query_text("You are portia, a data harmonization copilot. " * 5)

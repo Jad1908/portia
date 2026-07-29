@@ -55,54 +55,57 @@ AGGREGATE = """
 # --- the gap it closes -------------------------------------------------------
 
 
-def test_the_fan_out_has_a_resolution_now(events, bookings):
+def test_the_fan_out_has_a_resolution_now(events, bookings, table):
     """The whole point: aggregate first, and the join no longer multiplies rows.
 
     Recorded as two steps this is exactly the answer key's correct handling, and
     until this op existed the spec could not express it at all.
     """
-    per_city_date = apply_sql({"city_events": events}, AGGREGATE)
-    assert len(per_city_date.frame) == 2  # amsterdam and paris, one row each
+    events_t, bookings_t = table(events, "city_events"), table(bookings, "bookings")
+    per_city_date = apply_sql({"city_events": events_t}, AGGREGATE, name="per_city_date")
+    assert per_city_date.table.count() == 2  # amsterdam and paris, one row each
 
     joined = apply_join(
-        bookings,
-        per_city_date.frame,
+        bookings_t,
+        per_city_date.table,
         how="left",
         left_on=["city", "stay_date"],
         right_on=["city_name", "event_date"],
     )
     report = outcome_report(
-        joined.frame,
-        inputs={"bookings": bookings, "events": per_city_date.frame},
+        joined.table,
+        inputs={"bookings": bookings_t, "events": per_city_date.table},
         grain=["booking_id"],
     )
 
-    assert len(joined.frame) == len(bookings)  # no multiplication
+    assert joined.table.count() == len(bookings)  # no multiplication
     assert report["grain"]["unique"] is True
     assert GRAIN_NOT_UNIQUE not in report["flags"]
-    assert joined.frame["revenue"].sum() == bookings["revenue"].sum()  # nothing double-counted
+    # nothing double-counted
+    assert joined.table.scalar("sum(revenue)") == bookings["revenue"].sum()
 
 
-def test_without_the_aggregate_the_same_join_still_fans_out(events, bookings):
+def test_without_the_aggregate_the_same_join_still_fans_out(events, bookings, table):
     """The trap is real, not an artifact of the fixture — the control case."""
+    bookings_t = table(bookings, "bookings")
     joined = apply_join(
-        bookings,
-        events,
+        bookings_t,
+        table(events, "city_events"),
         how="left",
         left_on=["city", "stay_date"],
         right_on=["city_name", "event_date"],
     )
-    report = outcome_report(joined.frame, inputs={"b": bookings}, grain=["booking_id"])
+    report = outcome_report(joined.table, inputs={"b": bookings_t}, grain=["booking_id"])
 
-    assert len(joined.frame) > len(bookings)
+    assert joined.table.count() > len(bookings)
     assert GRAIN_NOT_UNIQUE in report["flags"]
 
 
 # --- provenance --------------------------------------------------------------
 
 
-def test_provenance_is_serializable_and_declares_what_it_read(events):
-    result = apply_sql({"city_events": events}, AGGREGATE)
+def test_provenance_is_serializable_and_declares_what_it_read(events, table):
+    result = apply_sql({"city_events": table(events)}, AGGREGATE)
     json.dumps(result.provenance)
 
     assert set(result.provenance) == set(PROVENANCE_KEYS)
@@ -118,23 +121,25 @@ def test_provenance_is_serializable_and_declares_what_it_read(events):
     ]
 
 
-def test_the_declared_keys_match_a_real_run(events):
+def test_the_declared_keys_match_a_real_run(events, table):
     """Guards `_EXPECTABLE`: an `expect` block is validated against this set."""
-    assert set(apply_sql({"city_events": events}, AGGREGATE).provenance) == set(PROVENANCE_KEYS)
+    assert set(apply_sql({"city_events": table(events)}, AGGREGATE).provenance) == set(
+        PROVENANCE_KEYS
+    )
 
 
-def test_a_table_that_was_not_declared_is_not_visible(events, bookings):
+def test_a_table_that_was_not_declared_is_not_visible(events, bookings, table):
     """An undeclared read is an error, not a silent dependency.
 
     Without this, the contribution measurement in `checks.outcome` is reporting
     on a set of inputs that isn't the set the query actually used.
     """
     with pytest.raises(Exception, match="(?i)bookings"):
-        apply_sql({"city_events": events}, "SELECT * FROM bookings")
+        apply_sql({"city_events": table(events)}, "SELECT * FROM bookings")
 
 
-def test_render_shows_the_sql_itself(events):
-    text = render_text(apply_sql({"city_events": events}, AGGREGATE).provenance)
+def test_render_shows_the_sql_itself(events, table):
+    text = render_text(apply_sql({"city_events": table(events)}, AGGREGATE).provenance)
     assert "city_events 3" in text
     assert "→ 2 rows × 4 cols" in text
     assert "GROUP BY 1, 2" in text  # the decision is the query; show it
@@ -186,7 +191,7 @@ def test_an_ordinary_read_is_allowed(sql):
         "SELECT * FROM read_csv_auto('secrets.csv')",  # not the exact word `read_csv`
     ],
 )
-def test_external_access_is_off_inside_duckdb_too(events, sql):
+def test_external_access_is_off_inside_duckdb_too(events, sql, table):
     """The string check is bypassable by design; this is the half that isn't.
 
     Both spellings get past `check_sql`'s word list, so what stops them is
@@ -195,4 +200,4 @@ def test_external_access_is_off_inside_duckdb_too(events, sql):
     """
     check_sql(sql)  # the readable half does NOT catch these
     with pytest.raises(Exception, match="(?i)file system operations are disabled"):
-        apply_sql({"city_events": events}, sql)
+        apply_sql({"city_events": table(events)}, sql)
