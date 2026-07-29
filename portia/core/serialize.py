@@ -59,3 +59,16 @@ def to_jsonable(v: Any) -> Any:
 def to_json(obj: Any) -> str:
     """Serialize an already-jsonable evidence dict to a stable, readable string."""
     return json.dumps(obj, indent=2, ensure_ascii=False)
+
+
+def to_json_line(obj: Any) -> str:
+    """One object, one line — the JSONL form, for the run log (`portia/runlog.py`).
+
+    Two things differ from `to_json` and both are the format's doing. The
+    readable indent is wrong when a newline ends the record, and ``default=str``
+    is the last-resort coercion for whatever the SDK hands back inside an
+    event's payload — nested, not scalar, so `to_jsonable` (which stringifies
+    anything that isn't a scalar) can't do the job. A log line that raises
+    mid-turn would lose the transcript it exists to keep.
+    """
+    return json.dumps(obj, ensure_ascii=False, default=str)

@@ -190,12 +190,12 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
   items. Small, but it changes every prompt the model reads, so it wants its own branch and a
   before/after against **Run 7**, where a whole section of that description appears to have been
   ignored. *Suspected contributor, not a proven cause — `EVALUATION.md` → Run 7.*
-- **Run log + the metrics that need no labels. Specced 2026-07-26** — `EVALUATION.md` → "The run
-  log". Write each turn's events (`agent/events.py`) to JSONL and compute with pandas: rungs pulled
-  and in what order, tokens and turns, how often it asked, which ops it chose, drift rate. No
-  infrastructure. Be honest about what these are: **cost and behaviour descriptors, not
-  correctness** — only the answer keys make a number mean anything. Blocked on the tool-result
-  event above, without which the log is half a transcript.
+- ~~**Run log + the metrics that need no labels**~~ — *shipped 2026-07-29: `portia/runlog.py` and
+  `python -m portia.cli.runs`. `EVALUATION.md` → "What shipped" for the two surprises (a second
+  engine event was needed to count refused writes; the SDK's `input_tokens` excludes the cache and
+  under-reports a turn by ~800×). Two things it does not yet do: **drift rate** — that lives in the
+  spec's run results, not the event stream, and joining the two is its own small job — and the app
+  side, below.*
 - **Langfuse, once the JSONL hurts.** Its job is browsing a run's timeline when debugging why one
   went sideways, not computing the metrics above. Free either way (self-host via Docker, or the
   cloud Hobby tier: 50k units/month, 30-day retention, 2 seats). The SDK drives Claude Code as a
@@ -306,10 +306,13 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
     Membership editing needs multi-select, the fiddliest widget in the app.
   - **The source preview loads the whole file to show 15 rows.** Fine today, a straight bug at
     multi-GB — fixed by the DuckDB migration, listed here so it is not lost if that slips.
-- **A copilot turn still disappears when the window does.** *Half of this closed 2026-07-27: a
-  **spec run** can be saved as markdown (`Save report` → `runs/*.md`, or `cli.run --report`), and the
-  left pane lists them.* What is still unwritten is the **turn** — questions asked, answers given,
-  writes approved — which is the run log's job (below) and what `EVALUATION.md` actually needs.
+- **A copilot turn is now written down, and the window still can't show it.** *Two halves closed:
+  a **spec run** saves as markdown 2026-07-27 (`Save report` → `runs/*.md`), and the **turn** is
+  written 2026-07-29 to `.portia/runs/*.jsonl` by `portia/runlog.py`, teed from `ui/turn` — so
+  nothing is lost when the window closes.* What is left is the reading surface: the Runs pane
+  (`ui/artifacts.py`) lists only the markdown reports, and a logged turn should be a row there that
+  replays into the transcript panel. Cheap, because the panel already renders `Event`s and a log
+  line *is* one. Two artifacts under one word "run" is the thing to design around, not paper over.
 - **A conversation that stays open.** `session.run` sends one prompt, drains the response and closes
   the client, so there is no multi-turn — no "actually, redo that as an inner join" after a turn
   ends. The SDK's `ClaudeSDKClient` supports staying open; this is a portia limitation, not an SDK
@@ -320,6 +323,9 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
   `events.TOOL_RESULT`, emitted from the `UserMessage` carrying `ToolResultBlock`s. The app expands
   them inline; **`cli/chat.py` still ignores the kind**, deliberately, so terminal transcripts stay
   comparable across the runs already scored against them. Revisit when the run log lands.*
+  **Revisited 2026-07-29 and the answer was to keep it:** the log stores tool results and
+  `cli.runs show` renders them, so the evidence is there to read without changing what a live run
+  prints. Logging and rendering are different jobs; only the second had a reason to stay still.
 
 ## Scale — data tiers
 

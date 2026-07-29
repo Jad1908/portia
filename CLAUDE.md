@@ -159,11 +159,21 @@ adding code, and extend them rather than working around them:
     context + groups + per-source metadata (Layer 1 prose `summary`, Layer 2 per-column `role` +
     check facts). The agent's memory. **Update rule: facts refresh, prose/roles are preserved** —
     corrections are never clobbered (facts vs judgment, applied to updates).
+  - `portia/runlog.py` — the **run log** (*what the copilot did*): one JSONL per turn in
+    `.portia/runs/`, one `Event` per line under a header naming model, effort, prompt and portia
+    sha. Read with `python -m portia.cli.runs`. Two rules hold it in place. **It is teed at the
+    edges** (`cli/chat.run_and_render`, `ui/turn`) and never inside the engine — the moment
+    `events.py` writes files it stops being a seam and becomes a logging framework. And
+    **`summary` counts; it never scores.** Rungs pulled, questions asked, writes refused, ops
+    chosen, tokens — all cost-and-behaviour descriptors. "Asked three times" is neither good nor
+    bad without a goal, and only `EVALUATION.md`'s answer keys supply one. A comparison view was
+    specced and dropped for inviting exactly that reading.
 - `portia/fixtures/` — kept mock data (a builder per module, registered in `__init__`)
 - `sandbox/` — **gitignored scratch space for throwaway test projects** (`sandbox/run1`, …). Spin up
   as many as you like; none of it reaches the repo. Test runs used to land in the repo root or in
   `/tmp`, and the first cluttered the tree while the second was gone by morning.
-- `portia/cli/` — play surfaces: `python -m portia.cli.<tool>` (e.g. `profile`, `join`, `run`, `index`)
+- `portia/cli/` — play surfaces: `python -m portia.cli.<tool>` (e.g. `profile`, `join`, `run`,
+  `index`, `runs`)
 - `portia/ui/` — the **app** (`python -m portia.ui`, `ui` extra): three panes on the same event
   stream, driving a turn through `ask.py`'s injected `answer`/`confirm`. Same status as `cli/` — an
   **edge**, and the two must never disagree about a number.
@@ -179,7 +189,8 @@ adding code, and extend them rather than working around them:
     engine's behalf.
 
 Rule of thumb: **`core` = reused everywhere · `checks` = diagnosis (facts) · `ops` = execution ·
-`spec` + `catalog` = the durable artifacts · `agent` = judgment · `cli` + `ui` = human edges.**
+`spec` + `catalog` + `runlog` = the durable artifacts · `agent` = judgment · `cli` + `ui` = human
+edges.**
 Deciding is the agent's job, not a layer. A new file that's none of these probably belongs in one of
 them, not loose in `portia/`.
 
