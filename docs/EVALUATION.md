@@ -797,6 +797,39 @@ the spec did not say:
   before it was built: it invites reading two columns of counts as better-and-worse, which is the
   one thing this section says the numbers cannot support. Find the two runs in `list`, read them.
 
+The app got the same thing the same day: a **Turns** section in the left pane, and a replay in the
+middle one — the summary above it computed by `engine.turn_summary`, which *is* `runlog.summary`,
+so the window and `cli.runs` cannot quote two different numbers for how often the copilot asked.
+Replaying reuses the transcript panel's own renderers, and building it caught a real reading bug:
+drawing both the question **and** its answer listed every question twice, which reads as the
+copilot having asked it twice. A resolved question is one row, exactly as the live panel shows it.
+
+#### Where the logs live, and what that costs
+
+**Project-local, and that is the entire storage model.** `<project>/.portia/runs/*.jsonl` — no
+central store, no index, nothing written outside the project. The reason is that a turn is only
+interpretable beside the catalog it read and the spec it wrote; a global folder of transcripts
+naming tables you then have to go find is worse than no folder. Four consequences, stated here
+rather than left to be discovered:
+
+- **Deleting a project deletes its turns.** There is no copy. `sandbox/` is gitignored, so test-run
+  logs are not recoverable from git either — which is fine for scratch runs and worth knowing
+  before you delete something you meant to score.
+- **Nothing prunes.** No retention, no rotation, no delete path in either surface. Logs accumulate;
+  tool results are the bulk of the bytes (a two-tool turn with full profiles is ~8 KB).
+- **Nothing aggregates across projects.** Deliberate, for now: the log exists to make a prompt
+  change measurable, and that means comparing runs *on the same fixture against the same answer
+  key* — which happens inside one project. A list mixing hotel-fixture runs with PHQ runs is a list
+  you have to filter before it means anything. The question that would justify aggregating —
+  *"did this prompt fix help across every dataset?"* — is real, but it should wait until at least
+  one run has actually been scored using the log.
+- **Reading another project needs no copying.** `--dir` takes an absolute path and `show` accepts a
+  file path directly, and the header names model, effort, prompt, cwd and portia sha, so a log read
+  away from its project still says what it was.
+
+The only user-level state portia writes is `~/.config/portia/recents.json` (`ui/engine.py`) —
+recently-opened project **paths** and open times, eight of them. No run data, and it does not prune
+dead paths, so a deleted project lingers there as a stale entry.
+
 **Not yet done:** no run has been scored *using* it, so its value is argued rather than
-demonstrated — the first real test is Run 9. It also does not surface in the app yet; the Runs pane
-still lists only saved spec reports.
+demonstrated — the first real test is Run 9.

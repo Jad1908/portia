@@ -21,7 +21,7 @@ Layout, per module:
 
 - `app.py`      — the window: toolbar, three panes, which screen is showing
 - `screens.py`  — before the panes: open a project · the brief · add data
-- `artifacts.py`— left: what portia knows about
+- `artifacts.py`— left: what portia knows about, past copilot turns included
 - `workflow.py` — middle: the spec as a graph, over the run report
 - `transcript.py` — right: the turn, the question form, the write confirmation
 - `turn.py`     — driving `session.run` with the app's own answer/confirm

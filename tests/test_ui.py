@@ -240,3 +240,120 @@ def test_the_continue_button_says_whether_it_spends_money():
     assert "read" in screens._continue_label()
     APP.interpret = False
     assert screens._continue_label() == "Continue to the project"
+
+
+# --- replaying a logged turn -------------------------------------------------
+
+
+def _events(*pairs):
+    from portia.agent import events
+
+    return [events.Event(kind, data) for kind, data in pairs]
+
+
+def test_a_write_is_paired_with_the_answer_that_resolved_it():
+    """The log records a write request and its allow/deny as two events. Drawn
+    as two rows they read as two separate things happening."""
+    from portia.agent import events
+    from portia.ui import transcript
+
+    rows = _events(
+        (events.APPROVAL, {"name": "record_step", "input": {}}),
+        (events.APPROVAL_RESULT, {"name": "record_step", "allowed": True}),
+        (events.APPROVAL, {"name": "record_step", "input": {}}),
+        (events.APPROVAL_RESULT, {"name": "record_step", "allowed": False}),
+    )
+    assert transcript._outcome_after(rows, 0) is True
+    assert transcript._outcome_after(rows, 2) is False
+
+
+def test_a_write_the_turn_died_on_is_unanswered_not_refused():
+    """A turn killed at the confirmation prompt leaves a request with no
+    outcome, and that is a different fact from a denial."""
+    from portia.agent import events
+    from portia.ui import transcript
+
+    rows = _events((events.APPROVAL, {"name": "record_step", "input": {}}))
+    assert transcript._outcome_after(rows, 0) is None
+
+
+def test_a_writes_outcome_is_never_read_off_the_next_write():
+    """Two requests in a row: the first was never resolved, and the second's
+    answer does not belong to it."""
+    from portia.agent import events
+    from portia.ui import transcript
+
+    rows = _events(
+        (events.APPROVAL, {"name": "a", "input": {}}),
+        (events.APPROVAL, {"name": "b", "input": {}}),
+        (events.APPROVAL_RESULT, {"name": "b", "allowed": True}),
+    )
+    assert transcript._outcome_after(rows, 0) is None
+    assert transcript._outcome_after(rows, 1) is True
+
+
+def test_turns_and_saved_runs_are_two_different_lists(tmp_path):
+    """Same word, two artifacts: a *run* executed a spec, a *turn* was the
+    copilot deciding what the spec should say. The pane must not merge them."""
+    from portia import runlog
+    from portia.ui import engine
+
+    app = App(root=tmp_path)
+    (tmp_path / "runs").mkdir()
+    (tmp_path / "runs" / "2026-07-29T09-00-00.md").write_text("# a spec run")
+    runlog.start(app.catalog_dir, prompt="a goal", model="m")
+
+    assert [p.suffix for p in engine.runs_in(app)] == [".md"]
+    assert [p.suffix for p in engine.turns_in(app)] == [".jsonl"]
+
+
+def test_a_turns_counts_come_from_the_engine_not_the_panel(tmp_path):
+    """`DESIGN.md`: nothing in `ui/` computes. The window and `cli.runs` have to
+    quote the same number for how often the copilot asked."""
+    from portia import runlog
+    from portia.agent import events
+    from portia.ui import engine
+
+    app = App(root=tmp_path)
+    log = runlog.start(app.catalog_dir, prompt="a goal", model="m")
+    log.event(events.question_event([{"question": "which grain?"}]))
+
+    run = runlog.read(engine.turn_path(app, log.path.name))
+    assert engine.turn_summary(run) == runlog.summary(run)
+    assert engine.turn_summary(run)["questions"] == 1
+
+
+def test_an_answered_question_is_one_row_not_two():
+    """The live panel replaces a resolved question with its answer. A replay
+    that drew the form *and* the answer listed the same question twice, which
+    reads as the copilot having asked it twice."""
+    from portia.agent import events
+    from portia.ui import transcript
+
+    rows = _events(
+        (events.QUESTION, {"questions": [{"question": "which grain?"}]}),
+        (events.ANSWER, {"answers": {"which grain?": "city-date"}}),
+    )
+    assert transcript._answered_after(rows, 0) is True
+
+
+def test_a_question_the_turn_died_on_keeps_its_options_on_screen():
+    """An unanswered question is the shape of an interrupted run."""
+    from portia.agent import events
+    from portia.ui import transcript
+
+    rows = _events((events.QUESTION, {"questions": [{"question": "which grain?"}]}))
+    assert transcript._answered_after(rows, 0) is False
+
+
+def test_an_answer_is_never_read_off_the_next_question():
+    from portia.agent import events
+    from portia.ui import transcript
+
+    rows = _events(
+        (events.QUESTION, {"questions": [{"question": "a"}]}),
+        (events.QUESTION, {"questions": [{"question": "b"}]}),
+        (events.ANSWER, {"answers": {"b": "yes"}}),
+    )
+    assert transcript._answered_after(rows, 0) is False
+    assert transcript._answered_after(rows, 1) is True

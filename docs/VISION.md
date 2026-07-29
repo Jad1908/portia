@@ -267,8 +267,10 @@ they are the whole reason the UI exists:
   first-class button, not a `n` you have to know about.
 
 **When the turn ends, it ends.** The panel says so and offers a new turn; it does not present a
-chat box implying a conversation the engine cannot hold. Past runs are replayable from the run log
-(`EVALUATION.md`).
+chat box implying a conversation the engine cannot hold. *Shipped 2026-07-29:* the turn is written
+to the run log (`portia/runlog.py`) as it happens, and every past one is under **Turns** in the
+left pane — replayed in the middle pane, read-only. Ending a turn now costs you nothing but the
+turn.
 
 ### How a tuning session actually goes
 
@@ -314,7 +316,7 @@ regressed** — this is the checklist, not a nice-to-have.
 | `cat specs/*.yaml` | The graph, and each step's detail |
 | `cat out/*.csv` | `table-preview` |
 | `cat .portia/sources/*.yaml` | Clicking a source |
-| scrolling back through a transcript | The transcript panel, and the run log |
+| scrolling back through a transcript | The transcript panel; past turns under **Turns**, replayed |
 
 ### What V0 deliberately does not do
 

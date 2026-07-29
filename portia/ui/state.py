@@ -33,6 +33,7 @@ __all__ = [
     "SPEC",
     "OUTPUT",
     "RUN",
+    "TURN",
     "GOAL",
     "INDEXING",
     "REREAD",
@@ -43,10 +44,18 @@ __all__ = [
 ]
 
 #: What a left-pane selection can be. ``None`` means the workflow is in view.
+#:
+#: ``RUN`` and ``TURN`` are two different artifacts and get two different words
+#: on screen: a **run** executed a spec and was saved as markdown, a **turn** was
+#: the copilot working and was logged as events (`portia/runlog.py`). One is what
+#: the recipe did, the other is how the recipe got decided. Collapsing them into
+#: one list would make "run" mean two things in the pane that exists to say what
+#: portia knows about.
 SOURCE = "source"
 SPEC = "spec"
 OUTPUT = "output"
 RUN = "run"
+TURN = "turn"
 
 
 @dataclass

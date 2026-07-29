@@ -344,7 +344,12 @@ def _submit_answers(decision: Decision) -> None:
 
 
 def _answered(decision: Decision) -> None:
-    for question, answer in (decision.outcome or {}).items():
+    _answers_view(decision.outcome or {})
+
+
+def _answers_view(answers: dict) -> None:
+    """What was asked and what was said, live or replayed from a log."""
+    for question, answer in answers.items():
         with ui.element("div").classes("transcript-row"):
             ui.label(str(question)).classes("t-body c-ink pre-wrap")
             ui.label(_as_text(answer)).classes("t-body c-accent pre-wrap")
@@ -386,13 +391,100 @@ def _resolve_write(decision: Decision, allowed: bool) -> None:
 
 
 def _resolved_write(decision: Decision) -> None:
-    name = events.tool_label(str(decision.payload["name"]))
-    outcome = "allowed" if decision.outcome else "declined"
+    _resolved_write_view(
+        str(decision.payload["name"]), decision.payload["input"], bool(decision.outcome)
+    )
+
+
+def _resolved_write_view(name: str, payload: dict, allowed: bool | None) -> None:
+    """A write and what the human did with it — live, or replayed from a log.
+
+    One renderer for both, because a replay that laid a write out differently
+    from the panel it happened in would be a second opinion about the same
+    moment. ``allowed`` is None when the log has the request and not the
+    outcome: a turn killed at the confirmation prompt, which is a real thing
+    that happens and is not the same as a refusal.
+    """
+    outcome = "unanswered" if allowed is None else ("allowed" if allowed else "declined")
     with ui.element("div").classes("transcript-row"):
         with ui.element("div").classes("row-gap-sm"):
-            c.mono(name, color="c-ink")
-            c.caption(outcome, color="c-accent" if decision.outcome else "c-mute")
-        c.collapsed("payload", lambda: c.payload_view(decision.payload["input"]))
+            c.mono(events.tool_label(name), color="c-ink")
+            c.caption(outcome, color="c-accent" if allowed else "c-mute")
+        c.collapsed("payload", lambda: c.payload_view(payload))
+
+
+# --- a turn that already happened -------------------------------------------
+
+
+def replay(run: Any) -> None:
+    """A logged turn, rendered where a live one would be (`portia/runlog.py`).
+
+    Same renderers as the live panel, deliberately: the log stores the events
+    the panel was drawing, so replaying them through anything else would be a
+    second opinion about a turn that is already written down. What differs is
+    that nothing here is answerable — the questions were answered months ago,
+    and a form you can fill in on a dead turn is a lie about what it would do.
+
+    Questions and writes each arrive as two events — asked, then answered — and
+    each becomes **one** row, because that is what the live panel shows once a
+    decision resolves: the answer, not the form that collected it. Drawing both
+    halves listed the same question twice, which reads as the copilot having
+    asked it twice.
+    """
+    for index, event in enumerate(run.events):
+        if event.kind == events.APPROVAL:
+            _resolved_write_view(
+                str(event.data.get("name", "")),
+                event.data.get("input") or {},
+                _outcome_after(run.events, index),
+            )
+        elif event.kind == events.QUESTION:
+            if _answered_after(run.events, index):
+                continue  # the ANSWER draws it, exactly as the live panel does
+            # No answer under it: the turn ended with the question on screen.
+            # That is the shape of an interrupted run and `EVALUATION.md` cares
+            # about it, so the options it was offering stay visible.
+            _asked_view(event.data.get("questions") or [])
+            c.empty_note(_UNANSWERED)
+        elif event.kind == events.ANSWER:
+            _answers_view(event.data.get("answers") or {})
+        elif event.kind == events.APPROVAL_RESULT:
+            continue  # drawn with the request it resolves
+        else:
+            _event(event)
+
+
+def _answered_after(rows: list, index: int) -> bool:
+    """Whether the question at ``index`` ever got an answer."""
+    for event in rows[index + 1 :]:
+        if event.kind == events.ANSWER:
+            return True
+        if event.kind == events.QUESTION:
+            break  # the next question — this one was never answered
+    return False
+
+
+def _outcome_after(rows: list, index: int) -> bool | None:
+    """The allow/deny that resolved the write at ``index``, if the log has one."""
+    for event in rows[index + 1 :]:
+        if event.kind == events.APPROVAL_RESULT:
+            return bool(event.data.get("allowed"))
+        if event.kind == events.APPROVAL:
+            break  # the next write's request — this one was never resolved
+    return None
+
+
+def _asked_view(questions: list[dict]) -> None:
+    """The question as it was put, with its options in the order given.
+
+    Never re-ordered and never badged, replayed or live: which option was best
+    is what the human was being asked, and the screen is not a participant.
+    """
+    for question in questions:
+        with ui.element("div").classes("transcript-row"):
+            ui.label(str(question.get("question", ""))).classes("t-body c-ink pre-wrap")
+            for option in question.get("options") or []:
+                c.caption(str(option.get("label", "")))
 
 
 # --- the end of a turn ------------------------------------------------------
@@ -436,6 +528,8 @@ _BANNER_WHY = {
 _TAB_LABEL = {state.CHAT: "Copilot", state.INDEX: "Indexing"}
 _RUNNING = "a turn is running here"
 _WAITING = "this turn is waiting on you"
+
+_UNANSWERED = "The turn ended with this question unanswered."
 
 _IDLE = "Nothing yet. Describe the goal above and press Go."
 _IDLE_INDEX = "Nothing indexed in this session."

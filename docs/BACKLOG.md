@@ -306,13 +306,14 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
     Membership editing needs multi-select, the fiddliest widget in the app.
   - **The source preview loads the whole file to show 15 rows.** Fine today, a straight bug at
     multi-GB — fixed by the DuckDB migration, listed here so it is not lost if that slips.
-- **A copilot turn is now written down, and the window still can't show it.** *Two halves closed:
-  a **spec run** saves as markdown 2026-07-27 (`Save report` → `runs/*.md`), and the **turn** is
-  written 2026-07-29 to `.portia/runs/*.jsonl` by `portia/runlog.py`, teed from `ui/turn` — so
-  nothing is lost when the window closes.* What is left is the reading surface: the Runs pane
-  (`ui/artifacts.py`) lists only the markdown reports, and a logged turn should be a row there that
-  replays into the transcript panel. Cheap, because the panel already renders `Event`s and a log
-  line *is* one. Two artifacts under one word "run" is the thing to design around, not paper over.
+- ~~**A copilot turn still disappears when the window does.**~~ — *closed in three parts: a **spec
+  run** saves as markdown 2026-07-27 (`Save report` → `runs/*.md`); the **turn** is written
+  2026-07-29 to `.portia/runs/*.jsonl` by `portia/runlog.py`, teed from `ui/turn`; and the same day
+  the left pane grew a **Turns** section that replays one into the middle pane. Two artifacts under
+  one word "run" got two headings rather than one merged list — a run executed a spec, a turn
+  decided what the spec should say. The replay reuses the transcript's own renderers, so a past
+  turn reads like the live one; what it cannot do is answer, since the questions are already
+  answered.*
 - **A conversation that stays open.** `session.run` sends one prompt, drains the response and closes
   the client, so there is no multi-turn — no "actually, redo that as an inner join" after a turn
   ends. The SDK's `ClaudeSDKClient` supports staying open; this is a portia limitation, not an SDK

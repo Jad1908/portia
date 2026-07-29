@@ -20,6 +20,17 @@ directory, so a run travels with the spec it produced.
 learn it is being observed, or `events.py` stops being a clean seam and becomes
 a logging framework (docs/EVALUATION.md → "The run log").
 
+**Logs are project-local, and that is the whole storage model.** There is no
+central store, no index, and nothing written outside the project — a turn is
+only interpretable beside the catalog it read and the spec it wrote, so a
+global folder of transcripts referring to tables you would have to go find is
+worse than no folder. The consequences are worth stating plainly rather than
+discovering: **deleting a project deletes its turns**, there is no retention,
+rotation or delete path (logs accumulate; tool results are the bulk), and
+nothing aggregates across projects. Reading another project's log needs no
+copying — every reader here takes a path, and `cli.runs --dir <proj>/.portia`
+works from anywhere.
+
 Nothing here judges a run. `summary` counts what happened — rungs pulled and in
 what order, how often it asked, which ops it chose, what a turn cost — and every
 one of those is a **cost and behaviour descriptor, not a correctness signal**.
@@ -188,6 +199,25 @@ def find(name: str, portia_dir: str | Path = DEFAULT_DIR) -> Path | None:
         return direct
     candidates = runs_in(portia_dir)
     return next((p for p in candidates if p.stem == name or p.stem.startswith(name)), None)
+
+
+def read_header(path: str | Path) -> dict[str, Any]:
+    """Just the header, without parsing the transcript under it.
+
+    A list of turns wants the model and the prompt and nothing else, and a
+    transcript is mostly tool results — a profile of a wide table is kilobytes.
+    Reading one line to draw one row keeps a pane that redraws on every event
+    from re-parsing every past run each time.
+    """
+    with Path(path).open(encoding="utf-8") as handle:
+        first = handle.readline()
+    try:
+        record = json.loads(first)
+    except ValueError:
+        return {}
+    if not isinstance(record, dict) or record.get("kind") != HEADER:
+        return {}
+    return record.get("data") or {}
 
 
 def read(path: str | Path) -> Run:
