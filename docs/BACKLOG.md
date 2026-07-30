@@ -47,6 +47,16 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
 
 ## Ops — execution (trusted transforms)
 
+- **`apply_join` crashes instead of reporting a key-type mismatch.** Found 2026-07-30 while
+  building the cross-spec work. `_select_list` emits `coalesce(l."k", r."k")` for a shared key
+  name, and DuckDB refuses `coalesce(VARCHAR, BIGINT)` with a raw `BinderException` — so a join
+  between keys of different kinds dies at bind time rather than producing the
+  `key_dtype_mismatch` report `checks/join.py` already knows how to make. **The reachable path is
+  an obvious one:** the profiler flags whitespace on a key, the agent records a `strip` (which
+  casts to VARCHAR), then joins to a numeric key on the other side — clean up, then break. Note
+  `checks/join.py` handles this correctly and deliberately (`_key_exprs` compares as text when the
+  kinds differ, precisely so the report cannot crash); the *op* has no such care. Fix is probably
+  an explicit cast in the coalesce, but it changes output types, so it wants its own review.
 - **A `sql` step reports no flags, ever.** `ops/sql.py:167` hardcodes `"flags": []`, so the escape
   hatch is the least observable op in the engine — while `record_step.md` tells the agent to reach
   for it whenever `join` and `normalize` cannot express the work (aggregating, deduping, filtering,
