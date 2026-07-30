@@ -67,6 +67,10 @@ class StepResult:
     #: Blocking flags the step itself declares as deliberate. Recorded in the spec
     #: so an override is a visible, reviewable act rather than a silent one.
     acknowledged: list[str] = field(default_factory=list)
+    #: This step's SELECT, reading its inputs **by name** — the CTE body it
+    #: compiles to (`portia/compile.py`, `docs/PIPELINE.md` §3). Produced by the
+    #: same builder that produced `table.query`, not a second rendering of it.
+    compiled: str = ""
 
     @property
     def has_drift(self) -> bool:
@@ -202,6 +206,7 @@ def _run_step(step: dict, tables: dict[str, Table]) -> StepResult:
         rationale=step.get("rationale"),
         outcome=outcome_report(out.table, inputs=inputs, keys=key_columns, grain=step.get("grain")),
         acknowledged=list(step.get("acknowledge") or []),
+        compiled=out.compiled,
     )
 
 

@@ -116,11 +116,21 @@ def load_table(path: str | Path, con: Any, *, name: str | None = None) -> Table:
     return Table(name=name or path.stem, query=read_query(path), con=con)
 
 
-def read_query(path: str | Path) -> str:
-    """The ``SELECT`` that reads ``path`` in DuckDB. The one place a reader is named."""
+def read_query(path: str | Path, *, absolute: bool = True) -> str:
+    """The ``SELECT`` that reads ``path`` in DuckDB. The one place a reader is named.
+
+    ``absolute=False`` leaves the path as given, for SQL that will be **written to
+    a file** rather than executed here: a compiled pipeline (`portia/pipeline.py`)
+    is run from the repo root and has to work on a machine other than this one, so
+    an absolute path would pin it to one laptop. The reader and its options are
+    identical either way — which is the point of asking here rather than spelling
+    a ``read_csv`` somewhere else. A generated file that disagreed with the engine
+    about which tokens mean null would be the exact class of bug `core/present.py`
+    exists to prevent.
+    """
     path = Path(path)
     fmt = _format(path)
-    args = [quote_literal(str(path.resolve()))]
+    args = [quote_literal(str(path.resolve() if absolute else path))]
     args += [f"{key}={_sql_value(value)}" for key, value in fmt.sql_options.items()]
     return f"SELECT * FROM {fmt.sql_reader}({', '.join(args)})"
 
