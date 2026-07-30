@@ -240,7 +240,42 @@ Rough map for whoever picks this up — not a task list, and not exhaustive.
 
 ---
 
-## 6. Deferred out of this task
+## 6. The frontend check — the last step, not an afterthought
+
+*Added 2026-07-30: this was not discussed while the seven decisions were being made, so it is
+scheduled explicitly rather than assumed. **Do this pass at the end of the overhaul**, once the
+engine side is real — but read it now, because two items below are engine decisions wearing a UI
+costume, and getting them wrong early is expensive.*
+
+`ui/` is an edge and must not compute (`CLAUDE.md`), so every item here is either "render something
+the engine now exposes" or "the engine needs to expose something".
+
+- **`.sql` files are a new artifact kind in the left panel.** Today it shows sources, specs, outputs,
+  runs and turns. Compiled models are a sixth, and they are the *deliverable* — arguably the most
+  important row on that panel.
+- **There are now two graphs, and the middle pane only knows about one.** Within a spec, steps form
+  a DAG (built, rendered today). Across specs, models form a DAG (new). Does the workflow pane show
+  one spec's steps, the project's models, or both at two zoom levels? This collides with
+  `VISION.md`'s oldest open question — *are cards steps or tables?* — and the answer just changed
+  shape, because now **both are true at different levels**: a card in the project graph is a table
+  (one spec, one table), and a card inside a spec is a step.
+- **Layers are a grouping, never an ordering of quality.** `DESIGN.md`'s product rule applies
+  directly: staging/intermediate/mart is a **kind**, so it may colour or group a graph, and it must
+  never be rendered as a progression from worse to better, or as a score.
+- **"Run" becomes ambiguous.** Today it runs one spec. With cross-spec references it could mean run
+  this spec, or run everything it depends on first. That is `VISION.md`'s "run semantics" open
+  question arriving for real, and it is an **engine** decision the UI merely surfaces.
+- **The staleness warning needs somewhere to land** (§2.3) — a `.sql` on disk that no longer matches
+  its spec has to be visible in the app, not only in a terminal.
+- **The import flow is a new surface** (§2.7): choose a file outside the repo, choose where in the
+  repo it lands, see plainly what will be copied and to where, confirm, then index. The existing drop
+  zone already copies files in, so this is a narrowing plus an explicit destination step.
+- **One concrete breakage:** `ui/engine.py:237` is the only place in `ui/` that opens the store, and
+  the store is being removed. It must change with §2.7 rather than at the end.
+
+---
+
+## 7. Deferred out of this task
 
 Recorded so they are not silently absorbed:
 
