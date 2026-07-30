@@ -27,14 +27,32 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
   dimension join**, which is how a real signal gets learned as noise. The fix is probably to flag on
   what actually multiplies the *result*, not on either side's multiplicity — but that changes a flag
   the copilot reads, so it needs its own review.
-- **`handlers.profile_source` re-reads the file rather than the store.** It goes through
-  `profile_path`, which is DuckDB-backed and memory-bounded, but re-parses the source file on every
-  call where a store read would be ~20× faster. Needs the project connection to reach `handlers`,
-  which is really the connection-lifecycle question step 9 has to answer anyway. **Run 8 raises the
-  stakes**: the fix above wants the model calling `profile_source` far more often than it does
-  today, and this is the path that call takes.
+- ~~**`handlers.profile_source` re-reads the file rather than the store.**~~ — *resolved by
+  decision, 2026-07-30: **the store is being removed** (`PIPELINE.md` §2.7), so reading the file is
+  the correct behaviour and this stops being a bug. Worth keeping the finding that led there: the
+  store was written at index time and then read by almost nothing — `run_spec`, every agent check
+  and every CLI tool went to the original files. A fast copy nobody reads is not a cache. If the
+  re-parse cost ever bites at the volume Run 8 wants, the answer is **parquet in the repo**, not a
+  hidden second copy.*
+- **`join_findings` cannot see nulls it is about to create.** It measures nulls in the **key
+  columns** only — `n_null_keys` per side, and example null-key rows. It never looks at a non-key
+  column and never reports anything about the *output's* columns, so it cannot say "under a left
+  join, `event_name` will be null in 340 of the 500 result rows" even though the unmatched counts
+  contain enough to derive it. Only `checks/outcome.py` catches an all-null column, and that is
+  **after** the step has run — which is exactly the Run 2 failure the verification layer was built
+  for, caught one moment too late. Every other op in the system has a measure-*before*; this is the
+  gap. `record_step.md` even says the quiet part out loud ("a join can match nothing, leave every
+  column from one side null, and still report exactly the row count you predicted") while the tool
+  that exists to measure a join beforehand is structurally incapable of seeing it.
 
 ## Ops — execution (trusted transforms)
+
+- **A `sql` step reports no flags, ever.** `ops/sql.py:167` hardcodes `"flags": []`, so the escape
+  hatch is the least observable op in the engine — while `record_step.md` tells the agent to reach
+  for it whenever `join` and `normalize` cannot express the work (aggregating, deduping, filtering,
+  deriving). `join` re-exports the join check's flags and `normalize` has `coercion_failures`;
+  `sql` has nothing. What a SQL step *could* honestly flag is worth thinking about before adding
+  anything — it must stay facts-only, and "the query did something surprising" is not a fact.
 
 - ~~**Nothing can aggregate**~~ — *fixed by the SQL escape hatch, shipped 2026-07-26
   (`ops/sql.py`). `ops = {join, normalize, sql}`. The hotel fixture's fatal fan-out now has a
@@ -86,8 +104,19 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
 - **Drift calibration** — split expectations into **invariants** (must never change → hard fail) vs
   **informational metrics** (row counts that naturally move → notice, not failure). Avoids alarm
   fatigue. Maybe drift-on-rationale (flag when a decision's justifying condition no longer holds).
-- **Workflow chaining across specs** — a mature workflow consuming another's trusted output as a
-  named, versioned artifact; spec versioning; drift across the chain (`VISION.md` open question).
+- ~~**Workflow chaining across specs**~~ — *designed 2026-07-30, **`docs/PIPELINE.md`**, not yet
+  built. A spec references another spec's output **by plain name**; portia scans the project's specs
+  and derives the run order. One spec produces one table; names are unique across the project. This
+  replaces the refusal at `agent/handlers.py:618`. Part of the pipeline overhaul, `PLAN.md` item 7.*
+  - **Still open and deliberately out of that task:** spec **versioning**, **drift across a chain**
+    (an upstream re-run invalidating a downstream `expect`), and **run caching / partial runs** —
+    once a project is a DAG of specs, "run only what changed" becomes askable.
+- **`write_outputs` is all-or-nothing and CSV-only.** It writes *every* step's table to
+  `<out_dir>/<step id>.csv` — a 12-step spec writes 12 files, 11 of which nobody wants — with no way
+  to mark a step as the deliverable versus scaffolding, and no way to ask for parquet even though
+  `write_table` dispatches on the extension. The pipeline overhaul reframes this (one spec = one
+  table, steps become blocks inside a query), so **re-read `PIPELINE.md` before fixing it here** —
+  the fix may be that this function's job changes rather than gets patched.
 - **Reproducibility of custom steps** — pin the execution environment (DuckDB version, or Python +
   deps + seeds) so a captured step truly re-runs identically.
 - **A `sql` step's output row order is not stable, so `write_outputs` isn't byte-reproducible.**
@@ -102,6 +131,40 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
 
 ## Agent — the "decide" layer (the copilot)
 
+*Four findings from the 2026-07-30 audit of every tool and every prompt (that session's map is the
+thing to re-read before prompt work; the pipeline decisions it produced are in `PIPELINE.md`).*
+
+- **`copilot.md` tells the model something false about itself: "You never see raw rows."** It does.
+  `join_findings` returns up to **12 complete rows** of the user's data per call — `SELECT *`, capped
+  at 3 each for unmatched-left, unmatched-right, null-key-left and null-key-right
+  (`checks/join.py:401`). That is deliberate and `checks/join.py`'s own docstring argues for it
+  ("so the agent can weigh materiality from real rows, not just counts"), so the *code* is right and
+  the *prompt* is wrong. Not a safety problem — the rows are capped and there is no filesystem — but
+  a model told it cannot see something it is looking at may distrust the sample it is entitled to
+  reason from, or fail to tell the user it read real records. Fix the sentence, not the tool.
+- **`--dir` never reaches the tools.** `portia_dir` flows into `build_system_prompt` only
+  (`agent/session.py:73`). The MCP server runs in-process, so every handler falls back to
+  `catalog.DEFAULT_DIR` unless the model spontaneously fills the optional `portia_dir` schema field —
+  and `describe_source`'s shorthand schema does not even expose it, while `run_spec`'s handler
+  ignores it entirely. So `chat --dir other` gives the agent a brief from `other/` and tools that
+  read `.portia/`. Latent today because everything uses the default.
+- **One string the model reads is still inline**, against the rule the whole `prompts/` directory
+  exists to enforce: the write-declined message at `agent/ask.py:59`. It is under the 200-character
+  threshold, so `tests/test_agent_prompts.py` does not catch it. It belongs in `prompts/errors/`,
+  which is precisely the directory for text read at the moment the model picks its next move.
+- **The three "flags" the agent sees are three unrelated vocabularies with one name.** Column flags
+  from `profiling` (`high_null`, `possible_key`, …), join-proposal flags from `checks/join`
+  (`fan_out`, `low_overlap`, …) and post-condition flags from `checks/outcome` (the five blocking
+  zeros) all arrive under the key `flags`, and only context tells the model which set it is reading.
+  Worth deciding whether that is fine or worth renaming. Related: four of them are threshold-based
+  (`high_null` and `low_overlap` at 0.5, `high_cardinality` and `numeric_stored_as_text` at 0.9) and
+  carry judgment-flavoured *names* — nothing blocks on them, so the facts-vs-judgment rule holds
+  where it is written down, but the naming does quiet judgment anyway.
+- **Prompt work the pipeline overhaul requires** (`PIPELINE.md` §2.6): `record_step.md` has to teach
+  the **new-spec-vs-new-step** decision and the `layer` field, and `copilot.md` has to cover
+  proposing the project's shape (flat or layered) and what the three layers mean. Portia supplies the
+  fact — how many other specs read a table — and the agent decides; no rule like "always promote a
+  join".
 - ~~**The copilot loop**~~ — *shipped (`portia/agent/`, branch `agent-loop`): in-process MCP server
   over the checks/catalog/spec, `AskUserQuestion` routed to the human, event stream, chat CLI.
   Proven end-to-end on both flows — `interpret` writes the catalog read, `merge` measures a join,
@@ -368,6 +431,11 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
 
 ## Core / infra
 
+- **The import workflow** (`PIPELINE.md` §2.7) — indexing is being restricted to files already
+  inside the working directory, so bringing outside data in needs its own command and its own UI
+  affordance: the user picks where in the repo it lands, portia states what it is about to copy and
+  to where, copies it, then indexes. Part of the pipeline overhaul, but listed here because it is the
+  one piece of it that is a **new** surface rather than a change to an existing one.
 - **README says nothing about auth — a decision awaiting the user, not an oversight.** `PLAN.md`
   → "Auth posture" settles what portia *does* (no auth code, ever) but not what the README
   *claims*. Naming the API key as the supported path is the safe posture; saying nothing is also

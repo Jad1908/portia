@@ -18,6 +18,12 @@ stack, and product vision. Read them every session, before proposing changes or 
   plan**: the specced sandbox turned out to be impossible, and a profile's memory still scales with
   cardinality because `possible_key` needs an exact `count(DISTINCT)`. Required reading before
   touching `checks/`, `ops/`, `core/io.py`, or anything that looks like a performance fix.
+- `docs/PIPELINE.md` — **the next task: SQL as the artifact.** Decided 2026-07-30, not built.
+  One `.sql` per spec, dbt-shaped and committed · cross-spec references **by name** with portia
+  deriving the run order · an optional `layer` whose *absence* is the simple case · the agent
+  deciding "new spec or new step" · and indexing restricted to files already in the repo, which
+  **retires `.portia/store.duckdb`**. Required reading before touching `spec.py`, `ops/`,
+  `core/store.py`, `catalog.py` or `cli/index.py` — several of those get things *removed*.
 - `docs/BACKLOG.md` — parking lot of deferred ideas, by stream. Not required reading; scan it when
   picking the next thing to build, and **add to it whenever we postpone something mid-work.**
 
@@ -95,8 +101,9 @@ adding code, and extend them rather than working around them:
 **Package layout — one home per concern; don't let things pile up flat in `portia/`:**
 
 - `portia/core/` — shared seams: `table.py` (**the currency** — a lazy relation) · `store.py` (a
-  project's ingested data, `.portia/store.duckdb`) · `io.py` (loading) · `serialize.py` (compact
-  JSON evidence) ·
+  project's ingested data, `.portia/store.duckdb` — **slated for removal**, `docs/PIPELINE.md` §2.7:
+  the hot paths never read it, and portia is tightening to sourcing only from files already in the
+  repo) · `io.py` (loading) · `serialize.py` (compact JSON evidence) ·
   `present.py` (**one way to show a measured value to a human** — rates, counts, a value on one
   line. Every surface renders the same numbers; the day the terminal and the app disagree about a
   null rate is the day someone has to work out which one to believe.)
@@ -148,8 +155,13 @@ adding code, and extend them rather than working around them:
     description** — the description is what teaches the model when to climb.
   - Do not add a code layer that ranks decisions or suggests answers — see "facts vs judgment".
 - **Durable artifacts** (git-diffable YAML, the residue that makes this a product, not a script):
-  - `portia/spec.py` — the **spec** (*what we did to the data*): sources + decided steps + `expect`
-    + `rationale` + an optional `grain` claim and `acknowledge` list; `run_spec` re-executes,
+  - `portia/spec.py` — the **spec** (*what we did to the data*). **A spec produces one table**, and
+    it is about to compile to one `.sql` file — dbt-shaped, committed, referencing other specs by
+    name (`docs/PIPELINE.md`). The SQL already exists: `run_spec` composes each step's `SELECT` into
+    the next and discards the result at the end of the run. Keeping it, as named blocks rather than
+    nested sub-selects, is the whole of that change.
+    Contents: sources + decided steps + `expect` + `rationale` + an optional `grain` claim and an
+    `acknowledge` list; `run_spec` re-executes,
     detects drift, and attaches each step's measured `outcome`. **Drift and outcome are different
     questions** — drift asks whether the prediction held, the outcome asks what came out. A correct
     prediction about a broken join is still a broken join. Recording a step **runs** it

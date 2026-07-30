@@ -54,7 +54,21 @@ not a gadget — a place you actually work.
      else in the project. Not a dismissible prompt, not a settings field found later.
    - **CLI: prompted on stdin** the first time a command runs in an uninitialized directory.
 2. **Add data manually + index.** The user adds files by hand — CSV or Parquet, whatever
-   `core/io` registers. Each added source is **indexed**:
+   `core/io` registers.
+
+   > **Scope, decided 2026-07-30 (`PIPELINE.md` §2.7).** portia plugs into a repo that **already
+   > holds the data**, and the user picks what is in scope. Only files **inside the working
+   > directory** can be indexed — an outside path is refused, not warned about. Bringing outside
+   > data in is a **separate, deliberate import step**: the user chooses where in the repo it lands,
+   > portia states plainly what it is about to copy and to where, copies it, then indexes it.
+   > Original files are never modified, and every source path recorded in a spec is repo-relative —
+   > which is what makes a spec work on a machine other than the one that wrote it.
+   >
+   > This retires `.portia/store.duckdb`, the hidden second copy made at index time. One visible
+   > copy of the data beats an invisible fast one; parquet in the repo is the answer if reads ever
+   > get slow.
+
+   Each added source is **indexed**:
    - a **deterministic metadata analysis** runs (profiling — this is the engine's checks layer).
      This is free and **always happens**, and
    - the **model writes a short report** on *what it thinks this data is*, based on that metadata
@@ -78,9 +92,29 @@ not a gadget — a place you actually work.
 - The **output of one workflow can feed a downstream, more mature workflow** — i.e. a mature
   pipeline consumes the trusted table another workflow produced.
 
-> **Needs reflection.** How does a downstream workflow *reference* an upstream output — as a named,
-> versioned artifact (the durable spec/table from `PLAN.md`) that shows up as a source in the
-> downstream panel? How do we handle re-runs and drift across the chain?
+> **Decided 2026-07-30 — `PIPELINE.md`.** A downstream spec references an upstream output **by its
+> plain name**: no path, no version, no `depends_on` list. portia scans the project's specs, finds
+> which one produces that name, and derives the run order itself — the same answer dbt, SQLMesh,
+> Dataform and Terraform all landed on, and one portia is already halfway to, since
+> `spec.step_inputs` deliberately does not distinguish a source from an earlier step. **One spec
+> produces one table**, so a spec *is* the named artifact; its steps are blocks inside its query.
+> The rule this costs: output names are unique across the project.
+>
+> Re-runs and drift across the chain are **not** settled by that and stay open (`BACKLOG.md` →
+> Spec).
+
+### The pipeline as a deliverable
+
+The set of specs compiles to **one `.sql` file per spec**, in its own folder, shaped so it drops
+into a dbt project. That is the thing you hand a data team. A spec may declare a `layer`
+(`staging` / `intermediate` / `mart`) and its file lands in the matching subfolder; a project with
+**no** layers is a flat project, all files in one folder, and that is the whole of how "this pattern
+is overkill here" is handled — the simple case is the absence of a field, never a second mode.
+
+The SQL is a **build output**: regenerated from the spec, not hand-edited, because the spec carries
+the `rationale`, `expect` and `grain` that plain SQL cannot hold. It is **committed** anyway — the
+pipeline is the deliverable and someone has to read it in a PR — with a generated header and a
+staleness warning so a file that has drifted from its spec is visible rather than surprising.
 
 ---
 
@@ -326,6 +360,29 @@ you back to a terminal**, which is the line that matters.
 
 ---
 
+## Flow — a cloud-hosted project (later, and a UI vision before it is a mechanism)
+
+*Recorded 2026-07-30 so it isn't lost. This is what it should feel like; how it works gets decided
+when it is picked up. Nothing here is scheduled.*
+
+When the project's data lives in a warehouse rather than the repo, **the app should feel exactly the
+same.** The user picks which warehouse tables are in scope for this study, and from then on browses
+them in portia the way local sources are browsed: the schema, the profile statistics, what the agent
+recorded when it indexed them, the interpretation and column roles, all in the same panels.
+
+**The data is never pulled down.** That is the whole constraint — these tables are too large to work
+with locally, and copying them would reintroduce the second-copy problem the local mode just got rid
+of. Measurements are queries that run where the data is; only small results come back. Everything
+portia writes — the catalog entries, the specs, the compiled `.sql` — still lands locally, in the
+repo, exactly as in local mode.
+
+So the work to do here is mostly **UI parity plus a table picker**, on top of the `core.table.Table`
+seam that already exists for it (`TECH_STACK.md` — "a name, a query, and a connection is not a
+DuckDB-shaped idea"). How tables are selected, how credentials are held, and how the profile queries
+are shaped are all open.
+
+---
+
 ## Open questions (revisit later — not now)
 
 - **Nature of the cards:** tables/datasets vs. steps/actions vs. a hybrid (a *step* card that
@@ -340,7 +397,10 @@ you back to a terminal**, which is the line that matters.
 - **Editing interpretations:** how manual corrections to a file's metadata/interpretation are
   stored and fed back into the model's future reasoning.
 - **Grouping:** is a group just shared context, or does it also constrain/scope workflows?
-- **Workflow chaining:** how downstream workflows reference upstream outputs; versioning; drift
-  across the chain; how "maturity" of a workflow is represented.
+- ~~**Workflow chaining:** how downstream workflows reference upstream outputs~~ — *decided
+  2026-07-30: **by plain name**, with portia deriving the run order from the set of specs
+  (`PIPELINE.md` §2.4). Names are unique across the project; one spec produces one table.*
+  **Still open:** spec versioning, drift across the chain, and how a workflow's "maturity" is
+  represented.
 - **Left-panel curation:** how we decide what counts as a "data file or artifact" to surface inside
   a complex repo.
