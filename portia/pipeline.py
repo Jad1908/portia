@@ -29,11 +29,14 @@ from __future__ import annotations
 
 import hashlib
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
 import yaml
 
+from portia import spec
+from portia.core import store
 from portia.core.io import read_query
 from portia.core.table import quote_ident
 from portia.spec import StepResult
@@ -167,6 +170,84 @@ def write_sources(sources: dict[str, str], *, root: str | Path = ".", when=None)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(compile_sources(sources, when=when))
     return path
+
+
+@dataclass
+class BuiltModel:
+    """One model, built: what ran, what came out, and where the SQL landed."""
+
+    name: str
+    spec_path: Path
+    layer: str | None
+    results: list[StepResult]
+    sql_path: Path
+
+    @property
+    def blocking(self) -> list[str]:
+        """Zero-conditions any step hit and did not acknowledge."""
+        return sorted({flag for r in self.results for flag in r.blocking})
+
+    @property
+    def drift(self) -> dict[str, dict]:
+        """Every step that diverged from its prediction, by step id."""
+        return {r.id: r.drift for r in self.results if r.drift}
+
+
+def build_project(root: str | Path = ".", *, when: datetime | None = None) -> list[BuiltModel]:
+    """Run every spec in dependency order and write the whole ``models/`` tree.
+
+    The project's DAG comes from what the specs say they read — nothing declares
+    an order (`spec.run_order`). Models are built in that order, so an upstream is
+    always real before a downstream reads it.
+
+    **Nothing is suppressed.** A model whose step hit a blocking zero is still
+    compiled and still returned, carrying its flags; deciding whether to ship a
+    pipeline with a known zero in it is the human's call, and a builder that
+    silently dropped the file would be making that call in code.
+    """
+    root = Path(root)
+    models = spec.discover_specs(root)
+    if not models:
+        return []
+
+    con = store.memory()
+    built: list[BuiltModel] = []
+    sources: dict[str, str] = {}
+
+    for name in spec.run_order(models, base_dir=root):
+        doc = spec.load_spec(root / models[name])
+        layer = doc.get("layer")
+        spec.validate_layer(layer)
+        sources |= doc.get("sources") or {}
+
+        results = spec.run_spec(doc, base_dir=root, con=con, models=models)
+        sql_path = write_model(
+            results,
+            models[name],
+            layer=layer,
+            root=root,
+            spec_fingerprint=fingerprint(doc),
+            when=when,
+        )
+        built.append(BuiltModel(name, models[name], layer, results, sql_path))
+
+    write_sources(sources, root=root, when=when)
+    return built
+
+
+def stale_models(root: str | Path = ".") -> list[str]:
+    """Models whose ``.sql`` on disk no longer matches their spec.
+
+    Cheap — it reads a header, it does not run anything — so a surface can ask on
+    every render. See :func:`is_stale` for why a missing file is not stale.
+    """
+    root = Path(root)
+    stale = []
+    for name, path in spec.discover_specs(root).items():
+        doc = spec.load_spec(root / path)
+        if is_stale(path, doc, layer=doc.get("layer"), root=root):
+            stale.append(name)
+    return sorted(stale)
 
 
 def file_fingerprint(path: str | Path) -> str | None:

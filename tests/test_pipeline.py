@@ -174,3 +174,131 @@ def test_an_edited_spec_makes_its_model_stale(project: Path) -> None:
 def test_a_spec_with_no_steps_refuses_to_compile() -> None:
     with pytest.raises(ValueError, match="no steps"):
         pipeline.compile_spec([], name="empty")
+
+
+# --- the whole project, in dependency order ---------------------------------
+
+
+def _spec_file(project: Path, name: str, doc: dict) -> None:
+    directory = project / "specs"
+    directory.mkdir(parents=True, exist_ok=True)
+    import yaml
+
+    (directory / f"{name}.yaml").write_text(yaml.safe_dump(doc, sort_keys=False))
+
+
+def _two_layer_project(project: Path) -> None:
+    _spec_file(
+        project,
+        "stg_orders",
+        {
+            "version": 1,
+            "layer": "staging",
+            "sources": {"orders": "data/orders.csv"},
+            "steps": [
+                {
+                    "id": "cleaned",
+                    "op": "normalize",
+                    "input": "orders",
+                    "transforms": [{"column": "customer_id", "op": "strip"}],
+                }
+            ],
+        },
+    )
+    _spec_file(
+        project,
+        "mart_orders",
+        {
+            "version": 1,
+            "layer": "mart",
+            "sources": {"customers": "data/customers.csv"},
+            "steps": [
+                {
+                    "id": "joined",
+                    "op": "join",
+                    "left": "stg_orders",
+                    "right": "customers",
+                    "keys": ["customer_id"],
+                    "how": "left",
+                }
+            ],
+        },
+    )
+
+
+def test_build_project_writes_a_layered_models_tree(project: Path) -> None:
+    _two_layer_project(project)
+
+    built = pipeline.build_project(project)
+
+    assert [m.name for m in built] == ["stg_orders", "mart_orders"]  # dependency order
+    assert (project / "models" / "staging" / "stg_orders.sql").exists()
+    assert (project / "models" / "mart" / "mart_orders.sql").exists()
+    assert (project / "models" / pipeline.SOURCES_FILE).exists()
+
+
+def test_the_built_pipeline_runs_end_to_end_in_a_fresh_database(project: Path) -> None:
+    """The deliverable, exercised the way whoever receives it would run it."""
+    _two_layer_project(project)
+    built = pipeline.build_project(project)
+    expected = built[-1].results[-1].table.head(1000)
+
+    con = duckdb.connect(":memory:")
+    try:
+        con.execute(f"SET FILE_SEARCH_PATH='{project}'")
+        con.execute((project / "models" / pipeline.SOURCES_FILE).read_text())
+        for model in built:  # dependency order matters and build_project gives it
+            con.execute(model.sql_path.read_text())
+        actual = con.execute("SELECT * FROM mart_orders").fetch_df()
+    finally:
+        con.close()
+
+    sort = list(expected.columns)
+    assert (
+        expected.sort_values(sort)
+        .reset_index(drop=True)
+        .equals(actual.sort_values(sort).reset_index(drop=True))
+    )
+
+
+def test_build_reports_a_blocking_zero_rather_than_hiding_it(project: Path) -> None:
+    _spec_file(
+        project,
+        "nothing_survives",
+        {
+            "version": 1,
+            "sources": {"orders": "data/orders.csv"},
+            "steps": [
+                {
+                    "id": "filtered_away",
+                    "op": "sql",
+                    "inputs": ["orders"],
+                    "sql": "SELECT * FROM orders WHERE amount > 1000",
+                }
+            ],
+        },
+    )
+    built = pipeline.build_project(project)
+
+    assert "empty_output" in built[0].blocking
+    # And the file is still written: whether to ship a pipeline with a known zero
+    # in it is the human's call, not something a builder decides by hiding it.
+    assert built[0].sql_path.exists()
+
+
+def test_an_unknown_layer_is_refused(project: Path) -> None:
+    _spec_file(project, "x", {"version": 1, "layer": "gold", "steps": []})
+    with pytest.raises(ValueError, match="unknown layer"):
+        pipeline.build_project(project)
+
+
+def test_stale_models_lists_what_drifted(project: Path) -> None:
+    _two_layer_project(project)
+    pipeline.build_project(project)
+    assert pipeline.stale_models(project) == []
+
+    doc = spec.load_spec(project / "specs" / "stg_orders.yaml")
+    doc["steps"][0]["transforms"][0]["op"] = "lower"
+    spec.save_spec(doc, project / "specs" / "stg_orders.yaml")
+
+    assert pipeline.stale_models(project) == ["stg_orders"]

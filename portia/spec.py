@@ -107,6 +107,31 @@ def step_inputs(step: dict) -> list[str]:
 #: the project's set of buildable tables.
 SPECS_DIR = "specs"
 
+#: The layers a spec may declare, coarsest-input to nearest-the-user. A *kind*,
+#: never a rank: `DESIGN.md`'s rule applies here as much as on screen, so nothing
+#: may order these by quality or treat "mart" as further along than "staging".
+#:
+#: - ``staging`` — one lightly-cleaned copy per raw source; nothing joined.
+#: - ``intermediate`` — combinations on the way to an answer.
+#: - ``mart`` — the tables people actually query.
+#:
+#: **The field is optional and its absence is the flat project** (`PIPELINE.md`
+#: §2.5). That is the whole of how "this pattern is overkill here" is handled;
+#: there must never be a second mode, a setting, or a branch in the engine, or
+#: the simple case rots the first time nobody exercises it.
+LAYERS = ("staging", "intermediate", "mart")
+
+
+def validate_layer(layer: Any) -> None:
+    """A declared layer must be one we know; no layer is always fine."""
+    if layer is None:
+        return
+    if layer not in LAYERS:
+        raise ValueError(
+            f"unknown layer {layer!r} — expected one of {', '.join(LAYERS)}, "
+            "or leave it out entirely for a flat project"
+        )
+
 
 def discover_specs(root: str | Path = ".") -> dict[str, Path]:
     """Every spec in the project, as ``model name -> path``.

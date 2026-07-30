@@ -270,6 +270,7 @@ def join_findings(
 def record_step(
     spec_path: str,
     step: dict,
+    layer: str | None = None,
     portia_dir: str = catalog.DEFAULT_DIR,
 ) -> dict:
     """Execute a decided step, measure what it produced, and record it if it holds.
@@ -302,6 +303,13 @@ def record_step(
     )
     sources: dict[str, str] = doc.setdefault("sources", {})
     steps: list[dict] = doc.setdefault("steps", [])
+
+    # A spec-level claim, not a step-level one — the layer describes the table the
+    # spec builds. Set once and left alone afterwards: silently re-layering a model
+    # on a later step would move its file without anyone reading a decision.
+    spec.validate_layer(layer)
+    if layer and not doc.get("layer"):
+        doc["layer"] = layer
 
     root = _project_root(portia_dir)
     # Every other spec in the project is a table this step may read, by name. The
@@ -353,6 +361,7 @@ def record_step(
         "spec": str(path),
         "step_id": step["id"],
         "n_steps": len(steps),
+        "layer": doc.get("layer"),
         "outcome": result.outcome,
         "drift": result.drift,
         "acknowledged": result.acknowledged,
