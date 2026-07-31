@@ -42,8 +42,7 @@ from portia.checks.outcome import (
     outcome_report,
     render_outcome,
 )
-from portia.core import store
-from portia.core.io import load_table, write_table
+from portia.core.io import connect, load_table, write_table
 from portia.core.present import format_rate, frame_to_markdown, inline
 from portia.core.table import Table
 from portia.ops import apply_join, apply_normalize, apply_sql
@@ -225,7 +224,7 @@ def run_spec(
     and writing outputs after the run returns.
     """
     base = Path(base_dir)
-    con = con or store.memory()
+    con = con or connect()
     tables: dict[str, Table] = {
         name: load_table(base / rel, con, name=name)
         for name, rel in (spec.get("sources") or {}).items()
@@ -282,22 +281,36 @@ def model_table(
     return Table(name=ref, query=upstream[-1].table.query, con=con)
 
 
-def write_outputs(results: list[StepResult], out_dir: str | Path) -> list[Path]:
-    """Save each step's produced table as ``<out_dir>/<step id>.csv``.
+def write_outputs(
+    results: list[StepResult], out_dir: str | Path, *, name: str | None = None
+) -> list[Path]:
+    """Save the table this spec produced, as ``<out_dir>/<name>.csv``.
+
+    **One file per model, not one per step** (`docs/PIPELINE.md` §2.1). A spec
+    produces one table; its steps are the working-out, and in the compiled
+    pipeline they are CTEs rather than tables. Writing a CSV per step made a
+    twelve-step spec deposit twelve files, eleven of which nobody wanted, and it
+    described a shape the pipeline no longer has.
+
+    ``name`` is the model's name — the spec's filename. Without one this falls
+    back to the last step's id, which is what a caller that has results but no
+    spec path can honestly say.
 
     Both human edges write outputs — ``cli.run --write`` and the app's Run — and
     a table's filename is part of how a spec is read afterwards, so where it
     lands is decided once, here, rather than in each renderer.
     """
+    produced = [r for r in results if r.table is not None]
+    if not produced:
+        return []
+
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    written = []
-    for r in results:
-        if r.table is not None:
-            # `write_table` dispatches on the extension, so pointing this at
-            # `.parquet` is the only change a parquet output would need.
-            written.append(write_table(r.table, out / f"{r.id}.csv"))
-    return written
+    final = produced[-1]
+    assert final.table is not None  # `produced` filtered on exactly this
+    # `write_table` dispatches on the extension, so pointing this at `.parquet`
+    # is the only change a parquet output would need.
+    return [write_table(final.table, out / f"{name or final.id}.csv")]
 
 
 def _run_step(step: dict, tables: dict[str, Table]) -> StepResult:

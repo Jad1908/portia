@@ -36,8 +36,7 @@ from pathlib import Path
 import yaml
 
 from portia import spec
-from portia.core import store
-from portia.core.io import read_query
+from portia.core.io import connect, read_query
 from portia.core.table import quote_ident
 from portia.spec import StepResult
 
@@ -210,7 +209,7 @@ def build_project(root: str | Path = ".", *, when: datetime | None = None) -> li
     if not models:
         return []
 
-    con = store.memory()
+    con = connect()
     built: list[BuiltModel] = []
     sources: dict[str, str] = {}
 

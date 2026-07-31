@@ -19,7 +19,7 @@ import duckdb
 import pytest
 
 from portia import pipeline, spec
-from portia.core import store
+from portia.core.io import connect
 
 
 @pytest.fixture
@@ -69,7 +69,7 @@ def _doc() -> dict:
 
 
 def _run(doc: dict, project: Path) -> list[spec.StepResult]:
-    return spec.run_spec(doc, base_dir=project, con=store.memory())
+    return spec.run_spec(doc, base_dir=project, con=connect())
 
 
 def test_every_step_compiles(project: Path) -> None:
@@ -302,3 +302,24 @@ def test_stale_models_lists_what_drifted(project: Path) -> None:
     spec.save_spec(doc, project / "specs" / "stg_orders.yaml")
 
     assert pipeline.stale_models(project) == ["stg_orders"]
+
+
+def test_write_outputs_writes_one_file_per_model_not_per_step(project: Path) -> None:
+    """A spec produces one table; its steps are the working-out (`PIPELINE.md` §2.1).
+
+    This used to drop a CSV per step, so a twelve-step spec deposited twelve files
+    and eleven of them were scaffolding. It also described a shape the compiled
+    pipeline does not have — in the .sql those steps are CTEs, not tables.
+    """
+    results = _run(_doc(), project)  # two steps
+
+    written = spec.write_outputs(results, project / "out", name="orders_with_customers")
+
+    assert [p.name for p in written] == ["orders_with_customers.csv"]
+    assert sorted(p.name for p in (project / "out").iterdir()) == ["orders_with_customers.csv"]
+
+
+def test_write_outputs_falls_back_to_the_last_step_id(project: Path) -> None:
+    """What a caller holding results but no spec path can honestly say."""
+    written = spec.write_outputs(_run(_doc(), project), project / "out")
+    assert [p.name for p in written] == ["orders_with_customers.csv"]

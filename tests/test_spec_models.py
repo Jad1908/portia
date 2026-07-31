@@ -14,7 +14,7 @@ import pytest
 import yaml
 
 from portia import pipeline, spec
-from portia.core import store
+from portia.core.io import connect
 
 
 @pytest.fixture
@@ -106,9 +106,7 @@ def test_a_step_reads_another_specs_table_by_name(project: Path) -> None:
     mart = _mart(project)
     models = spec.discover_specs(project)
 
-    results = spec.run_spec(
-        spec.load_spec(mart), base_dir=project, con=store.memory(), models=models
-    )
+    results = spec.run_spec(spec.load_spec(mart), base_dir=project, con=connect(), models=models)
 
     # 3 order rows, 2 of them C1 -> both match Ann; C2 matches Bo. The upstream
     # strip is what makes " C1 " match at all, so this also proves the upstream
@@ -125,7 +123,7 @@ def test_an_unknown_name_says_what_is_available(project: Path) -> None:
         spec.run_spec(
             spec.load_spec(mart),
             base_dir=project,
-            con=store.memory(),
+            con=connect(),
             models=spec.discover_specs(project),
         )
 
@@ -161,9 +159,7 @@ def test_a_cross_spec_reference_compiles_to_a_bare_model_name(project: Path) -> 
     mart = _mart(project)
     models = spec.discover_specs(project)
 
-    results = spec.run_spec(
-        spec.load_spec(mart), base_dir=project, con=store.memory(), models=models
-    )
+    results = spec.run_spec(spec.load_spec(mart), base_dir=project, con=connect(), models=models)
     sql = pipeline.compile_spec(results, name="mart_customer_orders")
 
     assert '"stg_orders" AS "l"' in sql

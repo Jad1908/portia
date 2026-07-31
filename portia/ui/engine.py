@@ -42,8 +42,7 @@ from pathlib import Path
 
 from portia import catalog, runlog
 from portia import spec as spec_module
-from portia.core import store
-from portia.core.io import find_data_files, load_table
+from portia.core.io import connect, find_data_files, load_table
 from portia.ui import state as State
 from portia.ui.state import App
 
@@ -234,28 +233,23 @@ async def index(paths: list[Path], app: App, *, on_progress=None) -> list[str]:
     total, name)`` is called before each file, on the event loop, so a caller can
     redraw between them.
     """
-    con = await asyncio.to_thread(store.connect, app.catalog_dir)
     names = []
-    try:
-        for done, path in enumerate(paths):
-            if on_progress is not None:
-                on_progress(done, len(paths), path.stem)
-            names.append(await asyncio.to_thread(_index_one, path, app.portia_dir, app.root, con))
-    finally:
-        await asyncio.to_thread(con.close)
+    for done, path in enumerate(paths):
+        if on_progress is not None:
+            on_progress(done, len(paths), path.stem)
+        names.append(await asyncio.to_thread(_index_one, path, app.portia_dir))
     refresh_catalog(app)
     return names
 
 
-def _index_one(path: Path, portia_dir: str, root: Path, con) -> str:
-    """One source into the store and the catalog, on the project's own connection.
+def _index_one(path: Path, portia_dir: str) -> str:
+    """One source into the catalog. Nothing is copied — see `catalog.index_source`.
 
-    The connection is shared across the batch deliberately: DuckDB takes a write
-    lock on the store, so opening one per file is both slower and a collision
-    waiting to happen.
+    There is no shared connection to thread through any more: with the store
+    retired, indexing profiles the file where it lies and `catalog.source_ref`
+    records the path relative to the project (`docs/PIPELINE.md` §2.7).
     """
-    relative = path.resolve().relative_to(root) if path.resolve().is_relative_to(root) else path
-    catalog.index_source(relative, portia_dir=portia_dir, con=con)
+    catalog.index_source(path, portia_dir=portia_dir)
     return path.stem
 
 
@@ -358,10 +352,18 @@ def turn_summary(run: runlog.Run) -> dict:
 
 
 async def write_outputs(app: App) -> list[Path]:
-    """Save each step's table under ``out/``, the same way ``cli.run --write`` does."""
+    """Save the table this spec produced under ``out/``, as ``cli.run --write`` does.
+
+    One file per model, named for the spec — see `spec.write_outputs`.
+    """
     if not app.results:
         return []
-    written = await asyncio.to_thread(spec_module.write_outputs, app.results, app.root / OUT_DIR)
+    written = await asyncio.to_thread(
+        spec_module.write_outputs,
+        app.results,
+        app.root / OUT_DIR,
+        name=app.spec_path.stem if app.spec_path else None,
+    )
     app.outputs = written
     return written
 
@@ -373,7 +375,7 @@ async def read_table(path: Path):
     rows; before this it loaded the whole file to show those fifteen, which was a
     straight bug the moment an output got large.
     """
-    return load_table(path, store.memory())
+    return load_table(path, connect())
 
 
 # --- reloading the spec after the copilot has written to it -----------------

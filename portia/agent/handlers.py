@@ -31,8 +31,7 @@ from portia.checks import profiling
 from portia.checks.join import join_findings as _join_findings
 from portia.checks.outcome import BLOCKING_FLAGS
 from portia.checks.profiling import profile_path
-from portia.core import store
-from portia.core.io import load_table
+from portia.core.io import connect, load_table
 from portia.core.serialize import to_json
 from portia.ops import join as join_op
 from portia.ops import normalize as normalize_op
@@ -181,7 +180,7 @@ def profile_source(source: str, portia_dir: str = catalog.DEFAULT_DIR) -> dict:
         }
 
     entry = _entry(source, portia_dir)
-    profile = profile_path(entry["source"])
+    profile = profile_path(_project_root(portia_dir) / entry["source"])
     roles = {c["name"]: c.get("role") for c in entry.get("columns", [])}
     return {
         "source": entry["source"],
@@ -257,7 +256,7 @@ def join_findings(
 
     Call this **before** deciding anything about a merge.
     """
-    con = store.memory()
+    con = connect()
     return _join_findings(
         _table(left, portia_dir, con),
         _table(right, portia_dir, con),
@@ -426,9 +425,9 @@ def _table(ref: str, portia_dir: str, con=None):
     """
     if STEP_REF in ref:
         return _step_table(ref, con)
-    con = con or store.memory()
+    con = con or connect()
     try:
-        return load_table(_source_path(ref, portia_dir), con, name=ref)
+        return load_table(_project_root(portia_dir) / _source_path(ref, portia_dir), con, name=ref)
     except ValueError as exc:
         # Not an indexed source. Before giving up, try the project's other models:
         # a name is allowed to be any of three things, and a message that names
@@ -463,7 +462,7 @@ def _step_table(ref: str, con=None):
     prefix = {**doc, "steps": steps[: ids.index(step_id) + 1]}
     root = Path(spec_path).parent.parent
     return spec.run_spec(
-        prefix, base_dir=root, con=con or store.memory(), models=spec.discover_specs(root)
+        prefix, base_dir=root, con=con or connect(), models=spec.discover_specs(root)
     )[-1].table
 
 

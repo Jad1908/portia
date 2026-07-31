@@ -82,7 +82,13 @@ def main() -> None:
     paths = resolve(args.data)
     names = []
     for path in paths:
-        written = index_source(path, portia_dir=args.dir)
+        try:
+            written = index_source(path, portia_dir=args.dir)
+        except ValueError as exc:
+            # An out-of-repo path is refused, not warned about (PIPELINE.md §2.7).
+            # `catalog.source_ref` composes the message, including the import
+            # command to run instead, so the rule is stated in one place.
+            raise SystemExit(str(exc)) from None
         names.append(written.stem)
         print(f"indexed → {written}")
 

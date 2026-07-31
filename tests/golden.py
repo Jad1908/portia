@@ -41,7 +41,7 @@ from typing import Any
 
 from portia.checks import join as join_checks
 from portia.checks import profiling
-from portia.core import store
+from portia.core.io import connect, load_table
 from portia.core.serialize import to_json, to_jsonable
 from portia.core.table import Table
 from portia.ops.join import HOWS
@@ -92,9 +92,11 @@ class Case:
 class DuckDBBackend:
     """The engine, as the cases reach it. Same evidence, measured in SQL.
 
-    Sources are **ingested**, exactly as a real project's are, so what the golden
-    files compare is the path the product actually takes rather than a view over
-    a CSV that nothing else uses.
+    Sources are read **in place**, exactly as a real project's are since the store
+    was retired (`docs/PIPELINE.md` §2.7), so what the golden files compare is the
+    path the product actually takes. The evidence did not move when that changed:
+    ingesting was ``CREATE TABLE … AS <read_query(path)>``, so the reader and its
+    null tokens were always the same ones — only the materialization differed.
 
     The pandas backend that used to sit beside this one is gone with the
     implementations it called (`docs/DUCKDB_MIGRATION.md` §8, step 10). The class
@@ -106,19 +108,15 @@ class DuckDBBackend:
 
     def __init__(self):
         self._con = None
-        self._ingested: set[str] = set()
 
     @property
     def con(self):
         if self._con is None:
-            self._con = store.memory()
+            self._con = connect()
         return self._con
 
     def source(self, fixture: str) -> Table:
-        if fixture not in self._ingested:
-            store.ingest(self.con, ROOT / MOCK_DIR / f"{fixture}.csv", name=fixture)
-            self._ingested.add(fixture)
-        return store.table(self.con, fixture)
+        return load_table(ROOT / MOCK_DIR / f"{fixture}.csv", self.con, name=fixture)
 
     def builder(self, fixture: str) -> Table:
         from portia import fixtures
@@ -138,7 +136,7 @@ class DuckDBBackend:
         return join_checks.join_findings(left, right, **keys)
 
     def run_spec(self, spec: dict) -> list[StepResult]:
-        return run_spec(spec, base_dir=ROOT, con=store.memory())
+        return run_spec(spec, base_dir=ROOT, con=connect())
 
     def output(self, table) -> dict:
         """A step's produced table, ordered by the row's own values.
