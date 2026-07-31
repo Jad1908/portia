@@ -56,7 +56,7 @@ not a gadget — a place you actually work.
 2. **Add data manually + index.** The user adds files by hand — CSV or Parquet, whatever
    `core/io` registers.
 
-   > **Scope, decided 2026-07-30 (`PIPELINE.md` §2.7).** portia plugs into a repo that **already
+   > **Scope, decided 2026-07-30 and shipped 2026-07-31 (`PIPELINE.md` §2.7).** portia plugs into a repo that **already
    > holds the data**, and the user picks what is in scope. Only files **inside the working
    > directory** can be indexed — an outside path is refused, not warned about. Bringing outside
    > data in is a **separate, deliberate import step**: the user chooses where in the repo it lands,
@@ -64,9 +64,10 @@ not a gadget — a place you actually work.
    > Original files are never modified, and every source path recorded in a spec is repo-relative —
    > which is what makes a spec work on a machine other than the one that wrote it.
    >
-   > This retires `.portia/store.duckdb`, the hidden second copy made at index time. One visible
+   > This retired `.portia/store.duckdb`, the hidden second copy made at index time. One visible
    > copy of the data beats an invisible fast one; parquet in the repo is the answer if reads ever
-   > get slow.
+   > get slow. **The GUI half is not built**: the drop zone still copies files in without letting
+   > you choose where or telling you first (`PIPELINE.md` §6).
 
    Each added source is **indexed**:
    - a **deterministic metadata analysis** runs (profiling — this is the engine's checks layer).
@@ -92,7 +93,7 @@ not a gadget — a place you actually work.
 - The **output of one workflow can feed a downstream, more mature workflow** — i.e. a mature
   pipeline consumes the trusted table another workflow produced.
 
-> **Decided 2026-07-30 — `PIPELINE.md`.** A downstream spec references an upstream output **by its
+> **Decided 2026-07-30, shipped 2026-07-31 — `PIPELINE.md`.** A downstream spec references an upstream output **by its
 > plain name**: no path, no version, no `depends_on` list. portia scans the project's specs, finds
 > which one produces that name, and derives the run order itself — the same answer dbt, SQLMesh,
 > Dataform and Terraform all landed on, and one portia is already halfway to, since
@@ -104,6 +105,9 @@ not a gadget — a place you actually work.
 > Spec).
 
 ### The pipeline as a deliverable
+
+*Engine shipped 2026-07-31 (`portia/pipeline.py`, `python -m portia.cli.build`); the app does not
+render it yet.*
 
 The set of specs compiles to **one `.sql` file per spec**, in its own folder, shaped so it drops
 into a dbt project. That is the thing you hand a data team. A spec may declare a `layer`
@@ -255,8 +259,13 @@ Adding a source later is the same affordance, available from the left panel.
 ### Left — files & artifacts
 
 `VISION.md` asks how we decide what to surface inside a big repo. V0 answers it cheaply: **a file
-appears if portia knows about it.** Sources come from the catalog, not a directory walk; specs are
-`specs/*.yaml`; outputs are whatever a run wrote. Nothing else is shown, which is the curation.
+appears if portia knows about it.** Sources come from the catalog, not a directory walk; specs come
+from `spec.discover_specs` (which finds them in layer subdirectories, and enforces the one-name-per-
+project rule); outputs are whatever a run wrote. Nothing else is shown, which is the curation.
+
+> **Not built yet: the compiled models.** `models/*.sql` is a sixth artifact kind and arguably the
+> most important row on this panel — it is the deliverable. `engine.models_in` and
+> `engine.stale_models` return it and nothing draws it (`PIPELINE.md` §6).
 
 Clicking a source shows its catalog entry — the prose summary, the per-column roles, the check
 facts. That alone is most of what is currently invisible.
@@ -347,6 +356,9 @@ regressed** — this is the checklist, not a nice-to-have.
 | answering `allow? [Y/n]` on stdin | `write-confirm` |
 | `run <spec>` | **Run** in the workflow pane |
 | `run --write out` | Same, with an output location — outputs land in the left panel |
+| `build` | **Not built yet** — `engine.build` exists, no button calls it (`PIPELINE.md` §6) |
+| `build --check` | **Not built yet** — `engine.stale_models` is cheap enough to show on any render |
+| `import_data <f> --to <dir>` | **Not built yet** — the drop zone copies in, but does not let you choose where, nor state what it will copy before doing it |
 | `cat specs/*.yaml` | The graph, and each step's detail |
 | `cat out/*.csv` | `table-preview` |
 | `cat .portia/sources/*.yaml` | Clicking a source |

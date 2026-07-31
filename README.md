@@ -28,9 +28,14 @@ missing values, and near-duplicate entities as decisions to make rather than sil
 and records every choice as a durable, reproducible artifact.
 
 Every number it tells you comes from deterministic code, never from the model reading your data.
-The engine runs on DuckDB, so it works on tables too big to open: sources are ingested once into
-the project, and a join that would explode to 80 million rows is *counted* rather than built.
-CSV and Parquet.
+The engine runs on DuckDB, so it works on tables too big to open: your files are read where they
+lie — portia copies nothing — and a join that would explode to 80 million rows is *counted* rather
+than built. CSV and Parquet.
+
+**What you keep is a pipeline.** Every decision is recorded as a spec (git-diffable YAML: the keys,
+the prediction, and *why*), and every spec compiles to one `.sql` file that builds one table —
+dbt-shaped, so it drops into a dbt project unchanged. The specs are the reasoning; the SQL is what
+runs.
 
 ## The app
 
@@ -45,11 +50,31 @@ Open a project directory (it gets created if it isn't there), write a few lines 
 project *is*, drop your data in — CSV or Parquet — and go. Every question the copilot asks and every write it wants to
 make stops on screen, with the evidence still next to it.
 
-Pressing **Run** executes the spec in memory; **Write outputs** saves the tables to `out/` and
-**Save report** saves the run as markdown to `runs/`. Nothing is written until you ask.
+Pressing **Run** executes the spec in memory; **Write outputs** saves the produced table to `out/`
+and **Save report** saves the run as markdown to `runs/`. Nothing is written until you ask.
 
-There are CLIs for the same engine — `python -m portia.cli.index`, `.chat`, `.run` — if you'd
-rather stay in a terminal; `run --write out --report runs` produces the same two artifacts.
+## Your data stays where you put it
+
+portia plugs into a repo that **already holds its data**, and you choose what is in scope. It
+indexes files inside the project and nothing outside it, it never modifies them, and it keeps no
+second copy of its own. Bringing an outside file in is a separate, deliberate step that tells you
+what it is about to copy and where:
+
+```bash
+python -m portia.cli.import_data ~/Downloads/vendor.csv --to data
+```
+
+## The CLIs
+
+The same engine, if you'd rather stay in a terminal:
+
+```bash
+python -m portia.cli.index data          # profile sources into the catalog
+python -m portia.cli.chat  ask "..."     # a copilot turn
+python -m portia.cli.run   specs/x.yaml  # execute one spec (--write out --report runs)
+python -m portia.cli.build               # compile every spec to models/*.sql
+python -m portia.cli.build --check       # CI: fail if a .sql no longer matches its spec
+```
 
 ## Docs
 
