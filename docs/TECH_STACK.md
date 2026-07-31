@@ -32,12 +32,13 @@ Scale forced it; `docs/DUCKDB_MIGRATION.md` is what happened.*
   relation behind `core.table.Table`. Measured on real data: 4.82 GB across three tables indexes in 32 s,
   a 50M × 3M join is diagnosed in 3.8 s, and **peak memory is bounded by the largest table rather
   than the total**, which is what makes ~20 tables workable at all.
-- **Why ingest rather than query the files in place.** Two reasons, and the second is the real one:
+- **Why we *used to* ingest rather than query the files in place** — kept because the reversal
+  below is the useful part. Two reasons, and the second was meant to be the real one:
   columnar storage is ~20× faster on column-scoped reads, and — decisively — if a source *is* a
   `read_csv` call then the agent's SQL needs file-reading rights, which is exactly what
   `ops/sql.py` exists to withhold. Data inside the database means the hatch needs no filesystem
   access at all. `DUCKDB_MIGRATION.md` §3.
-  - **Reversed 2026-07-30 — the store is being removed** (`PIPELINE.md` §2.7). Both arguments
+  - **Reversed — the store was removed 2026-07-31** (`PIPELINE.md` §2.7). Both arguments
     turned out weaker than they read. The speed one never landed: `run_spec`, every agent check and
     every CLI tool re-read the original files anyway, so the fast copy was written and then ignored.
     And the sandbox one does not apply — `ops/sql.py` materializes its declared inputs into a fresh
@@ -45,6 +46,9 @@ Scale forced it; `docs/DUCKDB_MIGRATION.md` is what happened.*
     What is left is a hidden second copy of the user's data, against a product that is tightening to
     **sourcing only from files already in the repo**. If reads get slow, the answer is **parquet in
     the repo** — columnar, typed, already supported, and still one copy you can see.
+    *Removing it moved no evidence at all: all 35 golden cases came out byte-identical, because
+    ingesting was `CREATE TABLE … AS <read_query(path)>` — the reader and its null tokens were
+    always the same ones, and only the materialization differed.*
 - **pandas is still here, at four edges, deliberately.** The fixtures (tiny, and the readable
   definition of the test data), `load_frame` for small reads, the renderers, and the SQL hatch's
   sandbox boundary. `tests/test_table.py` fails if anything *else* pulls a whole relation into
@@ -100,7 +104,7 @@ not a SWE project, so we minimize JS/frontend learning.
   likely YAML/JSON). Re-running against a changed source produces a readable diff.
 - A generated **report** (markdown/HTML) as a durable summary; live decisions surface in the UI.
 - The **run log** — one JSONL per copilot turn, project-local (`portia/runlog.py`).
-- **The compiled pipeline — decided 2026-07-30, not yet built** (`PIPELINE.md`). One `.sql` file per
+- **The compiled pipeline — shipped 2026-07-31** (`PIPELINE.md`, `portia/pipeline.py`). One `.sql` file per
   spec, in its own folder, **dbt-shaped**: one file builds one table, and it references other models
   by name. portia writes the model files and nothing else — no `dbt_project.yml`, no `profiles.yml`,
   no `schema.yml` — so the output drops into a dbt project without portia becoming a dbt wrapper or

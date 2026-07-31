@@ -28,7 +28,7 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
   what actually multiplies the *result*, not on either side's multiplicity — but that changes a flag
   the copilot reads, so it needs its own review.
 - ~~**`handlers.profile_source` re-reads the file rather than the store.**~~ — *resolved by
-  decision, 2026-07-30: **the store is being removed** (`PIPELINE.md` §2.7), so reading the file is
+  decision, and **removed 2026-07-31** (`PIPELINE.md` §2.7), so reading the file is
   the correct behaviour and this stops being a bug. Worth keeping the finding that led there: the
   store was written at index time and then read by almost nothing — `run_spec`, every agent check
   and every CLI tool went to the original files. A fast copy nobody reads is not a cache. If the
@@ -121,12 +121,11 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
   - **Still open and deliberately out of that task:** spec **versioning**, **drift across a chain**
     (an upstream re-run invalidating a downstream `expect`), and **run caching / partial runs** —
     once a project is a DAG of specs, "run only what changed" becomes askable.
-- **`write_outputs` is all-or-nothing and CSV-only.** It writes *every* step's table to
-  `<out_dir>/<step id>.csv` — a 12-step spec writes 12 files, 11 of which nobody wants — with no way
-  to mark a step as the deliverable versus scaffolding, and no way to ask for parquet even though
-  `write_table` dispatches on the extension. The pipeline overhaul reframes this (one spec = one
-  table, steps become blocks inside a query), so **re-read `PIPELINE.md` before fixing it here** —
-  the fix may be that this function's job changes rather than gets patched.
+- ~~**`write_outputs` is all-or-nothing and CSV-only.**~~ — *half fixed 2026-07-31: it writes **one
+  file per model**, named for the spec, because a spec produces one table and its steps are CTEs in
+  the compiled pipeline rather than tables. It had no test at all before; it has two now.*
+  **Still open:** the output format is hard-coded to `.csv` even though `write_table` dispatches on
+  the extension, so a parquet output is one argument away and nothing passes it.
 - **Reproducibility of custom steps** — pin the execution environment (DuckDB version, or Python +
   deps + seeds) so a captured step truly re-runs identically.
 - **A `sql` step's output row order is not stable, so `write_outputs` isn't byte-reproducible.**
@@ -144,7 +143,11 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
 *Four findings from the 2026-07-30 audit of every tool and every prompt (that session's map is the
 thing to re-read before prompt work; the pipeline decisions it produced are in `PIPELINE.md`).*
 
-- **`copilot.md` tells the model something false about itself: "You never see raw rows."** It does.
+- ~~**`copilot.md` tells the model something false about itself: "You never see raw rows."**~~
+  *Fixed 2026-07-31: the prompt now names `join_findings` as the one tool that shows rows, says why
+  (a judgment about rows you have never seen is a guess), and says they are examples rather than a
+  sample to generalise a number from. The original finding, kept because it is the kind of thing to
+  look for again:* It does.
   `join_findings` returns up to **12 complete rows** of the user's data per call — `SELECT *`, capped
   at 3 each for unmatched-left, unmatched-right, null-key-left and null-key-right
   (`checks/join.py:401`). That is deliberate and `checks/join.py`'s own docstring argues for it
