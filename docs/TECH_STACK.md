@@ -27,9 +27,9 @@ infrastructure and frontend surface, stay in Python wherever we can, and keep th
 Scale forced it; `docs/DUCKDB_MIGRATION.md` is what happened.*
 
 - **DuckDB under the whole engine.** `pip install duckdb`, **embedded (no server)**, reads
-  larger-than-memory CSV and Parquet. A project ingests its sources into `.portia/store.duckdb`
-  and everything downstream — profiling, join diagnosis, the ops, `run_spec` — is a lazy relation
-  behind `core.table.Table`. Measured on real data: 4.82 GB across three tables indexes in 32 s,
+  larger-than-memory CSV and Parquet. A project reads its sources **in place, from inside the
+  repo**, and everything downstream — profiling, join diagnosis, the ops, `run_spec` — is a lazy
+  relation behind `core.table.Table`. Measured on real data: 4.82 GB across three tables indexes in 32 s,
   a 50M × 3M join is diagnosed in 3.8 s, and **peak memory is bounded by the largest table rather
   than the total**, which is what makes ~20 tables workable at all.
 - **Why ingest rather than query the files in place.** Two reasons, and the second is the real one:

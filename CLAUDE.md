@@ -18,12 +18,14 @@ stack, and product vision. Read them every session, before proposing changes or 
   plan**: the specced sandbox turned out to be impossible, and a profile's memory still scales with
   cardinality because `possible_key` needs an exact `count(DISTINCT)`. Required reading before
   touching `checks/`, `ops/`, `core/io.py`, or anything that looks like a performance fix.
-- `docs/PIPELINE.md` — **the next task: SQL as the artifact.** Decided 2026-07-30, not built.
+- `docs/PIPELINE.md` — **SQL as the artifact.** Designed 2026-07-30, shipped 2026-07-31.
   One `.sql` per spec, dbt-shaped and committed · cross-spec references **by name** with portia
   deriving the run order · an optional `layer` whose *absence* is the simple case · the agent
   deciding "new spec or new step" · and indexing restricted to files already in the repo, which
-  **retires `.portia/store.duckdb`**. Required reading before touching `spec.py`, `ops/`,
-  `core/store.py`, `catalog.py` or `cli/index.py` — several of those get things *removed*.
+  **retired `.portia/store.duckdb`** (deleted — `core/io.connect` and `catalog.is_stale` are what
+  survived it). Required reading before touching `spec.py`, `pipeline.py`, `ops/`, `catalog.py` or
+  `cli/index.py`. **§6 is the open part**: the app does not yet render the compiled models, and
+  three design questions are unanswered.
 - `docs/BACKLOG.md` — parking lot of deferred ideas, by stream. Not required reading; scan it when
   picking the next thing to build, and **add to it whenever we postpone something mid-work.**
 
@@ -100,10 +102,10 @@ adding code, and extend them rather than working around them:
 
 **Package layout — one home per concern; don't let things pile up flat in `portia/`:**
 
-- `portia/core/` — shared seams: `table.py` (**the currency** — a lazy relation) · `store.py` (a
-  project's ingested data, `.portia/store.duckdb` — **slated for removal**, `docs/PIPELINE.md` §2.7:
-  the hot paths never read it, and portia is tightening to sourcing only from files already in the
-  repo) · `io.py` (loading) · `serialize.py` (compact JSON evidence) ·
+- `portia/core/` — shared seams: `table.py` (**the currency** — a lazy relation) · `io.py` (loading
+  — **the only way a file becomes a table**, plus `connect()` for the connection to read it on;
+  there is no ingested store any more, `docs/PIPELINE.md` §2.7) · `serialize.py` (compact JSON
+  evidence) ·
   `present.py` (**one way to show a measured value to a human** — rates, counts, a value on one
   line. Every surface renders the same numbers; the day the terminal and the app disagree about a
   null rate is the day someone has to work out which one to believe.)

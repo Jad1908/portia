@@ -1,13 +1,19 @@
 # The pipeline overhaul — SQL as the artifact
 
-> **Status: decided, not built.** Everything in this file is a design agreed on 2026-07-30. None
-> of it exists in the code yet. It is scoped as **one task, picked up in its own session**, and it
-> is the next thing after the run log. Read it start to finish before touching `spec.py`, `ops/`,
-> `core/store.py` or `cli/index.py` — several of the decisions below *remove* things those files
-> currently do, and reading half of this will look like vandalism.
+> **Status: designed 2026-07-30, built 2026-07-31.** All seven decisions in §2 are implemented and
+> tested. §3 describes how compilation actually works, and it is accurate. **What is left is
+> rendering and three design questions, all in §6** — the engine is done, the app is not.
+>
+> The design is kept in full rather than trimmed to a changelog, because the *reasoning* is what a
+> future session needs: several decisions removed things (`core/store.py` is deleted), and a reader
+> who finds only the outcome will re-litigate the trade-off from scratch.
 >
 > Companion reading: `PLAN.md` (where this sits in the order), `VISION.md` (the flows it changes),
 > `TECH_STACK.md` (the stack commitments it makes), `CLAUDE.md` (the seams it must respect).
+>
+> **What landed, in commit order:** compilation to `.sql` · cross-spec references by name · layers
+> and `portia.cli.build` · repo-only sourcing, the import command, and the store's removal · the
+> prompts · the frontend pass.
 
 ---
 
@@ -240,12 +246,58 @@ Rough map for whoever picks this up — not a task list, and not exhaustive.
 
 ---
 
-## 6. The frontend check — the last step, not an afterthought
+## 6. The frontend check — done 2026-07-31, and it found two real bugs
 
-*Added 2026-07-30: this was not discussed while the seven decisions were being made, so it is
-scheduled explicitly rather than assumed. **Do this pass at the end of the overhaul**, once the
-engine side is real — but read it now, because two items below are engine decisions wearing a UI
-costume, and getting them wrong early is expensive.*
+> **Result of the pass described below.** Two things in `ui/` were silently broken by the engine
+> work and are now fixed, with tests that fail against the old code:
+>
+> - **`specs_in` globbed one directory level**, so a layered project's specs — which live in
+>   `specs/staging/`, `specs/marts/` — were **invisible in the left panel**. It goes through
+>   `spec.discover_specs` now, which also means the app inherits the duplicate-name rule instead of
+>   listing two specs that cannot both exist.
+> - **The app's Run did not pass the model registry**, so a spec reading another spec's table
+>   *failed in the window and worked from the CLI*. That is precisely the seam `VISION.md` says must
+>   never break: `cli/` and `ui/` are two renderers of one engine.
+>
+> `ui/engine.py` also grew `models_in`, `stale_models` and `build` — the compiled pipeline, whether
+> a generated file still matches its spec, and the app's half of `python -m portia.cli.build`. The
+> engine side is done; **rendering them is not, and neither are the three design questions below.**
+
+### Still to do — rendering
+
+- **`.sql` files as a left-panel section.** `engine.models_in` returns them; nothing draws them yet.
+  They are not outputs — a run's CSV is a result, the pipeline is the deliverable — so this is a
+  new section, not a new row in Outputs.
+- **The staleness warning needs somewhere to land** (§2.3). `engine.stale_models` is cheap enough to
+  call on any render; a `.sql` that no longer matches its spec has to be visible in the app, not
+  only in `build --check`.
+- **A Build action.** `engine.build` exists; no button calls it.
+- **The import flow is a new surface** (§2.7): choose a file outside the repo, choose where in the
+  repo it lands, see plainly what will be copied and to where, confirm, then index.
+  `cli/import_data.py`'s `plan()` is deliberately separate from the copying so a UI can show the
+  same plan the terminal shows.
+
+### Still to decide — three questions the engine cannot answer alone
+
+- **There are now two graphs, and the middle pane only knows about one.** Within a spec, steps form
+  a DAG (rendered today). Across specs, models form a DAG (`spec.run_order` derives it, nothing
+  draws it). Does the workflow pane show one spec's steps, the project's models, or both at two
+  zoom levels? This collides with `VISION.md`'s oldest open question — *are cards steps or tables?*
+  — and the answer just changed shape, because **both are now true at different levels**: a card in
+  the project graph is a table, a card inside a spec is a step.
+- **"Run" is ambiguous now.** Today it runs one spec. With cross-spec references it could mean run
+  this spec, or run everything it depends on first. `run_spec` already resolves upstreams by
+  re-running them, so the *behaviour* exists; what is undecided is what the button should say it is
+  doing, and whether "Run" and "Build" are one action or two.
+- **Layers are a grouping, never an ordering of quality.** `DESIGN.md`'s rule applies directly:
+  staging/intermediate/mart is a **kind**, so it may colour or group a graph, and it must never be
+  rendered as a progression from worse to better, or rolled into a score.
+
+### The original pass — kept for the reasoning
+
+*Added 2026-07-30: this was not discussed while the seven decisions were being made, so it was
+scheduled explicitly rather than assumed. The list below is what the pass looked for; the results
+are above.*
 
 `ui/` is an edge and must not compute (`CLAUDE.md`), so every item here is either "render something
 the engine now exposes" or "the engine needs to expose something".
@@ -270,8 +322,8 @@ the engine now exposes" or "the engine needs to expose something".
 - **The import flow is a new surface** (§2.7): choose a file outside the repo, choose where in the
   repo it lands, see plainly what will be copied and to where, confirm, then index. The existing drop
   zone already copies files in, so this is a narrowing plus an explicit destination step.
-- **One concrete breakage:** `ui/engine.py:237` is the only place in `ui/` that opens the store, and
-  the store is being removed. It must change with §2.7 rather than at the end.
+- ~~**One concrete breakage:** `ui/engine.py:237` opens the store.~~ *Done with §2.7 — indexing no
+  longer threads a connection through at all.*
 
 ---
 

@@ -166,3 +166,45 @@ def test_a_cross_spec_reference_compiles_to_a_bare_model_name(project: Path) -> 
     # The upstream spec's internals must not leak into the downstream model.
     assert "trim(" not in sql
     assert "read_csv" not in sql
+
+
+# --- the app must see what the engine sees ----------------------------------
+
+
+def test_the_app_lists_specs_in_subdirectories(project: Path) -> None:
+    """A layered project keeps specs in subdirectories; a one-level glob missed them."""
+    from portia.ui import engine
+    from portia.ui.state import App
+
+    _staging(project)
+    _mart(project)
+    app = App()
+    app.root = project
+
+    assert sorted(p.name for p in engine.specs_in(app)) == [
+        "mart_customer_orders.yaml",
+        "stg_orders.yaml",
+    ]
+
+
+def test_the_apps_run_resolves_cross_spec_references(project: Path) -> None:
+    """`cli/` and `ui/` are two renderers of one engine (VISION.md).
+
+    Without the model registry the app failed on a spec the CLI ran fine, which is
+    exactly the seam breaking.
+    """
+    import asyncio
+
+    from portia.ui import engine
+    from portia.ui.state import App
+
+    _staging(project)
+    mart = _mart(project)
+    app = App()
+    app.root = project
+    engine.select_spec(mart, app)
+
+    asyncio.run(engine.run_spec(app))
+
+    assert app.run_error is None, app.run_error
+    assert app.results and app.results[-1].provenance["result_rows"] == 3

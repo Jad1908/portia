@@ -28,17 +28,17 @@ engine are equally important** — the questions-and-insights UX *is* the produc
 ## Stack
 
 Python + **Claude Agent SDK** (agent loop, context management, **MCP-client**, custom tools).
-**DuckDB** under the whole engine since 2026-07-28 — sources are ingested into a per-project
-`.portia/store.duckdb` (CSV or Parquet) and everything downstream is a lazy relation — with a
+**DuckDB** under the whole engine since 2026-07-28 — sources (CSV or Parquet) are read **in place,
+from inside the repo**, and everything downstream is a lazy relation — with a
 **Snowflake tier (~15–20 tables)** via the Snowflake **MCP server** to come, plugging into the same
 `core.table` seam. pandas stays for fixtures, small reads and rendering. UI: a Python-authored,
 serious (non-gadgety) framework — **NiceGUI** (Vue under the hood) — sitting on the engine's event
 stream. Model is a config knob.
 
-> **The ingested store is on its way out** (decided 2026-07-30, `PIPELINE.md` §2.7). It is a second,
-> hidden copy of the user's data that the hot paths never read, and portia is tightening to
-> **sourcing only from files already in the repo**. One visible copy beats an invisible fast one;
-> parquet is the answer if read speed ever bites.
+> **The ingested store is gone** (2026-07-31, `PIPELINE.md` §2.7). It was a second, hidden copy of
+> the user's data that the hot paths never read. One visible copy beats an invisible fast one;
+> parquet in the repo is the answer if read speed ever bites. Removing it moved **no evidence** —
+> all 35 golden cases stayed byte-identical.
 
 **Full stack + reasoning: see `TECH_STACK.md`.**
 
@@ -69,8 +69,9 @@ now runs in one window, with no terminal. The **verification loop** exists too: 
 step executes it, `checks/outcome.py` measures the table it produced, and a step that hits a zero
 is refused rather than written.
 
-**Scale is now built.** The engine is DuckDB throughout — sources are ingested into a per-project
-`.portia/store.duckdb` and everything downstream is a lazy relation. Measured end to end on real
+**Scale is now built.** The engine is DuckDB throughout and everything is a lazy relation.
+*(Sources were ingested into a per-project store when this was measured; that store is gone as of
+2026-07-31 and the measurements below stand — the reader was always the same one.)* Measured end to end on real
 PHQ data: 4.82 GB across three tables indexes in 32 s, a 50M × 3M join is diagnosed in 3.8 s, and a
 full spec run over 50M rows takes 27 s. **Peak memory is bounded by the largest table, not the
 total**, which is the property that makes ~20 tables workable. Item 4 below, and
@@ -128,9 +129,8 @@ constraint.** The nearest candidate cause is in our own prompt, which still call
    type-inference divergences where the spec predicted one, a sandbox design that turned out to be
    impossible, and a profile whose memory still scales with cardinality rather than with the answer.
 
-**Next, in order.** *Item 7 — the pipeline overhaul — is the next task picked up, in its own
-session. It is specced end to end in `PIPELINE.md`; items 4 and 5 keep their numbers so existing
-cross-references stay valid.*
+**Next, in order.** *Item 7 — the pipeline overhaul — shipped 2026-07-31; it stays listed for its
+reasoning. Items 4 and 5 keep their numbers so existing cross-references stay valid.*
 
 4. **The PHQ test — begun 2026-07-29, and it already changed the next question.** 23 sources are
    indexed and interpreted, and the engine held: cardinality is the ceiling as §13 predicted, not
@@ -159,8 +159,9 @@ cross-references stay valid.*
    **What it does not do yet is prove itself:** no run has been scored *using* it. Run 9 is that
    test, and it is the same run item 4 above is waiting on.
 
-7. **The pipeline overhaul — SQL as the artifact.** *Decided 2026-07-30, specced in
-   **`docs/PIPELINE.md`**, not yet built. This is the next task and it gets its own session.*
+7. ~~**The pipeline overhaul — SQL as the artifact.**~~ *Designed 2026-07-30, **shipped
+   2026-07-31** (`docs/PIPELINE.md`). The engine half is done; what remains is rendering it in the
+   app and three design questions, all in `PIPELINE.md` §6.*
    portia already generates every line of SQL it needs and throws it away when the run ends. Keeping
    it turns the durable artifact from "a recipe we can re-run" into **a pipeline you can hand to a
    data team** — one `.sql` per spec, dbt-shaped, committed. Seven decisions, all settled: one spec
@@ -169,8 +170,12 @@ cross-references stay valid.*
    whose *absence* is the simple case · the agent deciding "new spec or new step" rather than "should
    this persist" · and **indexing restricted to files already in the repo**, which retires
    `.portia/store.duckdb` and makes every spec path repo-relative.
-   Read `PIPELINE.md` before touching `spec.py`, `ops/`, `core/store.py` or `cli/index.py` — three of
-   those get things *removed*, and half the design reads as vandalism.
+   Two things worth carrying forward. **Removing the store moved no evidence at all** — all 35
+   golden cases came out byte-identical, because ingesting was `CREATE TABLE … AS <read_query(path)>`
+   and the reader was therefore always the same one; only the materialization differed. And the
+   frontend pass found **two real bugs the engine work had introduced silently**: the app could not
+   see specs in subdirectories, and its Run did not resolve cross-spec references — so a spec that
+   ran from the CLI failed in the window, which is the one seam `VISION.md` says must never break.
 
 > **A referentially-consistent subset is still worth building.** The copilot never sees data, only
 > profiles — so slicing every table to rows reachable from a chosen set of ids preserves schemas,

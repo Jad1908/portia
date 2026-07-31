@@ -12,6 +12,10 @@ What the app is allowed to call, and why each is on the list:
 - ``catalog.load_catalog`` — what the left pane and the source inspector show
 - ``spec.load_spec`` / ``spec.run_spec`` / ``spec.write_outputs`` /
   ``spec.write_report`` — the Run button and what it can save
+- ``spec.discover_specs`` — the project's models, so the panel and the engine
+  agree on what a spec is and a cross-spec reference resolves
+- ``pipeline.build_project`` / ``stale_models`` — compiling to SQL, and whether a
+  generated file still matches the spec that produced it
 - ``core.io.load_table`` — previewing a produced table (the one way to load data)
 - ``core.io.find_data_files`` — resolving what "add by path" points at
 - ``agent.session.run`` — a turn, driven with the app's own answer/confirm
@@ -40,7 +44,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from portia import catalog, runlog
+from portia import catalog, pipeline, runlog
 from portia import spec as spec_module
 from portia.core.io import connect, find_data_files, load_table
 from portia.ui import state as State
@@ -257,7 +261,44 @@ def _index_one(path: Path, portia_dir: str) -> str:
 
 
 def specs_in(app: App) -> list[Path]:
-    return sorted((app.root / "specs").glob("*.yaml")) if (app.root / "specs").is_dir() else []
+    """Every spec in the project, in the order the engine finds them.
+
+    Goes through `spec.discover_specs` rather than globbing, for the reason this
+    whole module exists: a layered project keeps its specs in subdirectories, and
+    a left panel that globbed one level would show a different set of specs than
+    the engine builds. It also means the project's duplicate-name rule is enforced
+    in one place, and the app inherits the error instead of quietly listing two
+    specs that cannot both exist.
+    """
+    return sorted(app.root / path for path in spec_module.discover_specs(app.root).values())
+
+
+def models_in(app: App) -> list[Path]:
+    """The compiled ``.sql`` files — the pipeline, which is the deliverable.
+
+    Not an output like ``out/*.csv``: a run's CSV is a result, and these are the
+    thing you hand someone (`docs/PIPELINE.md` §2.2).
+    """
+    models = app.root / pipeline.MODELS_DIR
+    return sorted(models.rglob("*.sql")) if models.is_dir() else []
+
+
+def stale_models(app: App) -> list[str]:
+    """Models whose ``.sql`` no longer matches the spec that produced it.
+
+    Cheap — it reads a header, it runs nothing — so a panel may ask on any render.
+    """
+    try:
+        return pipeline.stale_models(app.root)
+    except (OSError, ValueError):
+        # A malformed spec is the spec pane's problem to report, not a reason for
+        # the whole left panel to fail to draw.
+        return []
+
+
+async def build(app: App) -> list[pipeline.BuiltModel]:
+    """Compile the project to SQL — the app's half of ``python -m portia.cli.build``."""
+    return await asyncio.to_thread(pipeline.build_project, app.root)
 
 
 def count_steps(path: Path) -> int | None:
@@ -288,7 +329,15 @@ async def run_spec(app: App) -> None:
     if app.spec is None:
         return
     try:
-        app.results = await asyncio.to_thread(spec_module.run_spec, app.spec, base_dir=app.root)
+        # `models` is not optional here: a spec may read another spec's table by
+        # name, and without the registry the app would fail on a spec the CLI
+        # runs fine. `cli/` and `ui/` are two renderers of one engine (VISION.md).
+        app.results = await asyncio.to_thread(
+            spec_module.run_spec,
+            app.spec,
+            base_dir=app.root,
+            models=spec_module.discover_specs(app.root),
+        )
     except Exception as exc:  # noqa: BLE001 — shown to the operator, not swallowed
         app.results = None
         app.run_error = f"{type(exc).__name__}: {exc}"
