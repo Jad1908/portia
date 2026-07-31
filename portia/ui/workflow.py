@@ -66,13 +66,13 @@ def _workflow() -> None:
 def _graph_half() -> None:
     with ui.element("div").classes("p-pane"):
         _graph_header()
-        with ui.element("div").classes("p-scroll graph-canvas"):
-            placed = graph.layout(APP.spec)
+        placed = graph.layout(APP.spec)
+        with ui.element("div").classes("graph-canvas"):
             if placed.empty:
                 c.empty_note(_NO_STEPS if APP.spec_path else _NO_SPEC)
             else:
                 _graph(placed)
-            _step_detail()
+        _step_detail()
 
 
 def _graph_header() -> None:
@@ -81,11 +81,20 @@ def _graph_header() -> None:
         ui.label(name).classes("t-heading-sm")
         steps = len((APP.spec or {}).get("steps") or [])
         c.caption(c.count(steps, "step"))
+        ui.element("div").classes("flex-1")
+        # The canvas pans in both directions with no bound, which is what makes
+        # it a surface rather than a picture — and is exactly why there has to be
+        # a way back. Double-clicking the canvas does the same thing.
+        c.button("Recenter", _recenter, icon="filter_center_focus", micro=True)
+
+
+def _recenter() -> None:
+    ui.run_javascript("portiaRecenter()")
 
 
 def _graph(placed: graph.Layout) -> None:
-    style = f"position:relative;width:{placed.width}px;height:{placed.height}px"
-    with ui.element("div").style(style):
+    style = f"width:{placed.width}px;height:{placed.height}px"
+    with ui.element("div").classes("graph-content").style(style):
         ui.html(_edges_svg(placed))
         for node in placed.nodes:
             _node(node)
@@ -141,12 +150,15 @@ def _step_card(node: graph.Node) -> None:
 
 
 def _step_detail() -> None:
-    """The selected step, verbatim. Its acknowledgement sits above everything."""
+    """The selected step, verbatim. Its acknowledgement sits above everything.
+
+    Below the canvas rather than on it: it describes the selection, so panning
+    the graph should not carry it off screen.
+    """
     step = _step(APP.selected_step)
     if step is None:
         return
-    with ui.element("div").classes("stack-md mt-4"):
-        c.rule()
+    with ui.element("div").classes("graph-detail stack-md"):
         with ui.element("div").classes("row-gap-sm pt-3"):
             ui.label(step["id"]).classes("t-heading-md")
             c.chip(step.get("op", "?"))
