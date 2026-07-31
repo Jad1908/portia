@@ -167,11 +167,20 @@ def _select(kind: str, name: str) -> None:
 
 
 def _open_spec(path: Path) -> None:
+    """Open a spec — which means **navigating to it** on the canvas, not replacing it.
+
+    The middle pane draws the whole project, so picking a spec here opens its card
+    onto the steps that build it and pans the canvas to it. Swapping the canvas for
+    a single spec would throw away the one view where a table and the steps that
+    produce it are both on screen.
+    """
     from portia.ui import app as app_module
     from portia.ui import workflow
 
     engine.select_spec(path, APP)
     APP.select(SPEC, path.name)
+    APP.expanded = APP.expanded | {path.stem}
+    APP.focus_model = path.stem
     pane.refresh()
     workflow.pane.refresh()
     app_module.toolbar.refresh()

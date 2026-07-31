@@ -30,11 +30,15 @@ from portia.checks.outcome import BLOCKING_FLAGS, describe_contribution, describ
 from portia.core.present import format_rate
 from portia.ui import components as c
 from portia.ui import engine, graph, state
-from portia.ui.state import APP, OUTPUT, RUN, SOURCE, TURN
+from portia.ui.state import APP, OUTPUT, RUN, SOURCE, SPEC, TURN
 
 #: How tall the graph half sits by default, as a percentage. The report half is
 #: the taller of the two — it is where the evidence is (DESIGN.md → Layout).
-GRAPH_SPLIT = 38
+GRAPH_SPLIT = 44
+
+#: Where a focused card lands: this far in from the canvas's top-left corner,
+#: rather than flush against it, so its incoming edges stay visible.
+FOCUS_INSET = 48
 
 
 @ui.refreshable
@@ -64,23 +68,38 @@ def _workflow() -> None:
 
 
 def _graph_half() -> None:
+    """The project as a DAG of tables, with the open spec's card opened onto its steps.
+
+    One canvas, two zoom levels: a card here is a **table** (one spec, one table),
+    and a card inside an opened one is a **step**. `VISION.md`'s oldest open
+    question — are cards steps or tables? — is answered as *both, at different
+    levels*, and this is where you can see both at once.
+    """
+    docs = engine.project_docs(APP)
+    placed = graph.project_layout(docs, expanded=APP.expanded, badges=_badge_counts(docs))
     with ui.element("div").classes("p-pane"):
-        _graph_header()
-        placed = graph.layout(APP.spec)
+        _graph_header(docs)
         with ui.element("div").classes("graph-canvas"):
             if placed.empty:
-                c.empty_note(_NO_STEPS if APP.spec_path else _NO_SPEC)
+                c.empty_note(_NO_SPECS)
             else:
                 _graph(placed)
         _step_detail()
+    _focus_selected(placed)
 
 
-def _graph_header() -> None:
+def _graph_header(docs: dict) -> None:
     with ui.element("div").classes("row-gap-sm px-4 pt-3"):
-        name = APP.spec_path.name if APP.spec_path else "no spec open"
-        ui.label(name).classes("t-heading-sm")
-        steps = len((APP.spec or {}).get("steps") or [])
-        c.caption(c.count(steps, "step"))
+        ui.label("Pipeline").classes("t-heading-sm")
+        c.caption(c.count(len(docs), "model"))
+        stale = engine.stale_models(APP)
+        if stale:
+            # A `.sql` that no longer matches its spec is a fact about the
+            # deliverable, so it belongs where the deliverable is drawn — not only
+            # in `build --check`, where you find it after the fact.
+            c.flag_badge(f"{c.count(len(stale), 'model')} stale", c.DRIFT).tooltip(
+                f"{', '.join(stale)} — the .sql no longer matches the spec. Build to regenerate."
+            )
         ui.element("div").classes("flex-1")
         # The canvas pans in both directions with no bound, which is what makes
         # it a surface rather than a picture — and is exactly why there has to be
@@ -92,6 +111,43 @@ def _recenter() -> None:
     ui.run_javascript("portiaRecenter()")
 
 
+def _focus_selected(placed: graph.Layout) -> None:
+    """Bring the open spec's card into view, once, after a left-panel pick.
+
+    Picking a spec navigates the graph rather than replacing it — the canvas is
+    the only place both zoom levels are true at once, and swapping it out on every
+    click would throw that away.
+    """
+    name = APP.focus_model
+    APP.focus_model = None
+    node = next((n for n in placed.nodes if n.id == name), None)
+    if node is not None:
+        ui.run_javascript(f"portiaPanTo({FOCUS_INSET - node.x}, {FOCUS_INSET - node.y})")
+
+
+def _badge_counts(docs: dict) -> dict[str, int]:
+    """How many badges each step card will carry, so every card can fit the most.
+
+    Counting what is about to be drawn, not measuring anything: the flags
+    themselves come from `StepResult`, and before a run from what the spec
+    acknowledges. Cards stay uniform — this only decides what that one size is.
+    """
+    counts: dict[str, int] = {}
+    for doc in docs.values():
+        for step in doc.get("steps") or []:
+            step_id = step.get("id")
+            if not step_id:
+                continue
+            result = _result(step_id)
+            if result is None:
+                counts[step_id] = len(step.get("acknowledge") or [])
+            else:
+                counts[step_id] = (
+                    len(result.blocking) + len(result.acknowledged) + len(result.drift)
+                )
+    return counts
+
+
 def _graph(placed: graph.Layout) -> None:
     style = f"width:{placed.width}px;height:{placed.height}px"
     with ui.element("div").classes("graph-content").style(style):
@@ -100,14 +156,14 @@ def _graph(placed: graph.Layout) -> None:
             _node(node)
 
 
-def _edges_svg(placed: graph.Layout) -> str:
+def _edges_svg(placed: graph.Layout, *, inner: bool = False) -> str:
     """One overlay for every edge. 1px hairline-strong, small arrowheads, no labels."""
     parts = [
         f'<path d="{edge.path()}"/><polygon points="{edge.arrowhead()}"/>' for edge in placed.edges
     ]
+    cls = "graph-edges graph-edges--inner" if inner else "graph-edges"
     return (
-        f'<svg class="graph-edges" width="{placed.width}" height="{placed.height}">'
-        f"{''.join(parts)}</svg>"
+        f'<svg class="{cls}" width="{placed.width}" height="{placed.height}">{"".join(parts)}</svg>'
     )
 
 
@@ -115,9 +171,59 @@ def _node(node: graph.Node) -> None:
     style = f"left:{node.x}px;top:{node.y}px;width:{node.w}px;height:{node.h}px"
     with ui.element("div").classes("graph-node").style(style):
         if node.kind == graph.SOURCE:
-            ui.label(node.id).classes("source-node")
+            _source_node(node)
+        elif node.kind == graph.MODEL:
+            _model_card(node)
         else:
             _step_card(node)
+
+
+def _source_node(node: graph.Node) -> None:
+    """A file. Deliberately the quietest thing on the canvas — it is what arrived,
+    not what was decided."""
+    label = ui.label(node.id).classes("source-node")
+    label.on("click", lambda n=node.id: _select_source(n))
+
+
+def _model_card(node: graph.Node) -> None:
+    """Another spec's table — a thing portia built, and can open.
+
+    Distinct from a source on purpose. Until now every input that was not a step
+    drew as the same grey box, so a table with its own spec, steps and rationale
+    was indistinguishable from a CSV somebody dropped in the folder.
+
+    The layer is shown as its **name**, with no colour and no size of its own.
+    staging/intermediate/mart is build order, not a quality ladder, and it is the
+    one field on this card that nothing measured — so it may say what kind of
+    table this is and must never make one card louder than another.
+    """
+    selected = APP.spec_path is not None and APP.spec_path.stem == node.id
+    classes = "model-card"
+    if node.expanded:
+        classes += " model-card--open"
+    if selected:
+        classes += " model-card--selected"
+
+    with ui.element("div").classes(classes):
+        with ui.element("div").classes("model-head") as head:
+            ui.icon("expand_more" if node.expanded else "chevron_right").classes("model-caret")
+            ui.label(node.id).classes("model-name").tooltip(node.id)
+            ui.element("div").classes("flex-1")
+            if node.layer:
+                c.chip(node.layer)
+            c.caption(c.count(node.steps, "step"))
+        head.on("click", lambda n=node.id: _open_model(n))
+        if node.inner is not None:
+            _model_body(node.inner)
+
+
+def _model_body(inner: graph.Layout) -> None:
+    """The steps that build this table, on the same canvas one level in."""
+    style = f"width:{inner.width}px;height:{inner.height}px"
+    with ui.element("div").classes("model-body").style(style):
+        ui.html(_edges_svg(inner, inner=True))
+        for node in inner.nodes:
+            _node(node)
 
 
 def _step_card(node: graph.Node) -> None:
@@ -704,6 +810,41 @@ def _select_step(step_id: str) -> None:
     pane.refresh()
 
 
+def _open_model(name: str) -> None:
+    """Open a table's card, and make its spec the one the report half is about.
+
+    Clicking the card of the spec that is already open closes it again, so the
+    same gesture opens and collapses. Clicking a different one always opens it —
+    you asked to look inside that table, and having to click twice because the
+    last click was on something else is the kind of state the canvas should hide.
+    """
+    from portia.ui import app as app_module
+    from portia.ui import artifacts
+
+    already_open = APP.spec_path is not None and APP.spec_path.stem == name
+    if already_open and name in APP.expanded:
+        APP.expanded = APP.expanded - {name}
+    else:
+        APP.expanded = APP.expanded | {name}
+
+    path = engine.spec_path_for(APP, name)
+    if path is not None and not already_open:
+        engine.select_spec(path, APP)
+        APP.select(SPEC, path.name)
+    pane.refresh()
+    artifacts.pane.refresh()
+    app_module.toolbar.refresh()
+
+
+def _select_source(name: str) -> None:
+    """A file node opens its catalog entry, exactly as the left panel does."""
+    from portia.ui import artifacts
+
+    APP.select(SOURCE, name)
+    pane.refresh()
+    artifacts.pane.refresh()
+
+
 def _step(step_id: str | None) -> dict | None:
     if not step_id:
         return None
@@ -724,8 +865,9 @@ def spec_label(path: Path | None) -> str:
     return path.name if path else "no spec"
 
 
-_NO_SPEC = "No spec open. The copilot writes one as it records steps; pick one on the left."
-_NO_STEPS = "This spec has no steps yet."
+_NO_SPECS = (
+    "No specs yet. The copilot writes one as it records steps, and each one becomes a table."
+)
 _NO_RUN = "No run yet. Press Run in the toolbar to execute this spec."
 _EDIT_SCOPE = "writes the prose and the roles; the measured facts are untouched"
 _ASK_HEADING = "What did it miss?"

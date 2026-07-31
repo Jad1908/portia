@@ -222,6 +222,16 @@ def open_at_start(path: str | Path) -> None:
     """Open a project before the server starts, so `--project` skips a screen."""
     engine.open_project(path, APP)
     APP.opened = True
+    _pick_up_spec()
+
+
+def _pick_up_spec() -> None:
+    """Open the project's first spec, and open its card on the canvas.
+
+    Collapsed, the graph would say a project has three tables and show nothing of
+    how any of them is built — so whichever spec is selected arrives expanded.
+    """
     specs = engine.specs_in(APP)
     if specs:
         engine.select_spec(specs[0], APP)
+        APP.expanded = frozenset({specs[0].stem})

@@ -122,10 +122,14 @@ def _open(raw: str) -> None:
 
 
 def _pick_up_spec() -> None:
-    """Open the project's first spec, if it already has one."""
-    specs = engine.specs_in(APP)
-    if specs:
-        engine.select_spec(specs[0], APP)
+    """Open the project's first spec, if it already has one — and open its card.
+
+    Shared with `app.open_at_start`, which is the same moment reached from
+    `--project` instead of from the picker.
+    """
+    from portia.ui import app as app_module
+
+    app_module._pick_up_spec()
 
 
 # --- project-context — the one gate -----------------------------------------

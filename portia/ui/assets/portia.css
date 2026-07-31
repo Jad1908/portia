@@ -272,8 +272,17 @@ html body {
   flex-direction: column;
   /* Fill the panel rather than shrinking to content. Without this the graph
    * canvas ended where the graph did, leaving dead space below it that looked
-   * like the pane but wasn't — nothing to pan on, and no grid drawn. */
+   * like the pane but wasn't — nothing to pan on, and no grid drawn.
+   *
+   * `width: 100%` is not redundant with `flex: 1 1 auto`, which only governs the
+   * main axis — and this is a column, so the main axis is height. A splitter panel
+   * does not stretch its children, so the pane was as wide as its widest in-flow
+   * child. That was survivable while the graph sat in the flow and dragged the
+   * pane out to its own width; the moment the canvas started positioning its
+   * content absolutely the pane collapsed to the width of the header row, and
+   * every card past the second one was clipped away. */
   flex: 1 1 auto;
+  width: 100%;
   min-height: 0;
   min-width: 0;
 }
@@ -933,6 +942,67 @@ body.body--dark .step-card {
   white-space: nowrap;
 }
 
+/* Another spec's table — something portia built, with a spec behind it you can
+ * open. A source is a file that arrived; this is a decision that produced a
+ * table. They drew identically until the pipeline overhaul, which meant the
+ * graph could not say which of its inputs it was responsible for.
+ *
+ * The layer rides in the header as a plain `type-chip` with the layer's name and
+ * no colour of its own. staging/intermediate/mart is build order, and it is the
+ * one thing on this card that nothing measured — so it says what kind of table
+ * this is, and never makes one card louder than another. */
+.model-card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-card);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.model-card--selected {
+  border-color: color-mix(in srgb, var(--accent-primary) 60%, transparent);
+}
+
+.model-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  min-width: 0;
+  height: 48px;
+  flex: 0 0 48px;
+  padding: 0 var(--sp-md);
+  cursor: pointer;
+}
+.model-head:hover {
+  background: var(--surface-elevated);
+}
+.model-card--open .model-head {
+  border-bottom: 1px solid var(--hairline);
+}
+.model-caret {
+  font-size: 16px;
+  color: var(--mute);
+  flex: 0 0 auto;
+}
+.model-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* The steps that build this table, one zoom level in — the same cards the spec
+ * graph drew, on the same canvas, inside the card for the table they produce. */
+.model-body {
+  position: relative;
+  margin: var(--sp-md) var(--sp-md) 0;
+  flex: 0 0 auto;
+}
+
 /* Deliberately quieter than a step: steps are the decisions. */
 .source-node {
   height: 100%;
@@ -948,6 +1018,11 @@ body.body--dark .step-card {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: pointer;
+}
+.source-node:hover {
+  border-color: var(--hairline-strong);
+  color: var(--body);
 }
 
 /* ── middle pane, bottom — the run report ─────────────────────────────────── */

@@ -164,6 +164,14 @@ class App:
 
     selection: tuple[str, str] | None = None  # (kind, name) — None = the workflow
     selected_step: str | None = None
+    #: Which model cards are open on the canvas, showing the steps that build them.
+    #: A frozenset because it is replaced rather than mutated, which is what makes
+    #: "did the graph change?" answerable by comparing two values.
+    expanded: frozenset[str] = frozenset()
+    #: A model to bring into view on the next render, then forget. Picking a spec
+    #: on the left pans the canvas to its card instead of replacing the view —
+    #: the canvas is the one place both zoom levels are true at once.
+    focus_model: str | None = None
     #: The source whose interpretation is being edited by hand, if any. Editing is
     #: a mode rather than a dialog: the check facts have to stay on screen while
     #: you write the prose, because they are what the prose is a read *of*.

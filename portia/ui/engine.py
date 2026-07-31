@@ -273,6 +273,32 @@ def specs_in(app: App) -> list[Path]:
     return sorted(app.root / path for path in spec_module.discover_specs(app.root).values())
 
 
+def project_docs(app: App) -> dict[str, dict]:
+    """Every spec in the project, loaded, as ``model name -> doc``.
+
+    What the project graph is drawn from. The name is the spec's filename because
+    one spec produces one table, so this mapping is also what resolves a
+    cross-spec reference — the same `spec.discover_specs` the engine builds from,
+    which is the point: the window must not have a different idea of what the
+    project contains than `cli.build` does.
+    """
+    docs = {}
+    for name, path in spec_module.discover_specs(app.root).items():
+        try:
+            docs[name] = spec_module.load_spec(app.root / path) or {}
+        except (OSError, ValueError):
+            # One unreadable spec is that spec's problem to report; it is not a
+            # reason for the whole graph to refuse to draw.
+            continue
+    return docs
+
+
+def spec_path_for(app: App, model: str) -> Path | None:
+    """Where the spec that produces ``model`` lives, or None if nothing does."""
+    found = spec_module.discover_specs(app.root).get(model)
+    return app.root / found if found else None
+
+
 def models_in(app: App) -> list[Path]:
     """The compiled ``.sql`` files — the pipeline, which is the deliverable.
 

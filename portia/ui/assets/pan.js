@@ -48,6 +48,14 @@
     document.querySelectorAll(".graph-canvas").forEach((el) => writePan(el, 0, 0));
   };
 
+  // Bring a node into view. Picking a spec on the left focuses its card here, so
+  // the left panel navigates the graph rather than replacing it — the canvas is
+  // the one place both zoom levels are true at once and swapping it out on every
+  // click would throw that away.
+  window.portiaPanTo = (x, y) => {
+    document.querySelectorAll(".graph-canvas").forEach((el) => writePan(el, x, y));
+  };
+
   document.addEventListener("mousedown", (e) => {
     if (e.button !== 0) return;
     const found = e.target.closest(".graph-canvas");
