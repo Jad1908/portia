@@ -99,6 +99,7 @@ def step_vocabulary() -> dict[str, str]:
         "hows": " | ".join(join_op.HOWS),
         "transform_ops": " | ".join(sorted(normalize_op.TRANSFORM_OPS)),
         "blocking_flags": ", ".join(sorted(BLOCKING_FLAGS)),
+        "layers": " | ".join(spec.LAYERS),
     }
 
 
