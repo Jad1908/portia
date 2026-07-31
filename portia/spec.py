@@ -143,16 +143,28 @@ def discover_specs(root: str | Path = ".") -> dict[str, Path]:
     **Names must be unique across the project**, and this is where that is
     enforced. It is the one rule §2.4 costs us, and it is wanted anyway: it is also
     what keeps compiled `.sql` filenames unique.
+
+    **Paths come back relative to ``root``**, because every caller joins them onto
+    a base again — ``root / models[name]``, ``base / models[ref]``. Returning them
+    already prefixed made that join a silent double-prefix, which an absolute root
+    hides (joining an absolute path discards the left side) and ``root="."`` also
+    hides. It broke on exactly one shape, a *relative* root that isn't ``.`` — so
+    `python -m portia.cli.build --root sandbox/gui` looked for its specs under
+    ``sandbox/gui/sandbox/gui/specs``. Relative is also the right currency here:
+    a spec path is recorded and compared project-relative everywhere else
+    (`docs/PIPELINE.md` §2.7).
     """
-    directory = Path(root) / SPECS_DIR
+    base = Path(root)
+    directory = base / SPECS_DIR
     found: dict[str, Path] = {}
     for path in sorted(directory.rglob("*.yaml")) if directory.is_dir() else []:
+        relative = path.relative_to(base)
         if path.stem in found:
             raise ValueError(
-                f"two specs both produce {path.stem!r}: {found[path.stem]} and {path}. "
+                f"two specs both produce {path.stem!r}: {found[path.stem]} and {relative}. "
                 "Model names are unique across a project — rename one."
             )
-        found[path.stem] = path
+        found[path.stem] = relative
     return found
 
 
