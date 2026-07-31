@@ -1542,3 +1542,26 @@ body.body--dark .step-card {
   font-size: 11px;
   border-radius: var(--r-sm);
 }
+
+/* A layer inside a left-pane section. Uniform for every layer — same size, same
+ * weight, same colour — because staging/intermediate/mart is a kind of table and
+ * the order the tiers are built in, never a ranking. */
+.p-group-header {
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: var(--ash);
+  padding: var(--sp-sm) var(--sp-md) var(--sp-xxs) var(--sp-lg);
+}
+
+/* A generated .sql that no longer matches its spec. Drift, not a blocking zero:
+ * nothing is broken, the file is describing an older version of the decision
+ * record. Same colour the drift badge uses, for the same reason. */
+.stale-banner {
+  background: var(--warning-soft);
+  border: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
+  border-radius: var(--r-md);
+  padding: var(--sp-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+}

@@ -31,6 +31,7 @@ __all__ = [
     "Turn",
     "SOURCE",
     "SPEC",
+    "MODEL",
     "OUTPUT",
     "RUN",
     "TURN",
@@ -53,6 +54,11 @@ __all__ = [
 #: portia knows about.
 SOURCE = "source"
 SPEC = "spec"
+#: A compiled ``models/*.sql`` — **the deliverable**, and deliberately not an
+#: OUTPUT. A run's CSV is a result of executing the pipeline; this is the
+#: pipeline (`docs/PIPELINE.md` §2.2). One list holding both would make "output"
+#: mean two things in the pane whose whole job is saying what portia knows about.
+MODEL = "model"
 OUTPUT = "output"
 RUN = "run"
 TURN = "turn"

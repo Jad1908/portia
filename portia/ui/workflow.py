@@ -30,7 +30,7 @@ from portia.checks.outcome import BLOCKING_FLAGS, describe_contribution, describ
 from portia.core.present import format_rate
 from portia.ui import components as c
 from portia.ui import engine, graph, state
-from portia.ui.state import APP, OUTPUT, RUN, SOURCE, SPEC, TURN
+from portia.ui.state import APP, MODEL, OUTPUT, RUN, SOURCE, SPEC, TURN
 
 #: How tall the graph half sits by default, as a percentage. The report half is
 #: the taller of the two — it is where the evidence is (DESIGN.md → Layout).
@@ -46,6 +46,8 @@ async def pane() -> None:
     kind, name = APP.selection or (None, "")
     if kind == SOURCE:
         await _source_inspector(name)
+    elif kind == MODEL:
+        await _model_inspector(name)
     elif kind == OUTPUT:
         await _output_inspector(name)
     elif kind == RUN:
@@ -775,6 +777,41 @@ def _turn_cost(summary: dict) -> str:
     return "—" if not cost else f"~${cost:.4f}"
 
 
+async def _model_inspector(rel: str) -> None:
+    """A compiled model, as it sits on disk — the deliverable, read verbatim.
+
+    Rendered from the file rather than recompiled from the spec, for the same
+    reason `_run_inspector` reads its markdown off disk: what this shows has to be
+    exactly what a reviewer sees in the diff, or committing it was pointless. That
+    is also what makes the staleness banner meaningful — it is the difference
+    between this file and what the spec would produce now.
+    """
+    path = APP.root / rel
+    with ui.element("div").classes("p-scroll p-pad stack-lg"):
+        _inspector_header(path.name, str(path))
+        if not path.exists():
+            c.empty_note("that model is gone — press Build to write it again")
+            return
+        if path.stem in engine.stale_models(APP):
+            _stale_banner(path.stem)
+        c.code_block(await engine.read_text(path))
+
+
+def _stale_banner(name: str) -> None:
+    """The `.sql` no longer matches its spec. A fact, stated where it matters.
+
+    Drift-coloured rather than blocking: nothing is broken, the file is simply
+    describing an older version of the decision record. `build --check` is the
+    same fact in CI; this is it in the window, which is the point — you should not
+    have to run a terminal command to find out the deliverable is out of date.
+    """
+    with ui.element("div").classes("stale-banner"):
+        with ui.element("div").classes("row-gap-sm"):
+            c.flag_badge("stale", c.DRIFT)
+            ui.label(f"{name}.sql no longer matches {name}.yaml").classes("t-body-strong c-ink")
+        c.text(_STALE_WHY, color="c-body")
+
+
 async def _output_inspector(name: str) -> None:
     path = APP.root / engine.OUT_DIR / name
     with ui.element("div").classes("p-scroll p-pad stack-lg"):
@@ -869,6 +906,10 @@ _NO_SPECS = (
     "No specs yet. The copilot writes one as it records steps, and each one becomes a table."
 )
 _NO_RUN = "No run yet. Press Run in the toolbar to execute this spec."
+_STALE_WHY = (
+    "The spec has changed since this file was generated. Run the spec, or Build the "
+    "project, to regenerate it — the .sql is a build output and is never hand-edited."
+)
 _EDIT_SCOPE = "writes the prose and the roles; the measured facts are untouched"
 _ASK_HEADING = "What did it miss?"
 _ASK_WHY = "It re-reads this source with your note in hand, and asks if the two disagree."
