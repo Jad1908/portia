@@ -31,8 +31,7 @@ from portia.checks import profiling
 from portia.checks.join import join_findings as _join_findings
 from portia.checks.outcome import BLOCKING_FLAGS
 from portia.checks.profiling import profile_path
-from portia.core import store
-from portia.core.io import load_table
+from portia.core.io import connect, load_table
 from portia.core.serialize import to_json
 from portia.ops import join as join_op
 from portia.ops import normalize as normalize_op
@@ -100,6 +99,7 @@ def step_vocabulary() -> dict[str, str]:
         "hows": " | ".join(join_op.HOWS),
         "transform_ops": " | ".join(sorted(normalize_op.TRANSFORM_OPS)),
         "blocking_flags": ", ".join(sorted(BLOCKING_FLAGS)),
+        "layers": " | ".join(spec.LAYERS),
     }
 
 
@@ -181,7 +181,7 @@ def profile_source(source: str, portia_dir: str = catalog.DEFAULT_DIR) -> dict:
         }
 
     entry = _entry(source, portia_dir)
-    profile = profile_path(entry["source"])
+    profile = profile_path(_project_root(portia_dir) / entry["source"])
     roles = {c["name"]: c.get("role") for c in entry.get("columns", [])}
     return {
         "source": entry["source"],
@@ -257,7 +257,7 @@ def join_findings(
 
     Call this **before** deciding anything about a merge.
     """
-    con = store.memory()
+    con = connect()
     return _join_findings(
         _table(left, portia_dir, con),
         _table(right, portia_dir, con),
@@ -270,6 +270,7 @@ def join_findings(
 def record_step(
     spec_path: str,
     step: dict,
+    layer: str | None = None,
     portia_dir: str = catalog.DEFAULT_DIR,
 ) -> dict:
     """Execute a decided step, measure what it produced, and record it if it holds.
@@ -303,22 +304,38 @@ def record_step(
     sources: dict[str, str] = doc.setdefault("sources", {})
     steps: list[dict] = doc.setdefault("steps", [])
 
+    # A spec-level claim, not a step-level one — the layer describes the table the
+    # spec builds. Set once and left alone afterwards: silently re-layering a model
+    # on a later step would move its file without anyone reading a decision.
+    spec.validate_layer(layer)
+    if layer and not doc.get("layer"):
+        doc["layer"] = layer
+
+    root = _project_root(portia_dir)
+    # Every other spec in the project is a table this step may read, by name. The
+    # spec being written is excluded: a model cannot be its own input.
+    models = {n: p for n, p in spec.discover_specs(root).items() if n != path.stem}
+
     step_ids = {s["id"] for s in steps}
     _normalize_step_refs(step, spec_path=str(path))
     _validate_step(step, existing=steps)
-    for ref in _source_refs(step, known_steps=step_ids):
+    for ref in _source_refs(step, known_steps=step_ids | set(models)):
         try:
             sources[ref] = _source_path(ref, portia_dir)
         except ValueError as exc:
-            # It's neither an indexed source nor an earlier step. Say both, or the
+            # It's none of the three things a name can be. Say all three, or the
             # caller assumes chaining is unsupported rather than mistyped.
             known = ", ".join(sorted(step_ids)) or "(none yet)"
-            raise ValueError(f"{exc}. Earlier steps you can chain from: {known}") from exc
+            other = ", ".join(sorted(models)) or "(none)"
+            raise ValueError(
+                f"{exc}. Earlier steps in this spec: {known}. "
+                f"Other models in this project, which you may name directly: {other}"
+            ) from exc
 
     # Run before writing. An exception here — a missing column, a transform that
     # can't apply — is now surfaced instead of being written into a durable spec
     # that only fails when someone re-runs it, possibly months later.
-    result = spec.run_spec({**doc, "steps": [*steps, step]})[-1]
+    result = spec.run_spec({**doc, "steps": [*steps, step]}, base_dir=root, models=models)[-1]
 
     # Shape before post-conditions: a malformed prediction has to be fixed whether
     # or not the data is sound, and unlike a zero it is never legitimate — so
@@ -344,13 +361,14 @@ def record_step(
         "spec": str(path),
         "step_id": step["id"],
         "n_steps": len(steps),
+        "layer": doc.get("layer"),
         "outcome": result.outcome,
         "drift": result.drift,
         "acknowledged": result.acknowledged,
     }
 
 
-def run_spec(spec_path: str) -> dict:
+def run_spec(spec_path: str, portia_dir: str = catalog.DEFAULT_DIR) -> dict:
     """Re-execute a spec and report what each step actually did, plus any drift.
 
     Use it to check your own work: record a step, run it, and see whether the
@@ -363,7 +381,10 @@ def run_spec(spec_path: str) -> dict:
     what came out. A step can have no drift and still have produced a table with
     an entire source missing from it — that has happened.
     """
-    results = spec.run_spec(spec.load_spec(spec_path))
+    root = _project_root(portia_dir)
+    results = spec.run_spec(
+        spec.load_spec(spec_path), base_dir=root, models=spec.discover_specs(root)
+    )
     return {
         "spec": spec_path,
         "steps": [
@@ -386,8 +407,18 @@ def run_spec(spec_path: str) -> dict:
 # --- internals --------------------------------------------------------------
 
 
+def _project_root(portia_dir: str) -> Path:
+    """The repo portia is plugged into — the parent of its own directory.
+
+    Everything a project holds is relative to this: the specs, the compiled
+    models, and (once `PIPELINE.md` §2.7 lands) every data file that may be
+    indexed at all.
+    """
+    return Path(portia_dir).parent
+
+
 def _table(ref: str, portia_dir: str, con=None):
-    """Resolve a table reference: an indexed source, or an earlier step's output.
+    """Resolve a table reference: an indexed source, another model, or an earlier step.
 
     All file reading goes through ``core.io.load_table``. A ``con`` is passed
     when two references have to end up on the *same* connection — a join check
@@ -395,12 +426,23 @@ def _table(ref: str, portia_dir: str, con=None):
     """
     if STEP_REF in ref:
         return _step_table(ref, con)
+    con = con or connect()
     try:
-        return load_table(_source_path(ref, portia_dir), con or store.memory(), name=ref)
+        return load_table(_project_root(portia_dir) / _source_path(ref, portia_dir), con, name=ref)
     except ValueError as exc:
-        # Almost certainly a step id. Without this the message reads as "that
-        # table doesn't exist", when the truth is "not by that name".
-        raise ValueError(f"{exc}. For a table an earlier step produced: {_STEP_REF_HINT}") from exc
+        # Not an indexed source. Before giving up, try the project's other models:
+        # a name is allowed to be any of three things, and a message that names
+        # only one of them reads as "that table doesn't exist" when the truth is
+        # "not by that name" (`docs/PIPELINE.md` §2.4).
+        root = _project_root(portia_dir)
+        models = spec.discover_specs(root)
+        if ref in models:
+            return spec.model_table(ref, models, root, con, ())
+        known = ", ".join(sorted(models)) or "(none)"
+        raise ValueError(
+            f"{exc}. Models in this project: {known}. "
+            f"For a table an earlier step in the spec you are writing produced: {_STEP_REF_HINT}"
+        ) from exc
 
 
 def _step_table(ref: str, con=None):
@@ -419,7 +461,10 @@ def _step_table(ref: str, con=None):
         known = ", ".join(ids) or "(no steps yet)"
         raise ValueError(f"no step {step_id!r} in {spec_path} — have: {known}")
     prefix = {**doc, "steps": steps[: ids.index(step_id) + 1]}
-    return spec.run_spec(prefix, con=con or store.memory())[-1].table
+    root = Path(spec_path).parent.parent
+    return spec.run_spec(
+        prefix, base_dir=root, con=con or connect(), models=spec.discover_specs(root)
+    )[-1].table
 
 
 def _entry(source: str, portia_dir: str) -> dict:
@@ -611,16 +656,19 @@ def _normalize_step_refs(step: dict, *, spec_path: str) -> None:
 
 
 def _bare_step_id(ref: str, *, field: str, spec_path: str) -> str:
-    """``specs/t.yaml#otb_hotels`` → ``otb_hotels``; anything else unchanged."""
+    """``specs/t.yaml#otb_hotels`` → ``otb_hotels``; anything else unchanged.
+
+    A ``#``-reference to a *different* spec is reduced to that spec's **model
+    name**, because one spec produces one table and the name of that table is the
+    spec's own name (`docs/PIPELINE.md` §2.1, §2.4). Which step inside it produced
+    the table is not the caller's business, and naming one would couple two specs
+    to each other's internals.
+    """
     if STEP_REF not in ref:
         return ref
     named_spec, _, step_id = ref.partition(STEP_REF)
     if Path(named_spec) != Path(spec_path):
-        raise ValueError(
-            f"{field} names a step in {named_spec!r}, but this step is being written to "
-            f"{spec_path!r}. A step can only chain from an earlier step in its own spec; "
-            f"anything else has to be an indexed source."
-        )
+        return Path(named_spec).stem
     return step_id
 
 

@@ -38,7 +38,7 @@ def main() -> None:
         print(render_text(results))
 
     if args.write:
-        for path in write_outputs(results, args.write):
+        for path in write_outputs(results, args.write, name=Path(args.spec).stem):
             print(f"wrote {path}")
 
     if args.report:

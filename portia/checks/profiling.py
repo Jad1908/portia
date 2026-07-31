@@ -27,8 +27,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from portia.core import store
-from portia.core.io import load_table
+from portia.core.io import connect, load_table
 from portia.core.serialize import round_float, to_jsonable
 from portia.core.table import Table, quote_ident
 
@@ -89,7 +88,7 @@ def profile_path(path: str | Path, **load_kwargs: Any) -> dict:
     is format-agnostic because loading is centralized. Reads the file in place;
     inside a project, profile the ingested table instead (`catalog.index_source`).
     """
-    con = store.memory()
+    con = connect()
     try:
         prof = profile(load_table(path, con), **load_kwargs)
     finally:

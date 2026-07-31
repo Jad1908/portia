@@ -20,7 +20,7 @@ from __future__ import annotations
 from portia.checks.join import join_report
 from portia.checks.outcome import MERGE_SUFFIXES
 from portia.core.table import Table, quote_ident
-from portia.ops.base import OpResult
+from portia.ops.base import OpResult, named_from
 
 HOWS = ("inner", "left", "right", "outer")
 
@@ -72,17 +72,22 @@ def apply_join(
     lkeys = diagnosis["keys"]["left"]
     rkeys = diagnosis["keys"]["right"]
 
+    select = _select_list(left, right, lkeys, rkeys, shared_names=on is not None)
     condition = " AND ".join(
         f"l.{quote_ident(lk)} = r.{quote_ident(rk)}" for lk, rk in zip(lkeys, rkeys, strict=True)
     )
+
+    def build(left_from: str, right_from: str) -> str:
+        return f"SELECT {select} FROM {left_from} {_SQL_JOIN[how]} {right_from} ON {condition}"
+
     merged = Table(
         name=name,
-        query=(
-            f"SELECT {_select_list(left, right, lkeys, rkeys, shared_names=on is not None)} "
-            f"FROM ({left.query}) AS l {_SQL_JOIN[how]} ({right.query}) AS r ON {condition}"
-        ),
+        query=build(f"({left.query}) AS l", f"({right.query}) AS r"),
         con=left.con,
     )
+    # The same builder, told to name its inputs instead of inlining them. See
+    # `OpResult.compiled` for why this is one implementation and not two.
+    compiled = build(named_from(left, "l"), named_from(right, "r"))
 
     result_rows = merged.count()
     predicted = diagnosis["joins"][how]
@@ -101,7 +106,7 @@ def apply_join(
         "right_dropped": predicted["right_dropped"],
         "flags": diagnosis["flags"],
     }
-    return OpResult(table=merged, provenance=provenance)
+    return OpResult(table=merged, provenance=provenance, compiled=compiled)
 
 
 def _select_list(

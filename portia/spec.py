@@ -42,8 +42,7 @@ from portia.checks.outcome import (
     outcome_report,
     render_outcome,
 )
-from portia.core import store
-from portia.core.io import load_table, write_table
+from portia.core.io import connect, load_table, write_table
 from portia.core.present import format_rate, frame_to_markdown, inline
 from portia.core.table import Table
 from portia.ops import apply_join, apply_normalize, apply_sql
@@ -67,6 +66,10 @@ class StepResult:
     #: Blocking flags the step itself declares as deliberate. Recorded in the spec
     #: so an override is a visible, reviewable act rather than a silent one.
     acknowledged: list[str] = field(default_factory=list)
+    #: This step's SELECT, reading its inputs **by name** — the CTE body it
+    #: compiles to (`portia/compile.py`, `docs/PIPELINE.md` §3). Produced by the
+    #: same builder that produced `table.query`, not a second rendering of it.
+    compiled: str = ""
 
     @property
     def has_drift(self) -> bool:
@@ -99,6 +102,93 @@ def step_inputs(step: dict) -> list[str]:
     return [r for r in refs if isinstance(r, str) and r]
 
 
+#: Where a project keeps its specs. One spec is one model, so this directory *is*
+#: the project's set of buildable tables.
+SPECS_DIR = "specs"
+
+#: The layers a spec may declare, coarsest-input to nearest-the-user. A *kind*,
+#: never a rank: `DESIGN.md`'s rule applies here as much as on screen, so nothing
+#: may order these by quality or treat "mart" as further along than "staging".
+#:
+#: - ``staging`` — one lightly-cleaned copy per raw source; nothing joined.
+#: - ``intermediate`` — combinations on the way to an answer.
+#: - ``mart`` — the tables people actually query.
+#:
+#: **The field is optional and its absence is the flat project** (`PIPELINE.md`
+#: §2.5). That is the whole of how "this pattern is overkill here" is handled;
+#: there must never be a second mode, a setting, or a branch in the engine, or
+#: the simple case rots the first time nobody exercises it.
+LAYERS = ("staging", "intermediate", "mart")
+
+
+def validate_layer(layer: Any) -> None:
+    """A declared layer must be one we know; no layer is always fine."""
+    if layer is None:
+        return
+    if layer not in LAYERS:
+        raise ValueError(
+            f"unknown layer {layer!r} — expected one of {', '.join(LAYERS)}, "
+            "or leave it out entirely for a flat project"
+        )
+
+
+def discover_specs(root: str | Path = ".") -> dict[str, Path]:
+    """Every spec in the project, as ``model name -> path``.
+
+    The model name is the spec's filename, because one spec produces one table
+    (`docs/PIPELINE.md` §2.1). This mapping is what lets a spec reference another
+    one **by plain name** — no path, no version, no `depends_on` list — with portia
+    working out the order itself, the way dbt, SQLMesh and Terraform all do it.
+
+    **Names must be unique across the project**, and this is where that is
+    enforced. It is the one rule §2.4 costs us, and it is wanted anyway: it is also
+    what keeps compiled `.sql` filenames unique.
+    """
+    directory = Path(root) / SPECS_DIR
+    found: dict[str, Path] = {}
+    for path in sorted(directory.rglob("*.yaml")) if directory.is_dir() else []:
+        if path.stem in found:
+            raise ValueError(
+                f"two specs both produce {path.stem!r}: {found[path.stem]} and {path}. "
+                "Model names are unique across a project — rename one."
+            )
+        found[path.stem] = path
+    return found
+
+
+def run_order(models: dict[str, Path], *, base_dir: str | Path = ".") -> list[str]:
+    """The project's models, in an order where every dependency comes first.
+
+    Derived from what the specs already say they read — nothing declares an order
+    and nothing should. A cycle raises rather than looping.
+    """
+    docs = {name: load_spec(Path(base_dir) / path) for name, path in models.items()}
+    deps = {
+        name: {ref for step in (doc.get("steps") or []) for ref in step_inputs(step)}
+        & set(models) - {name}
+        for name, doc in docs.items()
+    }
+
+    ordered: list[str] = []
+    state: dict[str, int] = {}  # 1 = visiting, 2 = done
+
+    def visit(name: str, trail: tuple[str, ...]) -> None:
+        if state.get(name) == 2:
+            return
+        if state.get(name) == 1:
+            cycle = " -> ".join([*trail[trail.index(name) :], name])
+            raise ValueError(f"specs depend on each other in a cycle: {cycle}")
+        state[name] = 1
+        for dep in sorted(deps[name]):
+            visit(dep, (*trail, name))
+        state[name] = 2
+        ordered.append(name)
+
+    for name in sorted(models):
+        visit(name, ())
+    return ordered
+
+
 def load_spec(path: str | Path) -> dict:
     """Parse a spec YAML file into a plain dict."""
     with open(path) as f:
@@ -111,7 +201,14 @@ def save_spec(spec: dict, path: str | Path) -> None:
         yaml.safe_dump(spec, f, sort_keys=False, default_flow_style=False)
 
 
-def run_spec(spec: dict, *, base_dir: str | Path = ".", con: Any | None = None) -> list[StepResult]:
+def run_spec(
+    spec: dict,
+    *,
+    base_dir: str | Path = ".",
+    con: Any | None = None,
+    models: dict[str, Path] | None = None,
+    _building: tuple[str, ...] = (),
+) -> list[StepResult]:
     """Load the sources, execute the steps in order, and detect drift per step.
 
     A step's output is registered under its ``id``, so a later step can consume
@@ -127,7 +224,7 @@ def run_spec(spec: dict, *, base_dir: str | Path = ".", con: Any | None = None) 
     and writing outputs after the run returns.
     """
     base = Path(base_dir)
-    con = con or store.memory()
+    con = con or connect()
     tables: dict[str, Table] = {
         name: load_table(base / rel, con, name=name)
         for name, rel in (spec.get("sources") or {}).items()
@@ -135,6 +232,9 @@ def run_spec(spec: dict, *, base_dir: str | Path = ".", con: Any | None = None) 
 
     results: list[StepResult] = []
     for step in spec.get("steps", []):
+        for ref in step_inputs(step):
+            if ref not in tables:
+                tables[ref] = model_table(ref, models, base, con, _building)
         result = _run_step(step, tables)
         if result.table is not None:
             tables[step["id"]] = result.table  # downstream steps may reference it
@@ -142,22 +242,75 @@ def run_spec(spec: dict, *, base_dir: str | Path = ".", con: Any | None = None) 
     return results
 
 
-def write_outputs(results: list[StepResult], out_dir: str | Path) -> list[Path]:
-    """Save each step's produced table as ``<out_dir>/<step id>.csv``.
+def model_table(
+    ref: str,
+    models: dict[str, Path] | None,
+    base: Path,
+    con: Any,
+    building: tuple[str, ...],
+) -> Table:
+    """The table another spec produces, built by running that spec.
+
+    A model is its spec's **last** step, which is what "one spec, one table" means.
+    The result is a lazy handle like any other, so an upstream model costs a query
+    string here rather than a materialized frame — but it *is* re-executed per
+    reference, and caching unchanged models is deliberately out of scope
+    (`docs/BACKLOG.md` → Spec, run caching).
+    """
+    if not models or ref not in models:
+        known = ", ".join(sorted(models or {})) or "(none)"
+        raise ValueError(
+            f"{ref!r} is not a source, an earlier step, or a model in this project. "
+            f"Models available: {known}"
+        )
+    if ref in building:
+        cycle = " -> ".join([*building[building.index(ref) :], ref])
+        raise ValueError(f"specs depend on each other in a cycle: {cycle}")
+
+    upstream = run_spec(
+        load_spec(base / models[ref]),
+        base_dir=base,
+        con=con,
+        models=models,
+        _building=(*building, ref),
+    )
+    if not upstream or upstream[-1].table is None:
+        raise ValueError(f"model {ref!r} produced no table — its spec has no steps")
+    # Renamed to what the referencing step calls it, so the compiled SQL says
+    # `FROM "stg_orders"` rather than naming that spec's last step.
+    return Table(name=ref, query=upstream[-1].table.query, con=con)
+
+
+def write_outputs(
+    results: list[StepResult], out_dir: str | Path, *, name: str | None = None
+) -> list[Path]:
+    """Save the table this spec produced, as ``<out_dir>/<name>.csv``.
+
+    **One file per model, not one per step** (`docs/PIPELINE.md` §2.1). A spec
+    produces one table; its steps are the working-out, and in the compiled
+    pipeline they are CTEs rather than tables. Writing a CSV per step made a
+    twelve-step spec deposit twelve files, eleven of which nobody wanted, and it
+    described a shape the pipeline no longer has.
+
+    ``name`` is the model's name — the spec's filename. Without one this falls
+    back to the last step's id, which is what a caller that has results but no
+    spec path can honestly say.
 
     Both human edges write outputs — ``cli.run --write`` and the app's Run — and
     a table's filename is part of how a spec is read afterwards, so where it
     lands is decided once, here, rather than in each renderer.
     """
+    produced = [r for r in results if r.table is not None]
+    if not produced:
+        return []
+
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    written = []
-    for r in results:
-        if r.table is not None:
-            # `write_table` dispatches on the extension, so pointing this at
-            # `.parquet` is the only change a parquet output would need.
-            written.append(write_table(r.table, out / f"{r.id}.csv"))
-    return written
+    final = produced[-1]
+    assert final.table is not None  # `produced` filtered on exactly this
+    # `write_table` dispatches on the extension, so pointing this at `.parquet`
+    # is the only change a parquet output would need.
+    return [write_table(final.table, out / f"{name or final.id}.csv")]
 
 
 def _run_step(step: dict, tables: dict[str, Table]) -> StepResult:
@@ -202,6 +355,7 @@ def _run_step(step: dict, tables: dict[str, Table]) -> StepResult:
         rationale=step.get("rationale"),
         outcome=outcome_report(out.table, inputs=inputs, keys=key_columns, grain=step.get("grain")),
         acknowledged=list(step.get("acknowledge") or []),
+        compiled=out.compiled,
     )
 
 

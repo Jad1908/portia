@@ -27,16 +27,28 @@ infrastructure and frontend surface, stay in Python wherever we can, and keep th
 Scale forced it; `docs/DUCKDB_MIGRATION.md` is what happened.*
 
 - **DuckDB under the whole engine.** `pip install duckdb`, **embedded (no server)**, reads
-  larger-than-memory CSV and Parquet. A project ingests its sources into `.portia/store.duckdb`
-  and everything downstream — profiling, join diagnosis, the ops, `run_spec` — is a lazy relation
-  behind `core.table.Table`. Measured on real data: 4.82 GB across three tables indexes in 32 s,
+  larger-than-memory CSV and Parquet. A project reads its sources **in place, from inside the
+  repo**, and everything downstream — profiling, join diagnosis, the ops, `run_spec` — is a lazy
+  relation behind `core.table.Table`. Measured on real data: 4.82 GB across three tables indexes in 32 s,
   a 50M × 3M join is diagnosed in 3.8 s, and **peak memory is bounded by the largest table rather
   than the total**, which is what makes ~20 tables workable at all.
-- **Why ingest rather than query the files in place.** Two reasons, and the second is the real one:
+- **Why we *used to* ingest rather than query the files in place** — kept because the reversal
+  below is the useful part. Two reasons, and the second was meant to be the real one:
   columnar storage is ~20× faster on column-scoped reads, and — decisively — if a source *is* a
   `read_csv` call then the agent's SQL needs file-reading rights, which is exactly what
   `ops/sql.py` exists to withhold. Data inside the database means the hatch needs no filesystem
   access at all. `DUCKDB_MIGRATION.md` §3.
+  - **Reversed — the store was removed 2026-07-31** (`PIPELINE.md` §2.7). Both arguments
+    turned out weaker than they read. The speed one never landed: `run_spec`, every agent check and
+    every CLI tool re-read the original files anyway, so the fast copy was written and then ignored.
+    And the sandbox one does not apply — `ops/sql.py` materializes its declared inputs into a fresh
+    restricted connection whatever their query is, so the hatch never sees a `read_csv` regardless.
+    What is left is a hidden second copy of the user's data, against a product that is tightening to
+    **sourcing only from files already in the repo**. If reads get slow, the answer is **parquet in
+    the repo** — columnar, typed, already supported, and still one copy you can see.
+    *Removing it moved no evidence at all: all 35 golden cases came out byte-identical, because
+    ingesting was `CREATE TABLE … AS <read_query(path)>` — the reader and its null tokens were
+    always the same ones, and only the materialization differed.*
 - **pandas is still here, at four edges, deliberately.** The fixtures (tiny, and the readable
   definition of the test data), `load_frame` for small reads, the renderers, and the SQL hatch's
   sandbox boundary. `tests/test_table.py` fails if anything *else* pulls a whole relation into
@@ -85,12 +97,26 @@ not a SWE project, so we minimize JS/frontend learning.
   component definitions, not NiceGUI APIs, precisely so the swap above stays cheap. Ships as an
   optional `ui` extra (like `agent`), so a core install stays pandas + pyyaml + duckdb.
 
-## Durable artifact
+## Durable artifacts
 
 - The **spec/contract**: a plain-text, **git-diffable, re-runnable** file in the user's repo —
   reviewable in a PR, readable by any agent. Its schema **emerges from real runs** (format TBD;
   likely YAML/JSON). Re-running against a changed source produces a readable diff.
 - A generated **report** (markdown/HTML) as a durable summary; live decisions surface in the UI.
+- The **run log** — one JSONL per copilot turn, project-local (`portia/runlog.py`).
+- **The compiled pipeline — shipped 2026-07-31** (`PIPELINE.md`, `portia/pipeline.py`). One `.sql` file per
+  spec, in its own folder, **dbt-shaped**: one file builds one table, and it references other models
+  by name. portia writes the model files and nothing else — no `dbt_project.yml`, no `profiles.yml`,
+  no `schema.yml` — so the output drops into a dbt project without portia becoming a dbt wrapper or
+  having to track dbt's conventions.
+  - **This is a commitment worth naming as a stack choice**, because it decides what portia's output
+    plugs into. dbt is the shape a data team already knows how to read, review and schedule, and
+    matching it costs almost nothing: **the engine already generates this SQL on every run and
+    discards it.** Composing steps as named blocks instead of nested sub-selects is the whole change.
+  - **Compilation and execution are separate paths, so they must be pinned together.** Execution
+    keeps the SQL sandbox; compilation only emits text. A test has to run both and assert the same
+    table comes out — the migration's lesson that *the golden files did more work than the
+    abstraction did* applies directly.
 
 ## Deliberately out of scope
 

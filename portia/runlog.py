@@ -58,7 +58,7 @@ from portia.core.serialize import to_json_line
 #: kinds end up listed side by side.
 from portia.spec import REPORT_STAMP
 
-#: Under the project's `.portia/`, beside `sources/` and the store. Not the
+#: Under the project's `.portia/`, beside `sources/`. Not the
 #: project-root `runs/` that holds saved *spec-run* reports (`ui/engine.py`):
 #: those are markdown, written for a human reading a diff, and a run of a recipe
 #: is a different artifact from a turn of the copilot.

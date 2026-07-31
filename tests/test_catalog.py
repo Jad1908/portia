@@ -1,6 +1,7 @@
 """The catalog indexes sources and preserves human judgment across re-index."""
 
 import time
+from pathlib import Path
 
 import pytest
 import yaml
@@ -14,7 +15,6 @@ from portia.catalog import (
     set_group,
     set_interpretation,
 )
-from portia.core import store
 from portia.fixtures import messy_customers
 
 
@@ -178,31 +178,54 @@ def test_removing_something_that_was_never_indexed_is_not_an_error(tmp_path):
     assert remove_source("ghost", portia_dir=tmp_path / ".portia") is None
 
 
-# --- the store: indexing ingests, un-indexing forgets ----------------------
+# --- no copy: indexing reads the file where it is --------------------------
 
 
-def test_indexing_ingests_the_data_into_the_store(tmp_path):
-    """Indexing is the moment the copy is made — eagerly, per §3 of the migration."""
+def test_indexing_copies_nothing(tmp_path):
+    """`docs/PIPELINE.md` §2.7 — portia keeps no second copy of the user's data.
+
+    This used to ingest into `.portia/store.duckdb` eagerly. Two things retired
+    it: the hot paths went to the file anyway, and portia now sources only from
+    inside the repo, where a hidden duplicate is a worse trade than a re-parse.
+    """
     csv = _write_source(tmp_path)
     d = tmp_path / ".portia"
     index_source(csv, portia_dir=d)
 
-    assert store.store_path(d).exists()
-    con = store.connect(d)
-    try:
-        assert store.table(con, "customers").count() == 40
-    finally:
-        con.close()
+    assert not (d / "store.duckdb").exists()
+    assert [p.name for p in d.iterdir()] != []  # the catalog itself is still written
 
 
-def test_the_entry_records_what_was_ingested_and_when(tmp_path):
+def test_the_entry_records_the_path_relative_to_the_project(tmp_path):
+    """An absolute path pins a project to one laptop; the spec has to travel."""
+    csv = _write_source(tmp_path)
+    entry = yaml.safe_load(index_source(csv, portia_dir=tmp_path / ".portia").read_text())
+
+    assert entry["source"] == "customers.csv"
+    assert not Path(entry["source"]).is_absolute()
+
+
+def test_indexing_refuses_a_file_outside_the_project(tmp_path):
+    """Not a warning — an outside path is not an option (§2.7)."""
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    stray = outside / "customers.csv"
+    messy_customers().to_csv(stray, index=False)
+    project = tmp_path / "project"
+    (project / ".portia").mkdir(parents=True)
+
+    with pytest.raises(ValueError, match="outside this project"):
+        index_source(stray, portia_dir=project / ".portia")
+
+
+def test_the_entry_records_what_the_file_looked_like_when_indexed(tmp_path):
     """So a file that changed on disk afterwards is detectable, not silently stale."""
     csv = _write_source(tmp_path)
     entry = yaml.safe_load(index_source(csv, portia_dir=tmp_path / ".portia").read_text())
 
-    assert entry["ingestion"]["size"] == csv.stat().st_size
-    assert entry["ingestion"]["ingested_at"]
-    assert not is_stale(entry)
+    assert entry["indexed"]["size"] == csv.stat().st_size
+    assert entry["indexed"]["at"]
+    assert not is_stale(entry, portia_dir=tmp_path / ".portia")
 
 
 def test_a_source_whose_file_changed_reads_as_stale(tmp_path):
@@ -212,11 +235,12 @@ def test_a_source_whose_file_changed_reads_as_stale(tmp_path):
     time.sleep(0.01)
     messy_customers(n=30).to_csv(csv, index=False)
 
-    assert is_stale(yaml.safe_load((d / "sources" / "customers.yaml").read_text()))
+    entry = yaml.safe_load((d / "sources" / "customers.yaml").read_text())
+    assert is_stale(entry, portia_dir=d)
 
 
-def test_reindexing_refreshes_the_store_and_the_ingestion_record(tmp_path):
-    """The update rule, extended: facts refresh, judgment survives."""
+def test_reindexing_refreshes_the_facts_and_keeps_the_judgment(tmp_path):
+    """The update rule: facts refresh, judgment survives."""
     csv = _write_source(tmp_path)
     d = tmp_path / ".portia"
     index_source(csv, portia_dir=d)
@@ -226,24 +250,47 @@ def test_reindexing_refreshes_the_store_and_the_ingestion_record(tmp_path):
     entry = yaml.safe_load(index_source(csv, portia_dir=d).read_text())
 
     assert entry["summary"] == "our CRM export"  # judgment preserved
-    assert not is_stale(entry)  # fact refreshed
-    con = store.connect(d)
-    try:
-        assert store.table(con, "customers").count() == 30
-    finally:
-        con.close()
+    assert not is_stale(entry, portia_dir=d)  # fact refreshed
 
 
-def test_forgetting_a_source_drops_its_data_too(tmp_path):
-    """The catalog stops knowing about it, so the copy it caused should go."""
+def test_forgetting_a_source_leaves_the_file_alone(tmp_path):
+    """Un-indexing is a statement about the catalog, never about someone's disk."""
     csv = _write_source(tmp_path)
     d = tmp_path / ".portia"
     index_source(csv, portia_dir=d)
     remove_source("customers", portia_dir=d)
 
-    con = store.connect(d)
-    try:
-        assert not store.has(con, "customers")
-    finally:
-        con.close()
-    assert csv.exists()  # the file itself is still not ours to delete
+    assert not (d / "sources" / "customers.yaml").exists()
+    assert csv.exists()
+
+
+# --- bringing outside data in ----------------------------------------------
+
+
+def test_import_plans_the_copy_before_making_it(tmp_path):
+    """The confirmation shows the real thing, and a clash is found before any bytes move."""
+    from portia.cli.import_data import plan
+
+    root = tmp_path / "project"
+    (root / "data").mkdir(parents=True)
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    stray = outside / "customers.csv"
+    messy_customers().to_csv(stray, index=False)
+
+    pairs = plan([stray], root / "data", root)
+    assert pairs == [(stray, root / "data" / "customers.csv")]
+    assert stray.exists()  # planning copies nothing
+
+    (root / "data" / "customers.csv").write_text("already here")
+    with pytest.raises(SystemExit, match="refusing to overwrite"):
+        plan([stray], root / "data", root)
+
+
+def test_import_refuses_a_destination_outside_the_project(tmp_path):
+    from portia.cli.import_data import plan
+
+    root = tmp_path / "project"
+    root.mkdir()
+    with pytest.raises(SystemExit, match="must be inside the project"):
+        plan([], tmp_path / "somewhere-else", root)

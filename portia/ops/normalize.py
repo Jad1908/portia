@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from portia.core.serialize import to_jsonable
 from portia.core.table import Table, quote_ident
-from portia.ops.base import OpResult
+from portia.ops.base import OpResult, named_from
 
 SAMPLE_FAILED = 5
 
@@ -52,6 +52,9 @@ def apply_normalize(table: Table, transforms: list[dict], *, name: str | None = 
     """Apply an ordered list of column transforms, returning the new table +
     a provenance report. Each transform is ``{"column": ..., "op": ...}``."""
     out = table
+    # The compiled chain starts from the input's *name* and wraps the same way the
+    # executed one does, so N transforms give N nested projections either way.
+    compiled = named_from(table)
     records = []
     for t in transforms:
         col, op = t["column"], t["op"]
@@ -64,7 +67,12 @@ def apply_normalize(table: Table, transforms: list[dict], *, name: str | None = 
         records.append({"column": col, "op": op, **_measure(out, col, op, expression)})
         if op == "to_numeric" and t.get("fill") is not None:
             expression = f"coalesce({expression}, {float(t['fill'])})"
+        compiled = _project(out.columns, col, expression, compiled)
         out = _replace(out, col, expression, name or table.name)
+
+    # A normalize with no transforms is a pass-through, and `SELECT *` says so
+    # more honestly in a file than an empty projection would.
+    compiled = compiled if transforms else f"SELECT * FROM {compiled}"
 
     provenance = {
         "op": "normalize",
@@ -72,16 +80,25 @@ def apply_normalize(table: Table, transforms: list[dict], *, name: str | None = 
         "transforms": records,
         "flags": ["coercion_failures"] if any(r.get("n_failed", 0) for r in records) else [],
     }
-    return OpResult(table=out, provenance=provenance)
+    return OpResult(table=out, provenance=provenance, compiled=compiled)
+
+
+def _project(columns: list[str], column: str, expression: str, from_item: str) -> str:
+    """One column rewritten in place, keeping the order — the SELECT, as text.
+
+    Shared by the executed and the compiled chain; only ``from_item`` differs
+    (a nested sub-query vs. the input's name). See `ops.base.OpResult.compiled`.
+    """
+    select = ", ".join(
+        f"{expression} AS {quote_ident(c)}" if c == column else quote_ident(c) for c in columns
+    )
+    return f"SELECT {select} FROM {from_item}"
 
 
 def _replace(table: Table, column: str, expression: str, name: str) -> Table:
     """The same relation with one column rewritten, in place, keeping the order."""
-    select = ", ".join(
-        f"{expression} AS {quote_ident(c)}" if c == column else quote_ident(c)
-        for c in table.columns
-    )
-    return Table(name=name, query=f"SELECT {select} FROM ({table.query})", con=table.con)
+    query = _project(table.columns, column, expression, f"({table.query})")
+    return Table(name=name, query=query, con=table.con)
 
 
 def _measure(table: Table, column: str, op: str, expression: str) -> dict:

@@ -96,6 +96,35 @@ on both tiers, and the golden files were regenerated with the reason recorded.
 
 ## 3. The central decision: ingest into a DuckDB store
 
+> ### ⚠︎ REVERSED 2026-07-31 — there is no store any more (`docs/PIPELINE.md` §2.7)
+>
+> This section is kept **because being wrong here is the instructive part**, not as current
+> behaviour. `core/store.py` is deleted; sources are read in place, from inside the repo.
+>
+> Both arguments below turned out weaker than they read:
+>
+> - **The speed argument never landed.** The store was written at index time and then read by
+>   almost nothing — `run_spec`, every agent check and every CLI tool went to the original files
+>   anyway. A fast copy nobody reads is not a cache. That was true within days of this being
+>   written and went unnoticed for a month.
+> - **The sandbox argument does not apply.** `ops/sql.py` materializes its declared inputs into its
+>   own restricted connection whatever their query is, so the hatch never sees a `read_csv`
+>   regardless of where the input came from. §6.1 (below) already found the *specced* sandbox
+>   impossible; what it did not notice is that the replacement made this argument moot too.
+>
+> What decided it in the end was neither: portia now sources **only from files already inside the
+> repo**, and against that a hidden second copy of the user's data is a worse trade than a
+> re-parse. If reads get slow the answer is parquet in the repo — columnar, typed, already
+> supported, and still one copy you can see.
+>
+> **Removing it moved no evidence at all.** All 35 golden cases came out byte-identical, because
+> ingesting was `CREATE TABLE … AS <read_query(path)>` — the reader and its null tokens were always
+> the same ones, and only the materialization differed. Whatever else this section got wrong, it
+> was at least honest about going through `core/io`.
+>
+> What survived: `store.memory()` → `core.io.connect()`, and `store.is_stale` → `catalog.is_stale`,
+> which was never about the copy — it asks whether the *file* changed since we looked.
+
 Two ways to give DuckDB the data. **Take the second.**
 
 **(a) Views over the files.** `CREATE VIEW s AS SELECT * FROM read_csv_auto('data/x.csv')`. Nothing
@@ -284,7 +313,9 @@ one.** Measured across all six fixtures, the full list and what was done about e
   the other says "not all of it is".
 - **Ingest typed, confirmed.** Every signal-carrying column stays `VARCHAR` under the sniffer —
   `signup_amount` (numbers with whitespace, plus `pending`) and `mixed_ref` (half numeric) both do.
-  `tests/test_store.py` pins that rather than trusting it. Still verify on PHQ data.
+  `tests/test_store.py` pinned that rather than trusting it. *(That file went with the store on
+  2026-07-31; the typing behaviour is unchanged, because it was always the CSV sniffer's and never
+  the store's — `tests/test_io.py` and the golden profiles cover it.)*
 - **Two evidence fields were made deterministic, deliberately, on both tiers.** `top` broke ties by
   row order and `samples` was "the first three rows". Neither is a fact about the data — half the
   fixture columns have a tied mode, and a `LIMIT` with no `ORDER BY` promises nothing, so DuckDB

@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from portia.core import store
+from portia.core.io import connect, load_table
 from portia.core.table import Table
 
 #: The tracked mock CSVs, for tests that want the on-disk path rather than a frame.
@@ -23,7 +23,7 @@ MOCK = Path(__file__).resolve().parents[1] / "data" / "mock"
 @pytest.fixture
 def con():
     """A store with no project behind it, closed when the test ends."""
-    connection = store.memory()
+    connection = connect()
     yield connection
     connection.close()
 
@@ -46,10 +46,15 @@ def table(con):
 
 @pytest.fixture
 def ingested(con):
-    """``ingested("otb")`` — a tracked mock CSV read in through the real ingest path."""
+    """``ingested("otb")`` — a tracked mock CSV, read the way a project reads one.
+
+    Named for the ingest step that no longer exists: sources are read in place now
+    (`docs/PIPELINE.md` §2.7). Kept under the old name because the *point* of the
+    fixture is unchanged — a source arriving through the real loading path rather
+    than a frame handed straight to DuckDB.
+    """
 
     def make(name: str) -> Table:
-        store.ingest(con, MOCK / f"{name}.csv", name=name)
-        return store.table(con, name)
+        return load_table(MOCK / f"{name}.csv", con, name=name)
 
     return make

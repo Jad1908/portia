@@ -1,6 +1,7 @@
 <!-- placeholders: {expect_join}, {expect_normalize}, {expect_sql}, {hows}, {transform_ops},
-     {blocking_flags} — filled from handlers.step_vocabulary(); the ops own these lists, not this
-     file. A literal brace in here must be doubled, or str.format will eat it. -->
+     {blocking_flags}, {layers} — filled from handlers.step_vocabulary(); the ops and the spec
+     format own these lists, not this file. A literal brace in here must be doubled, or
+     str.format will eat it. -->
 Execute a decided step, measure the table it produces, and append it to the spec — the durable,
 re-runnable record of what was done to the data and why.
 
@@ -15,6 +16,31 @@ STEPS CHAIN: a step's output is stored under its 'id', and a later step may name
 join A to B, then join THAT result to C. You do not need an external tool for this. Naming it
 '<spec path>#<step id>' works too and is the same thing — that is the form the read-only checks
 need, so one habit works everywhere.
+
+## One spec builds one table — so decide where the work goes
+
+A spec produces exactly ONE table, named after the spec's file, and it compiles to one .sql file
+that someone will read and run. Its steps are the working-out and become named blocks inside that
+one query; they are not tables of their own.
+
+So before you record anything, decide:
+
+  A NEW SPEC — this is a table worth having on its own. It gets a name, a file, and other specs
+  can read it by that name.
+  A NEW STEP in the spec you are already writing — this is working-out on the way to that spec's
+  table.
+
+Make a new spec when the table is something a person would ask for by name, or when more than one
+downstream thing needs it. Make a step when it only exists to get to the next thing. Say which you
+chose and why in the 'rationale' — a reader of the repo months later is looking at a directory of
+tables and needs to know why these are the ones.
+
+SPECS READ EACH OTHER BY PLAIN NAME. To use another spec's table, name it: 'left': 'stg_orders'.
+No path, no version, no declaring a dependency — portia finds the spec that produces that name and
+works out what to run first. The same name works in 'join_findings' and 'profile_source', so you
+can measure another model before you build on it, exactly as you would a source.
+
+Model names are unique across a project, so pick one that says what the table IS.
 
 ## The step
 
@@ -106,3 +132,24 @@ multiplication" is not an informed answer if they were never told it double-coun
 
 STEPS ARE APPEND-ONLY. A recorded step cannot be revised and its id cannot be reused. If a
 prediction turns out wrong, that is a finding to report, not an id to bump.
+
+## 'layer' — optional, and leaving it out is a real answer
+
+If this project is organised in layers, say which one this table belongs to: {layers}.
+
+  staging       one lightly-cleaned copy per raw source. Types, names, whitespace. Nothing joined.
+  intermediate  combinations on the way to an answer.
+  mart          the tables people actually query.
+
+These are a KIND, not a rank. A staging table is not a worse mart table, and nothing is further
+along for being in one rather than another.
+
+MANY PROJECTS DO NOT NEED THIS. Two sources and one join is a flat project: leave 'layer' out
+entirely and every model sits in one folder. That is not a lesser mode, it is the normal one, and
+imposing three layers on a small job produces files nobody wanted and a diagram nobody reads.
+
+Layering is worth proposing when there are several raw sources each needing their own cleanup, or
+when more than one downstream table reads the same intermediate result. It is the user's project,
+so ask before committing them to a shape — say what each option would mean for their repo, and set
+'layer' from then on according to what they said. Set it on the spec's first step; it describes the
+table, not the step.

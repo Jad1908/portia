@@ -167,7 +167,12 @@ def apply_sql(inputs: dict[str, Table], sql: str, *, name: str = "sql") -> OpRes
         "flags": [],
     }
     table = _restore_types(Table.from_frame(out, name, con), types)
-    return OpResult(table=table, provenance=provenance)
+    # The declared SELECT already reads its inputs by the names the step declared,
+    # so it *is* the compiled form — no second rendering, nothing to drift. This is
+    # the one op where execution and compilation genuinely diverge (the sandbox
+    # materializes; a file does not), and it is also the one where the compiled
+    # text is the agent's own words, captured verbatim. `docs/PIPELINE.md` §3.
+    return OpResult(table=table, provenance=provenance, compiled=sql.strip())
 
 
 def _cast(types: dict[str, str]) -> str:

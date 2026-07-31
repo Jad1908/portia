@@ -346,7 +346,7 @@ def test_record_step_names_chainable_steps_when_a_ref_is_unknown(sales):
         },
         portia_dir=sales,
     )
-    with pytest.raises(ValueError, match="Earlier steps you can chain from: bridged"):
+    with pytest.raises(ValueError, match="Earlier steps in this spec: bridged"):
         handlers.record_step(
             "specs/chain.yaml",
             {
@@ -460,18 +460,92 @@ def test_record_step_accepts_the_same_reference_form_the_checks_need(sales, tmp_
     assert "chain.yaml" not in doc["steps"][1]["input"]
 
 
-def test_a_step_cannot_chain_from_another_spec(sales):
-    with pytest.raises(ValueError, match="only chain from an earlier step in its own spec"):
-        handlers.record_step(
-            "specs/chain.yaml",
-            {
-                "id": "x",
-                "op": "normalize",
-                "input": "specs/elsewhere.yaml#something",
-                "transforms": [{"column": "name", "op": "strip"}],
-            },
-            portia_dir=sales,
-        )
+def test_a_step_chains_from_another_spec_by_model_name(sales, tmp_path):
+    """`docs/PIPELINE.md` §2.4 — this used to be refused, and now it is the point.
+
+    One spec produces one table, so a downstream spec names that table and portia
+    resolves it. The refusal this replaces said "a step can only chain from an
+    earlier step in its own spec", which made a multi-model project impossible.
+    """
+    handlers.record_step(
+        "specs/stg_orders.yaml",
+        {
+            "id": "cleaned",
+            "op": "normalize",
+            "input": "orders",
+            "transforms": [{"column": "customer_id", "op": "to_numeric"}],
+        },
+        portia_dir=sales,
+    )
+    out = handlers.record_step(
+        "specs/mart_orders.yaml",
+        {
+            "id": "joined",
+            "op": "join",
+            "left": "stg_orders",  # another spec's table, by plain name
+            "right": "customers",
+            "keys": ["customer_id"],
+            "how": "left",
+        },
+        portia_dir=sales,
+    )
+
+    assert out["n_steps"] == 1
+    assert out["outcome"]["n_rows"] > 0
+    # The upstream model is not an indexed source, so it must not have been
+    # written into this spec's `sources` map as though it were a file.
+    doc = yaml.safe_load((tmp_path / "specs" / "mart_orders.yaml").read_text())
+    assert "stg_orders" not in doc["sources"]
+    assert doc["steps"][0]["left"] == "stg_orders"
+
+
+def test_a_hash_ref_to_another_spec_becomes_that_specs_model_name(sales, tmp_path):
+    """Which step inside another spec made its table is not the caller's business."""
+    handlers.record_step(
+        "specs/stg_orders.yaml",
+        {
+            "id": "cleaned",
+            "op": "normalize",
+            "input": "orders",
+            "transforms": [{"column": "customer_id", "op": "to_numeric"}],
+        },
+        portia_dir=sales,
+    )
+    handlers.record_step(
+        "specs/mart_orders.yaml",
+        {
+            "id": "joined",
+            "op": "join",
+            "left": "specs/stg_orders.yaml#cleaned",
+            "right": "customers",
+            "keys": ["customer_id"],
+            "how": "left",
+        },
+        portia_dir=sales,
+    )
+
+    doc = yaml.safe_load((tmp_path / "specs" / "mart_orders.yaml").read_text())
+    assert doc["steps"][0]["left"] == "stg_orders"
+
+
+def test_join_findings_reads_another_specs_model_by_name(sales):
+    """The read-only ladder has to reach a model, or you record hop two blind."""
+    handlers.record_step(
+        "specs/stg_orders.yaml",
+        {
+            "id": "cleaned",
+            "op": "normalize",
+            "input": "orders",
+            "transforms": [{"column": "customer_id", "op": "to_numeric"}],
+        },
+        portia_dir=sales,
+    )
+
+    findings = handlers.join_findings(
+        "stg_orders", "customers", keys=["customer_id"], portia_dir=sales
+    )
+
+    assert findings["report"]["left"]["n_rows"] > 0
 
 
 def test_profile_source_measures_a_table_an_earlier_step_produced(sales):

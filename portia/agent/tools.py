@@ -16,6 +16,7 @@ from typing import Any
 
 from claude_agent_sdk import ToolAnnotations, create_sdk_mcp_server, tool
 
+from portia import spec
 from portia.agent import handlers, prompts
 from portia.core.serialize import to_json
 
@@ -198,6 +199,11 @@ async def join_findings(args: dict[str, Any]) -> dict[str, Any]:
         "properties": {
             "spec_path": {"type": "string", "description": "e.g. specs/orders.yaml"},
             "step": {"type": "object", "description": "The step to append"},
+            "layer": {
+                "type": "string",
+                "enum": list(spec.LAYERS),
+                "description": "Layer this table belongs to; omit for a flat project",
+            },
             "portia_dir": {"type": "string"},
         },
         "required": ["spec_path", "step"],
@@ -205,7 +211,11 @@ async def join_findings(args: dict[str, Any]) -> dict[str, Any]:
 )
 async def record_step(args: dict[str, Any]) -> dict[str, Any]:
     try:
-        return _ok(handlers.record_step(args["spec_path"], args["step"], **_dir(args)))
+        return _ok(
+            handlers.record_step(
+                args["spec_path"], args["step"], layer=args.get("layer"), **_dir(args)
+            )
+        )
     except Exception as exc:  # noqa: BLE001
         return _failed(exc)
 

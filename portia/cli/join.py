@@ -11,8 +11,7 @@ import argparse
 import json
 
 from portia.checks.join import join_findings, render_findings
-from portia.core import store
-from portia.core.io import load_table
+from portia.core.io import connect, load_table
 
 
 def main() -> None:
@@ -27,7 +26,7 @@ def main() -> None:
 
     # One connection: a join reads both sides at once, and DuckDB cannot join
     # across handles.
-    con = store.memory()
+    con = connect()
     findings = join_findings(
         load_table(args.left, con),
         load_table(args.right, con),

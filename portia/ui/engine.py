@@ -12,6 +12,10 @@ What the app is allowed to call, and why each is on the list:
 - ``catalog.load_catalog`` — what the left pane and the source inspector show
 - ``spec.load_spec`` / ``spec.run_spec`` / ``spec.write_outputs`` /
   ``spec.write_report`` — the Run button and what it can save
+- ``spec.discover_specs`` — the project's models, so the panel and the engine
+  agree on what a spec is and a cross-spec reference resolves
+- ``pipeline.build_project`` / ``stale_models`` — compiling to SQL, and whether a
+  generated file still matches the spec that produced it
 - ``core.io.load_table`` — previewing a produced table (the one way to load data)
 - ``core.io.find_data_files`` — resolving what "add by path" points at
 - ``agent.session.run`` — a turn, driven with the app's own answer/confirm
@@ -40,10 +44,9 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from portia import catalog, runlog
+from portia import catalog, pipeline, runlog
 from portia import spec as spec_module
-from portia.core import store
-from portia.core.io import find_data_files, load_table
+from portia.core.io import connect, find_data_files, load_table
 from portia.ui import state as State
 from portia.ui.state import App
 
@@ -234,28 +237,23 @@ async def index(paths: list[Path], app: App, *, on_progress=None) -> list[str]:
     total, name)`` is called before each file, on the event loop, so a caller can
     redraw between them.
     """
-    con = await asyncio.to_thread(store.connect, app.catalog_dir)
     names = []
-    try:
-        for done, path in enumerate(paths):
-            if on_progress is not None:
-                on_progress(done, len(paths), path.stem)
-            names.append(await asyncio.to_thread(_index_one, path, app.portia_dir, app.root, con))
-    finally:
-        await asyncio.to_thread(con.close)
+    for done, path in enumerate(paths):
+        if on_progress is not None:
+            on_progress(done, len(paths), path.stem)
+        names.append(await asyncio.to_thread(_index_one, path, app.portia_dir))
     refresh_catalog(app)
     return names
 
 
-def _index_one(path: Path, portia_dir: str, root: Path, con) -> str:
-    """One source into the store and the catalog, on the project's own connection.
+def _index_one(path: Path, portia_dir: str) -> str:
+    """One source into the catalog. Nothing is copied — see `catalog.index_source`.
 
-    The connection is shared across the batch deliberately: DuckDB takes a write
-    lock on the store, so opening one per file is both slower and a collision
-    waiting to happen.
+    There is no shared connection to thread through any more: with the store
+    retired, indexing profiles the file where it lies and `catalog.source_ref`
+    records the path relative to the project (`docs/PIPELINE.md` §2.7).
     """
-    relative = path.resolve().relative_to(root) if path.resolve().is_relative_to(root) else path
-    catalog.index_source(relative, portia_dir=portia_dir, con=con)
+    catalog.index_source(path, portia_dir=portia_dir)
     return path.stem
 
 
@@ -263,7 +261,44 @@ def _index_one(path: Path, portia_dir: str, root: Path, con) -> str:
 
 
 def specs_in(app: App) -> list[Path]:
-    return sorted((app.root / "specs").glob("*.yaml")) if (app.root / "specs").is_dir() else []
+    """Every spec in the project, in the order the engine finds them.
+
+    Goes through `spec.discover_specs` rather than globbing, for the reason this
+    whole module exists: a layered project keeps its specs in subdirectories, and
+    a left panel that globbed one level would show a different set of specs than
+    the engine builds. It also means the project's duplicate-name rule is enforced
+    in one place, and the app inherits the error instead of quietly listing two
+    specs that cannot both exist.
+    """
+    return sorted(app.root / path for path in spec_module.discover_specs(app.root).values())
+
+
+def models_in(app: App) -> list[Path]:
+    """The compiled ``.sql`` files — the pipeline, which is the deliverable.
+
+    Not an output like ``out/*.csv``: a run's CSV is a result, and these are the
+    thing you hand someone (`docs/PIPELINE.md` §2.2).
+    """
+    models = app.root / pipeline.MODELS_DIR
+    return sorted(models.rglob("*.sql")) if models.is_dir() else []
+
+
+def stale_models(app: App) -> list[str]:
+    """Models whose ``.sql`` no longer matches the spec that produced it.
+
+    Cheap — it reads a header, it runs nothing — so a panel may ask on any render.
+    """
+    try:
+        return pipeline.stale_models(app.root)
+    except (OSError, ValueError):
+        # A malformed spec is the spec pane's problem to report, not a reason for
+        # the whole left panel to fail to draw.
+        return []
+
+
+async def build(app: App) -> list[pipeline.BuiltModel]:
+    """Compile the project to SQL — the app's half of ``python -m portia.cli.build``."""
+    return await asyncio.to_thread(pipeline.build_project, app.root)
 
 
 def count_steps(path: Path) -> int | None:
@@ -294,7 +329,15 @@ async def run_spec(app: App) -> None:
     if app.spec is None:
         return
     try:
-        app.results = await asyncio.to_thread(spec_module.run_spec, app.spec, base_dir=app.root)
+        # `models` is not optional here: a spec may read another spec's table by
+        # name, and without the registry the app would fail on a spec the CLI
+        # runs fine. `cli/` and `ui/` are two renderers of one engine (VISION.md).
+        app.results = await asyncio.to_thread(
+            spec_module.run_spec,
+            app.spec,
+            base_dir=app.root,
+            models=spec_module.discover_specs(app.root),
+        )
     except Exception as exc:  # noqa: BLE001 — shown to the operator, not swallowed
         app.results = None
         app.run_error = f"{type(exc).__name__}: {exc}"
@@ -358,10 +401,18 @@ def turn_summary(run: runlog.Run) -> dict:
 
 
 async def write_outputs(app: App) -> list[Path]:
-    """Save each step's table under ``out/``, the same way ``cli.run --write`` does."""
+    """Save the table this spec produced under ``out/``, as ``cli.run --write`` does.
+
+    One file per model, named for the spec — see `spec.write_outputs`.
+    """
     if not app.results:
         return []
-    written = await asyncio.to_thread(spec_module.write_outputs, app.results, app.root / OUT_DIR)
+    written = await asyncio.to_thread(
+        spec_module.write_outputs,
+        app.results,
+        app.root / OUT_DIR,
+        name=app.spec_path.stem if app.spec_path else None,
+    )
     app.outputs = written
     return written
 
@@ -373,7 +424,7 @@ async def read_table(path: Path):
     rows; before this it loaded the whole file to show those fifteen, which was a
     straight bug the moment an output got large.
     """
-    return load_table(path, store.memory())
+    return load_table(path, connect())
 
 
 # --- reloading the spec after the copilot has written to it -----------------

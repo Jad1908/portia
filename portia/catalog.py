@@ -24,13 +24,13 @@ clobbered. Nothing here is schema-locked; it's plain, hand-editable YAML.
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from portia.checks import profiling
-from portia.core import store
+from portia.checks.profiling import profile_path
 from portia.core.present import format_rate
 
 DEFAULT_DIR = ".portia"
@@ -51,6 +51,41 @@ _WATCHOUTS = {
 }
 
 
+def project_root(portia_dir: str | Path = DEFAULT_DIR) -> Path:
+    """The repo portia is plugged into — the parent of its own directory.
+
+    Everything a project holds is relative to this: the specs, the compiled
+    models, and every data file that may be indexed at all.
+    """
+    return Path(portia_dir).parent
+
+
+def source_ref(data_path: str | Path, *, portia_dir: str | Path = DEFAULT_DIR) -> str:
+    """A source's path as the catalog records it: **relative to the project root**.
+
+    portia plugs into a repo that already holds the data, and the user picks what
+    is in scope. A path outside that repo is refused here rather than warned about
+    (`docs/PIPELINE.md` §2.7) — one rule, one place, so no surface can be lenient
+    about it on its own.
+
+    Two things this buys, and the second is the one that matters. A spec's
+    ``sources:`` block becomes portable: an absolute path pins a spec to the
+    laptop that wrote it, and a spec that only runs in one place is not a durable
+    artifact. And ``.portia/`` never becomes the only thing that knows where the
+    data is — the path is readable, relative, and reviewable in a diff.
+    """
+    root = project_root(portia_dir).resolve()
+    target = Path(data_path).resolve()
+    try:
+        return str(target.relative_to(root))
+    except ValueError:
+        raise ValueError(
+            f"{data_path} is outside this project ({root}). "
+            f"portia indexes data already in the repo — to bring this file in:\n"
+            f"  python -m portia.cli.import_data {data_path} --to <dir>"
+        ) from None
+
+
 def init_project(project_context: str = "", *, portia_dir: str | Path = DEFAULT_DIR) -> Path:
     """Create (or update) ``.portia/project.yaml`` with the global project context."""
     d = Path(portia_dir)
@@ -63,53 +98,41 @@ def init_project(project_context: str = "", *, portia_dir: str | Path = DEFAULT_
     return proj
 
 
-def index_source(
-    data_path: str | Path,
-    *,
-    portia_dir: str | Path = DEFAULT_DIR,
-    con: Any | None = None,
-) -> Path:
-    """Ingest a data source into the store, profile it, and write its catalog entry.
+def index_source(data_path: str | Path, *, portia_dir: str | Path = DEFAULT_DIR) -> Path:
+    """Profile a data source and write its catalog entry.
 
     Facts are (re)computed from the data; a pre-existing ``summary`` and any set
     ``role`` values are preserved. Registers the source in ``project.yaml``.
 
-    **Ingestion is eager** — it happens here, at index time, rather than lazily on
-    first query (`docs/DUCKDB_MIGRATION.md` §3). Indexing is already the moment
-    the user is waiting for work to happen, and the alternative is a fast index
-    followed by a surprising pause later.
+    **Nothing is copied.** The file stays where it is and is read in place; the
+    entry records its path relative to the project root plus enough about the file
+    to notice it changing (`docs/PIPELINE.md` §2.7). This used to ingest into
+    ``.portia/store.duckdb`` first — a second, hidden copy of the user's data that
+    the hot paths then went around.
 
-    ``con`` is the project's open store connection. A caller that holds one
-    should pass it: DuckDB takes a write lock on the file, so two open handles to
-    the same store collide.
+    **The path must be inside the project.** :func:`source_ref` refuses anything
+    else; bringing outside data in is a separate, deliberate act
+    (``python -m portia.cli.import_data``).
     """
     data_path = Path(data_path)
     name = data_path.stem
     d = Path(portia_dir)
     (d / "sources").mkdir(parents=True, exist_ok=True)
 
-    own_con = con is None
-    con = con or store.connect(d)
-    try:
-        ingestion = store.ingest(con, data_path, name=name)
-        # Profile the ingested copy, not the file. This is the step that makes a
-        # multi-GB source indexable at all: the same profile that cost 1883 MB
-        # through pandas is a handful of aggregates over columnar storage.
-        profile = profiling.profile(store.table(con, name))
-    finally:
-        if own_con:
-            con.close()
+    recorded = source_ref(data_path, portia_dir=d)
+    # Profiled straight off the file — DuckDB-backed and memory-bounded, so the
+    # profile that cost 1883 MB through pandas is a handful of aggregates over
+    # the file itself. There is no ingested copy to profile instead (§2.7).
+    profile = profile_path(data_path)
 
     src_file = d / "sources" / f"{name}.yaml"
     existing = _read(src_file) if src_file.exists() else None
-    _write(src_file, _source_entry(str(data_path), profile, existing, ingestion))
+    _write(src_file, _source_entry(recorded, profile, existing, file_facts(data_path)))
     _register(d, name)
     return src_file
 
 
-def remove_source(
-    name: str, *, portia_dir: str | Path = DEFAULT_DIR, con: Any | None = None
-) -> Path | None:
+def remove_source(name: str, *, portia_dir: str | Path = DEFAULT_DIR) -> Path | None:
     """Forget a source: drop its entry, its registration, and its group membership.
 
     **The data file is not touched.** Un-indexing says "portia should stop
@@ -121,24 +144,11 @@ def remove_source(
     from its own ``sources:`` block, not from the catalog. What breaks is
     *recording a new step* against a name that is no longer indexed, which fails
     loudly at `record_step`.
-
-    The store's **copy** of the data does go, though: it exists only because the
-    catalog knows about the source, so leaving it behind would be a growing pile
-    of data nothing references.
     """
     d = Path(portia_dir)
     entry = d / "sources" / f"{name}.yaml"
     removed = entry if entry.exists() else None
     entry.unlink(missing_ok=True)
-
-    if store.store_path(d).exists():
-        own_con = con is None
-        con = con or store.connect(d)
-        try:
-            store.forget(con, name)
-        finally:
-            if own_con:
-                con.close()
 
     proj = d / "project.yaml"
     if proj.exists():
@@ -247,7 +257,7 @@ def load_catalog(portia_dir: str | Path = DEFAULT_DIR) -> dict:
 
 
 def _source_entry(
-    source: str, profile: dict, existing: dict | None, ingestion: dict | None = None
+    source: str, profile: dict, existing: dict | None, indexed: dict | None = None
 ) -> dict:
     existing = existing or {}
     prev_roles = {c["name"]: c.get("role") for c in existing.get("columns", [])}
@@ -257,11 +267,11 @@ def _source_entry(
     ]
     return {
         "source": source,
-        # When the store's copy was made, and what the file looked like then —
-        # so a file edited afterwards is detectable rather than silently stale.
-        # A fact, so re-indexing refreshes it. The path is not repeated here;
-        # `source` above is the one place a location is written down.
-        "ingestion": ingestion or existing.get("ingestion"),
+        # What the file looked like when it was indexed, so a file edited
+        # afterwards is detectable rather than silently stale. A fact, so
+        # re-indexing refreshes it. The path is not repeated here; `source`
+        # above is the one place a location is written down.
+        "indexed": indexed or existing.get("indexed"),
         # Layer 1 — prose read. Preserved across re-index (judgment, not fact).
         "summary": existing.get("summary") or _auto_summary(profile),
         "candidate_keys": profile["candidate_keys"],
@@ -270,9 +280,40 @@ def _source_entry(
     }
 
 
-def is_stale(entry: dict) -> bool:
-    """Whether this source's file has changed since the store ingested it."""
-    return store.is_stale(entry.get("ingestion"), entry.get("source"))
+def is_stale(entry: dict, *, portia_dir: str | Path = DEFAULT_DIR) -> bool:
+    """Whether this source's file has changed since it was indexed.
+
+    Compares the recorded size and mtime against the file now. Says nothing about
+    what to *do* about it — re-indexing refreshes facts and preserves prose and
+    roles, exactly as it always has (the update rule above).
+
+    A source whose file has been moved or deleted counts as stale: the catalog's
+    claims are no longer backed by anything on disk, and that is worth saying out
+    loud rather than treating as fresh.
+    """
+    indexed, path = entry.get("indexed"), entry.get("source")
+    if not indexed or not path:
+        return False  # nothing was recorded; there is no claim to contradict
+    target = project_root(portia_dir) / path
+    if not target.exists():
+        return True
+    now = file_facts(target)
+    return any(indexed.get(k) != now[k] for k in now)
+
+
+def file_facts(path: str | Path) -> dict:
+    """Size, mtime and the moment we looked — what makes staleness detectable.
+
+    mtime to the microsecond, not the second: a file rewritten quickly at the
+    same length would otherwise read as unchanged, which is the one case this
+    exists to catch.
+    """
+    stat = Path(path).stat()
+    return {
+        "size": int(stat.st_size),
+        "mtime": round(stat.st_mtime, 6),
+        "at": datetime.now().astimezone().isoformat(timespec="seconds"),
+    }
 
 
 def _column_facts(col: dict) -> dict:

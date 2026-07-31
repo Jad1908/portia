@@ -11,8 +11,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from portia.core import store
-from portia.core.io import load_table, write_table
+from portia.core.io import connect, load_table, write_table
 from portia.ops.normalize import apply_normalize, render_text
 
 
@@ -36,7 +35,7 @@ def main() -> None:
     if not transforms:
         parser.error("give at least one of --strip/--lower/--to-numeric/--to-string")
 
-    result = apply_normalize(load_table(args.file, store.memory()), transforms)
+    result = apply_normalize(load_table(args.file, connect()), transforms)
     print(render_text(result.provenance))
 
     if args.out:

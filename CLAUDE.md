@@ -18,6 +18,17 @@ stack, and product vision. Read them every session, before proposing changes or 
   plan**: the specced sandbox turned out to be impossible, and a profile's memory still scales with
   cardinality because `possible_key` needs an exact `count(DISTINCT)`. Required reading before
   touching `checks/`, `ops/`, `core/io.py`, or anything that looks like a performance fix.
+  **§3 was reversed on 2026-07-31** — the ingested store is gone — and it is kept, with the
+  reasoning that failed, because it is the clearest example in this repo of an argument that read
+  well and did not survive contact with how the code was actually used.
+- `docs/PIPELINE.md` — **SQL as the artifact.** Designed 2026-07-30, shipped 2026-07-31.
+  One `.sql` per spec, dbt-shaped and committed · cross-spec references **by name** with portia
+  deriving the run order · an optional `layer` whose *absence* is the simple case · the agent
+  deciding "new spec or new step" · and indexing restricted to files already in the repo, which
+  **retired `.portia/store.duckdb`** (deleted — `core/io.connect` and `catalog.is_stale` are what
+  survived it). Required reading before touching `spec.py`, `pipeline.py`, `ops/`, `catalog.py` or
+  `cli/index.py`. **§6 is the open part**: the app does not yet render the compiled models, and
+  three design questions are unanswered.
 - `docs/BACKLOG.md` — parking lot of deferred ideas, by stream. Not required reading; scan it when
   picking the next thing to build, and **add to it whenever we postpone something mid-work.**
 
@@ -94,9 +105,10 @@ adding code, and extend them rather than working around them:
 
 **Package layout — one home per concern; don't let things pile up flat in `portia/`:**
 
-- `portia/core/` — shared seams: `table.py` (**the currency** — a lazy relation) · `store.py` (a
-  project's ingested data, `.portia/store.duckdb`) · `io.py` (loading) · `serialize.py` (compact
-  JSON evidence) ·
+- `portia/core/` — shared seams: `table.py` (**the currency** — a lazy relation) · `io.py` (loading
+  — **the only way a file becomes a table**, plus `connect()` for the connection to read it on;
+  there is no ingested store any more, `docs/PIPELINE.md` §2.7) · `serialize.py` (compact JSON
+  evidence) ·
   `present.py` (**one way to show a measured value to a human** — rates, counts, a value on one
   line. Every surface renders the same numbers; the day the terminal and the app disagree about a
   null rate is the day someone has to work out which one to believe.)
@@ -148,13 +160,25 @@ adding code, and extend them rather than working around them:
     description** — the description is what teaches the model when to climb.
   - Do not add a code layer that ranks decisions or suggests answers — see "facts vs judgment".
 - **Durable artifacts** (git-diffable YAML, the residue that makes this a product, not a script):
-  - `portia/spec.py` — the **spec** (*what we did to the data*): sources + decided steps + `expect`
-    + `rationale` + an optional `grain` claim and `acknowledge` list; `run_spec` re-executes,
+  - `portia/spec.py` — the **spec** (*what we did to the data*). **A spec produces one table**, and
+    it is about to compile to one `.sql` file — dbt-shaped, committed, referencing other specs by
+    name (`docs/PIPELINE.md`). The SQL already exists: `run_spec` composes each step's `SELECT` into
+    the next and discards the result at the end of the run. Keeping it, as named blocks rather than
+    nested sub-selects, is the whole of that change.
+    Contents: sources + decided steps + `expect` + `rationale` + an optional `grain` claim and an
+    `acknowledge` list; `run_spec` re-executes,
     detects drift, and attaches each step's measured `outcome`. **Drift and outcome are different
     questions** — drift asks whether the prediction held, the outcome asks what came out. A correct
     prediction about a broken join is still a broken join. Recording a step **runs** it
     (`handlers.record_step`), so a step that hits a zero is never written; overriding means writing
     `acknowledge` into the YAML, where the human reads it in a diff.
+  - `portia/pipeline.py` — the **compiled pipeline** (*what someone else can run*). One `.sql` per
+    spec under `models/`, each step a named CTE, sources named and created by a generated
+    `_sources.sql`. A **build output**: regenerated from the spec, not hand-edited (the spec holds
+    the `rationale`, `expect` and `grain` that SQL cannot), but committed, because the pipeline is
+    the deliverable. `build_project` runs the project in dependency order; `is_stale` compares a
+    file's header fingerprint to its spec. **Compilation and execution are separate paths and
+    `tests/test_pipeline.py` pins them together** by running both and comparing the tables.
   - `portia/catalog.py` — the **context catalog** (*what the data is*), in `.portia/`: project
     context + groups + per-source metadata (Layer 1 prose `summary`, Layer 2 per-column `role` +
     check facts). The agent's memory. **Update rule: facts refresh, prose/roles are preserved** —
@@ -176,7 +200,9 @@ adding code, and extend them rather than working around them:
   as many as you like; none of it reaches the repo. Test runs used to land in the repo root or in
   `/tmp`, and the first cluttered the tree while the second was gone by morning.
 - `portia/cli/` — play surfaces: `python -m portia.cli.<tool>` (e.g. `profile`, `join`, `run`,
-  `index`, `runs`)
+  `index`, `runs`) · **`build`** compiles every spec to `models/*.sql` (`--check` is the CI form:
+  writes nothing, fails if a `.sql` no longer matches its spec) · **`import_data`** is the only way
+  outside data enters the repo, and it copies rather than moves.
 - `portia/ui/` — the **app** (`python -m portia.ui`, `ui` extra): three panes on the same event
   stream, driving a turn through `ask.py`'s injected `answer`/`confirm`. Same status as `cli/` — an
   **edge**, and the two must never disagree about a number.

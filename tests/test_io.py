@@ -6,9 +6,9 @@ import pandas as pd
 import pytest
 
 from portia.checks.profiling import profile_path
-from portia.core import store
 from portia.core.io import (
     NA_TOKENS,
+    connect,
     load_frame,
     load_table,
     supported_suffixes,
@@ -48,7 +48,7 @@ def test_profile_path_round_trips(tmp_path):
 def test_load_table_is_lazy_and_reads_the_same_rows(tmp_path):
     p = tmp_path / "t.csv"
     pd.DataFrame({"a": [1, 2, 3]}).to_csv(p, index=False)
-    con = store.memory()
+    con = connect()
     try:
         assert load_table(p, con).count() == 3
     finally:
@@ -63,7 +63,7 @@ def test_the_two_tiers_agree_on_what_missing_looks_like(tmp_path):
     keeps, DuckDB invents a gap. Either way a null rate would depend on which
     reader ran, and null rates are what the copilot decides on.
     """
-    con = store.memory()
+    con = connect()
     try:
         for token in NA_TOKENS:
             p = tmp_path / "na.csv"
@@ -86,7 +86,7 @@ def test_the_two_tiers_agree_on_what_missing_looks_like(tmp_path):
 def test_parquet_is_supported_on_both_halves(tmp_path):
     """A format you can load and not save is a trap you find at the end of a run."""
     assert ".parquet" in supported_suffixes()
-    con = store.memory()
+    con = connect()
     try:
         source = load_table(MOCK / "messy_customers.csv", con)
         out = write_table(source, tmp_path / "messy.parquet")
@@ -103,7 +103,7 @@ def test_a_round_trip_through_parquet_keeps_the_schema(tmp_path):
     `signup_amount` is numbers-with-whitespace plus a `pending`, and its
     text-ness *is* the finding. Parquet carries that rather than re-sniffing it.
     """
-    con = store.memory()
+    con = connect()
     try:
         before = load_table(MOCK / "messy_customers.csv", con)
         after = load_table(write_table(before, tmp_path / "m.parquet"), con)
@@ -117,7 +117,7 @@ def test_the_same_evidence_comes_out_of_either_format(tmp_path):
     """Converting must not change what the copilot reads."""
     from portia.checks.profiling import profile
 
-    con = store.memory()
+    con = connect()
     try:
         csv = load_table(MOCK / "messy_customers.csv", con)
         parquet = load_table(write_table(csv, tmp_path / "m.parquet"), con)
@@ -127,7 +127,7 @@ def test_the_same_evidence_comes_out_of_either_format(tmp_path):
 
 
 def test_writing_an_unsupported_format_says_so(tmp_path):
-    con = store.memory()
+    con = connect()
     try:
         with pytest.raises(ValueError, match="unsupported data format"):
             write_table(load_table(MOCK / "hotels.csv", con), tmp_path / "out.xlsx")
@@ -135,12 +135,11 @@ def test_writing_an_unsupported_format_says_so(tmp_path):
         con.close()
 
 
-def test_a_parquet_source_indexes_like_any_other(tmp_path):
-    """Ingest dispatches on the extension, so a project can hold either."""
-    con = store.memory()
+def test_a_parquet_source_loads_like_any_other(tmp_path):
+    """The reader dispatches on the extension, so a project can hold either."""
+    con = connect()
     try:
         write_table(load_table(MOCK / "otb.csv", con), tmp_path / "otb.parquet")
-        store.ingest(con, tmp_path / "otb.parquet", name="otb")
-        assert store.table(con, "otb").count() == 14
+        assert load_table(tmp_path / "otb.parquet", con, name="otb").count() == 14
     finally:
         con.close()

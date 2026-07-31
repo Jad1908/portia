@@ -17,10 +17,20 @@ Two entry points, for two different callers:
 - :func:`load_table` — a lazy :class:`~portia.core.table.Table` over the file.
   Nothing is read until something asks for a number.
 
-:func:`load_table` reads the file *in place*, which is right for a one-off — the
-CLI pointed at a path, with no project around it. A project ingests instead
-(`core.store`): querying the same CSV repeatedly re-parses it every time, and the
-ingested store is 20× faster on column-scoped reads and 5.6× smaller on disk.
+:func:`load_table` reads the file **in place**, and since 2026-07-30 that is the
+only way portia reads anything. A project used to ingest each source into a
+private ``.portia/store.duckdb`` first, on the argument that columnar storage is
+~20× faster on column-scoped reads; the store is gone (`docs/PIPELINE.md` §2.7).
+Two things retired it. The hot paths never used it — ``run_spec``, every agent
+check and every CLI tool went to the file anyway — and portia now sources **only
+from files already inside the repo**, where a hidden second copy of the user's
+data is a worse trade than a re-parse. If reads get slow, the answer is parquet
+in the repo: columnar, typed, already registered below, and still one copy you
+can see.
+
+:func:`connect` is the other half of that: a table needs a connection to be read
+on, and with no store to open there is one obvious kind — a fresh in-memory
+database that reads the repo's files.
 """
 
 from __future__ import annotations
@@ -106,21 +116,48 @@ def load_frame(path: str | Path, **kwargs: Any) -> pd.DataFrame:
     return _format(path).read_frame(Path(path), **kwargs)
 
 
+def connect() -> Any:
+    """A DuckDB connection to read the repo's files on.
+
+    In-memory and empty: portia keeps no database of its own any more, so a
+    connection is scratch space for one piece of work rather than a handle on
+    stored data (`docs/PIPELINE.md` §2.7). It has DuckDB's default external
+    access, because reading the project's files is its whole job — the agent's
+    SQL hatch opens its own restricted connection and always did (`ops/sql.py`).
+
+    **Not thread-safe.** A thread that runs a query takes its own handle with
+    ``con.cursor()`` and rebinds through :meth:`Table.using`.
+    """
+    import duckdb
+
+    return duckdb.connect(":memory:")
+
+
 def load_table(path: str | Path, con: Any, *, name: str | None = None) -> Table:
     """A lazy :class:`Table` reading ``path`` directly, without copying it.
 
-    For a one-off read where there is no project to ingest into. Inside a
-    project, prefer ``core.store.ingest`` — see the module docstring.
+    The one way a file becomes a table. There is no ingest step to prefer
+    instead any more — see the module docstring.
     """
     path = Path(path)
     return Table(name=name or path.stem, query=read_query(path), con=con)
 
 
-def read_query(path: str | Path) -> str:
-    """The ``SELECT`` that reads ``path`` in DuckDB. The one place a reader is named."""
+def read_query(path: str | Path, *, absolute: bool = True) -> str:
+    """The ``SELECT`` that reads ``path`` in DuckDB. The one place a reader is named.
+
+    ``absolute=False`` leaves the path as given, for SQL that will be **written to
+    a file** rather than executed here: a compiled pipeline (`portia/pipeline.py`)
+    is run from the repo root and has to work on a machine other than this one, so
+    an absolute path would pin it to one laptop. The reader and its options are
+    identical either way — which is the point of asking here rather than spelling
+    a ``read_csv`` somewhere else. A generated file that disagreed with the engine
+    about which tokens mean null would be the exact class of bug `core/present.py`
+    exists to prevent.
+    """
     path = Path(path)
     fmt = _format(path)
-    args = [quote_literal(str(path.resolve()))]
+    args = [quote_literal(str(path.resolve() if absolute else path))]
     args += [f"{key}={_sql_value(value)}" for key, value in fmt.sql_options.items()]
     return f"SELECT * FROM {fmt.sql_reader}({', '.join(args)})"
 
