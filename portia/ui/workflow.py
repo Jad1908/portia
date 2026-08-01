@@ -1,10 +1,20 @@
-"""Middle pane — the spec as a graph over its run report.
+"""Middle pane — the project as a graph over the open spec's run report.
 
-The top half draws what the YAML already encodes: cards are **steps**, an edge
-means *this step's output is that step's input*. Clicking a card shows the step
-verbatim, and **an acknowledged blocking flag is impossible to miss there** —
-Run 5 buried one mid-dict in a terminal confirmation and shipped a 3.85%-inflated
-table (docs/EVALUATION.md). This screen is the second chance at that.
+The top half draws what the YAML already encodes, at two zoom levels on one
+canvas. Across the project a card is a **table** — one spec, one table — and an
+edge is one model reading another; open a card and the cards inside it are the
+**steps** that build that table. That is `VISION.md`'s oldest open question,
+*are cards steps or tables?*, answered as **both, at different levels**.
+
+A third kind of card is the point of the distinction: a `SOURCE` is a file that
+arrived, a `MODEL` is a table portia built. They drew identically until the
+pipeline overhaul, which left the graph unable to say which of its inputs it was
+responsible for.
+
+Clicking a step shows it verbatim, and **an acknowledged blocking flag is
+impossible to miss there** — Run 5 buried one mid-dict in a terminal confirmation
+and shipped a 3.85%-inflated table (docs/EVALUATION.md). This screen is the
+second chance at that.
 
 The bottom half is `cli/run.py`'s output with the table attached: per step, what
 ``StepResult`` already carries — provenance, drift against ``expect``, the
