@@ -349,6 +349,7 @@ regressed** — this is the checklist, not a nice-to-have.
 | Terminal today | In V0 |
 |---|---|
 | `mkdir ~/portia-runN` + copy data in | Open-project path field · drop zone |
+| `run <spec>` for an upstream first | Nothing — **Run** does its upstreams, and says which |
 | `index --init "<brief>"` | Mandatory context panel → `catalog.init_project` |
 | `index .` (profiling half) | Automatic on drop → `catalog.index_source` |
 | `index .` (interpret half) | A turn, with its `set_interpretation` write confirmations |
@@ -359,9 +360,10 @@ regressed** — this is the checklist, not a nice-to-have.
 | answering `allow? [Y/n]` on stdin | `write-confirm` |
 | `run <spec>` | **Run** in the workflow pane |
 | `run --write out` | Same, with an output location — outputs land in the left panel |
-| `build` | **Not built yet** — `engine.build` exists, no button calls it (`PIPELINE.md` §6) |
-| `build --check` | **Not built yet** — `engine.stale_models` is cheap enough to show on any render |
-| `import_data <f> --to <dir>` | **Not built yet** — the drop zone copies in, but does not let you choose where, nor state what it will copy before doing it |
+| `build` | **Build** in the toolbar. Run does the same at one model's scope |
+| `build --check` | The stale badge on the graph header, and a banner on the model itself |
+| `import_data <f> --to <dir>` | Destination field + **Plan import** → every `from → to` pair → **Copy and index** |
+| `cat models/*.sql` | The **Models** section; clicking one shows the file as committed |
 | `cat specs/*.yaml` | The graph, and each step's detail |
 | `cat out/*.csv` | `table-preview` |
 | `cat .portia/sources/*.yaml` | Clicking a source |

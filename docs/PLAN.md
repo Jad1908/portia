@@ -62,12 +62,19 @@ the interactive copilot loop over it (the questions-and-insights UX, emitting a 
 a decision stream) → the surface where those questions are asked and answered. The interactive
 layer is **core, not deferred**; its shape is still to be designed (the user's vision).
 
-**Where we are (2026-07-28).** The engine is built (`checks`, `ops`, `spec`, `catalog`), so is
+**Where we are (2026-08-01).** The engine is built (`checks`, `ops`, `spec`, `catalog`), so is
 the copilot loop (`portia/agent/` — in-process MCP server, layered context, `AskUserQuestion`
 routed to a human, spec writing, chat CLI), and so is **V0 of the app** (`portia/ui/`) — the loop
 now runs in one window, with no terminal. The **verification loop** exists too: recording a
 step executes it, `checks/outcome.py` measures the table it produced, and a step that hits a zero
 is refused rather than written.
+
+**The pipeline is the artifact, and the app now shows it** (`docs/PIPELINE.md`). Every spec
+compiles to one committed `.sql` under `models/`; the window lists them, flags any whose file has
+drifted from its spec, and draws the project as a DAG of tables where a card opens in place onto
+the steps that build it. **Run** executes a model and everything it reads and writes their SQL;
+**Build** does the project. Outside data comes in through an import that states what it will copy
+and to where before it copies anything. `PIPELINE.md`'s three open design questions are closed.
 
 **Scale is now built.** The engine is DuckDB throughout and everything is a lazy relation.
 *(Sources were ingested into a per-project store when this was measured; that store is gone as of
