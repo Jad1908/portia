@@ -46,10 +46,6 @@ from portia.ui.state import APP, MODEL, OUTPUT, RUN, SOURCE, SPEC, TURN
 #: the taller of the two — it is where the evidence is (DESIGN.md → Layout).
 GRAPH_SPLIT = 44
 
-#: Where a focused card lands: this far in from the canvas's top-left corner,
-#: rather than flush against it, so its incoming edges stay visible.
-FOCUS_INSET = 48
-
 
 @ui.refreshable
 async def pane() -> None:
@@ -97,7 +93,6 @@ def _graph_half() -> None:
             else:
                 _graph(placed)
         _step_detail()
-    _focus_selected(placed)
 
 
 def _graph_header(docs: dict) -> None:
@@ -113,28 +108,39 @@ def _graph_header(docs: dict) -> None:
                 f"{', '.join(stale)} — the .sql no longer matches the spec. Build to regenerate."
             )
         ui.element("div").classes("flex-1")
-        # The canvas pans in both directions with no bound, which is what makes
-        # it a surface rather than a picture — and is exactly why there has to be
-        # a way back. Double-clicking the canvas does the same thing.
-        c.button("Recenter", _recenter, icon="filter_center_focus", micro=True)
+        _view_controls()
+
+
+def _view_controls() -> None:
+    """Zoom, and the way back from having moved.
+
+    The gestures come first — drag to pan, pinch to zoom — and these are for the
+    times a gesture isn't available or isn't precise enough. The readout between
+    them is written by `canvas.js`, because where the canvas is panned and zoomed
+    to is the one piece of state in this app the client owns; a round trip per
+    wheel tick would make the only directly-manipulated surface the laggiest.
+
+    The canvas pans and zooms with no bound, which is what makes it a surface
+    rather than a picture — and is exactly why Recenter has to exist. It undoes
+    both at once, as does double-clicking the canvas.
+    """
+    with ui.element("div").classes("row-gap-xs"):
+        c.button("", _zoom_out, icon="remove", micro=True).tooltip(_ZOOM_OUT_TIP)
+        ui.label("100%").classes("zoom-level")
+        c.button("", _zoom_in, icon="add", micro=True).tooltip(_ZOOM_IN_TIP)
+    c.button("Recenter", _recenter, icon="filter_center_focus", micro=True).tooltip(_RECENTER_TIP)
+
+
+def _zoom_in() -> None:
+    ui.run_javascript("portiaZoomIn()")
+
+
+def _zoom_out() -> None:
+    ui.run_javascript("portiaZoomOut()")
 
 
 def _recenter() -> None:
     ui.run_javascript("portiaRecenter()")
-
-
-def _focus_selected(placed: graph.Layout) -> None:
-    """Bring the open spec's card into view, once, after a left-panel pick.
-
-    Picking a spec navigates the graph rather than replacing it — the canvas is
-    the only place both zoom levels are true at once, and swapping it out on every
-    click would throw that away.
-    """
-    name = APP.focus_model
-    APP.focus_model = None
-    node = next((n for n in placed.nodes if n.id == name), None)
-    if node is not None:
-        ui.run_javascript(f"portiaPanTo({FOCUS_INSET - node.x}, {FOCUS_INSET - node.y})")
 
 
 def _badge_counts(docs: dict) -> dict[str, int]:
@@ -161,11 +167,26 @@ def _badge_counts(docs: dict) -> dict[str, int]:
 
 
 def _graph(placed: graph.Layout) -> None:
+    """Draw the laid-out graph, marking the card the canvas should move to.
+
+    The mark is **declarative on purpose**, and it took two goes to get there.
+    Picking a spec navigates the canvas rather than replacing it; the first
+    version did the moving with a `run_javascript` from inside this render, which
+    raced the DOM patch and reliably landed on the canvas that was about to be
+    discarded — so the pan never moved at all. The second marked the node and
+    cleared the request as the render consumed it, which failed for a quieter
+    reason: this pane renders more than once per click, so the first render ate
+    the request and the render that reached the screen had nothing to mark.
+
+    So the request carries a token and the client acts on each one once. A
+    repeated render is then simply harmless, rather than something the server has
+    to get right.
+    """
     style = f"width:{placed.width}px;height:{placed.height}px"
     with ui.element("div").classes("graph-content").style(style):
         ui.html(_edges_svg(placed))
         for node in placed.nodes:
-            _node(node)
+            _node(node, focused=node.id == APP.focus_model)
 
 
 def _edges_svg(placed: graph.Layout, *, inner: bool = False) -> str:
@@ -179,9 +200,13 @@ def _edges_svg(placed: graph.Layout, *, inner: bool = False) -> str:
     )
 
 
-def _node(node: graph.Node) -> None:
+def _node(node: graph.Node, *, focused: bool = False) -> None:
     style = f"left:{node.x}px;top:{node.y}px;width:{node.w}px;height:{node.h}px"
-    with ui.element("div").classes("graph-node").style(style):
+    classes = "graph-node" + (" graph-node--focus" if focused else "")
+    box = ui.element("div").classes(classes).style(style)
+    if focused:
+        box.props(f"data-focus-token={APP.focus_token}")
+    with box:
         if node.kind == graph.SOURCE:
             _source_node(node)
         elif node.kind == graph.MODEL:
@@ -928,6 +953,9 @@ _NO_SPECS = (
     "No specs yet. The copilot writes one as it records steps, and each one becomes a table."
 )
 _NO_RUN = "No run yet. Press Run in the toolbar to execute this spec."
+_ZOOM_IN_TIP = "Zoom in · pinch on the canvas, or ctrl and the wheel"
+_ZOOM_OUT_TIP = "Zoom out · pinch on the canvas, or ctrl and the wheel"
+_RECENTER_TIP = "Back to 100%, centred · or double-click the canvas"
 _STALE_WHY = (
     "The spec has changed since this file was generated. Run the spec, or Build the "
     "project, to regenerate it — the .sql is a build output and is never hand-edited."

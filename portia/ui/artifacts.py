@@ -262,7 +262,7 @@ def _open_spec(path: Path) -> None:
     engine.select_spec(path, APP)
     APP.select(SPEC, path.name)
     APP.expanded = APP.expanded | {path.stem}
-    APP.focus_model = path.stem
+    APP.focus(path.stem)
     pane.refresh()
     workflow.pane.refresh()
     app_module.toolbar.refresh()

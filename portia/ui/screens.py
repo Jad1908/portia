@@ -118,6 +118,10 @@ def _open(raw: str) -> None:
         return
     APP.opened = True
     _pick_up_spec()
+    # The canvas view survives a pane refresh on purpose (`assets/canvas.js`), so
+    # it would otherwise survive a change of project too — and a new project's
+    # graph opening panned off-screen at 40% reads as a window that failed to draw.
+    ui.run_javascript("portiaRecenter()")
     app_module.shell.refresh()
 
 

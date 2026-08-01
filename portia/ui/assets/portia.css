@@ -822,7 +822,7 @@ html body {
  * navigable" before you touch it, and gives the eye something to judge panning
  * against. Faint enough that the cards still carry the contrast.
  *
- * The canvas clips and the content inside it is translated (see `pan.js`).
+ * The canvas clips and the content inside it is transformed (see `canvas.js`).
  * It used to scroll instead, which had two consequences and both were bugs: a
  * graph that fitted its pane had nothing to scroll, so dragging did nothing at
  * all; and `background-attachment` defaults to `scroll`, which pins the grid to
@@ -832,13 +832,18 @@ html body {
 .graph-canvas {
   --pan-x: 0px;
   --pan-y: 0px;
+  --zoom: 1;
+  --grid: 20px;
   position: relative;
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
   cursor: grab;
   background-image: radial-gradient(var(--hairline-strong) 1.5px, transparent 1.5px);
-  background-size: 20px 20px;
+  /* The grid scales with the content, so zooming out shows *more* grid rather
+   * than a coarser one — it stays a texture the eye can judge movement against
+   * instead of becoming a second, contradictory sense of scale. */
+  background-size: calc(var(--grid) * var(--zoom)) calc(var(--grid) * var(--zoom));
   background-position: calc(var(--pan-x) - 1px) calc(var(--pan-y) - 1px);
 }
 .graph-canvas.is-panning {
@@ -857,7 +862,12 @@ html body {
   position: absolute;
   top: var(--sp-lg);
   left: var(--sp-lg);
-  transform: translate(var(--pan-x), var(--pan-y));
+  /* `transform-origin: 0 0` so the scale happens about the content's own corner
+   * and `canvas.js` can do the arithmetic that keeps the point under the cursor
+   * still. With the default centre origin, zooming walks whatever you were
+   * looking at off the screen. */
+  transform-origin: 0 0;
+  transform: translate(var(--pan-x), var(--pan-y)) scale(var(--zoom));
 }
 
 /* The selected card, verbatim, below the canvas rather than inside it. Inside,
@@ -1523,6 +1533,18 @@ body.body--dark .step-card {
   border: 1px solid var(--hairline);
   font-size: 11px;
   border-radius: var(--r-sm);
+}
+
+/* The zoom readout between the − and + buttons. Written by `canvas.js`, because
+ * the zoom level is client state — see that file's header. Tabular width so the
+ * buttons do not shift as it goes 100% → 80%. */
+.zoom-level {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-feature-settings: "tnum";
+  color: var(--mute);
+  min-width: 38px;
+  text-align: center;
 }
 
 /* A layer inside a left-pane section. Uniform for every layer — same size, same

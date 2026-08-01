@@ -434,3 +434,22 @@ def test_a_window_with_room_to_spare_gets_the_designed_pane_sizes():
 
     assert app_module._files_limits() == app_module.FILES_LIMITS
     assert app_module._transcript_limits() == app_module.TRANSCRIPT_LIMITS
+
+
+def test_focusing_a_card_is_a_request_with_a_token_not_a_flag():
+    """The workflow pane renders more than once per click. Clearing a flag as a
+    render consumed it meant the first render ate the request and the render that
+    reached the screen had nothing to mark — so the client dedupes on a token and
+    a repeated render is simply harmless."""
+    app = state.App()
+
+    app.focus("stg_orders")
+    first = app.focus_token
+    assert app.focus_model == "stg_orders"
+
+    # rendering does not consume it
+    assert app.focus_model == "stg_orders"
+    assert app.focus_token == first
+
+    app.focus("stg_orders")
+    assert app.focus_token > first, "asking again is a new request, even for the same card"

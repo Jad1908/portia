@@ -200,10 +200,19 @@ class App:
     #: A frozenset because it is replaced rather than mutated, which is what makes
     #: "did the graph change?" answerable by comparing two values.
     expanded: frozenset[str] = frozenset()
-    #: A model to bring into view on the next render, then forget. Picking a spec
-    #: on the left pans the canvas to its card instead of replacing the view —
-    #: the canvas is the one place both zoom levels are true at once.
+    #: A model to bring into view. Picking a spec on the left pans the canvas to
+    #: its card instead of replacing the view — the canvas is the one place both
+    #: zoom levels are true at once.
     focus_model: str | None = None
+    #: Bumped on each explicit focus request, and rendered onto the marked card so
+    #: the client can act on it **once**. It is not a counter of anything and
+    #: nothing reads it as one.
+    #:
+    #: The obvious version — clear `focus_model` as the render consumes it — was
+    #: wrong: the workflow pane renders more than once per click, so the first
+    #: render ate the flag and the render that reached the DOM had nothing to mark.
+    #: A token makes a repeated render harmless instead of making it a race.
+    focus_token: int = 0
     #: The source whose interpretation is being edited by hand, if any. Editing is
     #: a mode rather than a dialog: the check facts have to stay on screen while
     #: you write the prose, because they are what the prose is a read *of*.
@@ -292,6 +301,11 @@ class App:
     def busy(self) -> bool:
         """A turn is live **anywhere**. Starting a second would interleave two."""
         return any(s.busy for s in self.streams.values())
+
+    def focus(self, model: str) -> None:
+        """Ask the canvas to bring ``model`` into view on the next render."""
+        self.focus_model = model
+        self.focus_token += 1
 
     def resize(self, width: int) -> bool:
         """Record the window width; return whether the layout has to be redrawn.
