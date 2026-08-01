@@ -165,6 +165,10 @@ class App:
     spec_path: Path | None = None
     spec: dict | None = None
     results: list | None = None  # list[spec.StepResult] once a run has happened
+    #: Every model the last run built — the open spec plus everything it reads.
+    #: `results` is the open spec's steps; this is what else was executed, so the
+    #: run header can say so rather than implying one spec ran alone.
+    built: list = field(default_factory=list)  # list[pipeline.BuiltModel]
     run_error: str | None = None
     outputs: list[Path] = field(default_factory=list)
 

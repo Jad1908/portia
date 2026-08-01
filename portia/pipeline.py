@@ -192,12 +192,24 @@ class BuiltModel:
         return {r.id: r.drift for r in self.results if r.drift}
 
 
-def build_project(root: str | Path = ".", *, when: datetime | None = None) -> list[BuiltModel]:
-    """Run every spec in dependency order and write the whole ``models/`` tree.
+def build_project(
+    root: str | Path = ".", *, when: datetime | None = None, only: str | None = None
+) -> list[BuiltModel]:
+    """Run specs in dependency order and write their ``.sql``.
 
     The project's DAG comes from what the specs say they read — nothing declares
     an order (`spec.run_order`). Models are built in that order, so an upstream is
     always real before a downstream reads it.
+
+    ``only`` narrows it to one model **and everything it reads**, which is what
+    "run this spec" means once specs reference each other: a table is not built
+    until its inputs are. It is a scope, not a shortcut — every model in that set
+    is executed and recompiled exactly as a full build would.
+
+    **The sources file is always written in full**, whatever the scope. It creates
+    the names *every* model reads, so writing only the scoped subset would leave
+    the rest of the pipeline unable to run — a narrower build must not break a
+    file it wasn't asked to touch.
 
     **Nothing is suppressed.** A model whose step hit a blocking zero is still
     compiled and still returned, carrying its flags; deciding whether to ship a
@@ -209,15 +221,20 @@ def build_project(root: str | Path = ".", *, when: datetime | None = None) -> li
     if not models:
         return []
 
+    docs = {name: spec.load_spec(root / path) for name, path in models.items()}
+    order = (
+        spec.upstream_of(only, models, base_dir=root)
+        if only is not None
+        else spec.run_order(models, base_dir=root)
+    )
+
     con = connect()
     built: list[BuiltModel] = []
-    sources: dict[str, str] = {}
 
-    for name in spec.run_order(models, base_dir=root):
-        doc = spec.load_spec(root / models[name])
+    for name in order:
+        doc = docs[name]
         layer = doc.get("layer")
         spec.validate_layer(layer)
-        sources |= doc.get("sources") or {}
 
         results = spec.run_spec(doc, base_dir=root, con=con, models=models)
         sql_path = write_model(
@@ -230,6 +247,9 @@ def build_project(root: str | Path = ".", *, when: datetime | None = None) -> li
         )
         built.append(BuiltModel(name, models[name], layer, results, sql_path))
 
+    sources: dict[str, str] = {}
+    for doc in docs.values():
+        sources |= doc.get("sources") or {}
     write_sources(sources, root=root, when=when)
     return built
 

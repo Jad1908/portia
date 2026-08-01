@@ -303,6 +303,13 @@ def _run_error() -> None:
 
 
 def _run_header() -> None:
+    """What the run did — including the models below this one that it had to build.
+
+    Run executes the open spec's upstreams too, so a header that named only this
+    spec would understate what just happened. The upstream names are stated, never
+    summarised into "and 2 others": which tables were rebuilt is the kind of thing
+    you need to be able to check rather than trust.
+    """
     results = APP.results or []
     blocking = sorted({flag for r in results for flag in r.blocking})
     with ui.element("div").classes("row-gap-sm"):
@@ -311,6 +318,11 @@ def _run_header() -> None:
             c.flag_badge(flag, c.BLOCKING)
         if not blocking:
             c.caption("no blocking flag")
+    upstream = [
+        m.name for m in APP.built if m.name != (APP.spec_path.stem if APP.spec_path else "")
+    ]
+    if upstream:
+        c.caption(f"also built · {' · '.join(upstream)}")
     c.rule()
 
 

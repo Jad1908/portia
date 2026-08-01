@@ -42,6 +42,7 @@ import shutil
 import subprocess
 import sys
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 
 from portia import catalog, pipeline, runlog
@@ -322,9 +323,16 @@ def stale_models(app: App) -> list[str]:
         return []
 
 
-async def build(app: App) -> list[pipeline.BuiltModel]:
-    """Compile the project to SQL — the app's half of ``python -m portia.cli.build``."""
-    return await asyncio.to_thread(pipeline.build_project, app.root)
+async def build(app: App, *, only: str | None = None) -> list[pipeline.BuiltModel]:
+    """Run specs and write their ``.sql`` — the app's half of ``cli.build``.
+
+    ``only`` scopes it to one model and everything it reads, which is what the
+    Run button does; without it this is the whole project, which is Build. One
+    call for both, because they are one mechanism at two scopes — and because two
+    code paths for "execute the pipeline" is exactly how the window and the
+    terminal end up disagreeing about a number.
+    """
+    return await asyncio.to_thread(partial(pipeline.build_project, app.root, only=only))
 
 
 def count_steps(path: Path) -> int | None:
@@ -350,23 +358,36 @@ def select_spec(path: Path | None, app: App) -> None:
 
 
 async def run_spec(app: App) -> None:
-    """Execute the open spec and keep every ``StepResult`` for the report pane."""
+    """Run the open spec **and everything it reads**, then write their ``.sql``.
+
+    Both halves of that are decisions, not conveniences. A spec that references
+    another spec's table cannot run until that table is built, so "run this spec"
+    has always meant running its upstreams — `run_spec` did it implicitly. Doing it
+    through `build_project(only=...)` is the same work, named, so the app can say
+    which models it touched.
+
+    And it **writes the SQL for what it ran**, so a run can never leave the
+    deliverable describing an older version of the spec. That makes the staleness
+    warning mean something narrower and more useful: it can now only fire on a
+    spec edited outside the app.
+
+    The report half is about the spec you have open, so ``results`` is that
+    model's steps; ``built`` is the whole set, for the header to be honest about
+    what else ran.
+    """
     app.run_error = None
-    if app.spec is None:
+    app.built = []
+    if app.spec_path is None or app.spec is None:
         return
     try:
-        # `models` is not optional here: a spec may read another spec's table by
-        # name, and without the registry the app would fail on a spec the CLI
-        # runs fine. `cli/` and `ui/` are two renderers of one engine (VISION.md).
-        app.results = await asyncio.to_thread(
-            spec_module.run_spec,
-            app.spec,
-            base_dir=app.root,
-            models=spec_module.discover_specs(app.root),
-        )
+        built = await build(app, only=app.spec_path.stem)
     except Exception as exc:  # noqa: BLE001 — shown to the operator, not swallowed
         app.results = None
         app.run_error = f"{type(exc).__name__}: {exc}"
+        return
+    app.built = built
+    target = next((m for m in built if m.name == app.spec_path.stem), None)
+    app.results = target.results if target else None
 
 
 def runs_in(app: App) -> list[Path]:

@@ -168,18 +168,54 @@ def discover_specs(root: str | Path = ".") -> dict[str, Path]:
     return found
 
 
+def dependencies(models: dict[str, Path], *, base_dir: str | Path = ".") -> dict[str, set[str]]:
+    """Which models each model reads, derived from what its steps say they read.
+
+    The project's DAG, and the one place it is worked out. Nothing declares an
+    order and nothing should — this is read off `step_inputs`, exactly as a step's
+    inputs inside one spec are.
+    """
+    docs = {name: load_spec(Path(base_dir) / path) for name, path in models.items()}
+    return {
+        name: {ref for step in (doc.get("steps") or []) for ref in step_inputs(step)}
+        & set(models) - {name}
+        for name, doc in docs.items()
+    }
+
+
+def upstream_of(name: str, models: dict[str, Path], *, base_dir: str | Path = ".") -> list[str]:
+    """``name`` and every model it transitively reads, in build order.
+
+    What "run this spec" means once specs reference each other: a table is not
+    built until the tables it reads are. `run_spec` already re-runs upstreams to
+    execute one spec, so this does not change what happens — it names the set, so
+    a caller can say which models it is about to touch instead of running the
+    whole project to be safe.
+    """
+    if name not in models:
+        raise ValueError(f"no spec produces {name!r}. In this project: {', '.join(sorted(models))}")
+    deps = dependencies(models, base_dir=base_dir)
+
+    wanted: set[str] = set()
+
+    def walk(current: str) -> None:
+        if current in wanted:
+            return
+        wanted.add(current)
+        for parent in deps.get(current, ()):
+            walk(parent)
+
+    walk(name)
+    return [n for n in run_order(models, base_dir=base_dir) if n in wanted]
+
+
 def run_order(models: dict[str, Path], *, base_dir: str | Path = ".") -> list[str]:
     """The project's models, in an order where every dependency comes first.
 
     Derived from what the specs already say they read — nothing declares an order
     and nothing should. A cycle raises rather than looping.
     """
-    docs = {name: load_spec(Path(base_dir) / path) for name, path in models.items()}
-    deps = {
-        name: {ref for step in (doc.get("steps") or []) for ref in step_inputs(step)}
-        & set(models) - {name}
-        for name, doc in docs.items()
-    }
+    deps = dependencies(models, base_dir=base_dir)
 
     ordered: list[str] = []
     state: dict[str, int] = {}  # 1 = visiting, 2 = done

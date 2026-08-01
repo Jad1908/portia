@@ -155,16 +155,39 @@ def _switch_project() -> None:
 
 
 def _run_controls() -> None:
-    """Run is the app's one accent action once a spec has steps to execute."""
+    """Run and Build: one mechanism at two scopes, and each says which it is.
+
+    **Run** executes the open spec *and everything it reads*, because a table is
+    not built until its inputs are — that is what "run this spec" means once specs
+    reference each other by name. **Build** does the whole project.
+
+    Both write the ``.sql`` for what they ran, so the deliverable cannot silently
+    fall behind the decision record. That is why neither is "Compile": compiling
+    without running was never a thing portia could offer — the SQL comes out of an
+    executed step (`PIPELINE.md` §3).
+
+    Run keeps the single accent fill once a spec has steps; Build stays quiet
+    beside it. Scope is not importance, and the whole project is not the more
+    important button.
+    """
     kind = "primary" if APP.spec_has_steps and not APP.busy else "tertiary"
     run = c.button("Run", _run, kind=kind, icon="play_arrow", enabled=APP.spec_has_steps)
-    run.tooltip(str(APP.spec_path) if APP.spec_path else "no spec open")
+    run.tooltip(_run_tooltip())
+    build = c.button("Build", _build, icon="construction", enabled=not APP.busy)
+    build.tooltip(_BUILD_TIP.format(models=APP.root / "models"))
+    # A run writes the pipeline, never the data — these two are how a *result*
+    # becomes durable, and both are things you press rather than things that
+    # happen to you.
     write = c.button("Write outputs", _write, icon="save_alt", enabled=bool(APP.results))
     write.tooltip(str(APP.root / engine.OUT_DIR))
-    # Run itself writes nothing — these two are how a result becomes durable, and
-    # both are things you press rather than things that happen to you.
     report = c.button("Save report", _save_report, icon="description", enabled=bool(APP.results))
     report.tooltip(str(APP.root / engine.RUNS_DIR))
+
+
+def _run_tooltip() -> str:
+    if APP.spec_path is None:
+        return "no spec open"
+    return _RUN_TIP.format(name=APP.spec_path.stem, path=APP.spec_path)
 
 
 def _view_controls() -> None:
@@ -180,6 +203,20 @@ def _view_controls() -> None:
 
 async def _run() -> None:
     await engine.run_spec(APP)
+    workflow.pane.refresh()
+    artifacts.pane.refresh()  # the .sql it just wrote, and what is no longer stale
+    toolbar.refresh()
+
+
+async def _build() -> None:
+    """Compile the whole project — the app's half of `python -m portia.cli.build`."""
+    try:
+        built = await engine.build(APP)
+    except Exception as exc:  # noqa: BLE001 — shown to the operator, not swallowed
+        ui.notify(f"build failed — {type(exc).__name__}: {exc}")
+        return
+    ui.notify(f"built {len(built)} model(s) to models/")
+    artifacts.pane.refresh()
     workflow.pane.refresh()
     toolbar.refresh()
 
@@ -216,6 +253,11 @@ def _cycle_theme() -> None:
 
 
 _SWITCH_BUSY = "Can't switch projects while a turn is running."
+_RUN_TIP = (
+    "Run {name} and every model it reads, then write their .sql. "
+    "A table isn't built until its inputs are.\n{path}"
+)
+_BUILD_TIP = "Run every spec in the project and write the whole pipeline.\n{models}"
 
 
 def open_at_start(path: str | Path) -> None:
