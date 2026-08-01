@@ -357,3 +357,80 @@ def test_an_answer_is_never_read_off_the_next_question():
     )
     assert transcript._answered_after(rows, 0) is False
     assert transcript._answered_after(rows, 1) is True
+
+
+# --- width behaviour --------------------------------------------------------
+
+
+def test_the_three_bands_are_the_ones_the_design_specifies():
+    assert state.band_for(1600) == state.WIDE_BAND
+    assert state.band_for(state.WIDE) == state.WIDE_BAND
+    assert state.band_for(1200) == state.MEDIUM_BAND
+    assert state.band_for(state.MEDIUM) == state.MEDIUM_BAND
+    assert state.band_for(900) == state.NARROW_BAND
+
+
+def test_crossing_a_band_sets_that_bands_defaults():
+    app = state.App(width=1600, band=state.WIDE_BAND)
+
+    assert app.resize(1200) is True
+    assert (app.show_files, app.show_transcript) == (True, False)
+
+    assert app.resize(900) is True
+    assert (app.show_files, app.show_transcript) == (False, False)
+
+    assert app.resize(1600) is True
+    assert (app.show_files, app.show_transcript) == (True, True)
+
+
+def test_resizing_inside_a_band_leaves_the_panes_alone():
+    """A layout that keeps reopening a pane you just closed is worse than one
+    that never adapts."""
+    app = state.App(width=1600, band=state.WIDE_BAND)
+    app.show_transcript = False
+
+    assert app.resize(1500) is False
+    assert app.show_transcript is False
+    assert app.width == 1500
+
+
+def test_whatever_is_showing_fits_the_window_it_is_showing_in():
+    """The workflow pane never gives way (DESIGN.md → Width behaviour), so every
+    other pane's ceiling is computed against its floor — and the band defaults
+    close a pane outright when three of them could not fit at any size.
+
+    Measured before this: at 820px the workflow splitter panel was 158px wide
+    holding a pane with a 320px `min-width`, so most of the middle pane was
+    clipped away behind the transcript.
+    """
+    from portia.ui import app as app_module
+    from portia.ui.state import APP
+
+    for width in (1600, 1400, 1200, 1024, 900, 820, 700):
+        APP.resize(width)
+        showing = app_module.WORKFLOW_MIN
+        if APP.show_files:
+            showing += app_module._files_limits()[1]
+        if APP.show_transcript:
+            showing += app_module._transcript_limits()[1]
+        assert showing <= width, f"panes do not fit at {width}px"
+
+
+def test_a_narrow_window_keeps_the_workflow_pane_and_run():
+    """Whatever gives way, it is never the middle pane or the action on it."""
+    from portia.ui.state import APP
+
+    APP.resize(700)
+
+    assert (APP.show_files, APP.show_transcript) == (False, False)
+
+
+def test_a_window_with_room_to_spare_gets_the_designed_pane_sizes():
+    """The ceilings only tighten where the window cannot honour them."""
+    from portia.ui import app as app_module
+    from portia.ui.state import APP
+
+    APP.width, APP.show_files, APP.show_transcript = 1920, True, True
+
+    assert app_module._files_limits() == app_module.FILES_LIMITS
+    assert app_module._transcript_limits() == app_module.TRANSCRIPT_LIMITS

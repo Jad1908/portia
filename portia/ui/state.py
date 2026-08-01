@@ -42,6 +42,9 @@ __all__ = [
     "INDEX",
     "TABS",
     "Stream",
+    "WIDE",
+    "MEDIUM",
+    "band_for",
 ]
 
 #: What a left-pane selection can be. ``None`` means the workflow is in view.
@@ -105,6 +108,25 @@ TABS = (CHAT, INDEX)
 
 #: Which tab a turn's transcript belongs to.
 TAB_FOR_KIND = {GOAL: CHAT, INDEXING: INDEX, REREAD: INDEX}
+
+#: `DESIGN.md` → Width behaviour, as three bands. The workflow pane and Run stay
+#: reachable at every width, so it is always a side pane that gives way.
+#:
+#: These set **defaults**, not constraints: crossing a threshold changes what is
+#: showing, and the toolbar toggles still win afterwards. A hard rule would take
+#: the transcript — which holds the question form and the write confirmation, the
+#: two things this app exists for — away from anyone on a 1280px screen.
+WIDE = 1400
+MEDIUM = 1024
+WIDE_BAND = "wide"
+MEDIUM_BAND = "medium"
+NARROW_BAND = "narrow"
+
+
+def band_for(width: int) -> str:
+    if width >= WIDE:
+        return WIDE_BAND
+    return MEDIUM_BAND if width >= MEDIUM else NARROW_BAND
 
 
 @dataclass
@@ -211,6 +233,15 @@ class App:
     left_add_data: bool = False
     show_transcript: bool = True
     show_files: bool = True
+    #: How wide the window is, reported by `assets/viewport.js`. Layout only — the
+    #: splitters need it to work out how much room they may give a side pane
+    #: before the workflow pane stops being usable, and CSS cannot express that
+    #: once a splitter is setting inline pixel widths on its panels.
+    width: int = WIDE
+    #: Which width band that was, so the band's defaults are applied when you
+    #: cross a threshold and **not** on every resize event. Dragging a window
+    #: narrower should not keep reopening a pane you just closed.
+    band: str = WIDE_BAND
 
     #: One transcript per tab, and which tab is showing.
     streams: dict[str, Stream] = field(default_factory=lambda: {t: Stream() for t in TABS})
@@ -261,6 +292,22 @@ class App:
     def busy(self) -> bool:
         """A turn is live **anywhere**. Starting a second would interleave two."""
         return any(s.busy for s in self.streams.values())
+
+    def resize(self, width: int) -> bool:
+        """Record the window width; return whether the layout has to be redrawn.
+
+        Only a **band change** reapplies defaults. Resizing within a band leaves
+        the panes exactly as you left them, which is the difference between a
+        layout that adapts and one that keeps overruling you.
+        """
+        self.width = width
+        band = band_for(width)
+        if band == self.band:
+            return False
+        self.band = band
+        self.show_files = band != NARROW_BAND
+        self.show_transcript = band == WIDE_BAND
+        return True
 
     def select(self, kind: str | None, name: str = "") -> None:
         self.selection = None if kind is None else (kind, name)

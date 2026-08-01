@@ -363,31 +363,13 @@ html body {
   flex-direction: column;
 }
 
-/* Width behaviour — the workflow pane and Run stay reachable at every width, so
- * it is always the side panes that give way. Below 1024 the left pane stops
- * taking layout space and overlays instead; a transient overlay is the one place
- * a shadow is allowed. Both panes are toggled from the toolbar at every width. */
-@media (max-width: 1399px) {
-  .p-pane-right {
-    flex: 0 0 340px;
-  }
-}
-@media (max-width: 1023px) {
-  .p-body {
-    position: relative;
-  }
-  .p-pane-left {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 0;
-    z-index: 10;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
-  }
-  .p-pane-right {
-    flex: 0 0 300px;
-  }
-}
+/* Width behaviour lives in `app.py` and `state.py`, not here — see
+ * `assets/viewport.js`. This file used to hold three media queries for it and
+ * every one of them was inert: a Quasar splitter sets an inline pixel width on
+ * its panel, so `flex` or `position` on the pane *inside* that panel changes
+ * nothing about the space reserved beside it. Below 1024 the left pane duly went
+ * `position: absolute` to "overlay" and its splitter panel went on holding 260px
+ * of layout next to it, which is not an overlay, it is a gap. */
 
 /* ── buttons ──────────────────────────────────────────────────────────────── */
 

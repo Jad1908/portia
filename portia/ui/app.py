@@ -38,7 +38,22 @@ async def page() -> None:
     # by the first refresh (see `screens.build_add_dialog`).
     screens.build_add_dialog()
     screens.build_brief_dialog()
+    # `DESIGN.md` → Width behaviour, which cannot be done in CSS once the panes
+    # are inside splitters: a splitter sets an inline pixel width on its panel, so
+    # restyling the pane inside changes nothing about the space reserved beside it.
+    ui.on("portia:viewport", _resized)
     await shell()
+
+
+def _resized(event) -> None:
+    """Apply the width band's defaults, and only when the band actually changes.
+
+    Resizing within a band leaves the panes as you left them: a layout that keeps
+    reopening a pane you just closed is worse than one that never adapts.
+    """
+    width = int(event.args or 0)
+    if width and APP.resize(width):
+        shell.refresh()
 
 
 @ui.refreshable
@@ -62,13 +77,18 @@ async def shell() -> None:
 FILES_WIDTH, FILES_LIMITS = 260, (200, 520)
 TRANSCRIPT_WIDTH, TRANSCRIPT_LIMITS = 400, (330, 780)
 
+#: The width below which the workflow pane stops being worth having. It is the
+#: one pane that never gives way (`DESIGN.md` → Width behaviour), so this is the
+#: floor every other pane's ceiling is computed against.
+WORKFLOW_MIN = 320
+
 
 async def _window() -> None:
     with ui.element("div").classes("p-window"):
         toolbar()
         with ui.element("div").classes("p-body"):
             if APP.show_files:
-                with _splitter(FILES_WIDTH, FILES_LIMITS) as files:
+                with _splitter(FILES_WIDTH, _files_limits()) as files:
                     with files.before:
                         _left()
                     with files.after:
@@ -83,11 +103,44 @@ async def _workflow_and_transcript() -> None:
         return
     # `reverse` so the pixel size applies to the transcript rather than to the
     # workflow: the pane with a real minimum is the one the number should govern.
-    with _splitter(TRANSCRIPT_WIDTH, TRANSCRIPT_LIMITS, reverse=True) as split:
+    lower, upper = _transcript_limits()
+    with _splitter(min(TRANSCRIPT_WIDTH, upper), (lower, upper), reverse=True) as split:
         with split.before:
             await _middle()
         with split.after:
             _right()
+
+
+def _room_beside_files() -> int:
+    """What is left once the left pane has taken as much as it is allowed to.
+
+    Its **ceiling**, not its current width: the app does not track what a drag
+    left the splitter at, and computing against the default would let the two
+    side panes be dragged wide independently and together squeeze the workflow
+    pane past its floor. Costing the worst case is a few pixels off the
+    transcript's ceiling and needs no extra state to stay true.
+    """
+    return APP.width - (_files_limits()[1] if APP.show_files else 0)
+
+
+def _files_limits() -> tuple[int, int]:
+    """How wide the left pane may be dragged, given the window it is in.
+
+    A splitter panel reserves real layout space, so a ceiling that ignores the
+    window lets a drag squeeze the workflow pane past the width at which it stops
+    working — and the pane inside, held up by its own `min-width`, then renders
+    *underneath* the transcript. Measured at 820px before this: the workflow
+    panel was 158px holding a 320px pane.
+    """
+    lower, upper = FILES_LIMITS
+    room = APP.width - WORKFLOW_MIN - (TRANSCRIPT_LIMITS[0] if APP.show_transcript else 0)
+    return lower, max(lower, min(upper, room))
+
+
+def _transcript_limits() -> tuple[int, int]:
+    """Same rule for the right pane, against whatever the left pane left behind."""
+    lower, upper = TRANSCRIPT_LIMITS
+    return lower, max(lower, min(upper, _room_beside_files() - WORKFLOW_MIN))
 
 
 def _splitter(value: int, limits: tuple[int, int], *, reverse: bool = False) -> ui.splitter:
