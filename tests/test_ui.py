@@ -453,3 +453,102 @@ def test_focusing_a_card_is_a_request_with_a_token_not_a_flag():
 
     app.focus("stg_orders")
     assert app.focus_token > first, "asking again is a new request, even for the same card"
+
+
+# --- importing outside data (docs/PIPELINE.md §2.7) -------------------------
+
+
+@pytest.fixture
+def project(tmp_path):
+    from portia.ui.state import App
+
+    root = tmp_path / "project"
+    (root / "data").mkdir(parents=True)
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (outside / "orders.csv").write_text("a,b\n1,2\n")
+    return App(root=root), outside
+
+
+def test_a_planned_import_says_exactly_what_lands_where(project):
+    """The confirmation shows the real thing rather than a description of one."""
+    from portia.ui import engine
+
+    app, outside = project
+
+    pairs = engine.plan_import(str(outside / "orders.csv"), "data", app)
+
+    assert pairs == [(outside / "orders.csv", app.root / "data" / "orders.csv")]
+    assert (outside / "orders.csv").exists(), "planning copies nothing"
+    assert not (app.root / "data" / "orders.csv").exists()
+
+
+def test_the_destination_is_the_one_the_operator_chose(project):
+    from portia.ui import engine
+
+    app, outside = project
+
+    pairs = engine.plan_import(str(outside / "orders.csv"), "data/raw", app)
+
+    assert pairs[0][1] == app.root / "data" / "raw" / "orders.csv"
+
+
+def test_an_empty_destination_falls_back_to_the_data_directory(project):
+    from portia.ui import engine
+
+    app, _ = project
+
+    assert engine.destination_in("", app) == app.root / engine.DATA_DIR
+    assert engine.destination_in("   ", app) == app.root / engine.DATA_DIR
+
+
+def test_a_destination_outside_the_project_is_refused(project):
+    """Data lives in the repo (`PIPELINE.md` §2.7) — the destination field is not
+    the place to make an exception to that."""
+    from portia.ui import engine
+
+    app, outside = project
+
+    with pytest.raises(ValueError, match="must be inside the project"):
+        engine.plan_import(str(outside / "orders.csv"), str(outside), app)
+
+
+def test_a_name_already_taken_is_refused_before_anything_moves(project):
+    from portia.ui import engine
+
+    app, outside = project
+    (app.root / "data" / "orders.csv").write_text("already here")
+
+    with pytest.raises(ValueError, match="refusing to overwrite"):
+        engine.plan_import(str(outside / "orders.csv"), "data", app)
+
+    assert (app.root / "data" / "orders.csv").read_text() == "already here"
+
+
+def test_importing_copies_and_never_moves(project):
+    """A tool that relocates someone's data is not a data-harmonization concern."""
+    import asyncio
+
+    from portia.ui import engine
+
+    app, outside = project
+    pairs = engine.plan_import(str(outside / "orders.csv"), "data/raw", app)
+
+    copied = asyncio.run(engine.import_files(pairs, app))
+
+    assert copied == [app.root / "data" / "raw" / "orders.csv"]
+    assert copied[0].read_text() == "a,b\n1,2\n"
+    assert (outside / "orders.csv").exists(), "the original is left where it was"
+
+
+def test_the_window_and_the_terminal_plan_the_same_import(project):
+    """Not two surfaces written to agree — one function, called by both."""
+    from portia.cli.import_data import plan
+    from portia.ui import engine
+
+    app, outside = project
+    sources = [outside / "orders.csv"]
+
+    assert engine.plan_import(str(outside / "orders.csv"), "data", app) == plan(
+        sources, app.root / "data", app.root
+    )

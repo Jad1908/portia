@@ -10,7 +10,15 @@ Three states, in order:
   that doesn't exist yet is *created* — testing means a fresh directory per run,
   so that has to be one action rather than an error followed by a second one.
 - **No context set.** The mandatory brief. No skip, no dismiss, no "later".
-- **No sources.** A drop zone, and the interpret toggle beside it.
+- **No sources.** A drop zone, a destination, and the interpret toggle.
+
+**Bringing outside data in is a deliberate step** (`docs/PIPELINE.md` §2.7).
+``index`` only accepts files already inside the repo, so this screen is the way
+one gets in: you choose where it lands, portia states exactly what it is about to
+copy and to where, and only then does it copy. The plan is shown in full rather
+than summarised — "3 files into data/" describes a plan, the list *is* one, and
+the difference is the one time a wrong folder or a name collision is cheap to
+notice. It is a copy, never a move.
 
 Indexing is deliberately shown as **two** things, because one is free and one is
 not: profiling is deterministic and always happens, and interpretation is a model
@@ -27,6 +35,7 @@ from nicegui import ui
 from portia.agent import prompts
 from portia.ui import components as c
 from portia.ui import engine, state
+from portia.ui.engine import DATA_DIR
 from portia.ui.state import APP
 
 # --- project-open -----------------------------------------------------------
@@ -412,26 +421,136 @@ def dropzone(*, on_done=None) -> None:
             ).props("flat")
             upload.on("click", js_handler=_PICK_ON_CLICK.format(id=upload.id))
 
-        # Same as the project picker: dropping or picking is the way in, and the
-        # path field is folded away until someone wants it.
-        _add_by_path_field(on_done)
+        _destination_field()
+        _import_field(on_done)
+        _import_plan(on_done)
         _interpret_toggle()
 
 
-def _add_by_path_field(on_done) -> None:
-    reveal = ui.element("div").classes("row-gap-sm")
-    field = ui.element("div").classes("row-gap-sm w-full")
-    field.set_visibility(False)
+def _destination_field() -> None:
+    """Where in the project what you add will land.
 
-    with reveal:
-        c.button(_ADD_BY_PATH, lambda: _reveal(reveal, field), kind="secondary", micro=True)
-    with field:
+    **The one decision §2.7 added, and it belongs to the operator.** Data lives in
+    the repo, and portia's job is to say plainly where it is about to put a copy
+    rather than to pick a folder on your behalf and mention it afterwards. It
+    governs both routes — a browser drop and an import from disk — because "where
+    does this go" should not depend on how the file got here.
+    """
+    with ui.element("div").classes("row-gap-sm w-full"):
+        c.caption("Destination")
+        (
+            ui.input(placeholder=DATA_DIR)
+            .classes("p-field p-field-mono flex-1")
+            .props("borderless")
+            .bind_value(APP, "import_destination")
+        )
+        c.caption(_DESTINATION_SCOPE)
+
+
+def _import_field(on_done) -> None:
+    """The route for data that is outside the repo: choose it, then see the plan.
+
+    Nothing is copied here. `PIPELINE.md` §2.7 makes bringing outside data in a
+    deliberate step — you choose where it lands, portia states exactly what it is
+    about to copy and to where, and only then does it copy. This half is the
+    choosing; `_import_plan` is the stating.
+    """
+    with ui.element("div").classes("row-gap-sm w-full"):
+        if engine.can_browse():
+            c.button("Choose files…", lambda: _choose_to_import(), icon="folder_open", micro=True)
         path = (
             ui.input(placeholder=_PATH_PLACEHOLDER)
             .classes("p-field p-field-mono flex-1")
             .props("borderless")
         )
-        c.button("Add", lambda: _add_by_path(path.value, on_done))
+        c.button("Plan import", lambda: _plan_import(path.value), micro=True)
+
+
+@ui.refreshable
+def _import_plan(on_done=None) -> None:
+    """What is about to be copied, where to, and the two ways out of it.
+
+    Every pair is listed rather than summarised. "3 files into data/" is a
+    description of a plan; this is the plan, and the difference is the one time
+    a name collision or a wrong folder is cheap to notice.
+    """
+    if APP.import_error:
+        with ui.element("div").classes("write-confirm"):
+            c.text(APP.import_error, color="c-error")
+            c.button("OK", _clear_import, kind="secondary", micro=True)
+        return
+    if not APP.import_plan:
+        return
+    with ui.element("div").classes("write-confirm"):
+        ui.label(_IMPORT_HEADING.format(n=c.count(len(APP.import_plan), "file"))).classes(
+            "t-body-strong c-ink"
+        )
+        c.caption(_IMPORT_COPY_ONLY)
+        with ui.element("div").classes("added-list"):
+            for src, dst in APP.import_plan:
+                with ui.element("div").classes("added-row"):
+                    c.mono(str(src), small=True)
+                    ui.icon("arrow_forward").classes("fact-icon")
+                    c.mono(str(_relative(dst)), small=True)
+        with ui.element("div").classes("row-gap-sm"):
+            c.button("Copy and index", lambda: _do_import(on_done), kind="primary")
+            c.button("Cancel", _clear_import, kind="secondary")
+
+
+def _relative(path: Path) -> Path:
+    """A destination as the project sees it — the repo-relative path it will have."""
+    try:
+        return path.relative_to(APP.root)
+    except ValueError:
+        return path
+
+
+async def _choose_to_import() -> None:
+    chosen = await engine.browse_for_files()
+    if chosen:
+        _plan_import("\n".join(str(p) for p in chosen))
+
+
+def _plan_import(raw: str) -> None:
+    """Work out the plan and show it. Writes nothing."""
+    APP.import_plan, APP.import_error = [], ""
+    targets = [line.strip() for line in (raw or "").splitlines() if line.strip()]
+    if not targets:
+        APP.import_error = _NOTHING_CHOSEN
+        _import_plan.refresh()
+        return
+    try:
+        pairs = []
+        for target in targets:
+            pairs += engine.plan_import(target, APP.import_destination, APP)
+    except ValueError as exc:
+        APP.import_error = str(exc)
+    else:
+        APP.import_plan = pairs
+    _import_plan.refresh()
+
+
+def _clear_import() -> None:
+    APP.import_plan, APP.import_error = [], ""
+    _import_plan.refresh()
+
+
+async def _do_import(on_done) -> None:
+    """Copy what the plan said, then index it. The originals are left alone.
+
+    **The panel is redrawn last, and that is load-bearing.** `_import_plan` builds
+    the button this is the handler for, so refreshing it here deletes the slot the
+    handler is running in — every `ui.notify` after that point raises, and the
+    first version did it before the copy's own notification. The files landed and
+    the indexing never ran, which is worse than either failing alone.
+    """
+    pairs, APP.import_plan = APP.import_plan, []
+    if not pairs:
+        return
+    copied = await engine.import_files(pairs, APP)
+    ui.notify(f"copied {c.count(len(copied), 'file')} into {APP.import_destination}/")
+    await _index_and_interpret(copied, on_done)
+    _import_plan.refresh()
 
 
 def _interpret_toggle() -> None:
@@ -476,9 +595,16 @@ def _refresh_shell() -> None:
 
 
 async def _dropped(files, on_done) -> None:
+    """A browser drop. It lands at the chosen destination, like an import does.
+
+    No plan step: the browser has already handed us the bytes, so there is nothing
+    left to confirm — the copy the operator would be agreeing to has happened. The
+    destination still applies, because where a file goes should not depend on how
+    it arrived.
+    """
     paths = []
     for upload in files:
-        paths.append(await engine.store_upload(upload, APP))
+        paths.append(await engine.store_upload(upload, APP, APP.import_destination))
     await _index_and_interpret(paths, on_done)
 
 
@@ -490,17 +616,6 @@ def _rejected() -> None:
     twenty. Whatever the reason, it belongs on screen rather than in a colour.
     """
     ui.notify(_UPLOAD_REJECTED)
-
-
-async def _add_by_path(raw: str, on_done) -> None:
-    if not (raw or "").strip():
-        return
-    try:
-        found = engine.resolve_data(raw.strip())
-    except ValueError as exc:
-        ui.notify(str(exc))
-        return
-    await _index_and_interpret([engine.copy_into_project(p, APP) for p in found], on_done)
 
 
 async def _index_and_interpret(paths: list[Path], on_done) -> None:
@@ -598,7 +713,7 @@ def _default_model() -> str:
 
 _OPEN_SUBTITLE = "Open a project directory. If it doesn't exist yet, it gets created."
 _OPEN_NEW = "Type a path instead"
-_ADD_BY_PATH = "Add from a path already on disk"
+
 _CONTEXT_WHY = (
     "This is what makes a column's meaning decidable. A generic brief yields generic judgment."
 )
@@ -616,6 +731,10 @@ _UPLOAD_REJECTED = (
 _CONTINUE_HINT = "you can add more later from the left pane"
 _SKIP_HINT = "you can add data later from the left pane"
 _DROP_LABEL = "Drop files here, or click to pick"
-_PATH_PLACEHOLDER = "…or a path, directory or glob already on disk"
+_PATH_PLACEHOLDER = "a file, directory or glob anywhere on disk"
+_DESTINATION_SCOPE = "inside the project — data lives in the repo"
+_IMPORT_HEADING = "About to copy {n}:"
+_IMPORT_COPY_ONLY = "A copy. The originals are not moved, deleted or changed."
+_NOTHING_CHOSEN = "Nothing chosen yet — pick some files, or type a path."
 _INTERPRET_COST = "Profiling is free and always happens. This costs a model turn."
 _NO_DIALOG = "The add-data panel didn't load — reload the page."

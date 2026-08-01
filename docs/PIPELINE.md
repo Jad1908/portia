@@ -2,8 +2,8 @@
 
 > **Status: designed 2026-07-30, built 2026-07-31, rendered 2026-08-01.** All seven decisions in
 > §2 are implemented and tested. §3 describes how compilation actually works, and it is accurate.
-> §6's three design questions are answered and the app renders the pipeline. What is deliberately
-> **not** done is the import flow (§2.7's surface) — see `BACKLOG.md` → Interface.
+> §6's three design questions are answered, the app renders the pipeline, and §2.7's import
+> surface is built. Nothing from this design is outstanding.
 >
 > The design is kept in full rather than trimmed to a changelog, because the *reasoning* is what a
 > future session needs: several decisions removed things (`core/store.py` is deleted), and a reader
@@ -278,8 +278,14 @@ All four, plus one thing the pass turned up.
   what to do. Drift-coloured, never blocking — nothing is broken, the file is simply
   describing an older version of the decision record.
 - **Build is in the toolbar**, and Run writes SQL too (see below).
-- **The import flow is deferred**, not built. It is a whole surface and orthogonal to
-  rendering the pipeline; `BACKLOG.md` → Interface holds it.
+- **The import flow is built** (§2.7). One destination field governs both routes — a
+  browser drop and an import from disk — because where a file lands should not depend on
+  how it arrived. Choosing files (natively, or by path/glob) produces a **plan**: every
+  `from → to` pair listed in full, not summarised, because "3 files into data/" describes
+  a plan and the list *is* one. Nothing is written until you confirm. `cli.import_data.plan`
+  is the same function the terminal calls, so the two cannot disagree about where a file
+  is going; it raises `ValueError` now rather than `SystemExit`, since a refusal is
+  something a window has to be able to put on screen.
 - **One thing the pass found:** `discover_specs` returned root-prefixed paths that
   every caller then re-joined to the root. Two accidents hid it — an absolute root
   makes the join a no-op, and `root="."` makes the prefix one — so it broke only on a

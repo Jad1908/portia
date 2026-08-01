@@ -327,16 +327,18 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
 
 ## Interface — the app
 
-- **The import flow has no surface yet** (`PIPELINE.md` §2.7). Deferred out of the 2026-08-01
-  frontend pass deliberately: it is a whole screen — choose a file outside the repo, choose where in
-  the repo it lands, see plainly what will be copied and to where, confirm, index — and it is
-  orthogonal to rendering the pipeline. `cli/import_data.plan()` is already split from the copying
-  so a UI can show the same plan the terminal shows. The dropzone still copies straight into
-  `data/`, which predates the decision that outside data comes in through a deliberate step.
-- **The graph has pan but no zoom.** Added 2026-08-01 with the project graph. On three models it is
-  not wanted; on twenty it will be the first thing missing, because expanding a card makes the
-  canvas taller and wider at once. Deferred until a real project is big enough to say what zoom
-  should do to an *expanded* card — collapse it, or scale it.
+- ~~**The import flow has no surface yet**~~ — *built 2026-08-01 (`PIPELINE.md` §2.7). A
+  destination field governing both routes, a plan listing every `from → to` pair, and nothing
+  written until it is confirmed.*
+- ~~**The graph has pan but no zoom.**~~ — *built 2026-08-01: pinch or two-finger scroll, buttons
+  beside Recenter, anchored at the pointer. **What it still does not do is fit-to-content** — on a
+  project too wide for the pane you currently zoom out by feel. That wants the layout's own
+  dimensions, which `graph.Layout` already carries, so it is cheap when a project is big enough to
+  ask for it.*
+- **Zoom does not change what a card shows.** At 40% a step card is an unreadable rectangle. A
+  graph that dropped detail as it zoomed out would read better, but it is also the shape of thing
+  that quietly starts ranking what survives — so it needs the "colour and prominence communicate
+  kind, never rank" rule thought through before it is built, not after.
 - **A model card cannot be opened from the graph to its `.sql`.** Clicking a source node opens its
   catalog entry and clicking a model header opens its spec; the compiled file is only reachable from
   the left panel. Probably a second affordance on the card rather than a different click.

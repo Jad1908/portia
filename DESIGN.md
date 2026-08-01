@@ -313,6 +313,14 @@ These exist so a test run never needs a terminal (`VISION.md` → "The no-termin
   the UI must not blur the two.
 - Once a project has sources this shrinks to a row-height affordance at the foot of the left pane.
 
+**`import-plan`** — what an import is about to copy, and where
+- A `write-confirm` panel: the heading names the count, then one row per `from → to` pair in
+  `{typography.mono}`, then **Copy and index** and **Cancel**.
+- **Every pair is listed, never summarised.** "3 files into data/" describes a plan; this is the
+  plan. It is also the one moment a wrong destination or a name collision is cheap to notice.
+- A refusal — destination outside the project, name already taken — replaces the panel with the
+  engine's own sentence rather than a toast, because it is a thing to read and act on.
+
 **`index-progress`** — a file landing
 - Each file appears as an `artifact-row` the moment it profiles, carrying the **uninterpreted**
   marker until the turn writes its summary. Profiling is instant and deterministic; the
@@ -606,10 +614,12 @@ Their *visual language* lives on in the components above.
 - **Hover states** are left to platform convention and not specified here. *V0 gives artifact rows and option rows a `{colors.surface-card}` hover and nothing else.*
 - ~~**The graph's visual grammar is provisional.**~~ *Settled 2026-08-01, and the answer to
   cards-are-steps-or-tables is **both at different levels** (`PIPELINE.md` §6). The canvas pans and
-  a model card expands in place; **there is still no zoom**, which is the next thing to want on a
-  project with twenty models. Read on a three-model, two-layer project — legible, and the source /
-  model distinction does the work it was added for. Not yet seen on a project big enough for the
-  grammar rather than the density to be what fails.*
+  zooms and a model card expands in place. Read on a three-model, two-layer project — legible, and
+  the source / model distinction does the work it was added for. Not yet seen on a project big
+  enough for the grammar rather than the density to be what fails, and **zoom does not yet change
+  what a card shows**: at 40% a step card is an unreadable rectangle. Dropping detail as you zoom
+  out would read better and is exactly the sort of thing that starts quietly ranking what survives,
+  so the product rule needs thinking through before it is built (`BACKLOG.md`).*
 - **Panning was scroll-based and silently dead.** A graph that fitted its pane had nothing to
   scroll, and the dot grid was pinned to the element rather than its contents, so on the one graph
   large enough to pan the nodes slid under a stationary grid. Both gone: `--pan-x`/`--pan-y` drive

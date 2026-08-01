@@ -283,7 +283,7 @@ def test_import_plans_the_copy_before_making_it(tmp_path):
     assert stray.exists()  # planning copies nothing
 
     (root / "data" / "customers.csv").write_text("already here")
-    with pytest.raises(SystemExit, match="refusing to overwrite"):
+    with pytest.raises(ValueError, match="refusing to overwrite"):
         plan([stray], root / "data", root)
 
 
@@ -292,5 +292,5 @@ def test_import_refuses_a_destination_outside_the_project(tmp_path):
 
     root = tmp_path / "project"
     root.mkdir()
-    with pytest.raises(SystemExit, match="must be inside the project"):
+    with pytest.raises(ValueError, match="must be inside the project"):
         plan([], tmp_path / "somewhere-else", root)

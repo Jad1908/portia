@@ -223,6 +223,16 @@ class App:
     removing: str | None = None
     #: Whether the operator chose to get on with it without adding data yet.
     skipped_sources: bool = False
+    #: Where an import will put what it copies, relative to the project root.
+    #: Data lives in the repo (`docs/PIPELINE.md` §2.7), so this is a place inside
+    #: it, never a way out of it.
+    import_destination: str = "data"
+    #: The pending import, as ``(from, to)`` pairs — exactly what will be copied
+    #: and where. Held so the confirmation shows the real thing rather than a
+    #: description of one, and cleared the moment it is acted on or abandoned.
+    import_plan: list = field(default_factory=list)  # list[tuple[Path, Path]]
+    #: Why the last import could not be planned, in the operator's terms.
+    import_error: str = ""
     #: What indexing is doing right now, as a sentence to put on screen — empty
     #: when nothing is running. Profiling twenty real extracts takes a minute,
     #: and a window that says nothing for a minute reads as broken.
