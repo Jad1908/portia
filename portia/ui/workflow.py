@@ -114,8 +114,8 @@ def _graph_header(docs: dict) -> None:
 def _view_controls() -> None:
     """Zoom, and the way back from having moved.
 
-    The gestures come first — drag to pan, pinch to zoom — and these are for the
-    times a gesture isn't available or isn't precise enough. The readout between
+    The gestures come first — drag to move, two fingers up and down to zoom — and
+    these are for the times a gesture isn't available or isn't precise enough. The readout between
     them is written by `canvas.js`, because where the canvas is panned and zoomed
     to is the one piece of state in this app the client owns; a round trip per
     wheel tick would make the only directly-manipulated surface the laggiest.
@@ -953,9 +953,9 @@ _NO_SPECS = (
     "No specs yet. The copilot writes one as it records steps, and each one becomes a table."
 )
 _NO_RUN = "No run yet. Press Run in the toolbar to execute this spec."
-_ZOOM_IN_TIP = "Zoom in · pinch on the canvas, or ctrl and the wheel"
-_ZOOM_OUT_TIP = "Zoom out · pinch on the canvas, or ctrl and the wheel"
-_RECENTER_TIP = "Back to 100%, centred · or double-click the canvas"
+_ZOOM_IN_TIP = "Zoom in · or two fingers up on the canvas"
+_ZOOM_OUT_TIP = "Zoom out · or two fingers down on the canvas"
+_RECENTER_TIP = "Back to 100%, centred · or double-click the canvas. Drag to move around."
 _STALE_WHY = (
     "The spec has changed since this file was generated. Run the spec, or Build the "
     "project, to regenerate it — the .sql is a build output and is never hand-edited."

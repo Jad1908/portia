@@ -1,8 +1,11 @@
-// Moving around the workflow canvas: drag to pan, pinch or the buttons to zoom.
+// Moving around the workflow canvas: drag to pan, the wheel or the buttons to zoom.
 //
 // Panning and zooming only — nodes do not move. The graph's layout is the
 // recorded sequence of decisions (portia/ui/graph.py), so dragging a card would
 // either mean nothing or imply the order can be rearranged, and neither is true.
+//
+// **One gesture each.** Two fingers up and down zooms; click, hold and drag
+// moves. Neither needs a modifier, and neither does the other one's job.
 //
 // **It moves a transform, not a scroll offset.** The first version scrolled the
 // canvas, which meant a graph that fitted its pane had nothing to scroll and
@@ -41,9 +44,12 @@
   // One press of + or −. A quarter each way, so three presses roughly halve or
   // double — a rate you can aim with rather than overshoot.
   const BUTTON_STEP = 1.25;
-  // A trackpad pinch arrives as a wheel event in arbitrary units. Exponential, so
-  // the gesture feels the same at every zoom level.
-  const PINCH_RATE = 0.002;
+  // Wheel delta to zoom factor. Exponential, so the gesture feels the same at
+  // every zoom level. One rate for every source of wheel events — a trackpad
+  // swipe, a pinch, a mouse notch — because they differ in how *often* they fire
+  // far more than in how much they report, and a rate per device is a thing that
+  // goes wrong quietly on hardware nobody tested on.
+  const ZOOM_RATE = 0.002;
   // Where a focused card lands: this far in from the canvas corner rather than
   // flush against it, so its incoming edges stay visible.
   const FOCUS_INSET = 48;
@@ -188,26 +194,28 @@
 
   // --- the wheel -------------------------------------------------------------
   //
-  // What a trackpad already means, rather than a scheme of our own: two fingers
-  // move the canvas around, pinch zooms. macOS delivers a pinch as a wheel event
-  // with `ctrlKey` set, which is also the long-standing desktop convention for
-  // ctrl+wheel, so the two land on the same branch honestly.
+  // **The wheel zooms; it never moves the canvas.** Two fingers up and down is
+  // the zoom gesture, and dragging is the only way to move around — so the two
+  // things you can do to the canvas are one gesture each, rather than one gesture
+  // that does different things depending on whether a modifier happened to be
+  // held. A pinch arrives as a wheel event with `ctrlKey` on macOS and lands here
+  // too, which makes it the same gesture rather than a second one to learn.
   //
-  // `passive: false` because both branches call `preventDefault` — without it the
-  // page scrolls behind the canvas, or the browser zooms the whole window.
+  // An earlier version scrolled to pan and pinched to zoom, following the
+  // whiteboard apps. On a graph you are mostly reading rather than arranging, the
+  // thing you reach for constantly is scale, and having to remember a modifier
+  // for it put the common action behind the rare one.
+  //
+  // `passive: false` so `preventDefault` holds — without it the page scrolls
+  // behind the canvas, or the browser zooms the whole window.
   document.addEventListener(
     "wheel",
     (e) => {
       const found = canvasOf(e.target);
       if (!found) return;
       e.preventDefault();
-
-      if (e.ctrlKey || e.metaKey) {
-        const box = found.getBoundingClientRect();
-        zoomAt(Math.exp(-e.deltaY * PINCH_RATE), e.clientX - box.left, e.clientY - box.top);
-        return;
-      }
-      set(view.x - e.deltaX, view.y - e.deltaY, view.zoom);
+      const box = found.getBoundingClientRect();
+      zoomAt(Math.exp(-e.deltaY * ZOOM_RATE), e.clientX - box.left, e.clientY - box.top);
     },
     { passive: false },
   );
