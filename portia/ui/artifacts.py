@@ -62,11 +62,16 @@ ICON = {
     tree.FOLDER: "folder",
 }
 
-#: The disclosure triangle, which is the whole of "progressive disclosure" as a
-#: control: a folder says whether it is open before you click it.
+#: The disclosure triangle, which is **the** control: a folder says whether it is
+#: open before you click it, and the caret is the whole of how it says so.
+#:
+#: The folder icon deliberately does not change with it. It used to swap to the
+#: hollow `folder_open` glyph, which put two marks on one piece of state — and
+#: the second one read as the folder having changed *kind* rather than having
+#: opened, because a filled shape going hollow is how this app says "different
+#: thing", not "same thing, expanded".
 CARET_OPEN = "expand_more"
 CARET_SHUT = "chevron_right"
-FOLDER_OPEN = "folder_open"
 
 EMPTY_TREE = "Nothing portia can read in this directory yet. Add a file to begin."
 TURNS_NOTE = "No copilot turns yet. Type a goal and press Go."
@@ -142,7 +147,7 @@ def _folder(node: tree.Node, depth: int, stale: set[str]) -> None:
     is_open = APP.folder_open(node.rel, depth)
     c.artifact_row(
         name=node.name,
-        icon=FOLDER_OPEN if is_open else ICON[tree.FOLDER],
+        icon=ICON[tree.FOLDER],
         caret=CARET_OPEN if is_open else CARET_SHUT,
         depth=depth,
         on_click=lambda rel=node.rel, d=depth: _toggle(rel, d),

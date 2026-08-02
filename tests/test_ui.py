@@ -990,3 +990,18 @@ def test_a_missing_settings_panel_says_so_rather_than_doing_nothing():
         settings._DIALOG, settings.ui.notify = original_dialog, original_notify
 
     assert said == [settings.NO_PANEL]
+
+
+def test_a_folder_looks_the_same_open_or_shut_and_only_the_caret_moves():
+    """Two marks for one piece of state, and the second one lied: a filled glyph
+    going hollow is how this app says *different kind of thing*, not *same thing,
+    expanded*. The caret is the disclosure control; the icon says `folder`."""
+    import inspect
+
+    from portia.ui import artifacts
+
+    source = inspect.getsource(artifacts._folder)
+    assert "icon=ICON[tree.FOLDER]" in source
+    assert "CARET_OPEN if is_open else CARET_SHUT" in source
+    # The glyph name as a string, not `APP.folder_open` or the note explaining why.
+    assert '"folder_open"' not in inspect.getsource(artifacts)
