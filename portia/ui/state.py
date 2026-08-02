@@ -124,7 +124,8 @@ TAB_FOR_KIND = {GOAL: CHAT, INDEXING: INDEX, REREAD: INDEX}
 #: reachable at every width, so it is always a side pane that gives way.
 #:
 #: These set **defaults**, not constraints: crossing a threshold changes what is
-#: showing, and the toolbar toggles still win afterwards. A hard rule would take
+#: showing, and what you do to a pane afterwards still wins — dragging its edge
+#: past its floor to close it, or the rail to bring it back. A hard rule would take
 #: the transcript — which holds the question form and the write confirmation, the
 #: two things this app exists for — away from anyone on a 1280px screen.
 WIDE = 1400

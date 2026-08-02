@@ -316,6 +316,29 @@ html body {
   min-width: 330px;
 }
 
+/* A closed pane, as the strip of edge it left behind. Not a sliver of the pane
+ * itself — 28px of a file tree reads as a rendering failure, where a rail reads
+ * as a thing you press. Sits on the canvas like the left pane does, with the
+ * hairline on the side the pane will come back from. */
+.p-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-xs);
+  flex: 0 0 auto;
+  width: 32px;
+  padding-top: var(--sp-sm);
+  background: var(--canvas);
+  border-left: 1px solid var(--hairline);
+  border-right: 1px solid var(--hairline);
+}
+
+/* Which pane it brings back. The arrow above says which way; this says what. */
+.p-rail-icon {
+  color: var(--stone);
+  font-size: 16px;
+}
+
 .p-scroll {
   overflow-y: auto;
   overflow-x: hidden;

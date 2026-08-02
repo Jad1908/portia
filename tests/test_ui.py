@@ -720,3 +720,67 @@ def test_every_run_action_says_what_it_is_now_that_none_of_them_says_it_on_scree
     )
     for tip in tips:
         assert " · " in tip, f"{tip!r} does not lead with a name"
+
+
+# --- closing a pane is a drag, and the rail is how it comes back -------------
+
+
+def test_dragging_a_pane_past_its_floor_closes_it():
+    """`DESIGN.md`: below its minimum a pane stops being worth having, and the
+    honest move is to close it rather than to squeeze it. The splitter used to
+    simply refuse to go further, which left the toolbar toggle as the only way."""
+    from portia.ui import app as app_module
+
+    closed: list[str] = []
+    floor = app_module.FILES_LIMITS[0]
+
+    app_module._past_the_floor(floor, floor, lambda: closed.append("files"))
+    assert closed == [], "at the floor it is still readable"
+
+    app_module._past_the_floor(floor - 1, floor, lambda: closed.append("files"))
+    assert closed == ["files"]
+
+
+def test_a_splitter_can_be_dragged_below_its_floor_at_all():
+    """The floor is a threshold now, not a wall — Quasar's own limit has to let
+    the drag reach it or the close can never fire."""
+    from portia.ui import app as app_module
+    from portia.ui.state import APP
+
+    APP.width, APP.show_files, APP.show_transcript = 1920, True, True
+    with ui.element("div"):
+        split = app_module._splitter(260, app_module.FILES_LIMITS, on_collapse=lambda: None)
+
+    assert split._props["limits"][0] == 0
+
+
+def test_a_drag_that_keeps_reporting_below_the_floor_redraws_once():
+    """A splitter reports its width continuously while it is held. Refreshing the
+    shell per frame rebuilds all three panes under a mouse that is still down."""
+    from portia.ui import app as app_module
+    from portia.ui.state import APP
+
+    APP.show_files = True
+    redrawn: list[int] = []
+    original = app_module.shell.refresh
+    app_module.shell.refresh = lambda *a, **k: redrawn.append(1)  # type: ignore[method-assign]
+    try:
+        for _ in range(5):
+            app_module._close_files()
+    finally:
+        app_module.shell.refresh = original  # type: ignore[method-assign]
+
+    assert APP.show_files is False
+    assert redrawn == [1], "one redraw for one state change"
+    APP.show_files = True
+
+
+def test_the_toolbar_no_longer_toggles_a_pane():
+    """Two controls at the top of the window for something you do at the side."""
+    import inspect
+
+    from portia.ui import app as app_module
+
+    source = inspect.getsource(app_module._view_controls)
+    assert 'c.button("Files"' not in source
+    assert 'c.button("Transcript"' not in source

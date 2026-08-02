@@ -68,7 +68,8 @@ def shell() -> None:
 #: floor moves with the window, and the transcript — which holds the question form
 #: and the write confirmation, the two things this app exists for — could be
 #: dragged down to a few characters wide. These minimums are the width at which
-#: each pane is still worth having; the toolbar toggles are how you get rid of one.
+#: each pane is still worth having — and therefore the point at which dragging
+#: further **closes** it, which is how you get rid of one (`_splitter`).
 FILES_WIDTH, FILES_LIMITS = 260, (200, 520)
 TRANSCRIPT_WIDTH, TRANSCRIPT_LIMITS = 400, (330, 780)
 
@@ -83,27 +84,50 @@ def _window() -> None:
         toolbar()
         with ui.element("div").classes("p-body"):
             if APP.show_files:
-                with _splitter(FILES_WIDTH, _files_limits()) as files:
+                with _splitter(FILES_WIDTH, _files_limits(), on_collapse=_close_files) as files:
                     with files.before:
                         _left()
                     with files.after:
                         _workflow_and_transcript()
             else:
+                _rail("Files", "folder", "chevron_right", _open_files)
                 _workflow_and_transcript()
 
 
 def _workflow_and_transcript() -> None:
     if not APP.show_transcript:
-        _middle()
+        # A row, so the rail sits beside the workflow pane rather than under it.
+        with ui.element("div").classes("p-body"):
+            _middle()
+            _rail("Transcript", "forum", "chevron_left", _open_transcript)
         return
     # `reverse` so the pixel size applies to the transcript rather than to the
     # workflow: the pane with a real minimum is the one the number should govern.
     lower, upper = _transcript_limits()
-    with _splitter(min(TRANSCRIPT_WIDTH, upper), (lower, upper), reverse=True) as split:
+    with _splitter(
+        min(TRANSCRIPT_WIDTH, upper), (lower, upper), reverse=True, on_collapse=_close_transcript
+    ) as split:
         with split.before:
             _middle()
         with split.after:
             _right()
+
+
+def _rail(name: str, icon: str, arrow: str, reopen) -> None:
+    """A closed pane, as the strip of edge it left behind.
+
+    The toolbar used to carry a Files and a Transcript toggle, which is two
+    controls at the top of the window for something you do at the side of it.
+    Closing a pane is a drag now, and what stays is the edge: an arrow pointing
+    the way the pane will come back from, and the pane's own icon under it so the
+    strip says *which* pane rather than only that one is missing.
+
+    It is deliberately not a sliver of the pane. A 28px stripe of a file tree
+    reads as a rendering failure; a rail reads as a thing you press.
+    """
+    with ui.element("div").classes("p-rail"):
+        c.button("", reopen, icon=arrow, micro=True).tooltip(_RAIL_TIP.format(name=name))
+        ui.icon(icon).classes("p-rail-icon")
 
 
 def _room_beside_files() -> int:
@@ -138,12 +162,37 @@ def _transcript_limits() -> tuple[int, int]:
     return lower, max(lower, min(upper, _room_beside_files() - WORKFLOW_MIN))
 
 
-def _splitter(value: int, limits: tuple[int, int], *, reverse: bool = False) -> ui.splitter:
-    return (
-        ui.splitter(value=value, limits=limits, reverse=reverse)
+def _splitter(
+    value: int, limits: tuple[int, int], *, reverse: bool = False, on_collapse=None
+) -> ui.splitter:
+    """A draggable pane edge that closes the pane when you drag past its floor.
+
+    The floor is the width at which a pane stops being worth having, so it was
+    also the honest place to close it — `DESIGN.md` says as much ("the honest
+    move at that point is to close it rather than to squeeze it") and the
+    splitter used to simply refuse to go further, which left the toolbar toggle
+    as the only way to get rid of a pane.
+
+    So the splitter's own lower limit drops to zero and the floor becomes a
+    *threshold* instead: cross it and the pane closes, leaving a rail. The
+    ceiling still holds — it is what keeps the workflow pane above its own floor,
+    and that one never gives way.
+    """
+    lower, upper = limits
+    split = (
+        ui.splitter(value=value, limits=(0, upper), reverse=reverse)
         .props("unit=px")
         .classes("w-full h-full p-splitter")
     )
+    if on_collapse is not None:
+        split.on_value_change(lambda event: _past_the_floor(event.value, lower, on_collapse))
+    return split
+
+
+def _past_the_floor(width, floor: int, close) -> None:
+    """Close the pane once a drag takes it under the width it is readable at."""
+    if width is not None and width < floor:
+        close()
 
 
 def _left() -> None:
@@ -239,9 +288,14 @@ def _run_tooltip() -> str:
 
 
 def _view_controls() -> None:
-    """Both panes are collapsible; the workflow pane and Run never are."""
-    c.button("Files", _toggle_files, icon="folder", micro=True)
-    c.button("Transcript", _toggle_transcript, icon="forum", micro=True)
+    """What is left of the view controls, which is one button.
+
+    Files and Transcript were two toggles at the top of the window for something
+    you do at the side of it. A pane is closed by dragging its edge past the
+    width it is readable at, and reopened from the rail it leaves behind — the
+    gesture and the affordance are both where the pane is. The workflow pane and
+    Run are never either.
+    """
     c.button("", settings.open_dialog, icon="settings", micro=True).tooltip(_SETTINGS_TIP)
 
 
@@ -294,14 +348,35 @@ async def _save_report() -> None:
         toolbar.refresh()
 
 
-def _toggle_transcript() -> None:
-    APP.show_transcript = not APP.show_transcript
-    shell.refresh()
+def _close_transcript() -> None:
+    _set_panes(transcript=False)
 
 
-def _toggle_files() -> None:
-    APP.show_files = not APP.show_files
-    shell.refresh()
+def _open_transcript() -> None:
+    _set_panes(transcript=True)
+
+
+def _close_files() -> None:
+    _set_panes(files=False)
+
+
+def _open_files() -> None:
+    _set_panes(files=True)
+
+
+def _set_panes(*, files: bool | None = None, transcript: bool | None = None) -> None:
+    """Show or hide a side pane, and redraw only if that changed something.
+
+    The guard is not a micro-optimisation. A splitter reports its width
+    continuously while it is dragged, so crossing the floor fires the close
+    handler on every frame after it — and each one would refresh the shell,
+    rebuilding all three panes under a mouse that is still held down.
+    """
+    before = (APP.show_files, APP.show_transcript)
+    APP.show_files = before[0] if files is None else files
+    APP.show_transcript = before[1] if transcript is None else transcript
+    if (APP.show_files, APP.show_transcript) != before:
+        shell.refresh()
 
 
 #: The four run actions are icons, so their tooltips carry the name as well as
@@ -317,6 +392,7 @@ _RUN_TIP = (
 _BUILD_TIP = "Build · run every spec in the project and write the whole pipeline.\n{models}"
 _WRITE_TIP = "Write outputs · a CSV for every model the last run built, one file each.\n{out}"
 _REPORT_TIP = "Save report · the open spec's run report, as markdown.\n{runs}"
+_RAIL_TIP = "Show {name} · drag its edge past the width it is readable at to close it again."
 _NOTHING_TO_BUILD = "No specs to build yet — the copilot writes one as it records steps."
 
 
