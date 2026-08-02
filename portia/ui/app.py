@@ -228,9 +228,10 @@ def _run_controls() -> None:
     run.tooltip(_run_tooltip())
     build = c.button("Build", _build, icon="construction", enabled=not APP.busy)
     build.tooltip(_BUILD_TIP.format(models=APP.root / "models"))
-    # A run writes the pipeline, never the data — these two are how a *result*
-    # becomes durable, and both are things you press rather than things that
-    # happen to you.
+    # Run and Build write the pipeline, never the data — these two are how a
+    # *result* becomes durable, and both are things you press rather than things
+    # that happen to you. Either of the two above arms them, and both write the
+    # table for the spec you have open.
     write = c.button("Write outputs", _write, icon="save_alt", enabled=bool(APP.results))
     write.tooltip(str(APP.root / engine.OUT_DIR))
     report = c.button("Save report", _save_report, icon="description", enabled=bool(APP.results))
@@ -262,13 +263,25 @@ async def _run() -> None:
 
 
 async def _build() -> None:
-    """Compile the whole project — the app's half of `python -m portia.cli.build`."""
-    try:
-        built = await engine.build(APP)
-    except Exception as exc:  # noqa: BLE001 — shown to the operator, not swallowed
-        ui.notify(f"build failed — {type(exc).__name__}: {exc}")
-        return
-    ui.notify(f"built {len(built)} model(s) to models/")
+    """Compile the whole project — the app's half of `python -m portia.cli.build`.
+
+    It goes through the same `engine.execute` as Run, so a build leaves the window
+    in the same state a run does: the open spec's report on screen, and the two
+    save buttons live. Before, Build discarded what it produced and the saves
+    stayed greyed out, so the one press that ran *every* model looked like the one
+    press that saved nothing.
+
+    A project with no specs is the other half of that: `build_project` returns an
+    empty list, and "built 0 model(s)" reads as a failure. It isn't one — there is
+    simply nothing recorded to build yet — so it says that instead.
+    """
+    built = await engine.execute(APP)
+    if APP.run_error:
+        ui.notify(f"build failed — {APP.run_error}")
+    elif not built:
+        ui.notify(_NOTHING_TO_BUILD)
+    else:
+        ui.notify(f"built {len(built)} model(s) to models/")
     artifacts.pane.refresh()
     workflow.pane.refresh()
     toolbar.refresh()
@@ -311,6 +324,7 @@ _RUN_TIP = (
     "A table isn't built until its inputs are.\n{path}"
 )
 _BUILD_TIP = "Run every spec in the project and write the whole pipeline.\n{models}"
+_NOTHING_TO_BUILD = "No specs to build yet — the copilot writes one as it records steps."
 
 
 def open_at_start(path: str | Path) -> None:

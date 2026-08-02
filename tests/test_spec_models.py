@@ -210,6 +210,52 @@ def test_the_apps_run_resolves_cross_spec_references(project: Path) -> None:
     assert app.results and app.results[-1].provenance["result_rows"] == 3
 
 
+def test_the_apps_build_leaves_the_open_specs_results_behind(project: Path) -> None:
+    """Build ran every model and then dropped what came out.
+
+    The toolbar arms *Write outputs* and *Save report* on `app.results`, so a
+    press that compiled the whole project left both greyed out — the project had
+    been run and the window had no idea, which reads as "nothing was saved".
+    Build and Run go through one `engine.execute` for exactly this reason.
+    """
+    import asyncio
+
+    from portia.ui import engine
+    from portia.ui.state import App
+
+    _staging(project)
+    mart = _mart(project)
+    app = App()
+    app.root = project
+    engine.select_spec(mart, app)
+
+    built = asyncio.run(engine.execute(app))  # no `only` — the Build button
+
+    assert app.run_error is None, app.run_error
+    assert {m.name for m in built} == {"stg_orders", "mart_customer_orders"}
+    assert app.results and app.results[-1].provenance["result_rows"] == 3
+    assert asyncio.run(engine.write_outputs(app)) == [project / engine.OUT_DIR / f"{mart.stem}.csv"]
+
+
+def test_a_build_that_misses_the_open_spec_arms_nothing(project: Path) -> None:
+    """With no spec open there is no table for *Write outputs* to write, so the
+    saves stay disabled. Borrowing another model's results would put a name on a
+    button that writes a different table."""
+    import asyncio
+
+    from portia.ui import engine
+    from portia.ui.state import App
+
+    _staging(project)
+    app = App()
+    app.root = project
+
+    built = asyncio.run(engine.execute(app))
+
+    assert [m.name for m in built] == ["stg_orders"]
+    assert app.results is None
+
+
 def test_discovery_returns_paths_relative_to_the_root_it_was_given(project: Path) -> None:
     """Every caller joins the result back onto a base, so prefixing it here is a
     double-prefix. It hid behind two accidents — joining an *absolute* path

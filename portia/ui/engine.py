@@ -421,6 +421,41 @@ def select_spec(path: Path | None, app: App) -> None:
     app.selected_step = None
 
 
+async def execute(app: App, *, only: str | None = None) -> list[pipeline.BuiltModel]:
+    """Build models and **pick up what came out** — the state both buttons leave.
+
+    `build` is the engine call; this is the app's memory of it, and Run and Build
+    share it for the same reason they share `build_project`: they are one
+    mechanism at two scopes. Build used to throw its results away, so pressing it
+    compiled the whole project and still left *Write outputs* and *Save report*
+    greyed out — the project had been run and the window had no idea.
+
+    ``results`` is the **open spec's** steps, because the report half and both
+    save buttons are about the spec you are looking at; ``built`` is everything
+    that ran, so the header can name the models it also had to build. A build that
+    didn't touch the open spec (or a window with no spec open) leaves ``results``
+    empty rather than borrowing another model's — the saves stay disabled, which
+    is the honest state.
+
+    A failure lands in ``run_error`` rather than a toast: the run report pane shows
+    it until the next run, and a stack trace that vanishes after four seconds is
+    not something you can read.
+    """
+    app.run_error = None
+    app.built = []
+    try:
+        built = await build(app, only=only)
+    except Exception as exc:  # noqa: BLE001 — shown to the operator, not swallowed
+        app.results = None
+        app.run_error = f"{type(exc).__name__}: {exc}"
+        return []
+    app.built = built
+    open_model = app.spec_path.stem if app.spec_path else None
+    target = next((m for m in built if m.name == open_model), None)
+    app.results = target.results if target else None
+    return built
+
+
 async def run_spec(app: App) -> None:
     """Run the open spec **and everything it reads**, then write their ``.sql``.
 
@@ -434,24 +469,12 @@ async def run_spec(app: App) -> None:
     deliverable describing an older version of the spec. That makes the staleness
     warning mean something narrower and more useful: it can now only fire on a
     spec edited outside the app.
-
-    The report half is about the spec you have open, so ``results`` is that
-    model's steps; ``built`` is the whole set, for the header to be honest about
-    what else ran.
     """
     app.run_error = None
     app.built = []
     if app.spec_path is None or app.spec is None:
         return
-    try:
-        built = await build(app, only=app.spec_path.stem)
-    except Exception as exc:  # noqa: BLE001 — shown to the operator, not swallowed
-        app.results = None
-        app.run_error = f"{type(exc).__name__}: {exc}"
-        return
-    app.built = built
-    target = next((m for m in built if m.name == app.spec_path.stem), None)
-    app.results = target.results if target else None
+    await execute(app, only=app.spec_path.stem)
 
 
 def runs_in(app: App) -> list[Path]:
