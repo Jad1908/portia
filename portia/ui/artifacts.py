@@ -53,8 +53,13 @@ TURNS_NOTE = "No copilot turns yet. Type a goal and press Go."
 
 @ui.refreshable
 def pane() -> None:
-    """Sources · Specs · Models · Outputs · Runs · Turns, in that order."""
-    with ui.element("div").classes("p-scroll"):
+    """Sources · Specs · Models · Outputs · Runs · Turns, in that order.
+
+    Keyed, because selecting a row rebuilds this pane to move one highlight and
+    an unkeyed rebuild would send a long list back to the top each time you
+    clicked something near the bottom of it (`components.scroll_area`).
+    """
+    with c.scroll_area("artifacts"):
         _sources()
         _specs()
         _models()

@@ -93,6 +93,24 @@ def rule(strong: bool = False) -> ui.element:
     return ui.element("div").classes("p-rule-strong" if strong else "p-rule")
 
 
+def scroll_area(key: str, *, classes: str = "") -> ui.element:
+    """A scrolling region whose position survives the pane being rebuilt.
+
+    NiceGUI replaces a refreshable's elements rather than patching them, and a
+    replaced element starts at the top — so every click threw the file list and
+    the run report back to row one. The offset is **client state**, exactly like
+    the canvas's pan and zoom: the server states a key here and
+    `assets/scroll.js` puts the position back on whatever element now carries it.
+    Nothing measures it, nothing persists it, and no render asks for it.
+
+    ``key`` names *what is being scrolled*, not which pane it is in — two saved
+    runs shown in the same pane are two things to keep a place in, and sharing a
+    key would drop you into the second one at the first one's offset.
+    """
+    element = ui.element("div").classes(f"p-scroll {classes}".strip())
+    return element.props(f'data-scroll-key="{key}"')
+
+
 # --- controls ---------------------------------------------------------------
 
 

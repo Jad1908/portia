@@ -306,6 +306,13 @@ All four, plus one thing the pass turned up.
   inputs are — so `spec.upstream_of` names the set and `build_project(only=...)`
   scopes to it. Writing the SQL on every run is what narrows the staleness warning to
   what it should always have meant: *a spec edited outside the app*.
+  **Corrected 2026-08-02:** *Write outputs* did not follow that scope. It wrote the
+  open spec's table alone, and since selecting another spec clears the run, the only
+  table you could ever write was the one currently open — over the top of the last
+  one, so `out/` never held more than a single file however much had been built. It
+  goes through `pipeline.write_outputs` now: **one CSV per model that ran**, named for
+  its model, which is also what makes "overwrite" mean the right thing — rebuilding a
+  table replaces its own file and no other.
 - **Layers are a grouping and a build order, never a quality ladder.** They group the
   left panel and ride on a model card as their plain name — no colour, no size, no
   per-tier roll-up, and no effect on position. The argument, because it comes up: a

@@ -30,7 +30,7 @@ _DARK: ui.dark_mode | None = None
 
 
 @ui.page("/")
-async def page() -> None:
+def page() -> None:
     global _DARK
     _DARK = theme.apply()
     ui.page_title(TITLE)
@@ -42,7 +42,7 @@ async def page() -> None:
     # are inside splitters: a splitter sets an inline pixel width on its panel, so
     # restyling the pane inside changes nothing about the space reserved beside it.
     ui.on("portia:viewport", _resized)
-    await shell()
+    shell()
 
 
 def _resized(event) -> None:
@@ -57,7 +57,7 @@ def _resized(event) -> None:
 
 
 @ui.refreshable
-async def shell() -> None:
+def shell() -> None:
     """Which of the four screens is showing. The context panel is the one gate."""
     if not APP.opened:
         screens.project_open()
@@ -66,7 +66,7 @@ async def shell() -> None:
     elif not APP.left_add_data and not APP.skipped_sources:
         screens.first_sources()
     else:
-        await _window()
+        _window()
 
 
 #: Pane sizes, **in pixels rather than percent**. A percentage minimum means the
@@ -83,7 +83,7 @@ TRANSCRIPT_WIDTH, TRANSCRIPT_LIMITS = 400, (330, 780)
 WORKFLOW_MIN = 320
 
 
-async def _window() -> None:
+def _window() -> None:
     with ui.element("div").classes("p-window"):
         toolbar()
         with ui.element("div").classes("p-body"):
@@ -92,21 +92,21 @@ async def _window() -> None:
                     with files.before:
                         _left()
                     with files.after:
-                        await _workflow_and_transcript()
+                        _workflow_and_transcript()
             else:
-                await _workflow_and_transcript()
+                _workflow_and_transcript()
 
 
-async def _workflow_and_transcript() -> None:
+def _workflow_and_transcript() -> None:
     if not APP.show_transcript:
-        await _middle()
+        _middle()
         return
     # `reverse` so the pixel size applies to the transcript rather than to the
     # workflow: the pane with a real minimum is the one the number should govern.
     lower, upper = _transcript_limits()
     with _splitter(min(TRANSCRIPT_WIDTH, upper), (lower, upper), reverse=True) as split:
         with split.before:
-            await _middle()
+            _middle()
         with split.after:
             _right()
 
@@ -156,9 +156,9 @@ def _left() -> None:
         artifacts.pane()
 
 
-async def _middle() -> None:
+def _middle() -> None:
     with ui.element("div").classes("p-pane p-pane-mid"):
-        await workflow.pane()
+        workflow.pane()
 
 
 def _right() -> None:
@@ -230,10 +230,14 @@ def _run_controls() -> None:
     build.tooltip(_BUILD_TIP.format(models=APP.root / "models"))
     # Run and Build write the pipeline, never the data — these two are how a
     # *result* becomes durable, and both are things you press rather than things
-    # that happen to you. Either of the two above arms them, and both write the
-    # table for the spec you have open.
-    write = c.button("Write outputs", _write, icon="save_alt", enabled=bool(APP.results))
-    write.tooltip(str(APP.root / engine.OUT_DIR))
+    # that happen to you. Either of the two above arms them.
+    #
+    # Write outputs is armed by what was **built**, not by the open spec's
+    # results: it saves a table per model that ran, so a build that never touched
+    # the spec you have open still produced tables worth keeping. Save report is
+    # about the open spec, so that one stays on `results`.
+    write = c.button("Write outputs", _write, icon="save_alt", enabled=bool(APP.built))
+    write.tooltip(_WRITE_TIP.format(out=APP.root / engine.OUT_DIR))
     report = c.button("Save report", _save_report, icon="description", enabled=bool(APP.results))
     report.tooltip(str(APP.root / engine.RUNS_DIR))
 
@@ -324,6 +328,7 @@ _RUN_TIP = (
     "A table isn't built until its inputs are.\n{path}"
 )
 _BUILD_TIP = "Run every spec in the project and write the whole pipeline.\n{models}"
+_WRITE_TIP = "Save a CSV for every model the last run built, one file each.\n{out}"
 _NOTHING_TO_BUILD = "No specs to build yet — the copilot writes one as it records steps."
 
 

@@ -10,8 +10,9 @@ What the app is allowed to call, and why each is on the list:
 - ``catalog.init_project`` — the mandatory context panel writes ``project.yaml``
 - ``catalog.index_source`` — a dropped file is profiled (free, deterministic)
 - ``catalog.load_catalog`` — what the left pane and the source inspector show
-- ``spec.load_spec`` / ``spec.run_spec`` / ``spec.write_outputs`` /
-  ``spec.write_report`` — the Run button and what it can save
+- ``spec.load_spec`` / ``spec.run_spec`` / ``spec.write_report`` — the Run button
+  and the report it can save
+- ``pipeline.write_outputs`` — the tables a build produced, one CSV per model
 - ``spec.discover_specs`` — the project's models, so the panel and the engine
   agree on what a spec is and a cross-spec reference resolves
 - ``pipeline.build_project`` / ``stale_models`` — compiling to SQL, and whether a
@@ -33,8 +34,11 @@ folder chooser, because picking a directory by typing its absolute path is not a
 thing anyone should be asked to do.
 
 Blocking work (profiling a source, executing a spec) hits the database and would freeze the
-websocket, so it goes through ``asyncio.to_thread``. Nothing here formats
-anything for a human — that is the panes' job.
+websocket, so it goes through ``asyncio.to_thread``. Reading a file the panes
+draw — a report, a compiled model, a turn's log — deliberately does **not**: the
+middle pane draws in one pass so that a click never paints a blank frame, and an
+`await` in the middle of a render is exactly what that costs (`workflow.pane`).
+Nothing here formats anything for a human — that is the panes' job.
 """
 
 from __future__ import annotations
@@ -413,10 +417,16 @@ def outputs_in(app: App) -> list[Path]:
 
 
 def select_spec(path: Path | None, app: App) -> None:
-    """Load a spec into the workflow pane. A run's results belong to one spec."""
+    """Load a spec into the workflow pane. A run's results belong to one spec.
+
+    ``built`` goes with them. It is what *Write outputs* writes, and a build the
+    window is no longer showing is not a thing that button should still be able
+    to save — the honest state of a freshly-opened spec is that nothing has run.
+    """
     app.spec_path = path
     app.spec = spec_module.load_spec(path) if path and path.exists() else None
     app.results = None
+    app.built = []
     app.run_error = None
     app.selected_step = None
 
@@ -495,8 +505,16 @@ async def write_report(app: App) -> Path | None:
     )
 
 
-async def read_text(path: Path) -> str:
-    return await asyncio.to_thread(path.read_text)
+def read_text(path: Path) -> str:
+    """A saved report or a compiled model, off disk.
+
+    Not threaded, and that is the point: the pane that shows it draws in one pass
+    (`workflow.pane`), because an `await` mid-render is what put a blank frame on
+    screen between deleting the old content and creating the new. These are local
+    files of a few kilobytes; the work that genuinely blocks is still threaded
+    below.
+    """
+    return path.read_text()
 
 
 # --- logged copilot turns ---------------------------------------------------
@@ -522,10 +540,9 @@ def turn_header(path: Path) -> dict:
     return runlog.read_header(path)
 
 
-async def read_turn(path: Path) -> runlog.Run:
-    """One logged turn, off disk. A long transcript is a file read, so it goes
-    to a thread like every other read here."""
-    return await asyncio.to_thread(runlog.read, path)
+def read_turn(path: Path) -> runlog.Run:
+    """One logged turn, off disk. Read in the render pass — see `read_text`."""
+    return runlog.read(path)
 
 
 def turn_summary(run: runlog.Run) -> dict:
@@ -535,28 +552,35 @@ def turn_summary(run: runlog.Run) -> dict:
 
 
 async def write_outputs(app: App) -> list[Path]:
-    """Save the table this spec produced under ``out/``, as ``cli.run --write`` does.
+    """Save the tables the last Run or Build produced, under ``out/``.
 
-    One file per model, named for the spec — see `spec.write_outputs`.
+    **Every model that ran, not only the open one.** Run is already scoped to the
+    open spec *and everything it reads*, and it writes the ``.sql`` for all of
+    them; Build is the same mechanism at project scope. The tables follow that
+    scope, so pressing this after a build leaves one file per model.
+
+    Before, it wrote the open spec's table alone, which meant ``out/`` never held
+    more than one file: selecting another spec clears the run, so the only table
+    you could ever write was the one currently open, over the top of the last
+    one. Naming each file for its model (`pipeline.write_outputs`) is what keeps
+    "overwrite" honest — rebuilding a table replaces its own file, nothing else.
     """
-    if not app.results:
+    if not app.built:
         return []
-    written = await asyncio.to_thread(
-        spec_module.write_outputs,
-        app.results,
-        app.root / OUT_DIR,
-        name=app.spec_path.stem if app.spec_path else None,
-    )
+    written = await asyncio.to_thread(pipeline.write_outputs, app.built, app.root / OUT_DIR)
     app.outputs = written
     return written
 
 
-async def read_table(path: Path):
+def read_table(path: Path):
     """A produced table, read lazily — through the one loader, like everything else.
 
     Nothing is read here. The pane that shows it asks for a count and fifteen
     rows; before this it loaded the whole file to show those fifteen, which was a
-    straight bug the moment an output got large.
+    straight bug the moment an output got large. That count is what actually
+    costs something, and it has always been executed in the render pass by
+    `components.table_preview` — so threading this handle bought nothing and cost
+    a frame (`read_text`).
     """
     return load_table(path, connect())
 

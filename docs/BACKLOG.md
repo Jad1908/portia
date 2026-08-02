@@ -124,8 +124,14 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
 - ~~**`write_outputs` is all-or-nothing and CSV-only.**~~ — *half fixed 2026-07-31: it writes **one
   file per model**, named for the spec, because a spec produces one table and its steps are CTEs in
   the compiled pipeline rather than tables. It had no test at all before; it has two now.*
+  *Finished 2026-08-02: one file per model was right, but the app only ever wrote **one model**.
+  `pipeline.write_outputs` writes the table for every model a build produced, so the app's Write
+  outputs follows the same scope as the `.sql` it just wrote (`PIPELINE.md` §6).*
   **Still open:** the output format is hard-coded to `.csv` even though `write_table` dispatches on
   the extension, so a parquet output is one argument away and nothing passes it.
+  **Also open:** `cli.build` has no `--write`, so writing a whole project's tables is an app-only
+  gesture. `pipeline.write_outputs` is the engine half and takes one flag to reach the terminal;
+  left out of the fix above only to keep it to the bug.
 - **Reproducibility of custom steps** — pin the execution environment (DuckDB version, or Python +
   deps + seeds) so a captured step truly re-runs identically.
 - **A `sql` step's output row order is not stable, so `write_outputs` isn't byte-reproducible.**
@@ -361,6 +367,15 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
   are not equivalent: glob the project recursively (the pane shows what is there), or make
   `record_step` refuse a path outside `specs/` (the tree stays predictable, which is what
   `BACKLOG`'s "generated data has nowhere to live" item also wants). Prefer the second.
+- **A selection still rebuilds a whole pane to move one highlight.** Fixed the visible half of this
+  on 2026-08-02 — the scroll position survives a rebuild (`assets/scroll.js`) and the middle pane
+  draws in one pass so a click no longer paints a blank frame — but the rebuild itself is still
+  there: clicking a row in the left panel discards and re-creates all of it so one `--selected`
+  class can move, and clicking a step card re-draws the graph as well as the report. The honest fix
+  is to repaint the affected rows in place, as `transcript._pick` already does for the answer
+  options. What makes it awkward here is that `ui.refreshable` gives no handle on the elements it
+  built, and a module-level registry of them would be shared by two tabs on one project — which
+  `state.py` says is the intended case. It costs a DOM patch per click today, not a frame.
 - **The add-data copy is derived from the loader; nothing else is.** `screens._formats()` reads
   `supported_suffixes()`, so registering a format updates the screen with no edit. Worth doing the
   same wherever else a format is named in prose — `VISION.md` had six.

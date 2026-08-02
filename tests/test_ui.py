@@ -19,7 +19,10 @@ from portia.ui.state import App, Decision
 
 pytest.importorskip("nicegui", reason="the app needs the `ui` extra")
 
-from portia.ui import components as c  # noqa: E402  (after the extra is confirmed)
+from nicegui import ui  # noqa: E402  (after the extra is confirmed)
+
+from portia.ui import components as c  # noqa: E402
+from portia.ui import engine as engine_module  # noqa: E402
 
 # --- flags: named by the engine, coloured by kind ----------------------------
 
@@ -453,6 +456,57 @@ def test_focusing_a_card_is_a_request_with_a_token_not_a_flag():
 
     app.focus("stg_orders")
     assert app.focus_token > first, "asking again is a new request, even for the same card"
+
+
+# --- keeping your place across a rebuild -------------------------------------
+
+
+def test_the_middle_pane_draws_in_one_pass():
+    """An `await` mid-render costs a painted frame.
+
+    A refresh deletes the pane's elements and only then runs the function. With
+    an await in between, the delete and the rebuild leave in two batches and the
+    browser paints the gap — a blank middle pane, intermittently, on every click.
+    Reads for this pane are therefore synchronous (`ui.engine.read_text`).
+    """
+    import inspect
+
+    from portia.ui import workflow
+
+    assert not inspect.iscoroutinefunction(workflow.pane.func), "see the docstring on pane()"
+    for name in ("read_text", "read_turn", "read_table"):
+        reader = getattr(engine_module, name)
+        assert not inspect.iscoroutinefunction(reader), f"{name} is drawn, not awaited"
+
+
+def test_a_scroll_region_states_its_key_in_the_dom():
+    """Where a pane is scrolled to is client state, like the canvas's pan and zoom.
+
+    The server never learns it; it states a key and `assets/scroll.js` puts the
+    position back on whatever element carries that key after a rebuild. Driving
+    it from a render instead would race the DOM patch, which is the same mistake
+    the focus mark was fixed for.
+    """
+    with ui.element("div"):
+        area = c.scroll_area("artifacts", classes="p-pad")
+
+    assert area._props["data-scroll-key"] == "artifacts"
+    assert "p-scroll" in area.classes and "p-pad" in area.classes
+
+
+def test_two_artifacts_in_one_pane_do_not_share_a_scroll_key():
+    """Otherwise opening the second saved run drops you at the first one's offset."""
+    from portia.ui import workflow
+
+    state.APP.select(state.RUN, "a.md")
+    with ui.element("div"):
+        first = workflow._inspector_scroll()
+    state.APP.select(state.RUN, "b.md")
+    with ui.element("div"):
+        second = workflow._inspector_scroll()
+    state.APP.select(None)
+
+    assert first._props["data-scroll-key"] != second._props["data-scroll-key"]
 
 
 # --- importing outside data (docs/PIPELINE.md §2.7) -------------------------

@@ -48,20 +48,46 @@ GRAPH_SPLIT = 44
 
 
 @ui.refreshable
-async def pane() -> None:
+def pane() -> None:
+    """What the middle pane is showing, drawn in one pass.
+
+    **Synchronous, deliberately.** A refresh deletes this pane's elements and
+    only then runs the function; with an `await` in between, the delete and the
+    rebuild go out in two batches and the browser paints the gap — a blank middle
+    pane, intermittently, on every click. Drawing in one pass puts both in one
+    batch, so a click swaps the content rather than blinking it.
+
+    Nothing is given up by that. The reads here are a `.sql`, a markdown report,
+    a turn's JSONL — local files a few kilobytes long — and the heaviest thing on
+    screen, the row count behind a table preview, was already being executed
+    synchronously inside `c.table_preview`. The work that genuinely blocks —
+    profiling a source, executing a spec — still goes to a thread in
+    `engine.py`; it just isn't happening in here.
+    """
     kind, name = APP.selection or (None, "")
     if kind == SOURCE:
-        await _source_inspector(name)
+        _source_inspector(name)
     elif kind == MODEL:
-        await _model_inspector(name)
+        _model_inspector(name)
     elif kind == OUTPUT:
-        await _output_inspector(name)
+        _output_inspector(name)
     elif kind == RUN:
-        await _run_inspector(name)
+        _run_inspector(name)
     elif kind == TURN:
-        await _turn_inspector(name)
+        _turn_inspector(name)
     else:
         _workflow()
+
+
+def _inspector_scroll() -> ui.element:
+    """The inspector's scroll region, keyed to the artifact it is showing.
+
+    One key per artifact rather than one for "the inspector": two saved runs are
+    two things to keep a place in, and a shared key would drop you into the
+    second at the first one's offset (`c.scroll_area`).
+    """
+    kind, name = APP.selection or ("", "")
+    return c.scroll_area(f"{kind}:{name}", classes="p-pad stack-lg")
 
 
 # --- the workflow -----------------------------------------------------------
@@ -320,7 +346,10 @@ def _step_detail() -> None:
 
 def _report_half() -> None:
     with ui.element("div").classes("p-pane"):
-        with ui.element("div").classes("p-scroll p-pad stack-md"):
+        # Keyed to the spec it reports on: selecting a step rebuilds this to move
+        # one highlight, and reading a twelve-step report should not mean being
+        # returned to step one every time you click a card (`c.scroll_area`).
+        with c.scroll_area(f"report:{spec_label(APP.spec_path)}", classes="p-pad stack-md"):
             if APP.run_error:
                 _run_error()
             elif APP.results is None:
@@ -464,7 +493,7 @@ def _uncoloured_flags(flags: list[str]) -> None:
 # --- inspectors -------------------------------------------------------------
 
 
-async def _source_inspector(name: str) -> None:
+def _source_inspector(name: str) -> None:
     """A source's catalog entry — the prose read, the roles, the check facts, the rows.
 
     The catalog is what the *copilot* sees, and it never sees the rows. A person
@@ -472,9 +501,9 @@ async def _source_inspector(name: str) -> None:
     place in the app where the difference between the two views is deliberate.
     """
     entry = APP.sources.get(name)
-    frame = await _source_table(entry) if entry else None
+    frame = _source_table(entry) if entry else None
     editing = APP.editing == name
-    with ui.element("div").classes("p-scroll p-pad stack-lg"):
+    with _inspector_scroll():
         _inspector_header(name, "the catalog's entry for this source")
         if entry is None:
             c.empty_note("no catalog entry")
@@ -673,13 +702,13 @@ def _spend() -> str:
     return f"costs a turn on {APP.model or _default_model()}{effort}"
 
 
-async def _source_table(entry: dict):
+def _source_table(entry: dict):
     """The source's rows, or None if the file has moved since it was indexed."""
     path = APP.root / str(entry.get("source", ""))
     if not path.exists():
         return None
     try:
-        return await engine.read_table(path)
+        return engine.read_table(path)
     except Exception:  # noqa: BLE001 — a missing preview must not blank the pane
         return None
 
@@ -740,22 +769,22 @@ def _null_rate(col: dict) -> str:
     return format_rate(col.get("null_rate"))
 
 
-async def _run_inspector(name: str) -> None:
+def _run_inspector(name: str) -> None:
     """A saved run report, as it was written to disk.
 
     Rendered from the file rather than re-derived from state: what this shows has
     to be exactly what a reviewer sees in the diff, or saving it was pointless.
     """
     path = APP.root / engine.RUNS_DIR / name
-    with ui.element("div").classes("p-scroll p-pad stack-lg"):
+    with _inspector_scroll():
         _inspector_header(name, str(path))
         if not path.exists():
             c.empty_note("that report is gone")
             return
-        c.markdown(await engine.read_text(path))
+        c.markdown(engine.read_text(path))
 
 
-async def _turn_inspector(name: str) -> None:
+def _turn_inspector(name: str) -> None:
     """A logged copilot turn, replayed (`portia/runlog.py`).
 
     Here rather than in the right pane on purpose. The right pane is the *live*
@@ -770,12 +799,12 @@ async def _turn_inspector(name: str) -> None:
     from portia.ui import transcript
 
     path = engine.turn_path(APP, name)
-    with ui.element("div").classes("p-scroll p-pad stack-lg"):
+    with _inspector_scroll():
         _inspector_header(name, "a copilot turn, as it happened")
         if not path.exists():
             c.empty_note("that turn is gone")
             return
-        run = await engine.read_turn(path)
+        run = engine.read_turn(path)
         _turn_facts(engine.turn_summary(run))
         c.rule()
         transcript.replay(run)
@@ -824,7 +853,7 @@ def _turn_cost(summary: dict) -> str:
     return "—" if not cost else f"~${cost:.4f}"
 
 
-async def _model_inspector(rel: str) -> None:
+def _model_inspector(rel: str) -> None:
     """A compiled model, as it sits on disk — the deliverable, read verbatim.
 
     Rendered from the file rather than recompiled from the spec, for the same
@@ -834,14 +863,14 @@ async def _model_inspector(rel: str) -> None:
     between this file and what the spec would produce now.
     """
     path = APP.root / rel
-    with ui.element("div").classes("p-scroll p-pad stack-lg"):
+    with _inspector_scroll():
         _inspector_header(path.name, str(path))
         if not path.exists():
             c.empty_note("that model is gone — press Build to write it again")
             return
         if path.stem in engine.stale_models(APP):
             _stale_banner(path.stem)
-        c.code_block(await engine.read_text(path))
+        c.code_block(engine.read_text(path))
 
 
 def _stale_banner(name: str) -> None:
@@ -859,14 +888,14 @@ def _stale_banner(name: str) -> None:
         c.text(_STALE_WHY, color="c-body")
 
 
-async def _output_inspector(name: str) -> None:
+def _output_inspector(name: str) -> None:
     path = APP.root / engine.OUT_DIR / name
-    with ui.element("div").classes("p-scroll p-pad stack-lg"):
+    with _inspector_scroll():
         _inspector_header(name, "a table a run wrote")
         if not path.exists():
             c.empty_note("that file is gone")
             return
-        c.table_preview(await engine.read_table(path))
+        c.table_preview(engine.read_table(path))
 
 
 def _inspector_header(name: str, note: str) -> None:
