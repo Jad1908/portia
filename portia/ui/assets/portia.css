@@ -727,14 +727,24 @@ html body {
   flex: 0 0 auto;
 }
 
-/* One group of settings. The panel is a list of controls and nothing else, so
- * the only structure it needs is a gap and an indent under its header. */
+/* One tab's worth of settings. The panel is a list of controls and nothing
+ * else, so the only structure it needs is a gap — and a floor, so switching to
+ * a short tab doesn't resize the dialog under the pointer that switched it. */
 .settings-group {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: var(--sp-sm);
-  padding: 0 var(--sp-md) var(--sp-sm);
+  padding: var(--sp-md) 0 var(--sp-sm);
+  min-height: 190px;
+}
+
+/* The tabs run edge to edge inside the panel, so their underline is a rule
+ * across it rather than a line ending in the middle of nowhere. */
+.settings-panel .pane-tabs {
+  margin: 0 calc(-1 * var(--sp-lg));
+  padding: 0 var(--sp-lg);
+  background: transparent;
 }
 
 .row-gap-md {

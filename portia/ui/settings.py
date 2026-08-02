@@ -14,9 +14,11 @@ setting. The one thing that is not a plain control is the project switch, which
 refuses mid-turn: switching would leave the copilot writing into a directory the
 window has stopped looking at.
 
-Four groups, in the order they are worth changing: **Project** (where you are and
-what it is about) · **Copilot** (what a turn spends) · **Data** (what arrives, and
-where it lands) · **Appearance**.
+Four **tabs**, in the order they are worth changing: **Project** (where you are
+and what it is about) · **Copilot** (what a turn spends) · **Data** (what
+arrives, and where it lands) · **Appearance**. Stacked down a column they were a
+scroll through three things you are not changing to reach the one you are, and
+they made the dialog tall enough to be the whole window.
 
 The dialog is built once at page level — see `screens.build_add_dialog` for what
 happens to one created inside a refreshable — and its *contents* are the
@@ -62,22 +64,51 @@ def open_dialog() -> None:
     _DIALOG.open()
 
 
+#: The four tabs, in the order they are worth changing, and what draws each.
+#: A tuple rather than a dict so the order is the declaration — a settings panel
+#: whose tabs move when someone re-sorts a dict is a settings panel you have to
+#: re-learn.
+TABS = ("Project", "Copilot", "Data", "Appearance")
+
+#: Which one is showing. Page state, not project state: it is where you are
+#: looking inside a dialog, and it survives the panel being refreshed so that
+#: picking a theme does not throw you back to the first tab.
+_TAB = TABS[0]
+
+
 @ui.refreshable
 def _panel() -> None:
-    with ui.element("div").classes("write-confirm").style(screens.DIALOG_WIDTH):
+    """The panel: a title, one tab's worth of controls, and the way out.
+
+    **Tabbed rather than stacked.** Four groups down a column is a scroll through
+    three things you are not changing to reach the one you are, and it made the
+    dialog tall enough to be the whole window. The tabs are the same `pane-tabs`
+    the transcript uses — one tab vocabulary in the app, not two that have to be
+    kept looking alike.
+    """
+    with ui.element("div").classes("write-confirm settings-panel").style(screens.DIALOG_WIDTH):
         ui.label(TITLE).classes("t-heading-md")
-        _project()
-        _copilot()
-        _data()
-        _appearance()
+        _tabs()
+        with ui.element("div").classes("settings-group"):
+            _BODY[_TAB]()
         with ui.element("div").classes("row-gap-sm"):
             c.button("Close", _close, kind="secondary")
 
 
-def _group(label: str) -> ui.element:
-    c.rule()
-    c.section_header(label)
-    return ui.element("div").classes("settings-group")
+def _tabs() -> None:
+    with ui.element("div").classes("pane-tabs"):
+        for tab in TABS:
+            classes = "pane-tab" + (" pane-tab--active" if tab == _TAB else "")
+            element = ui.element("div").classes(classes)
+            with element:
+                ui.label(tab)
+            element.on("click", lambda t=tab: _show_tab(t))
+
+
+def _show_tab(tab: str) -> None:
+    global _TAB
+    _TAB = tab
+    _panel.refresh()
 
 
 def _project() -> None:
@@ -87,38 +118,35 @@ def _project() -> None:
     a project — a label that was secretly the exit. Here the name says where you
     are and the exit says what it does.
     """
-    with _group("Project"):
-        c.caption(str(APP.root))
-        c.button("Open another project…", _switch_project, icon="folder_open").tooltip(
-            SWITCH_BUSY if APP.busy else "back to the project picker"
-        )
-        c.button("Edit the project brief", _open_brief, icon="notes")
-        c.caption(BRIEF_WHY)
+    c.caption(str(APP.root))
+    c.button("Open another project…", _switch_project, icon="folder_open").tooltip(
+        SWITCH_BUSY if APP.busy else "back to the project picker"
+    )
+    c.button("Edit the project brief", _open_brief, icon="notes")
+    c.caption(BRIEF_WHY)
 
 
 def _copilot() -> None:
     """What a turn spends. The same two fields the goal box and the drop zone bind."""
-    with _group("Copilot"):
-        c.model_effort(APP, _set_effort)
-        c.caption(SPEND_NOTE)
+    c.model_effort(APP, _set_effort)
+    c.caption(SPEND_NOTE)
 
 
 def _data() -> None:
     """What arrives, and where it lands."""
-    with _group("Data"):
-        c.button("Add data…", _add_data, icon="add")
-        c.caption("Destination")
-        (
-            ui.input(placeholder=engine.DATA_DIR)
-            .classes("p-field p-field-mono w-full")
-            .props("borderless")
-            .bind_value(APP, "import_destination")
-        )
-        c.caption(DESTINATION_SCOPE)
-        ui.switch("Have the copilot read what each source is").classes("p-toggle").bind_value(
-            APP, "interpret"
-        )
-        c.caption(INTERPRET_COST)
+    c.button("Add data…", _add_data, icon="add")
+    c.caption("Destination")
+    (
+        ui.input(placeholder=engine.DATA_DIR)
+        .classes("p-field p-field-mono w-full")
+        .props("borderless")
+        .bind_value(APP, "import_destination")
+    )
+    c.caption(DESTINATION_SCOPE)
+    ui.switch("Have the copilot read what each source is").classes("p-toggle").bind_value(
+        APP, "interpret"
+    )
+    c.caption(INTERPRET_COST)
 
 
 def _appearance() -> None:
@@ -128,16 +156,20 @@ def _appearance() -> None:
     that only shows the mode it is *in* cannot distinguish "dark" from "auto, and
     it is night", and a settings panel is exactly where that should be legible.
     """
-    with _group("Appearance"):
-        c.caption("Theme")
-        c.segmented(
-            [theme.MODE_LABEL[mode] for mode in theme.MODES],
-            theme.MODE_LABEL[theme.mode()],
-            _set_theme,
-        )
+    c.caption("Theme")
+    c.segmented(
+        [theme.MODE_LABEL[mode] for mode in theme.MODES],
+        theme.MODE_LABEL[theme.mode()],
+        _set_theme,
+    )
 
 
 # --- what the controls do ---------------------------------------------------
+
+
+#: Tab name → what draws it. Defined after the four, and checked against `TABS`
+#: by a test: a tab with no body is a tab that renders an empty panel.
+_BODY = {"Project": _project, "Copilot": _copilot, "Data": _data, "Appearance": _appearance}
 
 
 def _set_theme(label: str) -> None:

@@ -808,3 +808,38 @@ def test_the_pane_beside_a_rail_states_both_its_dimensions():
     block = re.search(r"\.p-pane-row \{([^}]*)\}", css)
     assert block, ".p-pane-row is not styled"
     assert "width: 100%" in block.group(1) and "height: 100%" in block.group(1)
+
+
+def test_every_settings_tab_has_something_to_draw():
+    """A tab with no body renders an empty panel, and the failure is silent."""
+    from portia.ui import settings
+
+    assert tuple(settings._BODY) == settings.TABS
+
+
+def test_picking_a_setting_does_not_throw_you_back_to_the_first_tab(monkeypatch):
+    """Picking a theme or an effort refreshes the whole panel. If the showing tab
+    were rebuilt with it, every pick would bounce you back to Project."""
+    from portia.ui import settings
+
+    monkeypatch.setattr(settings._panel, "refresh", lambda *a, **k: None)
+    monkeypatch.setattr(settings.theme, "set_mode", lambda *a, **k: None)
+    monkeypatch.setattr(settings, "_TAB", "Appearance")
+
+    settings._set_theme("light")
+    assert settings._TAB == "Appearance"
+
+    settings._set_effort("high")
+    assert settings._TAB == "Appearance"
+
+
+def test_the_settings_tabs_reuse_the_transcripts_tab_vocabulary():
+    """One tab style in the app, not two that have to be kept looking alike."""
+    import inspect
+
+    from portia.ui import settings, transcript
+
+    for module in (settings, transcript):
+        source = inspect.getsource(module)
+        assert 'classes("pane-tabs")' in source
+        assert "pane-tab--active" in source
