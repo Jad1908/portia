@@ -784,3 +784,27 @@ def test_the_toolbar_no_longer_toggles_a_pane():
     source = inspect.getsource(app_module._view_controls)
     assert 'c.button("Files"' not in source
     assert 'c.button("Transcript"' not in source
+
+
+def test_the_pane_beside_a_rail_states_both_its_dimensions():
+    """A splitter panel does not stretch its children, so a flex row inside one
+    has to say its own width *and* height. Measured at 1280px before this: the
+    workflow pane came out 404px wide inside a 1019px panel, with the transcript
+    rail floating in the middle of the window.
+
+    `.p-body` cannot be reused for it — that one is the window's own row and
+    takes its height from `.p-window`'s flex column, where an explicit
+    `height: 100%` resolves against the viewport and swallows the toolbar.
+    """
+    import inspect
+    import re
+
+    from portia.ui import app as app_module
+    from portia.ui import theme
+
+    assert 'classes("p-pane-row")' in inspect.getsource(app_module._workflow_and_transcript)
+
+    css = theme.CSS.read_text()
+    block = re.search(r"\.p-pane-row \{([^}]*)\}", css)
+    assert block, ".p-pane-row is not styled"
+    assert "width: 100%" in block.group(1) and "height: 100%" in block.group(1)

@@ -316,6 +316,21 @@ html body {
   min-width: 330px;
 }
 
+/* A pane and the rail beside it, inside a splitter panel. Distinct from
+ * `.p-body` — that one is the window's own row and gets its height from
+ * `.p-window`'s flex column, where an explicit `height: 100%` would resolve
+ * against the viewport and swallow the toolbar. This one has a splitter panel
+ * above it, which does not stretch its children at all, so it has to say both
+ * dimensions itself. */
+.p-pane-row {
+  display: flex;
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
 /* A closed pane, as the strip of edge it left behind. Not a sliver of the pane
  * itself — 28px of a file tree reads as a rendering failure, where a rail reads
  * as a thing you press. Sits on the canvas like the left pane does, with the

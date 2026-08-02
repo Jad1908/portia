@@ -97,7 +97,11 @@ def _window() -> None:
 def _workflow_and_transcript() -> None:
     if not APP.show_transcript:
         # A row, so the rail sits beside the workflow pane rather than under it.
-        with ui.element("div").classes("p-body"):
+        # `p-pane-row`, not `p-body`: this one has a splitter panel above it, which
+        # does not stretch its children — measured at 1280px, the workflow pane
+        # came out 404px wide inside a 1019px panel with the rail floating in the
+        # middle of it. Same trap `.p-pane` documents.
+        with ui.element("div").classes("p-pane-row"):
             _middle()
             _rail("Transcript", "forum", "chevron_left", _open_transcript)
         return
