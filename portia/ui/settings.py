@@ -45,6 +45,7 @@ INTERPRET_COST = "Profiling is free and always happens. Reading them costs a mod
 SPEND_NOTE = "What a turn costs is the model and the effort, and nothing else."
 BRIEF_WHY = "What makes a column's meaning decidable. It opens in the middle pane."
 NO_PANEL = "The settings panel didn't load — reload the page."
+STALE_PANEL = "Settings may be showing stale values ({why}) — reload the page to be sure."
 
 
 def build_dialog() -> None:
@@ -56,11 +57,24 @@ def build_dialog() -> None:
 
 
 def open_dialog() -> None:
-    """Show it. Says so if it isn't there, rather than doing nothing quietly."""
+    """Show it. Says so if it isn't there, rather than doing nothing quietly.
+
+    **The refresh must never be able to stop the open.** Redrawing first is a
+    nicety — it picks up a project path or a busy flag that changed since the
+    panel was built — but `refresh()` walks targets that a page reload, a second
+    tab or a rebuilt slot may have invalidated, and a raise there used to mean
+    the gear silently did nothing. Opening is the point; showing yesterday's
+    project path is a far smaller failure than a settings panel that won't come
+    up, so the refresh is attempted and its failure is reported rather than
+    propagated.
+    """
     if _DIALOG is None or _DIALOG.is_deleted:
         ui.notify(NO_PANEL)
         return
-    _panel.refresh()
+    try:
+        _panel.refresh()
+    except Exception as exc:  # noqa: BLE001 — never worth a dead settings panel
+        ui.notify(STALE_PANEL.format(why=type(exc).__name__))
     _DIALOG.open()
 
 

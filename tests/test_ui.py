@@ -943,3 +943,50 @@ def test_the_tree_never_pops_a_box_repeating_the_row_you_are_pointing_at():
     source = inspect.getsource(artifacts)
     assert ".tooltip(" not in source, "the tree is back to tooltipping its own rows"
     assert "c.hint(row, APP.project_context)" in source, "the brief still says what a row cannot"
+
+
+def test_a_failed_refresh_never_stops_the_settings_panel_opening(monkeypatch):
+    """Redrawing first is a nicety; opening is the point.
+
+    `refresh()` walks targets a page reload or a second tab may have
+    invalidated, and a raise there used to mean the gear silently did nothing —
+    showing a stale project path is a far smaller failure than a settings panel
+    that will not come up.
+    """
+    from portia.ui import settings
+
+    opened, said = [], []
+
+    class Dialog:
+        is_deleted = False
+
+        def open(self):
+            opened.append(True)
+
+    def boom():
+        raise RuntimeError("slot is gone")
+
+    monkeypatch.setattr(settings, "_DIALOG", Dialog())
+    monkeypatch.setattr(settings._panel, "refresh", boom)
+    monkeypatch.setattr(settings.ui, "notify", said.append)
+
+    settings.open_dialog()
+
+    assert opened == [True], "the panel opened anyway"
+    assert said and said[0].startswith("Settings may be showing stale values")
+
+
+def test_a_missing_settings_panel_says_so_rather_than_doing_nothing():
+    """The one case where not opening is correct — and it has to be audible."""
+    from portia.ui import settings
+
+    said = []
+    original_dialog, original_notify = settings._DIALOG, settings.ui.notify
+    settings._DIALOG = None
+    settings.ui.notify = said.append
+    try:
+        settings.open_dialog()
+    finally:
+        settings._DIALOG, settings.ui.notify = original_dialog, original_notify
+
+    assert said == [settings.NO_PANEL]
