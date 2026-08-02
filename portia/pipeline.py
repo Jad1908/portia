@@ -254,6 +254,25 @@ def build_project(
     return built
 
 
+def write_outputs(built: list[BuiltModel], out_dir: str | Path) -> list[Path]:
+    """Save the table **every** built model produced — one CSV per model.
+
+    A build is a set of tables, not one table. ``build_project`` runs a whole
+    scope — the project, or one model and everything it reads — and writes the
+    ``.sql`` for all of it, so the data it produced belongs to the same scope.
+    Writing only one of them left ``out/`` holding a single file that every press
+    replaced, whatever had just been built.
+
+    Each file is named for its model (`spec.write_outputs`), which is what makes
+    "overwrite" mean the right thing: rebuilding a table replaces that table's
+    file and leaves every other one alone.
+    """
+    written: list[Path] = []
+    for model in built:
+        written += spec.write_outputs(model.results, out_dir, name=model.name)
+    return written
+
+
 def stale_models(root: str | Path = ".") -> list[str]:
     """Models whose ``.sql`` on disk no longer matches their spec.
 

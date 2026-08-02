@@ -213,10 +213,11 @@ def test_the_apps_run_resolves_cross_spec_references(project: Path) -> None:
 def test_the_apps_build_leaves_the_open_specs_results_behind(project: Path) -> None:
     """Build ran every model and then dropped what came out.
 
-    The toolbar arms *Write outputs* and *Save report* on `app.results`, so a
-    press that compiled the whole project left both greyed out — the project had
-    been run and the window had no idea, which reads as "nothing was saved".
-    Build and Run go through one `engine.execute` for exactly this reason.
+    *Save report* is about the spec you have open, so it is armed by
+    `app.results` — and a press that compiled the whole project used to leave it
+    greyed out: the project had been run and the window had no idea, which reads
+    as "nothing was saved". Build and Run go through one `engine.execute` for
+    exactly this reason.
     """
     import asyncio
 
@@ -234,13 +235,60 @@ def test_the_apps_build_leaves_the_open_specs_results_behind(project: Path) -> N
     assert app.run_error is None, app.run_error
     assert {m.name for m in built} == {"stg_orders", "mart_customer_orders"}
     assert app.results and app.results[-1].provenance["result_rows"] == 3
-    assert asyncio.run(engine.write_outputs(app)) == [project / engine.OUT_DIR / f"{mart.stem}.csv"]
 
 
-def test_a_build_that_misses_the_open_spec_arms_nothing(project: Path) -> None:
-    """With no spec open there is no table for *Write outputs* to write, so the
-    saves stay disabled. Borrowing another model's results would put a name on a
-    button that writes a different table."""
+def test_write_outputs_saves_a_table_per_model_not_just_the_open_one(project: Path) -> None:
+    """A build produced three tables and `out/` held one of them.
+
+    *Write outputs* wrote the open spec's table alone, and selecting another spec
+    clears the run — so the only table you could ever write was the one currently
+    open, over the top of the last one. A project could not accumulate outputs.
+    """
+    import asyncio
+
+    from portia.ui import engine
+    from portia.ui.state import App
+
+    _staging(project)
+    mart = _mart(project)
+    app = App()
+    app.root = project
+    engine.select_spec(mart, app)
+
+    asyncio.run(engine.execute(app))
+    written = asyncio.run(engine.write_outputs(app))
+
+    out = project / engine.OUT_DIR
+    assert set(written) == {out / "stg_orders.csv", out / "mart_customer_orders.csv"}
+
+
+def test_rebuilding_a_model_overwrites_that_models_file_and_no_other(project: Path) -> None:
+    """Named for the model, which is what makes "overwrite" mean the right thing."""
+    import asyncio
+
+    from portia.ui import engine
+    from portia.ui.state import App
+
+    _staging(project)
+    mart = _mart(project)
+    app = App()
+    app.root = project
+    engine.select_spec(mart, app)
+
+    asyncio.run(engine.execute(app))
+    first = asyncio.run(engine.write_outputs(app))
+    asyncio.run(engine.execute(app))
+    again = asyncio.run(engine.write_outputs(app))
+
+    assert set(first) == set(again)
+    assert len(list((project / engine.OUT_DIR).glob("*.csv"))) == 2
+
+
+def test_a_build_with_no_spec_open_still_has_tables_worth_writing(project: Path) -> None:
+    """*Save report* is about the open spec, so it stays disabled. *Write
+    outputs* is about what ran, and a build with nothing open still ran
+    something — the tables it produced are each named for their own model, so
+    there is no other model's results to borrow."""
     import asyncio
 
     from portia.ui import engine
@@ -253,7 +301,30 @@ def test_a_build_that_misses_the_open_spec_arms_nothing(project: Path) -> None:
     built = asyncio.run(engine.execute(app))
 
     assert [m.name for m in built] == ["stg_orders"]
-    assert app.results is None
+    assert app.results is None  # Save report: nothing open to report on
+    assert app.built  # Write outputs: a table came out of the build
+    assert asyncio.run(engine.write_outputs(app)) == [project / engine.OUT_DIR / "stg_orders.csv"]
+
+
+def test_opening_a_spec_disarms_write_outputs(project: Path) -> None:
+    """A build the window has stopped showing is not one that button may save."""
+    import asyncio
+
+    from portia.ui import engine
+    from portia.ui.state import App
+
+    staging = _staging(project)
+    mart = _mart(project)
+    app = App()
+    app.root = project
+    engine.select_spec(mart, app)
+    asyncio.run(engine.execute(app))
+    assert app.built
+
+    engine.select_spec(staging, app)
+
+    assert app.built == []
+    assert asyncio.run(engine.write_outputs(app)) == []
 
 
 def test_discovery_returns_paths_relative_to_the_root_it_was_given(project: Path) -> None:

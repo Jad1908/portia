@@ -230,14 +230,20 @@ adding code, and extend them rather than working around them:
   - The look lives in `ui/assets/portia.css` as `DESIGN.md`'s tokens — not in Python strings, and
     not in NiceGUI APIs, so swapping the framework stays cheap (`TECH_STACK.md`). Behaviour that
     has to be client-side lives beside it as its own file for the same reason: `canvas.js` (pan and
-    zoom), `viewport.js` (the window width, which `DESIGN.md`'s width bands need and CSS cannot
-    supply once panes are inside splitters), `choose_files.applescript` (the native file chooser).
-  - **The canvas view is the one piece of state the client owns.** Where it is panned and zoomed to
-    never reaches Python — a round trip per wheel tick would make the only directly-manipulated
-    surface the laggiest. It is not measured and not persisted. Anything the *server* wants the
-    canvas to do is stated declaratively in the DOM with a token, never driven by a
-    `run_javascript` during a render: that races the DOM patch, and NiceGUI rebuilds the pane
-    rather than patching it.
+    zoom), `scroll.js` (where each pane is scrolled to), `viewport.js` (the window width, which
+    `DESIGN.md`'s width bands need and CSS cannot supply once panes are inside splitters),
+    `choose_files.applescript` (the native file chooser).
+  - **Where you are looking is the client's state, and only the client's.** The canvas's pan and
+    zoom, and each pane's scroll offset (`c.scroll_area`): neither reaches Python, neither is
+    measured, neither is persisted. A round trip per wheel tick would make the only
+    directly-manipulated surface the laggiest, and NiceGUI *replaces* a refreshable's elements
+    rather than patching them — so a rebuilt pane starts at the top unless the client puts it back.
+    Anything the *server* wants either of them to do is stated declaratively in the DOM with a
+    token or a key, never driven by a `run_javascript` during a render: that races the DOM patch.
+  - **The middle pane draws in one pass** (`workflow.pane` is not a coroutine). A refresh deletes
+    its elements and only then runs the function; an `await` in between sends the delete and the
+    rebuild in two batches and the browser paints the gap. Work that genuinely blocks stays
+    threaded in `engine.py`; reading a file a pane is about to draw does not belong there.
   - **`DESIGN.md`'s product rule is the UI's version of facts vs judgment: colour and prominence
     communicate *kind*, never *rank*.** No sorting by severity, no badge that grows with its number,
     no roll-up that implies a score. The engine refuses to rank; the screen must not do it on the
