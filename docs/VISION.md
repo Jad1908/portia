@@ -372,7 +372,7 @@ regressed** — this is the checklist, not a nice-to-have.
 | answering `allow? [Y/n]` on stdin | `write-confirm` |
 | `run <spec>` | **Run** in the workflow pane |
 | `run --write out` | Same, with an output location — outputs land in the left panel |
-| `build` | **Build** in the toolbar. Run does the same at one model's scope |
+| `build` | **Build** on the workflow pane. Run does the same at one model's scope |
 | `build --check` | The stale badge on the graph header, and a banner on the model itself |
 | `import_data <f> --to <dir>` | Destination field + **Plan import** → every `from → to` pair → **Copy and index** |
 | `cat models/*.sql` | `models/` in the tree; clicking one shows the file as committed |

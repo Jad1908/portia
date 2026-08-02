@@ -535,35 +535,47 @@ questions-and-insights UX *is* the product" — and they get the most design att
 
 **`toolbar`** — the top bar
 - `{colors.canvas}`, 1px `{colors.hairline}` bottom rule. Holds: the mark and the **session name**
-  (left), a spacer, then **Run**, **Build**, **Write outputs** and **Save report** as icons, then
-  the **settings** gear.
-- **The four run actions are icon-only**, `{rounded.md}`, square padding, and each carries a tooltip
-  that leads with its own name, then what pressing it does, then where the result lands. That is
-  *more* than the labels carried, not less — a label never had room for the path. Run keeps the one
-  accent fill once a spec has steps; the other three stay `button-tertiary`.
+  (left), a spacer, and the **settings** gear. That is all of it.
+- **It got very short, and that is the design.** A toolbar says where you are and acts on what is in
+  front of you. The theme cycler, the Brief button and the two pane toggles were none of those and
+  have gone to `settings-panel`, the left pane and `pane-rail` respectively; the four run actions
+  went to `action-bar`, on the pane they act on.
 - **No spec switcher.** A spec is an artifact and artifacts are chosen in the left pane, where the
   sources, outputs and runs are. A second place to choose one is a second thing to keep in sync.
-- **Run writes nothing.** The two save actions beside it are how a result becomes durable, and both
-  are things you press rather than things that happen to you — the same rule as every other write
-  in the app.
 - **The session name is the open directory's name, and it is a label.** It used to be a button, and
   the only route back to the project picker — a label you had to discover was clickable. Where you
   are and how to leave are two statements; the second one is in `settings-panel`.
-- **No preferences.** The theme cycler, the Brief button and the two pane toggles all lived here and
-  none of them belongs: a toolbar says where you are and acts on what is in front of you. The theme
-  is in `settings-panel`, the brief is a row at the top of the left pane, and a pane is closed by
-  dragging its edge and reopened from its `pane-rail`.
 - **Not the project brief.** An earlier draft put the brief's first line here. The brief is the most
   load-bearing text in the product and it is still not chrome: a paragraph of prose across the top
   of every screen crowds out the one thing a toolbar is for. It is a pinned row in the left pane and
   a pane of its own now, which is where a paragraph you are meant to rewrite belongs.
 
+**`action-bar`** — Run, Build, Write outputs, Save report, at the top of the workflow pane
+- Fill `{colors.surface}`, 1px `{colors.hairline}` bottom rule, min-height 40px, padding
+  `{spacing.sm}` `{spacing.md}`, the four icons right-aligned.
+- **Icon-only**, `{rounded.md}`, square padding, and **each tooltip is the name of the action and
+  nothing else**: *Run spec* · *Build full pipeline* · *Write outputs* · *Save report*. An icon has
+  to name its verb; it does not have to explain it. A tooltip is read in the moment before a click,
+  and what an action does and where it writes is prose — it belongs in this file and in the code,
+  read at the speed prose is read at.
+- Run keeps the one accent fill once a spec has steps; the other three stay `button-tertiary`.
+- **Right-aligned to the middle pane, not to the window.** All four act on the workflow pane, and
+  from the toolbar's far corner they sat above the transcript — the one pane they have nothing to do
+  with. It is also the only way to keep them on that edge: a dragged pane's width is never reported
+  to the server, so chrome above the panes cannot know where the middle one ends.
+- **Run writes nothing.** The two save actions beside it are how a result becomes durable, and both
+  are things you press rather than things that happen to you — the same rule as every other write
+  in the app.
+
 **`settings-panel`** — the one place a preference lives
 - A `dialog`: `{colors.surface}` panel, `{rounded.lg}`, one soft shadow, `{spacing.lg}` padding.
-- Four groups under `{typography.caption}` `{colors.mute}` headers separated by
-  `{colors.hairline}` rules, in the order they are worth changing: **Project** (the path, the
-  switch, the brief) · **Copilot** (model, effort) · **Data** (add data, destination, the interpret
+- **Four tabs**, as `pane-tabs` — the same component the transcript uses, so there is one tab
+  vocabulary in the app — in the order they are worth changing: **Project** (the path, the switch,
+  the brief) · **Copilot** (model, effort) · **Data** (add data, destination, the interpret
   toggle) · **Appearance** (theme as a `segmented-control` naming all three modes).
+- Tabs rather than four stacked groups: stacked, they were a scroll through three things you are not
+  changing to reach the one you are. The body has a min-height floor so switching to a short tab
+  doesn't resize the dialog under the pointer that switched it.
 - **Controls, not behaviour.** Every field binds the same state the surface that spends it reads, so
   this is a second place to *change* a setting and never a second setting.
 - **Theme names all three modes.** The cycling button it replaces showed the mode it was *in*, which
@@ -698,10 +710,10 @@ the component that drew a layer inside a flat section has nothing left to draw.
   is thin and now has a real run behind it: a spinner beside "the copilot is working", and the
   transcript pinned to its newest row. A `tool_call` still looks identical whether its result is
   seconds away or never coming.*
-- **Two rules met each other and had to be reconciled.** The toolbar holds **Run**, the transcript
-  holds **Go**, and at most one solid accent fill may be visible per view — so V0 gives the fill to
-  whichever is the way forward: **Go** until a spec has steps, **Run** once it does. Stated here
-  because it is a real decision, not an implementation detail.
+- **Two rules met each other and had to be reconciled.** The workflow pane's `action-bar` holds
+  **Run**, the transcript holds **Go**, and at most one solid accent fill may be visible per view —
+  so V0 gives the fill to whichever is the way forward: **Go** until a spec has steps, **Run** once
+  it does. Stated here because it is a real decision, not an implementation detail.
 - **The left pane became a disk tree on 2026-08-02 and has only been read on small projects.** The
   filter is what is supposed to make it survive a big repo — a file appears if portia knows it or if
   the loader can read it — and that has never been tried on a repo with a thousand files under

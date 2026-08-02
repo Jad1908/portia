@@ -235,10 +235,16 @@ adding code, and extend them rather than working around them:
     every field binds the state the surface that spends it reads, so it is a second place to
     *change* a setting and never a second setting. The theme, the project switch, the brief, the
     model and effort, and the import destination were chrome across the top of every screen; a
-    toolbar says where you are and acts on what is in front of you.
+    toolbar says where you are and acts on what is in front of you. It is **four tabs**, sharing
+    `pane-tabs` with the transcript rather than growing a second tab style.
   - **A side pane is closed by dragging its edge past its floor**, which leaves a rail to reopen it.
     The floor was always "the width at which this pane stops being worth having" (`DESIGN.md`), so
     it was the honest place to close it; the toolbar toggles are gone.
+  - **The four run actions are drawn on the middle pane, right-aligned to it** — they act on that
+    pane and nothing else, and from the toolbar's corner they sat above the transcript. It is also
+    the only place they *can* be aligned to it: a dragged pane's width never reaches the server, so
+    chrome above the panes cannot know where the middle one ends. Their tooltips are the action's
+    name and nothing more; a hover is not where a sentence gets read.
   - **The middle pane is one canvas at two zoom levels** (`docs/PIPELINE.md` §6). A card in the
     project graph is a *table* — one spec, one table — and a card inside an opened one is a *step*.
     Three node kinds, and the distinction is the point: a `SOURCE` is a file that arrived, a
