@@ -188,12 +188,18 @@ positive at small sizes to keep the cool surfaces airy.
 - Three panes: **files & artifacts** (left) · **workflow** (middle) · **transcript** (right).
 - The middle pane splits horizontally: **the graph on top, the run report below**, with a draggable
   divider. The report half is the taller of the two by default — it is where the evidence is.
-- Minimum viewport ~`1024×640`. Left default 260px, transcript default 400px, both draggable and
-  both collapsible from the toolbar. The workflow pane is always present and takes the remainder.
+- Minimum viewport ~`1024×640`. Left default 260px, transcript default 400px, both draggable. The
+  workflow pane is always present and takes the remainder.
 - **Pane minimums are pixels, not percentages** — 200px left, 330px transcript. A percentage floor
   moves with the window, and the transcript holds the `question-form` and the `write-confirm`, the
   two components this app exists for. Below its minimum it stops being worth having, and the honest
   move at that point is to close it rather than to squeeze it.
+- **So the floor is a threshold, not a wall: dragging past it closes the pane**, leaving a
+  `pane-rail`. That is the whole of how a pane is closed — there is no toolbar toggle, because
+  closing a pane is something you do at the side of the window and not at the top of it. The
+  *ceiling* is still a hard limit, and it is the one that matters: every side pane's ceiling is
+  computed against the workflow pane's floor, so no combination of drags can squeeze the middle
+  pane past the width at which it stops working.
 - Panes are divided by a 1px `{colors.hairline}` — no gutters, no shadows between them. The canvas
   runs continuously behind all three. **Every divider is draggable**, including the graph/report one:
   a hairline at rest, taking `{colors.accent-primary}` only while it is being dragged, because it is
@@ -202,11 +208,11 @@ positive at small sizes to keep the cool surfaces airy.
 
 ### Width behavior
 - **Wide (≥1400px):** all three panes visible.
-- **Medium (≥1024px):** the transcript is closed by default and reachable from its toolbar toggle.
+- **Medium (≥1024px):** the transcript is closed by default and reachable from its `pane-rail`.
 - **Narrow (<1024px):** the left pane is closed by default too. The workflow pane and the Run
   action stay reachable at every width.
-- These are **defaults, not constraints.** Crossing a threshold changes what is showing; the
-  toolbar toggles win afterwards, and resizing *within* a band never overrules you. A hard rule
+- These are **defaults, not constraints.** Crossing a threshold changes what is showing; what you
+  then do to a pane wins afterwards, and resizing *within* a band never overrules you. A hard rule
   would take the transcript away from anyone on a 1280px screen, and it holds the two components
   this app exists for.
 - **It cannot be done in CSS**, and the first attempt at it was three media queries that did
@@ -327,23 +333,47 @@ These exist so a test run never needs a terminal (`VISION.md` → "The no-termin
   interpretation arrives later through the ordinary transcript. **Never one merged spinner** — one
   of the two costs money and the operator should be able to see which is which.
 
-### Left pane — files & artifacts
+### Left pane — the project tree
 
-**`artifact-pane`** — the curated project view
-- Fill `{colors.canvas}`, 1px `{colors.hairline}` on its content-facing edge. Grouped sections with
-  `{typography.caption}` `{colors.mute}` headers: **Sources**, **Specs**, **Outputs**, **Runs**.
-- It is **not a file tree**. A file appears only if portia knows about it (`VISION.md` → V0). Empty
-  sections state that plainly rather than disappearing.
+**`artifact-pane`** — the project directory, filtered to what portia reads
+- Fill `{colors.canvas}`, 1px `{colors.hairline}` on its content-facing edge.
+- **It is a file tree, and that reverses what this file used to say.** The six flat sections
+  (Sources · Specs · Models · Outputs · Runs · Turns) are gone. The reasoning for them was that a
+  curated view survives a big repo where a disk walk does not; what they cost was the *shape* of
+  the project — `specs/staging/stg_orders.yaml` and `models/staging/stg_orders.sql` arrived as two
+  rows with one name and no location, which is the first question anyone asks of a pipeline they
+  have been handed. Six known folders was also a structure the window imposed on the agent, and the
+  folders are not portia's to fix.
+- **The curation survives as a filter, not as a layout.** A file is drawn if portia knows it (the
+  catalog, `discover_specs`, the compiled models, the written outputs, the saved runs) *or* if
+  `core.io` registers a reader for its suffix. A folder is drawn only if something under it
+  survived. A README, a notebook and a stray `.py` stay hidden, so this is still a view of the data
+  and portia's artifacts — never a project explorer.
+- **Progressive disclosure**: the top level is open, everything below it is closed, and a caret
+  opens one level at a time. Which folders are open is per project and is not persisted.
+- Two rows are pinned outside the tree because their files live in `.portia/`, which is not walked:
+  the **project brief** at the top, and **Turns** as a section at the foot under a
+  `{typography.caption}` `{colors.mute}` header. A *run* executed a spec and is a file in the
+  project; a *turn* was the copilot deciding what the spec should say. Same word, two artifacts.
 
-**`artifact-row`** + **`artifact-row-selected`**
-- Default: transparent, leading kind icon `{colors.mute}`, name `{colors.body}`
-  `{typography.mono}`, trailing metadata (`14 rows`, `5 steps`) `{colors.mute}`
-  `{typography.caption}`, padding `8px 12px`, `{rounded.sm}`.
+**`artifact-row`** + **`artifact-row-selected`** — one row, for a folder or a file
+- Default: transparent, optional caret `{colors.ash}`, leading kind icon `{colors.mute}`, name
+  `{colors.body}` `{typography.mono}`, trailing metadata (`14 col`, `5 step`) `{colors.mute}`
+  `{typography.caption}`, padding `8px 12px`, `{rounded.sm}`. Each level indents by 14px, held in
+  CSS as `--depth` — how far a level steps in is a look.
 - **Selected**: `{colors.accent-soft}` fill, name and icon `{colors.accent-text}`. One of the three
   places the accent appears.
+- **One row type at two settings, not two components.** A folder is this row with a caret; a file is
+  this row without one. Two components that had to be kept looking alike would drift the first time
+  either was touched.
 - A source that still carries the auto-drafted placeholder summary shows an
   **uninterpreted** marker — `{colors.mute}`, `{typography.caption}`, uncolored. It is a fact about
-  the catalog, not a warning.
+  the catalog, not a warning. A readable file with no catalog entry shows **not indexed** the same
+  way: it is a fact about the catalog, and the row opens an inspector that offers to profile it.
+- Folders sort before files and both sort by name. **Nothing in this pane is ordered, coloured or
+  sized by anything measured** — that is the same rule as everywhere else, and a tree makes it
+  easier to break, because "put the interesting files first" is a tempting thing for a file browser
+  to do.
 
 ### Middle pane, top — the graph
 
@@ -505,20 +535,46 @@ questions-and-insights UX *is* the product" — and they get the most design att
 
 **`toolbar`** — the top bar
 - `{colors.canvas}`, 1px `{colors.hairline}` bottom rule. Holds: the mark and the **session name**
-  (left), a spacer, then "Run", "Write outputs" and "Save report" (right), the files and transcript
-  toggles, and the light/dark override.
+  (left), a spacer, then **Run**, **Build**, **Write outputs** and **Save report** as icons, then
+  the **settings** gear.
+- **The four run actions are icon-only**, `{rounded.md}`, square padding, and each carries a tooltip
+  that leads with its own name, then what pressing it does, then where the result lands. That is
+  *more* than the labels carried, not less — a label never had room for the path. Run keeps the one
+  accent fill once a spec has steps; the other three stay `button-tertiary`.
 - **No spec switcher.** A spec is an artifact and artifacts are chosen in the left pane, where the
   sources, outputs and runs are. A second place to choose one is a second thing to keep in sync.
 - **Run writes nothing.** The two save actions beside it are how a result becomes durable, and both
   are things you press rather than things that happen to you — the same rule as every other write
   in the app.
-- **The session name is the open directory's name, and it is a button**: clicking it returns to the
-  project picker, which is how you move between projects. Disabled while a turn is running — a
-  switch mid-turn would leave the copilot writing into a directory the window has stopped watching.
+- **The session name is the open directory's name, and it is a label.** It used to be a button, and
+  the only route back to the project picker — a label you had to discover was clickable. Where you
+  are and how to leave are two statements; the second one is in `settings-panel`.
+- **No preferences.** The theme cycler, the Brief button and the two pane toggles all lived here and
+  none of them belongs: a toolbar says where you are and acts on what is in front of you. The theme
+  is in `settings-panel`, the brief is a row at the top of the left pane, and a pane is closed by
+  dragging its edge and reopened from its `pane-rail`.
 - **Not the project brief.** An earlier draft put the brief's first line here. The brief is the most
   load-bearing text in the product and it is still not chrome: a paragraph of prose across the top
-  of every screen crowds out the one thing a toolbar is for, which is saying where you are. It is
-  currently visible nowhere in the app, which is a gap rather than a decision.
+  of every screen crowds out the one thing a toolbar is for. It is a pinned row in the left pane and
+  a pane of its own now, which is where a paragraph you are meant to rewrite belongs.
+
+**`settings-panel`** — the one place a preference lives
+- A `dialog`: `{colors.surface}` panel, `{rounded.lg}`, one soft shadow, `{spacing.lg}` padding.
+- Four groups under `{typography.caption}` `{colors.mute}` headers separated by
+  `{colors.hairline}` rules, in the order they are worth changing: **Project** (the path, the
+  switch, the brief) · **Copilot** (model, effort) · **Data** (add data, destination, the interpret
+  toggle) · **Appearance** (theme as a `segmented-control` naming all three modes).
+- **Controls, not behaviour.** Every field binds the same state the surface that spends it reads, so
+  this is a second place to *change* a setting and never a second setting.
+- **Theme names all three modes.** The cycling button it replaces showed the mode it was *in*, which
+  cannot distinguish "dark" from "auto, and it is night".
+
+**`pane-rail`** — a closed side pane, as the edge it left behind
+- 32px, fill `{colors.canvas}`, 1px `{colors.hairline}` on both sides. An arrow `button-micro`
+  pointing the way the pane will come back from, and the pane's own icon in `{colors.stone}`
+  beneath it saying which pane it was.
+- **Not a sliver of the pane.** 28px of a file tree reads as a rendering failure; a rail reads as a
+  thing you press.
 
 **`dialog`** — a transient overlay (adding data)
 - `{colors.surface}` panel on the standard scrim, `{rounded.lg}`, one soft shadow — the exception to
@@ -528,10 +584,6 @@ questions-and-insights UX *is* the product" — and they get the most design att
 
 **`keycap`** — `{colors.surface-card}` fill, `{colors.body}` `{typography.mono}`, padding `1px 6px`,
 `{rounded.xs}`.
-
-**`group-header`** — a layer inside a left-pane section
-- 11px, `{colors.ash}`, indented under its `{spacing.lg}` section header. Identical for every
-  layer. A project that declares no layer gets no group headers at all.
 
 **`stale-banner`** — a generated `.sql` that no longer matches its spec
 - `{colors.warning-soft}` fill, 1px `{colors.warning}` at 40%, `{rounded.md}`. Drift, not a
@@ -566,9 +618,18 @@ questions-and-insights UX *is* the product" — and they get the most design att
   edges must never disagree about a rate.
 
 ### Removed (from the sibling project — do not implement)
-`primary-nav`, `footer-section`, `pricing-tier-card`, `hero-stripe-band`, `file-tree-row`
-(portia's left pane is curated, not a disk tree), `prompt builder` components, `preview-full`.
-Their *visual language* lives on in the components above.
+`primary-nav`, `footer-section`, `pricing-tier-card`, `hero-stripe-band`, `prompt builder`
+components, `preview-full`. Their *visual language* lives on in the components above.
+
+**`file-tree-row` was on that list and has been taken off it** — the entry read "portia's left pane
+is curated, not a disk tree", and the left pane is a disk tree now (`artifact-pane`). The curation
+turned out to be a *filter*, which a tree can carry perfectly well; what the flat sections were
+actually doing was hiding where every file lived. Kept here rather than quietly deleted, because it
+is the second time in this repo an argument that read well did not survive contact with the thing
+being used (`docs/DUCKDB_MIGRATION.md` §3 is the first).
+
+**`group-header` is removed too**, and for a happier reason: layers are folders in the tree now, so
+the component that drew a layer inside a flat section has nothing left to draw.
 
 ## Do's and Don'ts
 
@@ -583,6 +644,7 @@ Their *visual language* lives on in the components above.
 
 ### Don't
 - **Don't rank.** No sorting by severity, no heat scales, no badge that grows with its number, no "3 issues" roll-up that implies a score. The engine refuses to rank; the screen must not do it on the engine's behalf.
+- **Don't reorder the left tree.** Folders before files, then by name. "Recently changed first", "sources first", "the ones with findings first" are all the same mistake in a browser's clothing.
 - **Don't compute.** Every number on screen comes from `checks`/`ops`/`spec`. A percentage calculated in a widget is a number the engine never stood behind — the exact failure this project exists to prevent.
 - Don't summarize a table as good. No overall health tick, no readiness score.
 - Don't let an acknowledged flag collapse, truncate, or sit below the fold of its step.
@@ -640,6 +702,14 @@ Their *visual language* lives on in the components above.
   holds **Go**, and at most one solid accent fill may be visible per view — so V0 gives the fill to
   whichever is the way forward: **Go** until a spec has steps, **Run** once it does. Stated here
   because it is a real decision, not an implementation detail.
+- **The left pane became a disk tree on 2026-08-02 and has only been read on small projects.** The
+  filter is what is supposed to make it survive a big repo — a file appears if portia knows it or if
+  the loader can read it — and that has never been tried on a repo with a thousand files under
+  `data/`. Two things to watch when it is: whether a deep `data/` needs more than "top level open,
+  everything else closed", and whether an un-indexed file marked `not indexed` is useful or is
+  noise once there are two hundred of them.
+- **Which folders are open is not persisted**, and neither is the pane you closed. Both are
+  per-session, like the canvas's pan and zoom. Reopening a project puts you back at the top level.
 - **The framework fights the palette in two places.** Quasar paints its own components from
   `--q-primary`, so that token is pointed at `{colors.accent-primary}` and everything unstyled lands
   on portia's hue in both modes. Its `toggle` still insists on a solid brand fill for the selected

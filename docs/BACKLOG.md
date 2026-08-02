@@ -219,6 +219,18 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
 
 ## Interface — the app
 
+- **The tree has never been read on a big repo**, which is the case it was chosen for. The filter —
+  a file appears if portia knows it or `core/io` can read it — is what is supposed to carry it, and
+  two things want watching when a real one turns up: whether "top level open, everything else
+  closed" is the right default under a deep `data/`, and whether two hundred rows marked
+  `not indexed` are useful or are noise. Do not add sorting or a search box before looking; both are
+  the kind of thing that starts ranking (`DESIGN.md`).
+- **Which folders are open is not persisted**, and neither is a pane you closed. Per session, like
+  the canvas's pan and zoom. Cheap to keep in `.portia/` if reopening a project at the top level
+  turns out to be annoying — and worth resisting until it is, since it is state to keep true.
+- **Indexing from the tree is one file at a time.** A folder full of un-indexed CSVs offers no "index
+  all of these", and un-indexing is still only in the source inspector. Both want a right-click
+  menu, which the tree does not have.
 - **Groups are invisible in the UI.** The engine has them fully — `catalog.set_group`, a write tool
   the copilot can call, and `agent/context.py` renders them into the L1 brief so a group genuinely
   changes what the copilot sees. The app shows none of it: you cannot see a group, make one, or
@@ -393,7 +405,13 @@ odd finding worth carrying forward isn't lost with it.*
   rendering are different jobs; only the second had a reason to stay still.
 - **Nothing is editable** — 2026-07-27: brief editable from the toolbar, a source's summary and
   roles editable in place or correctable by asking the copilot. Both write through
-  `catalog.set_interpretation`, which touches judgment and never a measured fact.
+  `catalog.set_interpretation`, which touches judgment and never a measured fact. *The brief moved
+  again 2026-08-02: a row at the top of the tree, opening an editor in the middle pane.*
+- **The left pane was six flat lists** — 2026-08-02 it became the project directory, filtered
+  (`ui/tree.py`). Reverses `DESIGN.md`'s "curated, not a disk tree"; the argument that failed is
+  kept there. Same commit range: preferences moved out of the toolbar into `ui/settings.py`, the
+  four run actions became icons, and a side pane is now closed by dragging its edge past its floor
+  and reopened from the rail that leaves behind.
 - **The graph is a fixed grid** — pan and a dot grid 2026-07-27; zoom 2026-08-01 (pinch,
   two-finger, buttons, anchored at the pointer).
 - **The add-data screen said nothing while it worked** — fixed 2026-07-28. It used to fire the
