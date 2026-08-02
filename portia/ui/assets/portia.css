@@ -462,6 +462,24 @@ html body {
   opacity: 1;
 }
 
+/* An icon with no label. Square rather than a text button with the text taken
+ * out — the asymmetric 6px/14px padding is there to sit around a word, and
+ * around a 16px glyph it reads as a button that lost something. What the button
+ * says lives in its tooltip, which is the deal an icon button makes. */
+.btn.q-btn.btn-icon {
+  padding: 6px;
+  min-width: 32px;
+}
+.btn.q-btn.btn-icon.btn-micro {
+  padding: 4px;
+  min-width: 24px;
+}
+.btn.q-btn.btn-icon .q-btn__content {
+  /* Quasar reserves label space even when there is none, which pushes the glyph
+   * off centre by a few pixels — enough to be visible in a row of four. */
+  gap: 0;
+}
+
 /* ── inputs (Quasar chrome, flattened to hairlines) ───────────────────────── */
 
 .p-field .q-field__control {

@@ -686,3 +686,37 @@ def test_the_toolbar_no_longer_carries_a_preference():
     source = inspect.getsource(app_module)
     for gone in ('c.button("Brief"', "_cycle_theme", "MODE_LABEL", "_switch_project"):
         assert gone not in source, f"{gone} is back in the toolbar"
+
+
+# --- icon buttons owe you a sentence -----------------------------------------
+
+
+def test_an_icon_with_no_label_is_styled_as_an_icon_button():
+    """A text button's 6px/14px padding is shaped around a word; around a 16px
+    glyph it reads as a button that lost something."""
+    with ui.element("div"):
+        icon_only = c.button("", icon="play_arrow")
+        labelled = c.button("Run", icon="play_arrow")
+        no_icon = c.button("Run")
+
+    assert "btn-icon" in icon_only.classes
+    assert "btn-icon" not in labelled.classes
+    assert "btn-icon" not in no_icon.classes
+
+
+def test_every_run_action_says_what_it_is_now_that_none_of_them_says_it_on_screen():
+    """The label is where the name was. It moved into the tooltip, so each of the
+    four leads with its own name — an icon row where hovering says only "runs the
+    project" is four glyphs you have to learn."""
+    from portia.ui import app as app_module
+
+    tips = (
+        app_module._RUN_TIP,
+        app_module._RUN_NO_SPEC,
+        app_module._BUILD_TIP,
+        app_module._WRITE_TIP,
+        app_module._REPORT_TIP,
+        app_module._SETTINGS_TIP,
+    )
+    for tip in tips:
+        assert " · " in tip, f"{tip!r} does not lead with a name"

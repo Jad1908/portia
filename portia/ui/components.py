@@ -116,8 +116,15 @@ def button(
 
     The teal fill is scarce on purpose — at most one per view, and never on
     approving a write (DESIGN.md → `write-confirm`).
+
+    **An icon with no label is an icon button**, and gets square padding rather
+    than a text button's asymmetric one. That is a statement of fact about the
+    arguments rather than a flag to remember: a caller that passes both gets a
+    labelled button, and one that passes only an icon owes it a tooltip.
     """
     classes = f"btn btn-{kind}" + (" btn-micro" if micro else "")
+    if icon and not label:
+        classes += " btn-icon"
     # color=None so Quasar doesn't add `bg-primary`: which fill a button gets is
     # a portia decision (there is at most one accent fill per view), not a
     # framework default.

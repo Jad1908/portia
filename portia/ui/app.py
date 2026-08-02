@@ -204,11 +204,19 @@ def _run_controls() -> None:
     Run keeps the single accent fill once a spec has steps; Build stays quiet
     beside it. Scope is not importance, and the whole project is not the more
     important button.
+
+    **All four are icons, and each says what it is on hover.** They are four
+    verbs in a row at the top of a window whose other two panes are the thing you
+    are reading; spelled out they were most of the toolbar, and "Write outputs"
+    beside "Save report" is two labels you have to read carefully to tell apart
+    anyway. The tooltip is not a nicety here — it is where the sentence went, so
+    each one leads with its own name and then says what pressing it does and
+    where the result lands.
     """
     kind = "primary" if APP.spec_has_steps and not APP.busy else "tertiary"
-    run = c.button("Run", _run, kind=kind, icon="play_arrow", enabled=APP.spec_has_steps)
+    run = c.button("", _run, kind=kind, icon="play_arrow", enabled=APP.spec_has_steps)
     run.tooltip(_run_tooltip())
-    build = c.button("Build", _build, icon="construction", enabled=not APP.busy)
+    build = c.button("", _build, icon="construction", enabled=not APP.busy)
     build.tooltip(_BUILD_TIP.format(models=APP.root / "models"))
     # Run and Build write the pipeline, never the data — these two are how a
     # *result* becomes durable, and both are things you press rather than things
@@ -218,15 +226,15 @@ def _run_controls() -> None:
     # results: it saves a table per model that ran, so a build that never touched
     # the spec you have open still produced tables worth keeping. Save report is
     # about the open spec, so that one stays on `results`.
-    write = c.button("Write outputs", _write, icon="save_alt", enabled=bool(APP.built))
+    write = c.button("", _write, icon="save_alt", enabled=bool(APP.built))
     write.tooltip(_WRITE_TIP.format(out=APP.root / engine.OUT_DIR))
-    report = c.button("Save report", _save_report, icon="description", enabled=bool(APP.results))
-    report.tooltip(str(APP.root / engine.RUNS_DIR))
+    report = c.button("", _save_report, icon="description", enabled=bool(APP.results))
+    report.tooltip(_REPORT_TIP.format(runs=APP.root / engine.RUNS_DIR))
 
 
 def _run_tooltip() -> str:
     if APP.spec_path is None:
-        return "no spec open"
+        return _RUN_NO_SPEC
     return _RUN_TIP.format(name=APP.spec_path.stem, path=APP.spec_path)
 
 
@@ -296,13 +304,19 @@ def _toggle_files() -> None:
     shell.refresh()
 
 
-_SETTINGS_TIP = "Theme, the project, what a turn spends, and where data lands."
+#: The four run actions are icons, so their tooltips carry the name as well as
+#: the sentence. Each leads with what it is called, then what pressing it does,
+#: then where the result lands — everything the label used to say and more, since
+#: the label never had room for the path.
+_SETTINGS_TIP = "Settings · theme, the project, what a turn spends, and where data lands."
+_RUN_NO_SPEC = "Run · no spec open"
 _RUN_TIP = (
-    "Run {name} and every model it reads, then write their .sql. "
+    "Run · {name} and every model it reads, then write their .sql. "
     "A table isn't built until its inputs are.\n{path}"
 )
-_BUILD_TIP = "Run every spec in the project and write the whole pipeline.\n{models}"
-_WRITE_TIP = "Save a CSV for every model the last run built, one file each.\n{out}"
+_BUILD_TIP = "Build · run every spec in the project and write the whole pipeline.\n{models}"
+_WRITE_TIP = "Write outputs · a CSV for every model the last run built, one file each.\n{out}"
+_REPORT_TIP = "Save report · the open spec's run report, as markdown.\n{runs}"
 _NOTHING_TO_BUILD = "No specs to build yet — the copilot writes one as it records steps."
 
 
