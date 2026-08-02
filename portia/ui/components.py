@@ -178,6 +178,26 @@ def model_effort(app, on_effort: Callable[[str], Any]) -> None:
     segmented(EFFORTS, app.effort, on_effort)
 
 
+#: How long a pointer has to rest before a tooltip appears, in ms. Quasar's
+#: default is instant, which is right for a button you aimed at and wrong for
+#: anything you cross on the way somewhere else — a list of rows especially,
+#: where instant tooltips fire all the way down the pane as you scan it.
+TOOLTIP_DELAY = 600
+
+
+def hint(element, text: str) -> None:
+    """A tooltip that waits to be asked for.
+
+    Use this instead of ``element.tooltip(...)`` on anything in a list. Only for
+    text that is *not already on screen*: a tooltip repeating the row you are
+    pointing at is a thing that appears, is read, and says nothing.
+    """
+    if not text:
+        return
+    with element:
+        ui.tooltip(text).props(f"delay={TOOLTIP_DELAY}")
+
+
 def chip(value: str) -> ui.label:
     """`type-chip` — a source's or step's kind (`csv`, `join`, `normalize`, `sql`)."""
     return ui.label(value).classes("type-chip")
@@ -290,7 +310,10 @@ def artifact_row(
         with ui.element("div").classes("artifact-body"):
             ui.label(name).classes("artifact-name")
             if note:
-                ui.label(note).classes("artifact-note").tooltip(note)
+                # No tooltip. It repeated the line it was attached to, which
+                # meant every row in the tree popped a box saying what the row
+                # already said, on the way past to somewhere else.
+                ui.label(note).classes("artifact-note")
         if meta:
             ui.label(meta).classes("artifact-meta")
     if on_click is not None:

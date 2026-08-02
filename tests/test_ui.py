@@ -931,3 +931,15 @@ def test_a_split_button_is_the_only_one_that_gets_a_rule_through_it():
     assert "btn-split" in split.classes
     assert "btn-split" not in plain.classes
     assert "btn-split" not in icon_only.classes, "an icon with no label has nothing to rule off"
+
+
+def test_the_tree_never_pops_a_box_repeating_the_row_you_are_pointing_at():
+    """Instant tooltips fired all the way down the pane as you scanned it, each
+    saying what the row already said."""
+    import inspect
+
+    from portia.ui import artifacts
+
+    source = inspect.getsource(artifacts)
+    assert ".tooltip(" not in source, "the tree is back to tooltipping its own rows"
+    assert "c.hint(row, APP.project_context)" in source, "the brief still says what a row cannot"

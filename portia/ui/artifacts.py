@@ -106,12 +106,15 @@ def _brief_row() -> None:
     dialog it used to live in. A paragraph you are meant to rewrite with the
     sources on screen beside it is not a thing to type into an overlay.
     """
-    c.artifact_row(
+    row = c.artifact_row(
         name="Project brief",
         icon="notes",
         selected=APP.is_selected(BRIEF, ""),
         on_click=lambda: _select(BRIEF, ""),
-    ).tooltip(APP.project_context)
+    )
+    # The one tooltip left in this pane, because it is the one that says
+    # something the row does not: the brief itself.
+    c.hint(row, APP.project_context)
 
 
 # --- the tree ---------------------------------------------------------------
@@ -143,7 +146,7 @@ def _folder(node: tree.Node, depth: int, stale: set[str]) -> None:
         caret=CARET_OPEN if is_open else CARET_SHUT,
         depth=depth,
         on_click=lambda rel=node.rel, d=depth: _toggle(rel, d),
-    ).tooltip(node.rel)
+    )
     if is_open:
         for child in node.children:
             _node(child, depth + 1, stale)
@@ -158,7 +161,7 @@ def _file(node: tree.Node, depth: int, stale: set[str]) -> None:
         depth=depth,
         selected=APP.is_selected(node.kind, node.ident),
         on_click=lambda n=node: _open(n),
-    ).tooltip(node.rel)
+    )
 
 
 def _meta(node: tree.Node) -> str:

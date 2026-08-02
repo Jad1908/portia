@@ -887,6 +887,15 @@ html body {
 /* One row type for a folder and for a file, at two settings: `--depth` indents
  * it and a caret appears when it can be opened. Two components that had to be
  * kept looking alike would drift the first time either was touched. */
+/* How far one level of the tree steps in, and where its guide line is drawn.
+ * One number, used by both, so a guide can never drift off the indent it marks.
+ * 14px was too tight to read as containment — a nested file looked like a
+ * sibling that happened to start slightly later. */
+:root {
+  --indent: 20px;
+  --indent-guide: 13px;
+}
+
 .artifact-row {
   display: flex;
   align-items: center;
@@ -896,15 +905,30 @@ html body {
   max-width: 100%;
   gap: var(--sp-sm);
   padding: var(--sp-sm) var(--sp-md);
-  /* How far one level of the tree steps in. It lives here rather than being
-   * computed into a padding in Python, for the same reason every other number in
-   * this file does: the indent is a look. */
-  padding-left: calc(var(--sp-md) + var(--depth, 0) * 14px);
+  padding-left: calc(var(--sp-md) + var(--depth, 0) * var(--indent));
   margin: 0 var(--sp-sm);
   border-radius: var(--r-sm);
-  background: transparent;
   cursor: pointer;
   min-width: 0;
+
+  /* One faint vertical rule per ancestor level, so a file reads as being
+   * *inside* the folder above it rather than merely further right. The rows are
+   * siblings in the DOM — a tree of nested elements would nest the hover and the
+   * selection with it — so the guides are drawn as a repeating background across
+   * the row's own indent, one stripe every `--indent`, stopping where the
+   * content starts.
+   *
+   * `background-color` and not `background`: the hover and selected rules below
+   * set a colour, and the shorthand would wipe the guides out with it. */
+  background-color: transparent;
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--hairline-soft) 0 1px,
+    transparent 1px var(--indent)
+  );
+  background-repeat: no-repeat;
+  background-position: var(--indent-guide) 0;
+  background-size: calc(var(--depth, 0) * var(--indent)) 100%;
 }
 .artifact-row .artifact-caret {
   color: var(--ash);
@@ -949,12 +973,21 @@ html body {
   color: var(--mute);
   flex: 0 0 auto;
 }
+/* `background-color`, never the `background` shorthand — that would take the
+ * indent guides with it. Eased rather than instant: a tree is a list you run the
+ * pointer down, and an unanimated fill snapping on and off every row on the way
+ * past is the flicker that made this pane feel twitchy. 120ms is short enough
+ * to feel like a response and long enough that a row you crossed on the way
+ * somewhere else never fully lights up. */
+.artifact-row {
+  transition: background-color 120ms ease-out;
+}
 .artifact-row:hover {
-  background: var(--surface-card);
+  background-color: var(--surface-card);
 }
 .artifact-row--selected,
 .artifact-row--selected:hover {
-  background: var(--accent-soft);
+  background-color: var(--accent-soft);
 }
 .artifact-row--selected .artifact-name,
 .artifact-row--selected .artifact-icon {
