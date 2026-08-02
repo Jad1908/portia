@@ -72,6 +72,16 @@ build it. **Run** executes a model and everything it reads and writes their SQL;
 project. Outside data comes in through an import that states what it will copy and to where before
 it copies anything.
 
+**The window was overhauled on 2026-08-02, and the theme was putting every control where the thing
+it acts on is.** The left pane is a **real directory tree, filtered** to what portia knows or can
+read (`ui/tree.py`) — which reversed `DESIGN.md`'s "curated, not a disk tree", with the argument
+that failed kept beside the reversal. Preferences left the toolbar for a tabbed **Settings** panel
+(`ui/settings.py`); the four run actions left it for the **middle pane they act on**; a side pane is
+closed by dragging its edge past its floor and reopened from the rail that leaves behind. What is
+left of the toolbar is a mark, the project's name and a gear. None of it changed what the engine
+does — it is all edge — but it is the first time the app was shaped by using it rather than by
+speccing it, and `BACKLOG.md` records what that turned up and did not fix.
+
 **Scale is built.** The engine is DuckDB throughout and everything is a lazy relation. Measured end
 to end on real PHQ data: 4.82 GB across three tables indexes in 32 s, a 50M × 3M join is diagnosed
 in 3.8 s, and a full spec run over 50M rows takes 27 s. **Peak memory is bounded by the largest

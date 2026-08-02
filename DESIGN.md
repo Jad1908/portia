@@ -366,6 +366,11 @@ These exist so a test run never needs a terminal (`VISION.md` → "The no-termin
   and portia's artifacts — never a project explorer.
 - **Progressive disclosure**: the top level is open, everything below it is closed, and a caret
   opens one level at a time. Which folders are open is per project and is not persisted.
+- **The caret is the only thing that changes when a folder opens.** The folder glyph stays filled,
+  in `{colors.mute}`, at every depth and in both states. It briefly swapped to a hollow
+  `folder_open` and that was wrong twice over: two marks for one piece of state, and in this app a
+  filled shape going hollow is how a row says *a different kind of thing* — on a folder it read as
+  the folder having changed kind rather than having opened.
 - Two rows are pinned outside the tree because their files live in `.portia/`, which is not walked:
   the **project brief** at the top, and **Turns** as a section at the foot under a
   `{typography.caption}` `{colors.mute}` header. A *run* executed a spec and is a file in the
