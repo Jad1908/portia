@@ -606,3 +606,402 @@ def test_the_window_and_the_terminal_plan_the_same_import(project):
     assert engine.plan_import(str(outside / "orders.csv"), "data", app) == plan(
         sources, app.root / "data", app.root
     )
+
+
+# --- settings: one place, and no second setting ------------------------------
+
+
+def test_the_theme_offers_all_three_modes_by_name():
+    """The cycling toolbar button showed the mode it was *in*, which cannot
+    distinguish "dark" from "auto, and it is night". Settings names all three."""
+    from portia.ui import theme
+
+    assert set(theme.MODES) == set(theme.MODE_LABEL)
+    assert [theme.MODE_LABEL[m] for m in theme.MODES] == ["auto", "light", "dark"]
+    for mode in theme.MODES:
+        assert theme.MODE_VALUE[theme.MODE_LABEL[mode]] is mode
+
+
+def test_the_model_and_effort_are_one_setting_in_every_place_they_are_picked():
+    """Three hand-rolled copies of the pair is how they stop agreeing — an option
+    added to one list and not the others, or a select writing a field the turn
+    never reads. One component, bound to the two fields a turn is started with."""
+    import inspect
+
+    from portia.ui import screens, settings, transcript
+
+    for module in (settings, transcript, screens):
+        source = inspect.getsource(module)
+        assert "c.model_effort(APP" in source, f"{module.__name__} rolls its own"
+        assert "MODELS" not in source, f"{module.__name__} still builds a model list"
+
+
+def test_every_setting_binds_a_field_the_rest_of_the_app_actually_reads():
+    """A second place to change a setting, never a second setting.
+
+    A typo'd binding is a control that looks live, writes an attribute nothing
+    reads, and silently does nothing — which is the whole failure mode a
+    settings panel invites.
+    """
+    import dataclasses
+    import inspect
+    import re
+
+    from portia.ui import settings
+
+    bound = re.findall(r'\.bind_value\(\s*APP,\s*"([a-z_]+)"', inspect.getsource(settings))
+    fields = {f.name for f in dataclasses.fields(state.App)}
+
+    assert bound, "the panel binds nothing at all"
+    assert set(bound) <= fields, f"settings writes what nothing reads: {set(bound) - fields}"
+
+
+def test_switching_projects_refuses_while_a_turn_is_running(monkeypatch):
+    """A switch mid-turn leaves the copilot writing into a directory the window
+    has stopped looking at."""
+    from portia.ui import settings
+    from portia.ui.state import APP
+
+    APP.streams[state.CHAT].turn = state.Turn(prompt="g", model="m", effort="low")
+    said = []
+    monkeypatch.setattr(settings.ui, "notify", said.append)
+    monkeypatch.setattr(settings, "_close", lambda: None)
+    APP.opened = True
+
+    settings._switch_project()
+
+    assert APP.opened is True, "still in the project"
+    assert said == [settings.SWITCH_BUSY]
+    APP.streams[state.CHAT].turn = None
+
+
+def test_the_toolbar_no_longer_carries_a_preference():
+    """Theme, the brief and the project switch were three buttons across the top
+    of every screen. A toolbar says where you are and acts on what is in front of
+    you; none of those three is either."""
+    import inspect
+
+    from portia.ui import app as app_module
+
+    source = inspect.getsource(app_module)
+    for gone in ('c.button("Brief"', "_cycle_theme", "MODE_LABEL", "_switch_project"):
+        assert gone not in source, f"{gone} is back in the toolbar"
+
+
+# --- icon buttons owe you a sentence -----------------------------------------
+
+
+def test_an_icon_with_no_label_is_styled_as_an_icon_button():
+    """A text button's 6px/14px padding is shaped around a word; around a 16px
+    glyph it reads as a button that lost something."""
+    with ui.element("div"):
+        icon_only = c.button("", icon="play_arrow")
+        labelled = c.button("Run", icon="play_arrow")
+        no_icon = c.button("Run")
+
+    assert "btn-icon" in icon_only.classes
+    assert "btn-icon" not in labelled.classes
+    assert "btn-icon" not in no_icon.classes
+
+
+def test_a_run_actions_hover_is_the_name_of_the_action_and_nothing_else():
+    """An icon has to name its verb; it does not have to explain it. A hover is
+    read in the moment before a click, and the sentence that used to be here —
+    what the action does, plus the path it writes to — was three lines of prose
+    in a floating box. The sentences live in the docstring and in `DESIGN.md`."""
+    from portia.ui import app as app_module
+
+    assert app_module.ACTION_TIPS == (
+        "Run spec",
+        "Build full pipeline",
+        "Write outputs",
+        "Save report",
+    )
+    for tip in (*app_module.ACTION_TIPS, app_module._SETTINGS_TIP):
+        assert "\n" not in tip and len(tip) <= 24, f"{tip!r} is explaining, not naming"
+
+
+def test_the_run_actions_are_drawn_on_the_pane_they_act_on():
+    """From the far corner of the toolbar they floated above the transcript — the
+    one pane they have nothing to do with. Chrome above the panes also cannot
+    align to the middle pane's edge: a dragged pane's width never reaches the
+    server (`_room_beside_files`), so the actions have to be drawn inside it."""
+    import inspect
+
+    from portia.ui import app as app_module
+
+    assert "run_controls()" in inspect.getsource(app_module._middle)
+    assert "run_controls" not in inspect.getsource(app_module.toolbar.func)
+
+
+# --- closing a pane is a drag, and the rail is how it comes back -------------
+
+
+def test_dragging_a_pane_past_its_floor_closes_it():
+    """`DESIGN.md`: below its minimum a pane stops being worth having, and the
+    honest move is to close it rather than to squeeze it. The splitter used to
+    simply refuse to go further, which left the toolbar toggle as the only way."""
+    from portia.ui import app as app_module
+
+    closed: list[str] = []
+    floor = app_module.FILES_LIMITS[0]
+
+    app_module._past_the_floor(floor, floor, lambda: closed.append("files"))
+    assert closed == [], "at the floor it is still readable"
+
+    app_module._past_the_floor(floor - 1, floor, lambda: closed.append("files"))
+    assert closed == ["files"]
+
+
+def test_a_splitter_can_be_dragged_below_its_floor_at_all():
+    """The floor is a threshold now, not a wall — Quasar's own limit has to let
+    the drag reach it or the close can never fire."""
+    from portia.ui import app as app_module
+    from portia.ui.state import APP
+
+    APP.width, APP.show_files, APP.show_transcript = 1920, True, True
+    with ui.element("div"):
+        split = app_module._splitter(260, app_module.FILES_LIMITS, on_collapse=lambda: None)
+
+    assert split._props["limits"][0] == 0
+
+
+def test_a_drag_that_keeps_reporting_below_the_floor_redraws_once():
+    """A splitter reports its width continuously while it is held. Refreshing the
+    shell per frame rebuilds all three panes under a mouse that is still down."""
+    from portia.ui import app as app_module
+    from portia.ui.state import APP
+
+    APP.show_files = True
+    redrawn: list[int] = []
+    original = app_module.shell.refresh
+    app_module.shell.refresh = lambda *a, **k: redrawn.append(1)  # type: ignore[method-assign]
+    try:
+        for _ in range(5):
+            app_module._close_files()
+    finally:
+        app_module.shell.refresh = original  # type: ignore[method-assign]
+
+    assert APP.show_files is False
+    assert redrawn == [1], "one redraw for one state change"
+    APP.show_files = True
+
+
+def test_the_toolbar_no_longer_toggles_a_pane():
+    """Two controls at the top of the window for something you do at the side."""
+    import inspect
+
+    from portia.ui import app as app_module
+
+    source = inspect.getsource(app_module.toolbar.func)
+    assert 'c.button("Files"' not in source
+    assert 'c.button("Transcript"' not in source
+
+
+def test_the_pane_beside_a_rail_states_both_its_dimensions():
+    """A splitter panel does not stretch its children, so a flex row inside one
+    has to say its own width *and* height. Measured at 1280px before this: the
+    workflow pane came out 404px wide inside a 1019px panel, with the transcript
+    rail floating in the middle of the window.
+
+    `.p-body` cannot be reused for it — that one is the window's own row and
+    takes its height from `.p-window`'s flex column, where an explicit
+    `height: 100%` resolves against the viewport and swallows the toolbar.
+    """
+    import inspect
+    import re
+
+    from portia.ui import app as app_module
+    from portia.ui import theme
+
+    assert 'classes("p-pane-row")' in inspect.getsource(app_module._workflow_and_transcript)
+
+    css = theme.CSS.read_text()
+    block = re.search(r"\.p-pane-row \{([^}]*)\}", css)
+    assert block, ".p-pane-row is not styled"
+    assert "width: 100%" in block.group(1) and "height: 100%" in block.group(1)
+
+
+def test_every_settings_tab_has_something_to_draw():
+    """A tab with no body renders an empty panel, and the failure is silent."""
+    from portia.ui import settings
+
+    assert tuple(settings._BODY) == settings.TABS
+
+
+def test_picking_a_setting_does_not_throw_you_back_to_the_first_tab(monkeypatch):
+    """Picking a theme or an effort refreshes the whole panel. If the showing tab
+    were rebuilt with it, every pick would bounce you back to Project."""
+    from portia.ui import settings
+
+    monkeypatch.setattr(settings._panel, "refresh", lambda *a, **k: None)
+    monkeypatch.setattr(settings.theme, "set_mode", lambda *a, **k: None)
+    monkeypatch.setattr(settings, "_TAB", "Appearance")
+
+    settings._set_theme("light")
+    assert settings._TAB == "Appearance"
+
+    settings._set_effort("high")
+    assert settings._TAB == "Appearance"
+
+
+def test_the_settings_tabs_reuse_the_transcripts_tab_vocabulary():
+    """One tab style in the app, not two that have to be kept looking alike."""
+    import inspect
+
+    from portia.ui import settings, transcript
+
+    for module in (settings, transcript):
+        source = inspect.getsource(module)
+        assert 'classes("pane-tabs")' in source
+        assert "pane-tab--active" in source
+
+
+# --- chrome that got out of the way ------------------------------------------
+
+
+def test_a_pane_holds_on_below_the_width_it_used_to_close_at():
+    """The floor doubles as the close threshold, so a generous floor reads as a
+    pane that gives up under a drag that meant "make this narrower". Both are
+    still real floors — measured in a browser at 180px (left) and 290px (right),
+    where the old 200/330 would have closed them."""
+    from portia.ui import app as app_module
+
+    assert app_module.FILES_LIMITS[0] < 200
+    assert app_module.TRANSCRIPT_LIMITS[0] < 330
+    # ...but a floor of nothing is not a floor: below these the pane cannot show
+    # a file name at the tree's indent, or the question form's option rows.
+    assert app_module.FILES_LIMITS[0] >= 120
+    assert app_module.TRANSCRIPT_LIMITS[0] >= 240
+
+
+def test_the_css_backstop_agrees_with_the_floor_the_splitter_enforces():
+    """Two numbers for one rule: the pane's `min-width` holds it up if a drag
+    ever gets past the splitter, so a mismatch renders a pane wider than the
+    panel reserved for it — which is how the left pane once ended up drawn
+    underneath the transcript."""
+    import re
+
+    from portia.ui import app as app_module
+    from portia.ui import theme
+
+    css = theme.CSS.read_text()
+
+    def floor(selector: str) -> int:
+        # Every block naming this selector, not the first — the three panes share
+        # a block that sets no width, and it comes first in the file.
+        for block in re.findall(rf"^{re.escape(selector)} \{{([^}}]*)\}}", css, re.MULTILINE):
+            found = re.search(r"min-width: (\d+)px", block)
+            if found:
+                return int(found.group(1))
+        raise AssertionError(f"{selector} declares no min-width")
+
+    assert floor(".p-pane-left") == app_module.FILES_LIMITS[0]
+    assert floor(".p-pane-right") == app_module.TRANSCRIPT_LIMITS[0]
+    assert floor(".p-pane-mid") == app_module.WORKFLOW_MIN
+
+
+def test_run_and_build_carry_their_word_and_the_two_saves_do_not():
+    """The pair that executes something is the pair worth naming on screen. Four
+    labelled buttons is the row that made this a toolbar problem in the first
+    place."""
+    import inspect
+    import re
+
+    from portia.ui import app as app_module
+
+    # Collapsed, because the formatter wraps a long call across lines and this is
+    # a statement about the arguments, not about where they sit.
+    source = re.sub(r"\s+", " ", inspect.getsource(app_module.run_controls.func))
+
+    assert 'c.button( "Run", _run' in source or 'c.button("Run", _run' in source
+    assert 'c.button("Build", _build' in source
+    assert source.count("split=True") == 2, "exactly the two that execute something"
+    assert 'c.button("", _write' in source and 'c.button("", _save_report' in source
+
+
+def test_a_split_button_is_the_only_one_that_gets_a_rule_through_it():
+    """Most icon-plus-label buttons are ordinary buttons that happen to have an
+    icon; a rule through all of them would be decoration."""
+    with ui.element("div"):
+        split = c.button("Run", icon="play_arrow", split=True)
+        plain = c.button("Add data", icon="add")
+        icon_only = c.button("", icon="add", split=True)
+
+    assert "btn-split" in split.classes
+    assert "btn-split" not in plain.classes
+    assert "btn-split" not in icon_only.classes, "an icon with no label has nothing to rule off"
+
+
+def test_the_tree_never_pops_a_box_repeating_the_row_you_are_pointing_at():
+    """Instant tooltips fired all the way down the pane as you scanned it, each
+    saying what the row already said."""
+    import inspect
+
+    from portia.ui import artifacts
+
+    source = inspect.getsource(artifacts)
+    assert ".tooltip(" not in source, "the tree is back to tooltipping its own rows"
+    assert "c.hint(row, APP.project_context)" in source, "the brief still says what a row cannot"
+
+
+def test_a_failed_refresh_never_stops_the_settings_panel_opening(monkeypatch):
+    """Redrawing first is a nicety; opening is the point.
+
+    `refresh()` walks targets a page reload or a second tab may have
+    invalidated, and a raise there used to mean the gear silently did nothing —
+    showing a stale project path is a far smaller failure than a settings panel
+    that will not come up.
+    """
+    from portia.ui import settings
+
+    opened, said = [], []
+
+    class Dialog:
+        is_deleted = False
+
+        def open(self):
+            opened.append(True)
+
+    def boom():
+        raise RuntimeError("slot is gone")
+
+    monkeypatch.setattr(settings, "_DIALOG", Dialog())
+    monkeypatch.setattr(settings._panel, "refresh", boom)
+    monkeypatch.setattr(settings.ui, "notify", said.append)
+
+    settings.open_dialog()
+
+    assert opened == [True], "the panel opened anyway"
+    assert said and said[0].startswith("Settings may be showing stale values")
+
+
+def test_a_missing_settings_panel_says_so_rather_than_doing_nothing():
+    """The one case where not opening is correct — and it has to be audible."""
+    from portia.ui import settings
+
+    said = []
+    original_dialog, original_notify = settings._DIALOG, settings.ui.notify
+    settings._DIALOG = None
+    settings.ui.notify = said.append
+    try:
+        settings.open_dialog()
+    finally:
+        settings._DIALOG, settings.ui.notify = original_dialog, original_notify
+
+    assert said == [settings.NO_PANEL]
+
+
+def test_a_folder_looks_the_same_open_or_shut_and_only_the_caret_moves():
+    """Two marks for one piece of state, and the second one lied: a filled glyph
+    going hollow is how this app says *different kind of thing*, not *same thing,
+    expanded*. The caret is the disclosure control; the icon says `folder`."""
+    import inspect
+
+    from portia.ui import artifacts
+
+    source = inspect.getsource(artifacts._folder)
+    assert "icon=ICON[tree.FOLDER]" in source
+    assert "CARET_OPEN if is_open else CARET_SHUT" in source
+    # The glyph name as a string, not `APP.folder_open` or the note explaining why.
+    assert '"folder_open"' not in inspect.getsource(artifacts)

@@ -188,4 +188,4 @@ def _sync_artifacts() -> None:
 
     artifacts.pane.refresh()
     workflow.pane.refresh()
-    app_module.toolbar.refresh()
+    app_module.run_controls.refresh()

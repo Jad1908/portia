@@ -35,11 +35,21 @@ _PRECONNECT = '<link rel="preconnect" href="https://fonts.gstatic.com" crossorig
 _INTER = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap"
 
 #: auto → light → dark → auto. ``None`` is auto; the label says which is in play,
-#: because a toggle that only shows an icon can't distinguish "dark" from
+#: because a control that only shows an icon can't distinguish "dark" from
 #: "auto, and it's night".
 _CYCLE: dict[bool | None, bool | None] = {None: False, False: True, True: None}
 MODE_ICON = {None: "brightness_auto", False: "light_mode", True: "dark_mode"}
 MODE_LABEL = {None: "auto", False: "light", True: "dark"}
+#: The three, in the order the settings panel offers them, and the way back from
+#: the label a segmented control hands you.
+MODES: tuple[bool | None, ...] = (None, False, True)
+MODE_VALUE = {label: value for value, label in MODE_LABEL.items()}
+
+#: The page's light/dark control. It lives here rather than in `app.py` because
+#: two surfaces now change it — the settings panel and nothing else, since the
+#: toolbar toggle is gone — and a mode held by whichever module happened to build
+#: the page is a mode the other one has to reach into `app` for.
+_DARK: ui.dark_mode | None = None
 
 
 #: The client-side behaviour, one file each. Files rather than inline strings for
@@ -55,12 +65,24 @@ BEHAVIOUR = (CANVAS_JS, VIEWPORT_JS, SCROLL_JS)
 
 def apply() -> ui.dark_mode:
     """Attach the stylesheet, the font and the client-side behaviour; return the mode control."""
+    global _DARK
     ui.add_head_html(_PRECONNECT)
     ui.add_head_html(f'<link rel="stylesheet" href="{_INTER}">')
     ui.add_css(CSS)
     for script in BEHAVIOUR:
         ui.add_body_html(f"<script>{script.read_text()}</script>")
-    return ui.dark_mode(None)
+    _DARK = ui.dark_mode(None)
+    return _DARK
+
+
+def mode() -> bool | None:
+    """Which of the three is in play: ``None`` auto, ``False`` light, ``True`` dark."""
+    return _DARK.value if _DARK is not None else None
+
+
+def set_mode(value: bool | None) -> None:
+    if _DARK is not None:
+        _DARK.value = value
 
 
 def next_mode(current: bool | None) -> bool | None:

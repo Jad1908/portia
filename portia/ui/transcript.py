@@ -127,22 +127,15 @@ def _stay_at_the_bottom(scroll: ui.element) -> None:
 
 
 def _goal_input(stream) -> None:
-    from portia.agent.session import DEFAULT_MODEL, EFFORTS, MODELS
-
     with ui.element("div").classes("p-pad stack-md"):
         if stream.turn is not None:
             _running_state(stream)
             return
 
-        APP.model = APP.model or DEFAULT_MODEL
         ui.textarea(placeholder=_GOAL_PLACEHOLDER).classes("p-field w-full p-editor").props(
             "borderless autogrow"
         ).bind_value(APP, "goal")
-        with ui.element("div").classes("row-gap-sm"):
-            ui.select(list(MODELS), value=APP.model).props(
-                "borderless dense options-dense new-value-mode=add-unique use-input"
-            ).classes("p-field p-field-mono").bind_value(APP, "model")
-        c.segmented(EFFORTS, APP.effort, _set_effort)
+        c.model_effort(APP, _set_effort)
         with ui.element("div").classes("row-gap-sm"):
             c.button("Go", _go, kind=_go_kind(), icon="play_arrow")
             c.caption(_spend())

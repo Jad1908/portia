@@ -312,8 +312,9 @@ All four, plus one thing the pass turned up.
   its model, which is also what makes "overwrite" mean the right thing — rebuilding a
   table replaces its own file and no other.
 - **Layers are a grouping and a build order, never a quality ladder.** They group the
-  left panel and ride on a model card as their plain name — no colour, no size, no
-  per-tier roll-up, and no effect on position. The argument, because it comes up: a
+  left panel — *since 2026-08-02 by simply being the folders they already are on disk,
+  since that pane is a directory tree now* — and ride on a model card as their plain
+  name: no colour, no size, no per-tier roll-up, and no effect on position. The argument, because it comes up: a
   mart is more *processed*, not more *correct*. In the sandbox this was built against,
   the mart is the only model carrying blocking flags, and the defect was authored in
   staging (a `strip` that cast a numeric key to text, so `'1000.0'` never matched

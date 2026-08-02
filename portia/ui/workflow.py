@@ -40,7 +40,7 @@ from portia.checks.outcome import BLOCKING_FLAGS, describe_contribution, describ
 from portia.core.present import format_rate
 from portia.ui import components as c
 from portia.ui import engine, graph, state
-from portia.ui.state import APP, MODEL, OUTPUT, RUN, SOURCE, SPEC, TURN
+from portia.ui.state import APP, BRIEF, MODEL, OUTPUT, RUN, SOURCE, SPEC, TURN, UNINDEXED
 
 #: How tall the graph half sits by default, as a percentage. The report half is
 #: the taller of the two — it is where the evidence is (DESIGN.md → Layout).
@@ -67,6 +67,8 @@ def pane() -> None:
     kind, name = APP.selection or (None, "")
     if kind == SOURCE:
         _source_inspector(name)
+    elif kind == UNINDEXED:
+        _unindexed_inspector(name)
     elif kind == MODEL:
         _model_inspector(name)
     elif kind == OUTPUT:
@@ -75,6 +77,8 @@ def pane() -> None:
         _run_inspector(name)
     elif kind == TURN:
         _turn_inspector(name)
+    elif kind == BRIEF:
+        _brief_inspector()
     else:
         _workflow()
 
@@ -888,6 +892,81 @@ def _stale_banner(name: str) -> None:
         c.text(_STALE_WHY, color="c-body")
 
 
+def _unindexed_inspector(rel: str) -> None:
+    """A file the tree can see and the catalog has never read.
+
+    The tree shows every file in a format `core.io` registers a reader for, not
+    only the ones in the catalog — otherwise a CSV sitting in the repo is
+    invisible until you go looking for it through a dialog. Showing it means
+    answering the obvious next question here rather than sending you elsewhere,
+    so this is the profiling half of indexing and nothing else: deterministic,
+    free, and no model turn. What each source *is* stays the copilot's job.
+    """
+    path = APP.root / rel
+    with _inspector_scroll():
+        _inspector_header(path.name, rel)
+        if not path.exists():
+            c.empty_note("that file is gone")
+            return
+        c.text(_UNINDEXED_WHY, color="c-body")
+        c.button("Index it", partial(_index, path), kind="primary", icon="bolt")
+        c.caption(_INDEX_SCOPE)
+        c.rule()
+        c.table_preview(engine.read_table(path))
+
+
+async def _index(path: Path) -> None:
+    from portia.ui import artifacts
+
+    await engine.index([path], APP)
+    APP.select(SOURCE, path.stem)
+    artifacts.pane.refresh()
+    pane.refresh()
+    ui.notify(f"profiled {path.stem}")
+
+
+def _brief_inspector() -> None:
+    """The project brief, edited where the rest of the project is read.
+
+    **The most consequential text box in the product** — the context is what makes
+    a column's meaning decidable, and a generic brief yields generic judgment
+    (`PLAN.md`). It was a dialog behind a toolbar button, which is a lot of chrome
+    for something you should be able to sit and rewrite with the sources on
+    screen beside it. It is a pane now, opened from the row at the top of the
+    tree, and it writes through `catalog.init_project` — the same call the gate in
+    `screens.project_context` makes, so there is one way the brief gets written.
+    """
+    from portia.ui import screens
+
+    with _inspector_scroll():
+        _inspector_header("Project brief", str(APP.catalog_dir / "project.yaml"))
+        c.text(screens.CONTEXT_WHY, color="c-mute")
+        box = (
+            ui.textarea(placeholder=screens.CONTEXT_PLACEHOLDER, value=APP.project_context)
+            .classes("p-field p-editor w-full")
+            .props("borderless")
+            .style("min-height:220px")
+        )
+        with ui.element("div").classes("stack-xs"):
+            for line in screens.CONTEXT_SHAPE:
+                c.caption(line, color="c-stone")
+        with ui.element("div").classes("row-gap-sm"):
+            c.button("Save", lambda: _save_brief(box.value), kind="primary")
+            c.button("Cancel", _back, kind="secondary")
+
+
+def _save_brief(text: str) -> None:
+    from portia.ui import artifacts
+
+    if not (text or "").strip():
+        ui.notify("the brief cannot be empty")
+        return
+    engine.set_context(text, APP)
+    artifacts.pane.refresh()
+    pane.refresh()
+    ui.notify("brief saved")
+
+
 def _output_inspector(name: str) -> None:
     path = APP.root / engine.OUT_DIR / name
     with _inspector_scroll():
@@ -946,7 +1025,7 @@ def _open_model(name: str) -> None:
         APP.select(SPEC, path.name)
     pane.refresh()
     artifacts.pane.refresh()
-    app_module.toolbar.refresh()
+    app_module.run_controls.refresh()
 
 
 def _select_source(name: str) -> None:
@@ -989,6 +1068,11 @@ _STALE_WHY = (
     "The spec has changed since this file was generated. Run the spec, or Build the "
     "project, to regenerate it — the .sql is a build output and is never hand-edited."
 )
+_UNINDEXED_WHY = (
+    "portia can read this file but has never profiled it, so nothing in the project "
+    "knows what is in it. Indexing measures it and writes a catalog entry."
+)
+_INDEX_SCOPE = "profiling only — deterministic and free. The copilot reads it on its next turn."
 _EDIT_SCOPE = "writes the prose and the roles; the measured facts are untouched"
 _ASK_HEADING = "What did it miss?"
 _ASK_WHY = "It re-reads this source with your note in hand, and asks if the two disagree."

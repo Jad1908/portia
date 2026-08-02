@@ -74,17 +74,6 @@ def section_header(value: str) -> ui.label:
     return ui.label(value).classes("p-section-header")
 
 
-def group_header(value: str) -> ui.label:
-    """A layer inside a section. Quieter than the section it sits under.
-
-    Uniform for every layer: same size, same weight, same colour. staging /
-    intermediate / mart is a **kind** of table and the order the tiers are built
-    in — never a ranking — so nothing here may grow, brighten or bold with the
-    tier (DESIGN.md → the rule specific to this product).
-    """
-    return ui.label(value).classes("p-group-header")
-
-
 def pane_title(value: str) -> ui.label:
     return ui.label(value).classes("t-heading-lg")
 
@@ -121,14 +110,30 @@ def button(
     kind: str = "tertiary",
     icon: str | None = None,
     micro: bool = False,
+    split: bool = False,
     enabled: bool = True,
 ) -> ui.button:
     """One button. ``kind`` is primary | secondary | tertiary.
 
     The teal fill is scarce on purpose — at most one per view, and never on
     approving a write (DESIGN.md → `write-confirm`).
+
+    **An icon with no label is an icon button**, and gets square padding rather
+    than a text button's asymmetric one. That is a statement of fact about the
+    arguments rather than a flag to remember: a caller that passes both gets a
+    labelled button, and one that passes only an icon owes it a tooltip.
+
+    ``split`` rules a hairline between the icon and the word, which reads as one
+    control doing one thing rather than a glyph that happens to sit beside some
+    text. It is opt-in rather than automatic for every icon-plus-label button:
+    most of those are ordinary buttons that merely have an icon, and a rule
+    through all of them would be decoration.
     """
     classes = f"btn btn-{kind}" + (" btn-micro" if micro else "")
+    if icon and not label:
+        classes += " btn-icon"
+    elif split:
+        classes += " btn-split"
     # color=None so Quasar doesn't add `bg-primary`: which fill a button gets is
     # a portia decision (there is at most one accent fill per view), not a
     # framework default.
@@ -151,6 +156,46 @@ def segmented(options, current, on_pick: Callable[[str], Any]) -> None:
             b = button(str(option), lambda o=option: on_pick(o), micro=True)
             if picked:
                 b.classes("seg-active")
+
+
+def model_effort(app, on_effort: Callable[[str], Any]) -> None:
+    """What a turn will spend: the model, and the reasoning effort.
+
+    Picked in three places — the goal box, the add-data screen, and Settings —
+    and it is **one setting in all three**, bound to the same two fields. Three
+    hand-rolled copies of the pair is how they stop agreeing: an option added to
+    one list and not the others, or a select that writes a field the turn never
+    reads. The app is passed in rather than imported so this stays a control
+    rather than a thing that knows about the open project.
+    """
+    from portia.agent.session import DEFAULT_MODEL, EFFORTS, MODELS
+
+    app.model = app.model or DEFAULT_MODEL
+    with ui.element("div").classes("row-gap-sm"):
+        ui.select(list(MODELS), value=app.model).props(
+            "borderless dense options-dense new-value-mode=add-unique use-input"
+        ).classes("p-field p-field-mono").bind_value(app, "model")
+    segmented(EFFORTS, app.effort, on_effort)
+
+
+#: How long a pointer has to rest before a tooltip appears, in ms. Quasar's
+#: default is instant, which is right for a button you aimed at and wrong for
+#: anything you cross on the way somewhere else — a list of rows especially,
+#: where instant tooltips fire all the way down the pane as you scan it.
+TOOLTIP_DELAY = 600
+
+
+def hint(element, text: str) -> None:
+    """A tooltip that waits to be asked for.
+
+    Use this instead of ``element.tooltip(...)`` on anything in a list. Only for
+    text that is *not already on screen*: a tooltip repeating the row you are
+    pointing at is a thing that appears, is read, and says nothing.
+    """
+    if not text:
+        return
+    with element:
+        ui.tooltip(text).props(f"delay={TOOLTIP_DELAY}")
 
 
 def chip(value: str) -> ui.label:
@@ -243,18 +288,32 @@ def artifact_row(
     meta: str = "",
     note: str = "",
     selected: bool = False,
+    depth: int = 0,
+    caret: str = "",
     on_click: Callable[..., Any] | None = None,
 ) -> ui.element:
-    """One file portia knows about. Selected is one of the accent's three jobs."""
+    """One file portia knows about. Selected is one of the accent's three jobs.
+
+    ``depth`` indents it inside the left tree and ``caret`` gives it a disclosure
+    triangle, so a folder and a file are **one row type at two settings** rather
+    than two components that have to be kept looking alike. The indent is handed
+    to CSS as a custom property rather than computed into a padding here: how far
+    a level steps in is a look, and looks live in ``assets/portia.css``.
+    """
     classes = "artifact-row" + (" artifact-row--selected" if selected else "")
-    with ui.element("div").classes(classes) as row:
+    with ui.element("div").classes(classes).style(f"--depth:{depth}") as row:
+        if caret:
+            ui.icon(caret).classes("artifact-caret")
         ui.icon(icon).classes("artifact-icon")
         # Own class rather than utility classes: this wrapper's job is to be the
         # thing that shrinks, and a long path is exactly what it holds.
         with ui.element("div").classes("artifact-body"):
             ui.label(name).classes("artifact-name")
             if note:
-                ui.label(note).classes("artifact-note").tooltip(note)
+                # No tooltip. It repeated the line it was attached to, which
+                # meant every row in the tree popped a box saying what the row
+                # already said, on the way past to somewhere else.
+                ui.label(note).classes("artifact-note")
         if meta:
             ui.label(meta).classes("artifact-meta")
     if on_click is not None:

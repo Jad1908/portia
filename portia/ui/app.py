@@ -18,26 +18,21 @@ from pathlib import Path
 
 from nicegui import ui
 
-from portia.ui import artifacts, engine, screens, theme, transcript, workflow
+from portia.ui import artifacts, engine, screens, settings, theme, transcript, workflow
 from portia.ui import components as c
 from portia.ui.state import APP
 
 TITLE = "portia"
 
-#: The page's light/dark control. One open project, one window's worth of state —
-#: see `state.py` for why this app is a singleton rather than per-tab.
-_DARK: ui.dark_mode | None = None
-
 
 @ui.page("/")
 def page() -> None:
-    global _DARK
-    _DARK = theme.apply()
+    theme.apply()
     ui.page_title(TITLE)
     # At page level, deliberately: a dialog built inside a refreshable is deleted
     # by the first refresh (see `screens.build_add_dialog`).
     screens.build_add_dialog()
-    screens.build_brief_dialog()
+    settings.build_dialog()
     # `DESIGN.md` → Width behaviour, which cannot be done in CSS once the panes
     # are inside splitters: a splitter sets an inline pixel width on its panel, so
     # restyling the pane inside changes nothing about the space reserved beside it.
@@ -73,9 +68,17 @@ def shell() -> None:
 #: floor moves with the window, and the transcript — which holds the question form
 #: and the write confirmation, the two things this app exists for — could be
 #: dragged down to a few characters wide. These minimums are the width at which
-#: each pane is still worth having; the toolbar toggles are how you get rid of one.
-FILES_WIDTH, FILES_LIMITS = 260, (200, 520)
-TRANSCRIPT_WIDTH, TRANSCRIPT_LIMITS = 400, (330, 780)
+#: each pane is still worth having — and therefore the point at which dragging
+#: further **closes** it, which is how you get rid of one (`_splitter`).
+#:
+#: **Lowered 2026-08-02, because the floor doubles as the close threshold and
+#: they were closing under a drag that meant "make this narrower".** 200 and 330
+#: were written when the only way to close a pane was a toolbar toggle, so being
+#: generous cost nothing; once the floor became the gesture, a generous floor
+#: reads as a pane that gives up. Both are still real floors — 150 holds a file
+#: name at the tree's indent, and 260 holds the `question-form`'s option rows.
+FILES_WIDTH, FILES_LIMITS = 260, (150, 520)
+TRANSCRIPT_WIDTH, TRANSCRIPT_LIMITS = 400, (260, 780)
 
 #: The width below which the workflow pane stops being worth having. It is the
 #: one pane that never gives way (`DESIGN.md` → Width behaviour), so this is the
@@ -88,27 +91,54 @@ def _window() -> None:
         toolbar()
         with ui.element("div").classes("p-body"):
             if APP.show_files:
-                with _splitter(FILES_WIDTH, _files_limits()) as files:
+                with _splitter(FILES_WIDTH, _files_limits(), on_collapse=_close_files) as files:
                     with files.before:
                         _left()
                     with files.after:
                         _workflow_and_transcript()
             else:
+                _rail("Files", "folder", "chevron_right", _open_files)
                 _workflow_and_transcript()
 
 
 def _workflow_and_transcript() -> None:
     if not APP.show_transcript:
-        _middle()
+        # A row, so the rail sits beside the workflow pane rather than under it.
+        # `p-pane-row`, not `p-body`: this one has a splitter panel above it, which
+        # does not stretch its children — measured at 1280px, the workflow pane
+        # came out 404px wide inside a 1019px panel with the rail floating in the
+        # middle of it. Same trap `.p-pane` documents.
+        with ui.element("div").classes("p-pane-row"):
+            _middle()
+            _rail("Transcript", "forum", "chevron_left", _open_transcript)
         return
     # `reverse` so the pixel size applies to the transcript rather than to the
     # workflow: the pane with a real minimum is the one the number should govern.
     lower, upper = _transcript_limits()
-    with _splitter(min(TRANSCRIPT_WIDTH, upper), (lower, upper), reverse=True) as split:
+    with _splitter(
+        min(TRANSCRIPT_WIDTH, upper), (lower, upper), reverse=True, on_collapse=_close_transcript
+    ) as split:
         with split.before:
             _middle()
         with split.after:
             _right()
+
+
+def _rail(name: str, icon: str, arrow: str, reopen) -> None:
+    """A closed pane, as the strip of edge it left behind.
+
+    The toolbar used to carry a Files and a Transcript toggle, which is two
+    controls at the top of the window for something you do at the side of it.
+    Closing a pane is a drag now, and what stays is the edge: an arrow pointing
+    the way the pane will come back from, and the pane's own icon under it so the
+    strip says *which* pane rather than only that one is missing.
+
+    It is deliberately not a sliver of the pane. A 28px stripe of a file tree
+    reads as a rendering failure; a rail reads as a thing you press.
+    """
+    with ui.element("div").classes("p-rail"):
+        c.button("", reopen, icon=arrow, micro=True).tooltip(_RAIL_TIP.format(name=name))
+        ui.icon(icon).classes("p-rail-icon")
 
 
 def _room_beside_files() -> int:
@@ -143,12 +173,37 @@ def _transcript_limits() -> tuple[int, int]:
     return lower, max(lower, min(upper, _room_beside_files() - WORKFLOW_MIN))
 
 
-def _splitter(value: int, limits: tuple[int, int], *, reverse: bool = False) -> ui.splitter:
-    return (
-        ui.splitter(value=value, limits=limits, reverse=reverse)
+def _splitter(
+    value: int, limits: tuple[int, int], *, reverse: bool = False, on_collapse=None
+) -> ui.splitter:
+    """A draggable pane edge that closes the pane when you drag past its floor.
+
+    The floor is the width at which a pane stops being worth having, so it was
+    also the honest place to close it — `DESIGN.md` says as much ("the honest
+    move at that point is to close it rather than to squeeze it") and the
+    splitter used to simply refuse to go further, which left the toolbar toggle
+    as the only way to get rid of a pane.
+
+    So the splitter's own lower limit drops to zero and the floor becomes a
+    *threshold* instead: cross it and the pane closes, leaving a rail. The
+    ceiling still holds — it is what keeps the workflow pane above its own floor,
+    and that one never gives way.
+    """
+    lower, upper = limits
+    split = (
+        ui.splitter(value=value, limits=(0, upper), reverse=reverse)
         .props("unit=px")
         .classes("w-full h-full p-splitter")
     )
+    if on_collapse is not None:
+        split.on_value_change(lambda event: _past_the_floor(event.value, lower, on_collapse))
+    return split
+
+
+def _past_the_floor(width, floor: int, close) -> None:
+    """Close the pane once a drag takes it under the width it is readable at."""
+    if width is not None and width < floor:
+        close()
 
 
 def _left() -> None:
@@ -158,6 +213,7 @@ def _left() -> None:
 
 def _middle() -> None:
     with ui.element("div").classes("p-pane p-pane-mid"):
+        run_controls()
         workflow.pane()
 
 
@@ -171,43 +227,36 @@ def _right() -> None:
 
 @ui.refreshable
 def toolbar() -> None:
+    """Where you are, and the one control that is about none of the panes.
+
+    It got very short, which is the point: the four actions moved onto the pane
+    they act on, and every preference moved into Settings. What is left is the
+    mark, the session name and the way into the settings panel.
+    """
     with ui.element("div").classes("p-toolbar"):
         _project_label()
         ui.element("div").classes("flex-1")
-        _run_controls()
-        _view_controls()
+        c.button("", settings.open_dialog, icon="settings", micro=True).tooltip(_SETTINGS_TIP)
 
 
 def _project_label() -> None:
-    """The session's name, and the way out of it.
+    """The session's name. A label, and only a label.
 
     The name of the open directory, and nothing else — the project brief is
     load-bearing but it is not chrome, and a paragraph of prose across the top of
     every screen is not what a toolbar is for.
 
-    It is also the only route back to the project picker, so it is a button and
-    says so. Disabled mid-turn: switching would leave the copilot writing into a
-    directory the window has stopped looking at.
+    **It used to be the exit**, and that was the problem: the way to change
+    projects was to notice that the thing telling you where you were could be
+    clicked. Where you are and how to leave are two different statements, and the
+    second one lives in Settings now, spelled out.
     """
     theme.logo(small=True)
-    c.button("Brief", screens.open_brief_dialog, icon="notes", micro=True).tooltip(
-        APP.project_context or "no brief yet"
-    )
-    label = c.button(
-        APP.root.name or str(APP.root),
-        _switch_project,
-        icon="folder_open",
-        enabled=not APP.busy,
-    )
-    label.tooltip(_SWITCH_BUSY if APP.busy else f"{APP.root} — click to open another project")
+    ui.label(APP.root.name or str(APP.root)).classes("p-session-name").tooltip(str(APP.root))
 
 
-def _switch_project() -> None:
-    APP.opened = False
-    shell.refresh()
-
-
-def _run_controls() -> None:
+@ui.refreshable
+def run_controls() -> None:
     """Run and Build: one mechanism at two scopes, and each says which it is.
 
     **Run** executes the open spec *and everything it reads*, because a table is
@@ -222,38 +271,48 @@ def _run_controls() -> None:
     Run keeps the single accent fill once a spec has steps; Build stays quiet
     beside it. Scope is not importance, and the whole project is not the more
     important button.
+
+    **They sit on the middle pane, at its right edge, not at the window's.** All
+    four act on the workflow pane and nothing else, and from the far corner of a
+    toolbar they were four verbs floating above the transcript — the pane they
+    have nothing to do with. Putting them here is also the only way to keep them
+    aligned to that edge: pane widths after a drag are never reported to the
+    server (`_room_beside_files`), so chrome above the panes cannot know where
+    the middle one ends. Drawn inside it, they track it for free.
+
+    **Run and Build carry their word; the two saves do not.** The pair that
+    *executes* something is the pair worth naming on screen, so each is an icon
+    ruled off from its label — one control doing one thing, not a glyph beside
+    some text. Write outputs and Save report stay square icons: they are the
+    quiet half, they are only ever pressed after one of the other two, and four
+    labelled buttons is the row that made this a toolbar problem in the first
+    place.
+
+    **Each says what it is on hover and nothing more.** The name is the whole
+    tooltip: an icon needs to say which verb it is, and a paragraph explaining
+    the verb is a paragraph nobody reads on a hover. What the actions actually do
+    is documented here and in `DESIGN.md`, which is where a sentence belongs.
     """
-    kind = "primary" if APP.spec_has_steps and not APP.busy else "tertiary"
-    run = c.button("Run", _run, kind=kind, icon="play_arrow", enabled=APP.spec_has_steps)
-    run.tooltip(_run_tooltip())
-    build = c.button("Build", _build, icon="construction", enabled=not APP.busy)
-    build.tooltip(_BUILD_TIP.format(models=APP.root / "models"))
-    # Run and Build write the pipeline, never the data — these two are how a
-    # *result* becomes durable, and both are things you press rather than things
-    # that happen to you. Either of the two above arms them.
-    #
-    # Write outputs is armed by what was **built**, not by the open spec's
-    # results: it saves a table per model that ran, so a build that never touched
-    # the spec you have open still produced tables worth keeping. Save report is
-    # about the open spec, so that one stays on `results`.
-    write = c.button("Write outputs", _write, icon="save_alt", enabled=bool(APP.built))
-    write.tooltip(_WRITE_TIP.format(out=APP.root / engine.OUT_DIR))
-    report = c.button("Save report", _save_report, icon="description", enabled=bool(APP.results))
-    report.tooltip(str(APP.root / engine.RUNS_DIR))
-
-
-def _run_tooltip() -> str:
-    if APP.spec_path is None:
-        return "no spec open"
-    return _RUN_TIP.format(name=APP.spec_path.stem, path=APP.spec_path)
-
-
-def _view_controls() -> None:
-    """Both panes are collapsible; the workflow pane and Run never are."""
-    c.button("Files", _toggle_files, icon="folder", micro=True)
-    c.button("Transcript", _toggle_transcript, icon="forum", micro=True)
-    mode = _DARK.value if _DARK else None
-    c.button(theme.MODE_LABEL[mode], _cycle_theme, icon=theme.MODE_ICON[mode], micro=True)
+    with ui.element("div").classes("p-actions"):
+        kind = "primary" if APP.spec_has_steps and not APP.busy else "tertiary"
+        run = c.button(
+            "Run", _run, kind=kind, icon="play_arrow", split=True, enabled=APP.spec_has_steps
+        )
+        run.tooltip(RUN_TIP)
+        build = c.button("Build", _build, icon="construction", split=True, enabled=not APP.busy)
+        build.tooltip(BUILD_TIP)
+        # Run and Build write the pipeline, never the data — these two are how a
+        # *result* becomes durable, and both are things you press rather than
+        # things that happen to you. Either of the two above arms them.
+        #
+        # Write outputs is armed by what was **built**, not by the open spec's
+        # results: it saves a table per model that ran, so a build that never
+        # touched the spec you have open still produced tables worth keeping.
+        # Save report is about the open spec, so that one stays on `results`.
+        write = c.button("", _write, icon="save_alt", enabled=bool(APP.built))
+        write.tooltip(WRITE_TIP)
+        report = c.button("", _save_report, icon="description", enabled=bool(APP.results))
+        report.tooltip(REPORT_TIP)
 
 
 # --- actions ----------------------------------------------------------------
@@ -263,7 +322,7 @@ async def _run() -> None:
     await engine.run_spec(APP)
     workflow.pane.refresh()
     artifacts.pane.refresh()  # the .sql it just wrote, and what is no longer stale
-    toolbar.refresh()
+    run_controls.refresh()
 
 
 async def _build() -> None:
@@ -288,7 +347,7 @@ async def _build() -> None:
         ui.notify(f"built {len(built)} model(s) to models/")
     artifacts.pane.refresh()
     workflow.pane.refresh()
-    toolbar.refresh()
+    run_controls.refresh()
 
 
 async def _write() -> None:
@@ -302,33 +361,53 @@ async def _save_report() -> None:
     if path is not None:
         ui.notify(f"saved {path.name} to {engine.RUNS_DIR}/")
         artifacts.pane.refresh()
-        toolbar.refresh()
+        run_controls.refresh()
 
 
-def _toggle_transcript() -> None:
-    APP.show_transcript = not APP.show_transcript
-    shell.refresh()
+def _close_transcript() -> None:
+    _set_panes(transcript=False)
 
 
-def _toggle_files() -> None:
-    APP.show_files = not APP.show_files
-    shell.refresh()
+def _open_transcript() -> None:
+    _set_panes(transcript=True)
 
 
-def _cycle_theme() -> None:
-    if _DARK is None:
-        return
-    _DARK.value = theme.next_mode(_DARK.value)
-    toolbar.refresh()
+def _close_files() -> None:
+    _set_panes(files=False)
 
 
-_SWITCH_BUSY = "Can't switch projects while a turn is running."
-_RUN_TIP = (
-    "Run {name} and every model it reads, then write their .sql. "
-    "A table isn't built until its inputs are.\n{path}"
-)
-_BUILD_TIP = "Run every spec in the project and write the whole pipeline.\n{models}"
-_WRITE_TIP = "Save a CSV for every model the last run built, one file each.\n{out}"
+def _open_files() -> None:
+    _set_panes(files=True)
+
+
+def _set_panes(*, files: bool | None = None, transcript: bool | None = None) -> None:
+    """Show or hide a side pane, and redraw only if that changed something.
+
+    The guard is not a micro-optimisation. A splitter reports its width
+    continuously while it is dragged, so crossing the floor fires the close
+    handler on every frame after it — and each one would refresh the shell,
+    rebuilding all three panes under a mouse that is still held down.
+    """
+    before = (APP.show_files, APP.show_transcript)
+    APP.show_files = before[0] if files is None else files
+    APP.show_transcript = before[1] if transcript is None else transcript
+    if (APP.show_files, APP.show_transcript) != before:
+        shell.refresh()
+
+
+#: What each icon is called, and the whole of what a hover says. An icon has to
+#: name its verb; it does not have to explain it — a hover is read in the moment
+#: before a click, and the sentence that used to be here (what the action does,
+#: and the path it writes to) was three lines of prose in a floating box. The
+#: sentences live in `run_controls`'s docstring and in `DESIGN.md`, which is
+#: where they can be read at the speed prose is read at.
+_SETTINGS_TIP = "Settings"
+RUN_TIP = "Run spec"
+BUILD_TIP = "Build full pipeline"
+WRITE_TIP = "Write outputs"
+REPORT_TIP = "Save report"
+ACTION_TIPS = (RUN_TIP, BUILD_TIP, WRITE_TIP, REPORT_TIP)
+_RAIL_TIP = "Show {name} · drag its edge past the width it is readable at to close it again."
 _NOTHING_TO_BUILD = "No specs to build yet — the copilot writes one as it records steps."
 
 

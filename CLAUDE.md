@@ -217,12 +217,34 @@ adding code, and extend them rather than working around them:
   - **`ui/engine.py` is the only module in here that calls the engine**, and **nothing in `ui/`
     computes**. A panel that wants a number the engine doesn't expose is a signal to add it to
     `checks`/`spec`, not to calculate it in a widget.
-  - **Runs and Turns are two sections because they are two artifacts.** A *run* executed a spec
-    (markdown, project-root `runs/`); a *turn* was the copilot deciding what the spec should say
-    (JSONL, `.portia/runs/`, `runlog.py`). Selecting a turn replays it through `transcript`'s own
-    renderers — one set of renderers, live and replayed, or the window ends up with a second
-    opinion about a turn that is already written down. **Models is a third**, and it is the
-    deliverable: a run's CSV under `out/` is a result, `models/*.sql` is the pipeline.
+  - **The left pane is a real directory tree, filtered** (`ui/tree.py`, 2026-08-02) — a file is
+    drawn if portia knows it (catalog · `discover_specs` · compiled models · outputs · saved runs)
+    or if `core/io` registers a reader for its suffix; a folder is drawn if something under it
+    survived. This **reversed** `DESIGN.md`'s "the left pane is curated, not a disk tree", and the
+    argument that failed is kept there beside the reversal. The curation is a *filter* now; six flat
+    sections were hiding where every file lived and fixing the folder layout the agent may produce.
+    `tree.py` imports no NiceGUI and no engine — `engine.known_files` supplies the classification
+    and the identity a click hands the panes.
+  - **Runs and Turns are two artifacts, and one of them is not in the tree.** A *run* executed a
+    spec (markdown, project-root `runs/`) and is a file like any other; a *turn* was the copilot
+    deciding what the spec should say (JSONL, `.portia/runs/`, `runlog.py`), and `.portia/` is not
+    walked — so Turns is pinned below the tree, as is the **project brief** above it. Selecting a
+    turn replays it through `transcript`'s own renderers — one set of renderers, live and replayed,
+    or the window ends up with a second opinion about a turn that is already written down.
+  - **`ui/settings.py` is the one place a preference lives**, and it holds controls, not behaviour:
+    every field binds the state the surface that spends it reads, so it is a second place to
+    *change* a setting and never a second setting. The theme, the project switch, the brief, the
+    model and effort, and the import destination were chrome across the top of every screen; a
+    toolbar says where you are and acts on what is in front of you. It is **four tabs**, sharing
+    `pane-tabs` with the transcript rather than growing a second tab style.
+  - **A side pane is closed by dragging its edge past its floor**, which leaves a rail to reopen it.
+    The floor was always "the width at which this pane stops being worth having" (`DESIGN.md`), so
+    it was the honest place to close it; the toolbar toggles are gone.
+  - **The four run actions are drawn on the middle pane, right-aligned to it** — they act on that
+    pane and nothing else, and from the toolbar's corner they sat above the transcript. It is also
+    the only place they *can* be aligned to it: a dragged pane's width never reaches the server, so
+    chrome above the panes cannot know where the middle one ends. Their tooltips are the action's
+    name and nothing more; a hover is not where a sentence gets read.
   - **The middle pane is one canvas at two zoom levels** (`docs/PIPELINE.md` §6). A card in the
     project graph is a *table* — one spec, one table — and a card inside an opened one is a *step*.
     Three node kinds, and the distinction is the point: a `SOURCE` is a file that arrived, a
@@ -231,7 +253,8 @@ adding code, and extend them rather than working around them:
   - **Run is scoped, not partial.** Run executes the open spec *and everything it reads*, then
     writes their `.sql`; Build does the project. One mechanism (`pipeline.build_project(only=…)`),
     so the window and `cli.build` cannot produce different SQL.
-  - `state.py` and `graph.py` import no NiceGUI, so the app's logic is testable without a browser.
+  - `state.py`, `graph.py` and `tree.py` import no NiceGUI, so the app's logic is testable without
+    a browser.
   - The look lives in `ui/assets/portia.css` as `DESIGN.md`'s tokens — not in Python strings, and
     not in NiceGUI APIs, so swapping the framework stays cheap (`TECH_STACK.md`). Behaviour that
     has to be client-side lives beside it as its own file for the same reason: `canvas.js` (pan and

@@ -56,8 +56,9 @@ from pathlib import Path
 from portia import catalog, pipeline, runlog
 from portia import spec as spec_module
 from portia.cli.import_data import plan as plan_copy
-from portia.core.io import connect, find_data_files, load_table
+from portia.core.io import connect, find_data_files, load_table, supported_suffixes
 from portia.ui import state as State
+from portia.ui import tree
 from portia.ui.state import App
 
 #: Where a dropped file lands, and where a run writes its tables. Relative to the
@@ -107,6 +108,9 @@ def open_project(path: str | Path, app: App) -> Path:
     app.tab = State.CHAT
     app.skipped_sources = False
     app.editing = app.asking = app.removing = None
+    # Which folders are open belongs to the project you are looking at, not to
+    # the window: `data/` opened in the last project says nothing about this one.
+    app.open_folders = app.closed_folders = frozenset()
     refresh_catalog(app)
     # A project that already has data is not being set up, so it opens on the
     # workspace. The add-data screen is for the first time, and for whenever
@@ -327,6 +331,59 @@ def _index_one(path: Path, portia_dir: str) -> str:
 
 
 # --- specs, runs, outputs ---------------------------------------------------
+
+
+def readable_suffixes() -> tuple[str, ...]:
+    """The formats `core.io` registers a reader for.
+
+    Read off the loader rather than written down anywhere in `ui/`: the left tree
+    shows un-indexed data files, and a hard-coded format list there would have
+    stopped showing Parquet the day it landed.
+    """
+    return supported_suffixes()
+
+
+def known_files(app: App) -> dict[str, tuple[str, str]]:
+    """Every file portia knows about: repo-relative path → ``(kind, ident)``.
+
+    This is the left pane's **filter** and its **bridge back to a selection**. The
+    tree is a real directory walk (`ui/tree.py`), so a row arrives as a path —
+    but the panes address a source by its catalog name and a saved run by its
+    filename, and this is what turns one into the other.
+
+    Built from the same calls the sections used to be built from, so the tree
+    cannot contain a different set of specs than `cli.build` does.
+    """
+    known: dict[str, tuple[str, str]] = {}
+    for path in runs_in(app):
+        known[_rel(path, app)] = (State.RUN, path.name)
+    for path in outputs_in(app):
+        known[_rel(path, app)] = (State.OUTPUT, path.name)
+    for path in models_in(app):
+        known[_rel(path, app)] = (State.MODEL, _rel(path, app))
+    for path in specs_in(app):
+        known[_rel(path, app)] = (State.SPEC, path.name)
+    # Sources last, and deliberately: a data file that a run also wrote into
+    # `out/` is a source first, because that is the entry with a profile and an
+    # interpretation behind it.
+    for name, entry in app.sources.items():
+        recorded = entry.get("source")
+        if recorded:
+            known[Path(recorded).as_posix()] = (State.SOURCE, name)
+    return known
+
+
+def _rel(path: Path, app: App) -> str:
+    """A path as the project sees it. Outside the root it stays as it is."""
+    try:
+        return path.relative_to(app.root).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def project_tree(app: App) -> tuple[tree.Node, ...]:
+    """The project directory, filtered to what portia reads. The left pane."""
+    return tree.build(app.root, known_files(app), readable_suffixes())
 
 
 def specs_in(app: App) -> list[Path]:

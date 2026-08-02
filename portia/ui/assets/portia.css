@@ -248,13 +248,17 @@ html body {
   background: var(--canvas);
 }
 
+/* Thin on purpose. It holds the mark, the session name and the settings gear —
+ * everything that used to make it worth 48px moved onto the pane it acts on or
+ * into the settings panel, so the bar should cost the panes as little height as
+ * it can while still reading as a bar. */
 .p-toolbar {
   display: flex;
   align-items: center;
-  gap: var(--sp-md);
-  height: 48px;
-  flex: 0 0 48px;
-  padding: 0 var(--sp-lg);
+  gap: var(--sp-sm);
+  height: 32px;
+  flex: 0 0 32px;
+  padding: 0 var(--sp-md);
   background: var(--canvas);
   border-bottom: 1px solid var(--hairline);
   overflow-x: auto;
@@ -303,7 +307,7 @@ html body {
  * renders narrower than the width at which it stops being readable. */
 .p-pane-left {
   background: var(--canvas);
-  min-width: 200px;
+  min-width: 150px;
 }
 
 .p-pane-mid {
@@ -313,7 +317,80 @@ html body {
 
 .p-pane-right {
   background: var(--surface);
-  min-width: 330px;
+  min-width: 260px;
+}
+
+/* The four run actions, on the pane they act on. Right-aligned to the middle
+ * pane's own edge rather than the window's: from the far corner of the toolbar
+ * they floated above the transcript, which is the one pane they have nothing to
+ * do with. Drawn inside the pane, they track its edge through any drag — which
+ * chrome above the panes could not do, since a dragged pane's width is never
+ * reported to the server. */
+.p-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-sm);
+  flex: 0 0 auto;
+  padding: var(--sp-xs) var(--sp-md);
+  background: var(--surface);
+  border-bottom: 1px solid var(--hairline);
+}
+
+/* Shorter than a form button. These sit on top of the pane you are reading, so
+ * every pixel they take is a pixel of graph or report — and they are pressed a
+ * handful of times a session, not typed into. */
+.p-actions .btn.q-btn {
+  min-height: 26px;
+  padding: 2px var(--sp-sm);
+}
+.p-actions .btn.q-btn .q-btn__content {
+  font-size: 12px;
+}
+.p-actions .btn.q-btn .q-icon {
+  font-size: 15px;
+}
+.p-actions .btn.q-btn.btn-icon {
+  min-width: 26px;
+  padding: 2px;
+}
+
+/* A pane and the rail beside it, inside a splitter panel. Distinct from
+ * `.p-body` — that one is the window's own row and gets its height from
+ * `.p-window`'s flex column, where an explicit `height: 100%` would resolve
+ * against the viewport and swallow the toolbar. This one has a splitter panel
+ * above it, which does not stretch its children at all, so it has to say both
+ * dimensions itself. */
+.p-pane-row {
+  display: flex;
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* A closed pane, as the strip of edge it left behind. Not a sliver of the pane
+ * itself — 28px of a file tree reads as a rendering failure, where a rail reads
+ * as a thing you press. Sits on the canvas like the left pane does, with the
+ * hairline on the side the pane will come back from. */
+.p-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-xs);
+  flex: 0 0 auto;
+  width: 32px;
+  padding-top: var(--sp-sm);
+  background: var(--canvas);
+  border-left: 1px solid var(--hairline);
+  border-right: 1px solid var(--hairline);
+}
+
+/* Which pane it brings back. The arrow above says which way; this says what. */
+.p-rail-icon {
+  color: var(--stone);
+  font-size: 16px;
 }
 
 .p-scroll {
@@ -460,6 +537,34 @@ html body {
   color: var(--ash);
   border-color: transparent;
   opacity: 1;
+}
+
+/* An icon with no label. Square rather than a text button with the text taken
+ * out — the asymmetric 6px/14px padding is there to sit around a word, and
+ * around a 16px glyph it reads as a button that lost something. What the button
+ * says lives in its tooltip, which is the deal an icon button makes. */
+.btn.q-btn.btn-icon {
+  padding: 6px;
+  min-width: 32px;
+}
+.btn.q-btn.btn-icon.btn-micro {
+  padding: 4px;
+  min-width: 24px;
+}
+.btn.q-btn.btn-icon .q-btn__content {
+  /* Quasar reserves label space even when there is none, which pushes the glyph
+   * off centre by a few pixels — enough to be visible in a row of four. */
+  gap: 0;
+}
+
+/* An icon ruled off from its word. The rule is `currentColor` rather than a
+ * hairline token because this variant appears on both fills — the accent one
+ * where the foreground is white, and the tertiary one where it is ink — and a
+ * fixed border colour would be invisible on one of them. */
+.btn.q-btn.btn-split .q-btn__content > .q-icon:first-child {
+  padding-right: var(--sp-sm);
+  margin-right: var(--sp-sm);
+  border-right: 1px solid color-mix(in srgb, currentColor 35%, transparent);
 }
 
 /* ── inputs (Quasar chrome, flattened to hairlines) ───────────────────────── */
@@ -653,11 +758,43 @@ html body {
   flex: 0 0 auto;
   object-fit: contain;
 }
+/* Sized to the thin toolbar it sits in, not the other way round. */
 .p-logo-sm {
-  width: 40px;
-  height: 40px;
+  width: 22px;
+  height: 22px;
   flex: 0 0 auto;
   object-fit: contain;
+}
+
+/* The open directory's name. A label saying where you are — it used to be a
+ * button that was also the only way out of the project, which is two statements
+ * in one control. Leaving lives in Settings now. */
+.p-session-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+/* One tab's worth of settings. The panel is a list of controls and nothing
+ * else, so the only structure it needs is a gap — and a floor, so switching to
+ * a short tab doesn't resize the dialog under the pointer that switched it. */
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-sm);
+  padding: var(--sp-md) 0 var(--sp-sm);
+  min-height: 190px;
+}
+
+/* The tabs run edge to edge inside the panel, so their underline is a rule
+ * across it rather than a line ending in the middle of nowhere. */
+.settings-panel .pane-tabs {
+  margin: 0 calc(-1 * var(--sp-lg));
+  padding: 0 var(--sp-lg);
+  background: transparent;
 }
 
 .row-gap-md {
@@ -745,7 +882,19 @@ html body {
   border-bottom: none;
 }
 
-/* ── left pane — files & artifacts ────────────────────────────────────────── */
+/* ── left pane — the project tree ─────────────────────────────────────────── */
+
+/* One row type for a folder and for a file, at two settings: `--depth` indents
+ * it and a caret appears when it can be opened. Two components that had to be
+ * kept looking alike would drift the first time either was touched. */
+/* How far one level of the tree steps in, and where its guide line is drawn.
+ * One number, used by both, so a guide can never drift off the indent it marks.
+ * 14px was too tight to read as containment — a nested file looked like a
+ * sibling that happened to start slightly later. */
+:root {
+  --indent: 20px;
+  --indent-guide: 13px;
+}
 
 .artifact-row {
   display: flex;
@@ -756,11 +905,38 @@ html body {
   max-width: 100%;
   gap: var(--sp-sm);
   padding: var(--sp-sm) var(--sp-md);
+  padding-left: calc(var(--sp-md) + var(--depth, 0) * var(--indent));
   margin: 0 var(--sp-sm);
   border-radius: var(--r-sm);
-  background: transparent;
   cursor: pointer;
   min-width: 0;
+
+  /* One faint vertical rule per ancestor level, so a file reads as being
+   * *inside* the folder above it rather than merely further right. The rows are
+   * siblings in the DOM — a tree of nested elements would nest the hover and the
+   * selection with it — so the guides are drawn as a repeating background across
+   * the row's own indent, one stripe every `--indent`, stopping where the
+   * content starts.
+   *
+   * `background-color` and not `background`: the hover and selected rules below
+   * set a colour, and the shorthand would wipe the guides out with it. */
+  background-color: transparent;
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--hairline-soft) 0 1px,
+    transparent 1px var(--indent)
+  );
+  background-repeat: no-repeat;
+  background-position: var(--indent-guide) 0;
+  background-size: calc(var(--depth, 0) * var(--indent)) 100%;
+}
+.artifact-row .artifact-caret {
+  color: var(--ash);
+  font-size: 16px;
+  flex: 0 0 auto;
+  /* Pulled tight against the folder icon: the caret and the icon are one
+   * affordance, not two things in a row. */
+  margin-right: calc(-1 * var(--sp-xs));
 }
 .artifact-row .artifact-icon {
   color: var(--mute);
@@ -797,12 +973,21 @@ html body {
   color: var(--mute);
   flex: 0 0 auto;
 }
+/* `background-color`, never the `background` shorthand — that would take the
+ * indent guides with it. Eased rather than instant: a tree is a list you run the
+ * pointer down, and an unanimated fill snapping on and off every row on the way
+ * past is the flicker that made this pane feel twitchy. 120ms is short enough
+ * to feel like a response and long enough that a row you crossed on the way
+ * somewhere else never fully lights up. */
+.artifact-row {
+  transition: background-color 120ms ease-out;
+}
 .artifact-row:hover {
-  background: var(--surface-card);
+  background-color: var(--surface-card);
 }
 .artifact-row--selected,
 .artifact-row--selected:hover {
-  background: var(--accent-soft);
+  background-color: var(--accent-soft);
 }
 .artifact-row--selected .artifact-name,
 .artifact-row--selected .artifact-icon {
@@ -1545,16 +1730,6 @@ body.body--dark .step-card {
   color: var(--mute);
   min-width: 38px;
   text-align: center;
-}
-
-/* A layer inside a left-pane section. Uniform for every layer — same size, same
- * weight, same colour — because staging/intermediate/mart is a kind of table and
- * the order the tiers are built in, never a ranking. */
-.p-group-header {
-  font-size: 11px;
-  letter-spacing: 0.2px;
-  color: var(--ash);
-  padding: var(--sp-sm) var(--sp-md) var(--sp-xxs) var(--sp-lg);
 }
 
 /* A generated .sql that no longer matches its spec. Drift, not a blocking zero:
