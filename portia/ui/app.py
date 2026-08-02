@@ -206,6 +206,7 @@ def _left() -> None:
 
 def _middle() -> None:
     with ui.element("div").classes("p-pane p-pane-mid"):
+        run_controls()
         workflow.pane()
 
 
@@ -219,11 +220,16 @@ def _right() -> None:
 
 @ui.refreshable
 def toolbar() -> None:
+    """Where you are, and the one control that is about none of the panes.
+
+    It got very short, which is the point: the four actions moved onto the pane
+    they act on, and every preference moved into Settings. What is left is the
+    mark, the session name and the way into the settings panel.
+    """
     with ui.element("div").classes("p-toolbar"):
         _project_label()
         ui.element("div").classes("flex-1")
-        _run_controls()
-        _view_controls()
+        c.button("", settings.open_dialog, icon="settings", micro=True).tooltip(_SETTINGS_TIP)
 
 
 def _project_label() -> None:
@@ -242,7 +248,8 @@ def _project_label() -> None:
     ui.label(APP.root.name or str(APP.root)).classes("p-session-name").tooltip(str(APP.root))
 
 
-def _run_controls() -> None:
+@ui.refreshable
+def run_controls() -> None:
     """Run and Build: one mechanism at two scopes, and each says which it is.
 
     **Run** executes the open spec *and everything it reads*, because a table is
@@ -258,49 +265,37 @@ def _run_controls() -> None:
     beside it. Scope is not importance, and the whole project is not the more
     important button.
 
-    **All four are icons, and each says what it is on hover.** They are four
-    verbs in a row at the top of a window whose other two panes are the thing you
-    are reading; spelled out they were most of the toolbar, and "Write outputs"
-    beside "Save report" is two labels you have to read carefully to tell apart
-    anyway. The tooltip is not a nicety here — it is where the sentence went, so
-    each one leads with its own name and then says what pressing it does and
-    where the result lands.
+    **They sit on the middle pane, at its right edge, not at the window's.** All
+    four act on the workflow pane and nothing else, and from the far corner of a
+    toolbar they were four verbs floating above the transcript — the pane they
+    have nothing to do with. Putting them here is also the only way to keep them
+    aligned to that edge: pane widths after a drag are never reported to the
+    server (`_room_beside_files`), so chrome above the panes cannot know where
+    the middle one ends. Drawn inside it, they track it for free.
+
+    **Each says what it is on hover and nothing more.** The name is the whole
+    tooltip: an icon needs to say which verb it is, and a paragraph explaining
+    the verb is a paragraph nobody reads on a hover. What the actions actually do
+    is documented here and in `DESIGN.md`, which is where a sentence belongs.
     """
-    kind = "primary" if APP.spec_has_steps and not APP.busy else "tertiary"
-    run = c.button("", _run, kind=kind, icon="play_arrow", enabled=APP.spec_has_steps)
-    run.tooltip(_run_tooltip())
-    build = c.button("", _build, icon="construction", enabled=not APP.busy)
-    build.tooltip(_BUILD_TIP.format(models=APP.root / "models"))
-    # Run and Build write the pipeline, never the data — these two are how a
-    # *result* becomes durable, and both are things you press rather than things
-    # that happen to you. Either of the two above arms them.
-    #
-    # Write outputs is armed by what was **built**, not by the open spec's
-    # results: it saves a table per model that ran, so a build that never touched
-    # the spec you have open still produced tables worth keeping. Save report is
-    # about the open spec, so that one stays on `results`.
-    write = c.button("", _write, icon="save_alt", enabled=bool(APP.built))
-    write.tooltip(_WRITE_TIP.format(out=APP.root / engine.OUT_DIR))
-    report = c.button("", _save_report, icon="description", enabled=bool(APP.results))
-    report.tooltip(_REPORT_TIP.format(runs=APP.root / engine.RUNS_DIR))
-
-
-def _run_tooltip() -> str:
-    if APP.spec_path is None:
-        return _RUN_NO_SPEC
-    return _RUN_TIP.format(name=APP.spec_path.stem, path=APP.spec_path)
-
-
-def _view_controls() -> None:
-    """What is left of the view controls, which is one button.
-
-    Files and Transcript were two toggles at the top of the window for something
-    you do at the side of it. A pane is closed by dragging its edge past the
-    width it is readable at, and reopened from the rail it leaves behind — the
-    gesture and the affordance are both where the pane is. The workflow pane and
-    Run are never either.
-    """
-    c.button("", settings.open_dialog, icon="settings", micro=True).tooltip(_SETTINGS_TIP)
+    with ui.element("div").classes("p-actions"):
+        kind = "primary" if APP.spec_has_steps and not APP.busy else "tertiary"
+        run = c.button("", _run, kind=kind, icon="play_arrow", enabled=APP.spec_has_steps)
+        run.tooltip(RUN_TIP)
+        build = c.button("", _build, icon="construction", enabled=not APP.busy)
+        build.tooltip(BUILD_TIP)
+        # Run and Build write the pipeline, never the data — these two are how a
+        # *result* becomes durable, and both are things you press rather than
+        # things that happen to you. Either of the two above arms them.
+        #
+        # Write outputs is armed by what was **built**, not by the open spec's
+        # results: it saves a table per model that ran, so a build that never
+        # touched the spec you have open still produced tables worth keeping.
+        # Save report is about the open spec, so that one stays on `results`.
+        write = c.button("", _write, icon="save_alt", enabled=bool(APP.built))
+        write.tooltip(WRITE_TIP)
+        report = c.button("", _save_report, icon="description", enabled=bool(APP.results))
+        report.tooltip(REPORT_TIP)
 
 
 # --- actions ----------------------------------------------------------------
@@ -310,7 +305,7 @@ async def _run() -> None:
     await engine.run_spec(APP)
     workflow.pane.refresh()
     artifacts.pane.refresh()  # the .sql it just wrote, and what is no longer stale
-    toolbar.refresh()
+    run_controls.refresh()
 
 
 async def _build() -> None:
@@ -335,7 +330,7 @@ async def _build() -> None:
         ui.notify(f"built {len(built)} model(s) to models/")
     artifacts.pane.refresh()
     workflow.pane.refresh()
-    toolbar.refresh()
+    run_controls.refresh()
 
 
 async def _write() -> None:
@@ -349,7 +344,7 @@ async def _save_report() -> None:
     if path is not None:
         ui.notify(f"saved {path.name} to {engine.RUNS_DIR}/")
         artifacts.pane.refresh()
-        toolbar.refresh()
+        run_controls.refresh()
 
 
 def _close_transcript() -> None:
@@ -383,19 +378,18 @@ def _set_panes(*, files: bool | None = None, transcript: bool | None = None) -> 
         shell.refresh()
 
 
-#: The four run actions are icons, so their tooltips carry the name as well as
-#: the sentence. Each leads with what it is called, then what pressing it does,
-#: then where the result lands — everything the label used to say and more, since
-#: the label never had room for the path.
-_SETTINGS_TIP = "Settings · theme, the project, what a turn spends, and where data lands."
-_RUN_NO_SPEC = "Run · no spec open"
-_RUN_TIP = (
-    "Run · {name} and every model it reads, then write their .sql. "
-    "A table isn't built until its inputs are.\n{path}"
-)
-_BUILD_TIP = "Build · run every spec in the project and write the whole pipeline.\n{models}"
-_WRITE_TIP = "Write outputs · a CSV for every model the last run built, one file each.\n{out}"
-_REPORT_TIP = "Save report · the open spec's run report, as markdown.\n{runs}"
+#: What each icon is called, and the whole of what a hover says. An icon has to
+#: name its verb; it does not have to explain it — a hover is read in the moment
+#: before a click, and the sentence that used to be here (what the action does,
+#: and the path it writes to) was three lines of prose in a floating box. The
+#: sentences live in `run_controls`'s docstring and in `DESIGN.md`, which is
+#: where they can be read at the speed prose is read at.
+_SETTINGS_TIP = "Settings"
+RUN_TIP = "Run spec"
+BUILD_TIP = "Build full pipeline"
+WRITE_TIP = "Write outputs"
+REPORT_TIP = "Save report"
+ACTION_TIPS = (RUN_TIP, BUILD_TIP, WRITE_TIP, REPORT_TIP)
 _RAIL_TIP = "Show {name} · drag its edge past the width it is readable at to close it again."
 _NOTHING_TO_BUILD = "No specs to build yet — the copilot writes one as it records steps."
 

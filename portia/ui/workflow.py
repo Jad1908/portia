@@ -1025,7 +1025,7 @@ def _open_model(name: str) -> None:
         APP.select(SPEC, path.name)
     pane.refresh()
     artifacts.pane.refresh()
-    app_module.toolbar.refresh()
+    app_module.run_controls.refresh()
 
 
 def _select_source(name: str) -> None:

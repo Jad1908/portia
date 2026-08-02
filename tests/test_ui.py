@@ -704,22 +704,34 @@ def test_an_icon_with_no_label_is_styled_as_an_icon_button():
     assert "btn-icon" not in no_icon.classes
 
 
-def test_every_run_action_says_what_it_is_now_that_none_of_them_says_it_on_screen():
-    """The label is where the name was. It moved into the tooltip, so each of the
-    four leads with its own name — an icon row where hovering says only "runs the
-    project" is four glyphs you have to learn."""
+def test_a_run_actions_hover_is_the_name_of_the_action_and_nothing_else():
+    """An icon has to name its verb; it does not have to explain it. A hover is
+    read in the moment before a click, and the sentence that used to be here —
+    what the action does, plus the path it writes to — was three lines of prose
+    in a floating box. The sentences live in the docstring and in `DESIGN.md`."""
     from portia.ui import app as app_module
 
-    tips = (
-        app_module._RUN_TIP,
-        app_module._RUN_NO_SPEC,
-        app_module._BUILD_TIP,
-        app_module._WRITE_TIP,
-        app_module._REPORT_TIP,
-        app_module._SETTINGS_TIP,
+    assert app_module.ACTION_TIPS == (
+        "Run spec",
+        "Build full pipeline",
+        "Write outputs",
+        "Save report",
     )
-    for tip in tips:
-        assert " · " in tip, f"{tip!r} does not lead with a name"
+    for tip in (*app_module.ACTION_TIPS, app_module._SETTINGS_TIP):
+        assert "\n" not in tip and len(tip) <= 24, f"{tip!r} is explaining, not naming"
+
+
+def test_the_run_actions_are_drawn_on_the_pane_they_act_on():
+    """From the far corner of the toolbar they floated above the transcript — the
+    one pane they have nothing to do with. Chrome above the panes also cannot
+    align to the middle pane's edge: a dragged pane's width never reaches the
+    server (`_room_beside_files`), so the actions have to be drawn inside it."""
+    import inspect
+
+    from portia.ui import app as app_module
+
+    assert "run_controls()" in inspect.getsource(app_module._middle)
+    assert "run_controls" not in inspect.getsource(app_module.toolbar.func)
 
 
 # --- closing a pane is a drag, and the rail is how it comes back -------------
@@ -781,7 +793,7 @@ def test_the_toolbar_no_longer_toggles_a_pane():
 
     from portia.ui import app as app_module
 
-    source = inspect.getsource(app_module._view_controls)
+    source = inspect.getsource(app_module.toolbar.func)
     assert 'c.button("Files"' not in source
     assert 'c.button("Transcript"' not in source
 

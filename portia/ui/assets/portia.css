@@ -316,6 +316,24 @@ html body {
   min-width: 330px;
 }
 
+/* The four run actions, on the pane they act on. Right-aligned to the middle
+ * pane's own edge rather than the window's: from the far corner of the toolbar
+ * they floated above the transcript, which is the one pane they have nothing to
+ * do with. Drawn inside the pane, they track its edge through any drag — which
+ * chrome above the panes could not do, since a dragged pane's width is never
+ * reported to the server. */
+.p-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-sm);
+  flex: 0 0 auto;
+  min-height: 40px;
+  padding: var(--sp-sm) var(--sp-md);
+  background: var(--surface);
+  border-bottom: 1px solid var(--hairline);
+}
+
 /* A pane and the rail beside it, inside a splitter panel. Distinct from
  * `.p-body` — that one is the window's own row and gets its height from
  * `.p-window`'s flex column, where an explicit `height: 100%` would resolve
