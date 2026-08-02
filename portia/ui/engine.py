@@ -8,6 +8,8 @@ nothing below it computes anything.
 What the app is allowed to call, and why each is on the list:
 
 - ``catalog.init_project`` — the mandatory context panel writes ``project.yaml``
+- ``catalog.set_data_dir`` — which folder in the repo is this project's data,
+  picked on the add-data screen and read back by the left pane
 - ``catalog.index_source`` — a dropped file is profiled (free, deterministic)
 - ``catalog.load_catalog`` — what the left pane and the source inspector show
 - ``spec.load_spec`` / ``spec.run_spec`` / ``spec.write_report`` — the Run button
@@ -61,8 +63,9 @@ from portia.ui import state as State
 from portia.ui import tree
 from portia.ui.state import App
 
-#: Where a dropped file lands, and where a run writes its tables. Relative to the
-#: project root, so the catalog and the spec stay portable.
+#: Where an import lands when the project has not named a data folder, and where
+#: a run writes its tables. Relative to the project root, so the catalog and the
+#: spec stay portable.
 DATA_DIR = "data"
 OUT_DIR = "out"
 
@@ -108,6 +111,16 @@ def open_project(path: str | Path, app: App) -> Path:
     app.tab = State.CHAT
     app.skipped_sources = False
     app.editing = app.asking = app.removing = None
+    # The add-data screen, back to the top. Where the picker was browsing and
+    # which files were ticked are statements about the last project's directory,
+    # and a half-planned import into it must not follow you into this one.
+    app.browse_at = ""
+    app.unpicked = frozenset()
+    app.repicking = False
+    app.import_open = False
+    app.import_to_data_dir = True
+    app.import_plan, app.import_error = [], ""
+    app.indexed = None
     # Which folders are open belongs to the project you are looking at, not to
     # the window: `data/` opened in the last project says nothing about this one.
     app.open_folders = app.closed_folders = frozenset()
@@ -205,6 +218,55 @@ def refresh_catalog(app: App) -> None:
     app.catalog = catalog.load_catalog(app.portia_dir)
 
 
+# --- the project's data folder ----------------------------------------------
+
+
+def set_data_dir(rel: str, app: App) -> None:
+    """Record which folder in the repo holds this project's data, durably.
+
+    A project setting rather than a window setting: it decides what the left pane
+    draws as data and where an import lands by default, and both of those have to
+    survive the process. `catalog.set_data_dir` puts it in ``project.yaml``, where
+    it is read in a diff beside the brief it belongs with.
+
+    **The project root is stored as ``"."``, never as ``""``.** They are the same
+    *scope* — every path in the repo, which `tree` collapses back to "anywhere" —
+    and different *answers*: ``""`` is "nobody has said". Normalising here rather
+    than at the button is what keeps that distinction one fact; the add-data
+    screen reads the setting back to decide whether to draw the picker, and an
+    empty string sent it round the loop again.
+    """
+    catalog.set_data_dir(rel or ".", portia_dir=app.portia_dir)
+    refresh_catalog(app)
+
+
+def folder_choices(app: App, at: str) -> tuple[tree.Choice, ...]:
+    """The sub-folders of ``at`` that hold readable data, for the in-page picker.
+
+    Rooted at the project, always. Choosing the data folder is choosing a *scope
+    inside the repo* — an outside folder is not a thing this control can express,
+    which is the same rule `index` enforces and one fewer error to write.
+    """
+    return tree.choices(app.root, at, readable_suffixes())
+
+
+def data_files_in(app: App, rel: str) -> list[Path]:
+    """Every readable data file under a repo-relative folder, at any depth.
+
+    What the add-data screen ticks and profiles. Recursive, because a data folder
+    with a year per sub-folder is the ordinary shape and asking someone to pick
+    each one is not a scope, it is a chore.
+    """
+    return list(tree.data_files(app.root / rel if rel else app.root, readable_suffixes()))
+
+
+def crumbs(app: App, at: str) -> list[tuple[str, str]]:
+    """The picker's path trail, with the project's own directory name at the root."""
+    trail = tree.crumbs(at)
+    root_name = app.root.name or str(app.root)
+    return [(rel, name or root_name) for rel, name in trail]
+
+
 def remove_source(name: str, app: App) -> None:
     """Un-index a source. The file stays on disk — see `catalog.remove_source`."""
     catalog.remove_source(name, portia_dir=app.portia_dir)
@@ -226,22 +288,6 @@ def set_interpretation(
 
 
 # --- adding data ------------------------------------------------------------
-
-
-async def store_upload(upload, app: App, destination: str = DATA_DIR) -> Path:
-    """Save a dropped file into the project, at the chosen destination.
-
-    Streams, through the upload's own ``save``. This used to be
-    ``write_bytes(await upload.read())``, and ``read()`` pulls the whole file
-    into memory — which throws away the spooling the upload already did and
-    turns a twenty-file drop of real extracts into twenty files' worth of RAM at
-    once. The rest of the engine stopped holding whole tables; the front door
-    should not be the one place that still does.
-    """
-    target = destination_in(destination, app) / Path(upload.name).name
-    target.parent.mkdir(parents=True, exist_ok=True)
-    await upload.save(target)
-    return target
 
 
 def plan_import(target: str, destination: str, app: App) -> list[tuple[Path, Path]]:
@@ -382,8 +428,14 @@ def _rel(path: Path, app: App) -> str:
 
 
 def project_tree(app: App) -> tuple[tree.Node, ...]:
-    """The project directory, filtered to what portia reads. The left pane."""
-    return tree.build(app.root, known_files(app), readable_suffixes())
+    """The project directory, filtered to what portia reads. The left pane.
+
+    ``data_dir`` scopes the *readable* half of that filter and nothing else: an
+    un-indexed CSV is drawn if it is under the project's data folder, while every
+    artifact portia wrote — a spec, a model, an output, a saved run — is drawn
+    wherever it lives. See `tree` for why the two halves are scoped differently.
+    """
+    return tree.build(app.root, known_files(app), readable_suffixes(), app.data_dir or None)
 
 
 def specs_in(app: App) -> list[Path]:

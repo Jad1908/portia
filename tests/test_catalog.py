@@ -12,6 +12,7 @@ from portia.catalog import (
     is_stale,
     load_catalog,
     remove_source,
+    set_data_dir,
     set_group,
     set_interpretation,
 )
@@ -294,3 +295,54 @@ def test_import_refuses_a_destination_outside_the_project(tmp_path):
     root.mkdir()
     with pytest.raises(ValueError, match="must be inside the project"):
         plan([], tmp_path / "somewhere-else", root)
+
+
+# --- the project's data folder ----------------------------------------------
+
+
+def test_the_data_folder_is_recorded_beside_the_brief(tmp_path):
+    """Which part of the repo is this project's data is a durable project fact,
+    so it lives in `project.yaml` where it is read in a diff beside the brief."""
+    d = tmp_path / ".portia"
+    init_project("a project", portia_dir=d)
+
+    set_data_dir("warehouse/raw", portia_dir=d)
+
+    assert load_catalog(d)["data_dir"] == "warehouse/raw"
+    assert load_catalog(d)["project"] == "a project", "the brief is untouched"
+
+
+def test_an_unset_data_folder_reads_as_empty_not_missing(tmp_path):
+    """Every project written before the field has none, and the honest answer for
+    one nobody has told is "" — which the tree reads as the whole repo."""
+    d = tmp_path / ".portia"
+    init_project("a project", portia_dir=d)
+
+    assert load_catalog(d)["data_dir"] == ""
+
+
+def test_the_data_folder_is_stored_relative_and_stripped(tmp_path):
+    """Relative like every other path portia writes, so the setting survives the
+    project being cloned somewhere else."""
+    d = tmp_path / ".portia"
+    init_project("a project", portia_dir=d)
+
+    set_data_dir("  data/raw/  ", portia_dir=d)
+
+    assert load_catalog(d)["data_dir"] == "data/raw"
+
+
+def test_setting_the_data_folder_does_not_disturb_the_indexed_sources(tmp_path, monkeypatch):
+    """It is a scope, not a re-home: nothing moves and no entry is rewritten."""
+    d = tmp_path / ".portia"
+    monkeypatch.chdir(tmp_path)
+    init_project("a project", portia_dir=d)
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "orders.csv").write_text("a,b\n1,2\n")
+    index_source(tmp_path / "data" / "orders.csv", portia_dir=d)
+
+    set_data_dir("data", portia_dir=d)
+
+    entry = load_catalog(d)["sources"]["orders"]
+    assert entry["source"] == "data/orders.csv"
+    assert (tmp_path / "data" / "orders.csv").exists()

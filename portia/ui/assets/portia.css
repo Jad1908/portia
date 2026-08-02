@@ -810,58 +810,63 @@ html body {
   padding: var(--sp-xl);
 }
 
-.dropzone .q-uploader {
-  width: 100%;
-  background: var(--surface);
-  border: 1px dashed var(--hairline-strong);
-  border-radius: var(--r-lg);
-  box-shadow: none;
-  /* Quasar caps the uploader and scrolls its file list; this used to say
-   * `max-height: none`, which is fine for three files and wrong for twenty —
-   * the list grew past the screen in both directions and took the Continue
-   * button with it. The cap is back, a little taller than Quasar's default so
-   * a handful of files still show without scrolling. */
-  max-height: 320px;
+/* ── add data: the folder picker ──────────────────────────────────────────────
+ *
+ * The drop zone that used to live here is gone (2026-08-02). It was a third
+ * route in that did the same job as the picker and the importer, while being
+ * the only one that streamed the file through the browser — so it was also the
+ * only one that could refuse a file for reasons portia could not explain.
+ *
+ * What replaced it is a list of folders and a list of files, which are the two
+ * lists this app already knows how to draw: `artifact-row` for a folder, and
+ * `added-row` for a file. No new row type, and nothing here is coloured or
+ * sized by a number (`DESIGN.md` — colour and prominence communicate kind). */
+
+/* The two routes, as sections with air between them rather than rules. A rule
+ * between every group turns a short form into a ruled table of controls. */
+.add-section {
   display: flex;
   flex-direction: column;
-  /* the whole box is the target, so the whole box says so */
-  cursor: pointer;
-}
-.dropzone .q-uploader:hover {
-  border-color: var(--accent-primary);
-}
-.dropzone .q-uploader__header {
-  background: transparent;
-  color: var(--mute);
-  padding: var(--sp-md) var(--sp-lg);
-  min-height: 88px;
-  display: flex;
-  align-items: center;
-}
-/* Quasar's byte counter, before anything has been dropped. `0.0B / 0.00%` is
- * a measurement of nothing, and this app does not show numbers it can't stand
- * behind. */
-.dropzone .q-uploader__subtitle {
-  display: none;
-}
-.dropzone .q-uploader__list {
-  background: transparent;
-  color: var(--body);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  padding: 0 var(--sp-lg) var(--sp-md);
-  min-height: 0;
-  /* the file list is what scrolls; the header stays put above it */
-  flex: 1 1 auto;
-  overflow-y: auto;
-}
-/* The header must not shrink away when the list fills the box. */
-.dropzone .q-uploader__header {
-  flex: 0 0 auto;
+  gap: var(--sp-sm);
+  min-width: 0;
 }
 
-/* What has been added so far, on the screen that added it. Capped for the same
- * reason the drop box is: a receipt for twenty files is still a receipt. */
+/* Where you are in the repo, as the path you came down. Buttons, because every
+ * crumb is somewhere you can go — including the project root, which is the one
+ * a back button could never offer in a single press. */
+.picker-crumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.picker-sep {
+  color: var(--stone);
+  font-size: 12px;
+}
+
+/* A file you can tick. The checkbox is the control; the path is the label, in
+ * mono because it is a path, and it gets the room because it is the thing being
+ * read. */
+.pick-row .p-check {
+  flex: 0 0 auto;
+}
+.p-check .q-checkbox__inner {
+  color: var(--mute);
+  font-size: 30px;
+}
+.p-check .q-checkbox__inner--truthy {
+  color: var(--accent-primary);
+}
+.p-check .q-checkbox__label {
+  font-size: 13px;
+  color: var(--body);
+}
+
+/* A list of files: what a folder holds, or what an import is about to copy.
+ * Capped and scrolling, because thirty files is a list you skim rather than a
+ * list that pushes the button off the bottom of the screen. */
 .added-list {
   width: 100%;
   max-height: 220px;

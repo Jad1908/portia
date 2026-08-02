@@ -82,6 +82,15 @@ left of the toolbar is a mark, the project's name and a gear. None of it changed
 does — it is all edge — but it is the first time the app was shaped by using it rather than by
 speccing it, and `BACKLOG.md` records what that turned up and did not fix.
 
+**The add-data screen was rewritten the same day, and it is where a project now says what its data
+is.** Choosing the folder that holds the data is an in-page browse through the repo — sub-folders
+that have readable data under them, with a count — and it writes **`data_dir` into `project.yaml`**,
+the first durable project setting since the brief. That is what scopes the left pane's un-indexed
+files, and what an import defaults to. Importing outside data is a fold-away second route beside it,
+and **one button copies what was planned and profiles what was ticked**, so the screen has exactly
+one control that writes anything. The browser drop zone is gone: it was a third route doing the same
+job, and the only one whose refusals portia could not explain.
+
 **Scale is built.** The engine is DuckDB throughout and everything is a lazy relation. Measured end
 to end on real PHQ data: 4.82 GB across three tables indexes in 32 s, a 50M × 3M join is diagnosed
 in 3.8 s, and a full spec run over 50M rows takes 27 s. **Peak memory is bounded by the largest

@@ -325,14 +325,30 @@ These exist so a test run never needs a terminal (`VISION.md` → "The no-termin
 - `button-primary` "Continue" disabled until non-empty. **No skip, no dismiss, no "later".** It is
   the one gate in the app.
 
-**`source-dropzone`** — adding data
-- Dashed 1px `{colors.hairline-strong}`, `{rounded.lg}`, fill `{colors.surface}`, padding
-  `{spacing.xl}`. Prompt in `{colors.mute}` `{typography.body-md}`; a `button-tertiary` file picker
-  for people who don't drag.
-- An **interpret toggle** sits beneath it, on by default, labelled with its cost in
+**`add-data`** — adding data *(replaced `source-dropzone`, 2026-08-02)*
+- **Two sections, in the order they are likely.** *Data in this repo* — an in-page folder browser
+  rooted at the project — then *Import external data*, a `p-expansion` **folded by default**.
+  portia plugs into a repo that already holds its data (`PIPELINE.md` §2.7), so the second is the
+  exception and should not be read past to reach the first.
+- **No new row types.** A folder in the picker is an `artifact-row` with a `chevron_right` caret
+  and a file count as its `meta`; a file in the list is an `added-row` with a checkbox. The count
+  is a **number of files**, not a measurement of anything in them — it ranks nothing, and it is
+  what makes "which of these six folders is the data" answerable in one look.
+- The **path trail** (`picker-crumbs`) is buttons, every crumb somewhere you can go, including the
+  project root. A back button would only undo one step.
+- An **interpret toggle** sits below both, on by default, labelled with its cost in
   `{colors.mute}` `{typography.caption}` — profiling is free, interpretation is a model turn, and
   the UI must not blur the two.
-- Once a project has sources this shrinks to a row-height affordance at the foot of the left pane.
+- **One accent fill, and it moves.** While files are outstanding it is on **Index N files**; the
+  moment there are none it becomes **Open the workspace**. Never both — a CTA offered beside
+  unfinished work is a skip button wearing a different word. In the dialog the way out is a
+  *Close*, and takes no accent at all.
+- Once a project has sources this shrinks to a row-height affordance at the foot of the left pane,
+  which opens the same panel as a dialog.
+- **The dashed drop box is gone.** It was a third route into the project doing the same job as the
+  picker and the importer, and the only one that streamed bytes through the browser — so the only
+  one that could refuse a file for a reason portia could not explain, and the only one where the
+  copy had already happened by the time a plan could be shown.
 
 **`import-plan`** — what an import is about to copy, and where
 - A `write-confirm` panel: the heading names the count, then one row per `from → to` pair in
@@ -746,8 +762,8 @@ the component that drew a layer inside a flat section has nothing left to draw.
   large enough to pan the nodes slid under a stationary grid. Both gone: `--pan-x`/`--pan-y` drive
   a transform on the content and the grid's `background-position` together. Worth remembering as a
   shape of bug — the feature was present, reviewed, and had never worked.
-- ~~**First-run chrome is specced but unbuilt**~~ — *built: `project-open`, `project-context`, `source-dropzone`, `index-progress`. The context panel is still a text box with guidance beneath it, and it still deserves more than that.*
-- ~~**Drag-and-drop file handling is unverified**~~ — *still unverified. The sanctioned fallback is what shipped and what was tested: the picker, plus an "add by path" field that takes a file, a directory or a glob.*
+- ~~**First-run chrome is specced but unbuilt**~~ — *built: `project-open`, `project-context`, `add-data`, `index-progress`. The context panel is still a text box with guidance beneath it, and it still deserves more than that.*
+- ~~**Drag-and-drop file handling is unverified**~~ — *removed 2026-08-02 rather than verified. It stayed unverified for a week while two other routes into the project were exercised on every run, which is its own answer: the browser upload was a third way to do what the folder picker and the importer already did, and the only one whose failures portia could not explain. `add-data` is the picker plus a path-or-glob field now.*
 - **Teal pill contrast on dark** — white on `#0D9488` sits just under 4.5:1 for 13px text; verify on device and darken toward `#0C7D72` if it reads weak. *Unmeasured.*
 - **No syntax highlighting** in V0 code blocks. If SQL steps get long, revisit.
 - **The accent hue is decided: deep teal**, shared with the sibling project. Not a gap — a choice.
