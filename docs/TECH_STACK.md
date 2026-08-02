@@ -18,8 +18,9 @@ infrastructure and frontend surface, stay in Python wherever we can, and keep th
   effort — if it works there, the *engine* is good, not the model; the flagship is a ceiling
   check / upgrade, never a dependency. **Claude Pro only** (no API budget, no Max), so loops stay
   **token-lean** (the agent sees compact profiles/schemas, never raw data). *Verified 2026-07-25:*
-  the SDK authenticates off the local Claude Code login with no `ANTHROPIC_API_KEY` set; how it
-  meters is still open. portia itself writes **no auth code** — see `PLAN.md` → "Auth posture".
+  the SDK authenticates off the local Claude Code login with no `ANTHROPIC_API_KEY` set, and meters
+  against the **subscription** (confirmed against real usage). portia itself writes **no auth
+  code** — see `PLAN.md` → "Auth posture".
 
 ## Data & compute — DuckDB, with pandas at the edges
 
@@ -32,23 +33,15 @@ Scale forced it; `docs/DUCKDB_MIGRATION.md` is what happened.*
   relation behind `core.table.Table`. Measured on real data: 4.82 GB across three tables indexes in 32 s,
   a 50M × 3M join is diagnosed in 3.8 s, and **peak memory is bounded by the largest table rather
   than the total**, which is what makes ~20 tables workable at all.
-- **Why we *used to* ingest rather than query the files in place** — kept because the reversal
-  below is the useful part. Two reasons, and the second was meant to be the real one:
-  columnar storage is ~20× faster on column-scoped reads, and — decisively — if a source *is* a
-  `read_csv` call then the agent's SQL needs file-reading rights, which is exactly what
-  `ops/sql.py` exists to withhold. Data inside the database means the hatch needs no filesystem
-  access at all. `DUCKDB_MIGRATION.md` §3.
-  - **Reversed — the store was removed 2026-07-31** (`PIPELINE.md` §2.7). Both arguments
-    turned out weaker than they read. The speed one never landed: `run_spec`, every agent check and
-    every CLI tool re-read the original files anyway, so the fast copy was written and then ignored.
-    And the sandbox one does not apply — `ops/sql.py` materializes its declared inputs into a fresh
-    restricted connection whatever their query is, so the hatch never sees a `read_csv` regardless.
-    What is left is a hidden second copy of the user's data, against a product that is tightening to
-    **sourcing only from files already in the repo**. If reads get slow, the answer is **parquet in
-    the repo** — columnar, typed, already supported, and still one copy you can see.
-    *Removing it moved no evidence at all: all 35 golden cases came out byte-identical, because
-    ingesting was `CREATE TABLE … AS <read_query(path)>` — the reader and its null tokens were
-    always the same ones, and only the materialization differed.*
+- **We tried ingesting into a store, and removed it** (2026-07-31, `PIPELINE.md` §2.7). The two
+  arguments for it — columnar reads are ~20× faster, and data inside the database means the SQL
+  hatch needs no file rights — both turned out weaker than they read: the hot paths re-read the
+  original files anyway, and `ops/sql.py` materializes its declared inputs into a fresh restricted
+  connection regardless of their query. What was left was a hidden second copy of the user's data,
+  against a product that sources **only from files already in the repo**. If reads get slow, the
+  answer is **parquet in the repo** — columnar, typed, already supported, and still one copy you can
+  see. `DUCKDB_MIGRATION.md` §3 keeps the argument that failed, because it read well and did not
+  survive contact with how the code was actually used.
 - **pandas is still here, at four edges, deliberately.** The fixtures (tiny, and the readable
   definition of the test data), `load_frame` for small reads, the renderers, and the SQL hatch's
   sandbox boundary. `tests/test_table.py` fails if anything *else* pulls a whole relation into

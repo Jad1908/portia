@@ -56,18 +56,18 @@ not a gadget — a place you actually work.
 2. **Add data manually + index.** The user adds files by hand — CSV or Parquet, whatever
    `core/io` registers.
 
-   > **Scope, decided 2026-07-30 and shipped 2026-07-31 (`PIPELINE.md` §2.7).** portia plugs into a repo that **already
-   > holds the data**, and the user picks what is in scope. Only files **inside the working
-   > directory** can be indexed — an outside path is refused, not warned about. Bringing outside
-   > data in is a **separate, deliberate import step**: the user chooses where in the repo it lands,
-   > portia states plainly what it is about to copy and to where, copies it, then indexes it.
-   > Original files are never modified, and every source path recorded in a spec is repo-relative —
-   > which is what makes a spec work on a machine other than the one that wrote it.
+   > **Scope, decided 2026-07-30, shipped 2026-07-31, with its GUI surface 2026-08-01
+   > (`PIPELINE.md` §2.7).** portia plugs into a repo that **already holds the data**, and the user
+   > picks what is in scope. Only files **inside the working directory** can be indexed — an outside
+   > path is refused, not warned about. Bringing outside data in is a **separate, deliberate import
+   > step**: the user chooses where in the repo it lands, portia states plainly what it is about to
+   > copy and to where, copies it, then indexes it. Original files are never modified, and every
+   > source path recorded in a spec is repo-relative — which is what makes a spec work on a machine
+   > other than the one that wrote it.
    >
    > This retired `.portia/store.duckdb`, the hidden second copy made at index time. One visible
    > copy of the data beats an invisible fast one; parquet in the repo is the answer if reads ever
-   > get slow. **The GUI half is not built**: the drop zone still copies files in without letting
-   > you choose where or telling you first (`PIPELINE.md` §6).
+   > get slow.
 
    Each added source is **indexed**:
    - a **deterministic metadata analysis** runs (profiling — this is the engine's checks layer).
@@ -106,8 +106,8 @@ not a gadget — a place you actually work.
 
 ### The pipeline as a deliverable
 
-*Engine shipped 2026-07-31 (`portia/pipeline.py`, `python -m portia.cli.build`); the app does not
-render it yet.*
+*Shipped 2026-07-31 (`portia/pipeline.py`, `python -m portia.cli.build`), rendered in the app
+2026-08-01.*
 
 The set of specs compiles to **one `.sql` file per spec**, in its own folder, shaped so it drops
 into a dbt project. That is the thing you hand a data team. A spec may declare a `layer`
@@ -138,32 +138,23 @@ staleness warning so a file that has drifted from its spec is visible rather tha
 ## V0 — the app (specced and built 2026-07-26)
 
 > **Built.** `portia/ui/`, launched with `python -m portia.ui`, behind the `ui` extra. The
-> no-terminal audit at the end of this section passes end to end: a project created, a brief
-> written, sources added and profiled, an interpret turn driven with its write confirmations approved
-> on screen, a spec run, and every artifact read — no shell. What it grew that this spec didn't
-> anticipate, and what it still doesn't do, is in `BACKLOG.md` → Interface. Three notes where the
-> build had to decide something this section left open:
+> no-terminal audit at the end of this section passes end to end — a project created, a brief
+> written, sources added and profiled, an interpret turn driven with its write confirmations
+> approved on screen, a spec run, and every artifact read, with no shell. What it has grown since,
+> and what it still doesn't do, is in `BACKLOG.md` → Interface.
 >
-> - **Where a source's catalog entry renders.** It replaces the workflow in the middle pane, with a
->   "Back to workflow" out. The spec says clicking a source shows its entry and doesn't say where.
->   It also shows the source's **rows**, which the catalog does not hold — the copilot never sees
->   them, and a person reading the same screen usually wants to.
-> - **Opening a project is a folder chooser**, not a path field. `Browse…` shells out to the OS's own
->   dialog (macOS today; the path field is the fallback elsewhere, and the only way to name a
->   directory that does not exist yet, which a fresh test run needs).
-> - **Which action carries the accent.** `DESIGN.md` puts **Run** in the toolbar and **Go** in the
->   transcript, and separately allows one solid accent fill per view — so V0 gives it to whichever
->   is the way forward: **Go** until a spec has steps, **Run** once it does.
+> Four places the build had to decide something this section left open:
+>
+> - **A source's catalog entry replaces the workflow** in the middle pane, with a "Back to workflow"
+>   out. It also shows the source's **rows**, which the catalog does not hold — the copilot never
+>   sees them, and a person reading the same screen usually wants to.
+> - **Opening a project is a folder chooser**, not a path field. The path field survives as the
+>   fallback, and as the only way to name a directory that does not exist yet.
+> - **Which action carries the accent** — `DESIGN.md` allows one solid accent fill per view, so V0
+>   gives it to whichever is the way forward: **Go** until a spec has steps, **Run** once it does.
 > - **An acknowledged flag at the confirmation prompt names the flag and what it means, not what it
->   would cost.** That number does not exist yet; it is `PLAN.md` item 2, and the banner is built to
->   take it the day it does.
->
-> **What V0 grew after this section was written** (2026-07-27, all in `BACKLOG.md` → Interface):
-> resizable panes, a native folder chooser, a pannable dot-grid canvas, editable briefs and source
-> interpretations, un-indexing a source, saved run reports (`runs/*.md`), and a **two-tab right
-> pane** — Copilot and Indexing as separate transcripts, because a goal you typed and the catalog
-> work the app runs on your behalf are different jobs, and a decision waiting on the hidden tab is
-> indistinguishable from a hung turn unless the tab says so.
+>   would cost.** That number does not exist yet; it is `PLAN.md` → Next → *the consequence of a
+>   zero*, and the banner is built to take it the day it does.
 >
 > **The one thing V0 does not surface at all is groups**, which the engine has had since the context
 > work: `catalog.set_group`, a write tool, and rendering into the L1 brief. See `BACKLOG.md`.

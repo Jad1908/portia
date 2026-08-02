@@ -200,24 +200,22 @@ requirement, not a nice-to-have: **a test must run the spec through the engine a
 `.sql` through DuckDB, and assert the two produce the same table.** Golden files did more work than
 the abstraction did during the DuckDB migration (`TECH_STACK.md`); the same applies here.
 
-### One thing still to settle
+### How a compiled file names its sources — settled, and built as recommended
 
-**How a compiled file names its sources.** Two shapes:
+Two shapes were possible: bare table names (`FROM orders`), dbt-shaped and clean but not runnable
+standalone until something creates those names; or the file read inlined
+(`FROM read_csv('data/orders.csv')`), runnable but not what a dbt model looks like.
 
-- bare table names (`FROM orders`) — dbt-shaped and clean, but the file does not run standalone
-  until something has created those names
-- the file read inlined (`FROM read_csv('data/orders.csv')`) — runs standalone in DuckDB, but is
-  not what a dbt model looks like
-
-Recommendation: **bare names in the model files**, plus a generated companion that creates them as
-views over the repo's files, plus the header comment naming which file each source came from. That
-keeps the models dbt-droppable and the pipeline runnable on its own. Confirm before building.
+**Built as the first**, plus a generated `_sources.sql` companion that creates the names as views
+over the repo's files, plus the header comment naming which file each source came from. The models
+stay dbt-droppable and the pipeline stays runnable on its own.
 
 ---
 
-## 4. What changes, by file
+## 4. What changed, by file
 
-Rough map for whoever picks this up — not a task list, and not exhaustive.
+*The map made before the work, kept as written. Every row landed; `portia/core/store.py` and the
+refusal at `agent/handlers.py:618` are both gone, so those two line references no longer resolve.*
 
 | File | Change |
 |---|---|
