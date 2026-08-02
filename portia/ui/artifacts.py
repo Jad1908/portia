@@ -1,24 +1,33 @@
-"""Left pane — files & artifacts.
+"""Left pane — the project directory, filtered to what portia reads.
 
-`VISION.md` asks how we decide what to surface inside a big repo. V0's answer is
-cheap and it is the curation: **a file appears if portia knows about it.**
-Sources come from the catalog, not a directory walk; specs come from
-`spec.discover_specs`; models are the compiled `.sql`; outputs are what a run
-wrote. Nothing else is shown.
+`VISION.md` asks how we decide what to surface inside a big repo. The answer is
+still **a file appears if portia knows about it**, but that is now a *filter over
+a real tree* rather than six flat sections. What the sections cost was the shape
+of the project: a spec in ``specs/staging/`` and its model in
+``models/staging/`` came out as two same-named rows with nothing on screen
+saying where either file was — which is the first question anyone asks of a
+pipeline they have been handed. Six known folders is also a structure the app
+was imposing on the agent, and the folders are not portia's to fix.
 
-**Models are their own section, and they are the deliverable.** A run's CSV under
-`out/` is a result; `models/*.sql` is the pipeline you hand to a data team
-(`docs/PIPELINE.md` §2.2). One is something this project produced, the other is
-the thing this project *is*, so they are not two rows in one list.
+So: `tree.build` walks the directory and keeps a file if the catalog, the spec
+discovery, the compiled models, the written outputs or the saved runs know it —
+or if `core.io` registers a reader for its suffix, which is how a data file
+sitting in the repo un-indexed becomes visible instead of invisible. A folder is
+drawn only if something under it survived. Kind still comes through as the
+leading icon, so what a file *is* reads at a glance the way it did before.
 
-Specs and models are grouped by layer where a project declares one, and the
-groups run staging → intermediate → mart. That is **build order** — the order the
-tiers are constructed in — and never a quality ranking: a layer is a string a
-human typed into a spec, nothing measured it, and it must not colour, resize or
-rank a row. What says whether a table is right is its outcome check, per step.
+Two things are pinned outside the tree because they live in ``.portia/``, which
+is not walked:
 
-It is not a file tree, and an empty section says so rather than disappearing —
-"no specs yet" is information; a missing heading is not.
+- **The brief**, at the top. It is the most consequential text in the product and
+  it used to be reachable only from a toolbar button that no longer exists.
+- **Turns**, at the foot. A *run* executed a spec and is a markdown file in the
+  project; a *turn* was the copilot deciding what the spec should say and is
+  JSONL inside ``.portia/`` (`portia/runlog.py`). Same word, two artifacts —
+  which is why the run sits in the tree where its file is and the turn does not.
+
+Nothing here ranks. Folders sort before files and both sort by name; no row is
+coloured, sized or ordered by anything measured (`DESIGN.md`).
 """
 
 from __future__ import annotations
@@ -29,8 +38,18 @@ from nicegui import ui
 
 from portia import catalog
 from portia.ui import components as c
-from portia.ui import engine
-from portia.ui.state import APP, MODEL, OUTPUT, RUN, SOURCE, SPEC, TURN
+from portia.ui import engine, tree
+from portia.ui.state import (
+    APP,
+    BRIEF,
+    MODEL,
+    OUTPUT,
+    RUN,
+    SOURCE,
+    SPEC,
+    TURN,
+    UNINDEXED,
+)
 
 ICON = {
     SOURCE: "table_chart",
@@ -39,174 +58,153 @@ ICON = {
     OUTPUT: "description",
     RUN: "history",
     TURN: "forum",
+    UNINDEXED: "insert_drive_file",
+    tree.FOLDER: "folder",
 }
 
-#: Layer groups, in the order the tiers are built. Build order, not a ladder —
-#: see the module docstring. A project that declares no layer has no groups at
-#: all, which is the whole of how the flat case is handled (`PIPELINE.md` §2.5).
-UNLAYERED = ""
+#: The disclosure triangle, which is the whole of "progressive disclosure" as a
+#: control: a folder says whether it is open before you click it.
+CARET_OPEN = "expand_more"
+CARET_SHUT = "chevron_right"
+FOLDER_OPEN = "folder_open"
 
-MODELS_NOTE = "Nothing compiled yet. Press Build to write the pipeline as .sql."
-RUNS_NOTE = "No saved runs. Press Run, then Save report."
+EMPTY_TREE = "Nothing portia can read in this directory yet. Add a file to begin."
 TURNS_NOTE = "No copilot turns yet. Type a goal and press Go."
+UNINDEXED_NOTE = "not indexed"
+STALE_SPEC_NOTE = "its .sql is out of date"
+STALE_MODEL_NOTE = "stale — its spec changed"
 
 
 @ui.refreshable
 def pane() -> None:
-    """Sources · Specs · Models · Outputs · Runs · Turns, in that order.
+    """The brief, the tree, then Turns.
 
     Keyed, because selecting a row rebuilds this pane to move one highlight and
     an unkeyed rebuild would send a long list back to the top each time you
     clicked something near the bottom of it (`components.scroll_area`).
     """
     with c.scroll_area("artifacts"):
-        _sources()
-        _specs()
-        _models()
-        _outputs()
-        _runs()
+        _brief_row()
+        _tree()
         _turns()
     _add_data_affordance()
 
 
-def _sources() -> None:
-    c.section_header("Sources")
-    if not APP.sources:
-        c.empty_note("No data indexed yet. Add a file to begin.")
-        return
-    for name, entry in APP.sources.items():
-        columns = len(entry.get("columns") or [])
-        c.artifact_row(
-            name=name,
-            icon=ICON[SOURCE],
-            meta=c.count(columns, "col"),
-            note="" if catalog.is_interpreted(entry) else "uninterpreted",
-            selected=APP.is_selected(SOURCE, name),
-            on_click=lambda n=name: _select(SOURCE, n),
-        )
+# --- the brief --------------------------------------------------------------
 
 
-def _specs() -> None:
-    """The decision records, grouped by layer where the project declares one."""
-    c.section_header("Specs")
-    docs = engine.project_docs(APP)
-    if not docs:
-        c.empty_note("No spec yet. The copilot writes one as it records steps.")
-        return
-    stale = set(engine.stale_models(APP))
-    for layer, names in _grouped(docs):
-        if layer:
-            c.group_header(layer)
-        for name in names:
-            path = engine.spec_path_for(APP, name)
-            if path is None:
-                continue
-            c.artifact_row(
-                name=path.name,
-                icon=ICON[SPEC],
-                meta=c.count(len(docs[name].get("steps") or []), "step"),
-                note="its .sql is out of date" if name in stale else "",
-                selected=APP.is_selected(SPEC, path.name),
-                on_click=lambda p=path: _open_spec(p),
-            )
+def _brief_row() -> None:
+    """The project brief, as a row you open rather than a button in the chrome.
 
+    It is not a file in the tree — ``.portia/project.yaml`` is catalog plumbing
+    and hand-editing it is not something the pane should invite — but it *reads*
+    as one, at the top, because that is where the thing the whole project is
+    conditioned on belongs. A project with no brief cannot exist: the gate in
+    `screens.project_context` is passed before this pane is ever drawn.
 
-def _models() -> None:
-    """The compiled pipeline — the deliverable, and its own kind of artifact.
-
-    Not a row in Outputs: a run's CSV is a result, and this is the thing someone
-    else can run (`docs/PIPELINE.md` §2.2). `_sources.sql` is listed with the rest
-    because it is part of what makes the pipeline runnable standalone, and hiding
-    a generated file the user is expected to commit would be a small lie.
+    It opens in the middle pane like every other row here, rather than in the
+    dialog it used to live in. A paragraph you are meant to rewrite with the
+    sources on screen beside it is not a thing to type into an overlay.
     """
-    c.section_header("Models")
-    models = engine.models_in(APP)
-    if not models:
-        c.empty_note(MODELS_NOTE)
+    c.artifact_row(
+        name="Project brief",
+        icon="notes",
+        selected=APP.is_selected(BRIEF, ""),
+        on_click=lambda: _select(BRIEF, ""),
+    ).tooltip(APP.project_context)
+
+
+# --- the tree ---------------------------------------------------------------
+
+
+def _tree() -> None:
+    nodes = engine.project_tree(APP)
+    if not nodes:
+        c.empty_note(EMPTY_TREE)
         return
     stale = set(engine.stale_models(APP))
-    for layer, paths in _grouped_paths(models):
-        if layer:
-            c.group_header(layer)
-        for path in paths:
-            rel = str(path.relative_to(APP.root))
-            c.artifact_row(
-                name=path.name,
-                icon=ICON[MODEL],
-                note="stale — its spec changed" if path.stem in stale else "",
-                selected=APP.is_selected(MODEL, rel),
-                on_click=lambda r=rel: _select(MODEL, r),
-            )
+    for node in nodes:
+        _node(node, 0, stale)
 
 
-def _grouped(docs: dict[str, dict]) -> list[tuple[str, list[str]]]:
-    """Model names by layer, unlayered first, then in build order."""
-    from portia.spec import LAYERS
-
-    by_layer: dict[str, list[str]] = {}
-    for name in sorted(docs):
-        by_layer.setdefault(docs[name].get("layer") or UNLAYERED, []).append(name)
-    order = [UNLAYERED, *LAYERS]
-    known = [(layer, by_layer.pop(layer)) for layer in order if layer in by_layer]
-    # A layer the engine does not know about is still shown rather than dropped:
-    # the spec pane is where a typo in `layer:` should become visible.
-    return known + sorted(by_layer.items())
+def _node(node: tree.Node, depth: int, stale: set[str]) -> None:
+    if node.is_folder:
+        _folder(node, depth, stale)
+    else:
+        _file(node, depth, stale)
 
 
-def _grouped_paths(paths: list[Path]) -> list[tuple[str, list[Path]]]:
-    """Compiled files by the subdirectory they landed in, which is their layer."""
-    from portia.spec import LAYERS
-
-    by_layer: dict[str, list[Path]] = {}
-    for path in paths:
-        parent = path.parent.name
-        by_layer.setdefault(parent if parent in LAYERS else UNLAYERED, []).append(path)
-    order = [UNLAYERED, *LAYERS]
-    return [(layer, by_layer[layer]) for layer in order if layer in by_layer]
-
-
-def _outputs() -> None:
-    c.section_header("Outputs")
-    outputs = engine.outputs_in(APP)
-    if not outputs:
-        c.empty_note("Nothing written yet. Run a spec, then write its tables.")
-        return
-    for path in outputs:
-        c.artifact_row(
-            name=path.name,
-            icon=ICON[OUTPUT],
-            selected=APP.is_selected(OUTPUT, path.name),
-            on_click=lambda p=path: _select(OUTPUT, p.name),
-        )
+def _folder(node: tree.Node, depth: int, stale: set[str]) -> None:
+    """A folder, and its contents when it is open. Disclosure, one level at a time."""
+    is_open = APP.folder_open(node.rel, depth)
+    c.artifact_row(
+        name=node.name,
+        icon=FOLDER_OPEN if is_open else ICON[tree.FOLDER],
+        caret=CARET_OPEN if is_open else CARET_SHUT,
+        depth=depth,
+        on_click=lambda rel=node.rel, d=depth: _toggle(rel, d),
+    ).tooltip(node.rel)
+    if is_open:
+        for child in node.children:
+            _node(child, depth + 1, stale)
 
 
-def _runs() -> None:
-    c.section_header("Runs")
-    runs = engine.runs_in(APP)
-    if not runs:
-        c.empty_note(RUNS_NOTE)
-        return
-    for path in runs:
-        c.artifact_row(
-            name=path.stem,
-            icon=ICON[RUN],
-            selected=APP.is_selected(RUN, path.name),
-            on_click=lambda p=path: _select(RUN, p.name),
-        )
+def _file(node: tree.Node, depth: int, stale: set[str]) -> None:
+    c.artifact_row(
+        name=node.name,
+        icon=ICON.get(node.kind, ICON[UNINDEXED]),
+        meta=_meta(node),
+        note=_note(node, stale),
+        depth=depth,
+        selected=APP.is_selected(node.kind, node.ident),
+        on_click=lambda n=node: _open(n),
+    ).tooltip(node.rel)
+
+
+def _meta(node: tree.Node) -> str:
+    """The one number a row carries, from the engine — never counted here."""
+    if node.kind == SOURCE:
+        entry = APP.sources.get(node.ident) or {}
+        return c.count(len(entry.get("columns") or []), "col")
+    if node.kind == SPEC:
+        steps = engine.count_steps(APP.root / node.rel)
+        return "" if steps is None else c.count(steps, "step")
+    if node.kind == TURN:
+        return _turn_meta(APP.root / node.rel)
+    return ""
+
+
+def _note(node: tree.Node, stale: set[str]) -> str:
+    """A fact about the row, in the engine's terms and in no colour at all."""
+    if node.kind == SOURCE:
+        entry = APP.sources.get(node.ident) or {}
+        return "" if catalog.is_interpreted(entry) else "uninterpreted"
+    if node.kind == SPEC and Path(node.name).stem in stale:
+        return STALE_SPEC_NOTE
+    if node.kind == MODEL and Path(node.name).stem in stale:
+        return STALE_MODEL_NOTE
+    if node.kind == UNINDEXED:
+        return UNINDEXED_NOTE
+    return ""
+
+
+# --- turns ------------------------------------------------------------------
 
 
 def _turns() -> None:
-    """Logged copilot turns — its own section, and its own word.
+    """Logged copilot turns — pinned below the tree, because their files are not in it.
 
     A *run* executed a spec; a *turn* was the copilot deciding what the spec
-    should say. Two artifacts, two headings: the pane's job is to say what
-    portia knows about, and one heading covering both would make "run" mean two
-    things in the one place that has to be unambiguous.
+    should say. Two artifacts, two words: one heading covering both would make
+    "run" mean two things in the one place that has to be unambiguous. The run's
+    markdown is a file in the project and appears in the tree where it lives;
+    a turn is JSONL inside ``.portia/``, which is not walked.
 
     The model is the meta, because it is the thing you are usually looking for.
     `EVALUATION.md` can only compare two runs when they differ in the model and
     effort and nothing else, so that is the first question asked of this list.
     """
+    c.rule()
     c.section_header("Turns")
     turns = engine.turns_in(APP)
     if not turns:
@@ -243,6 +241,19 @@ def _add_data_affordance() -> None:
 
 
 # --- selection --------------------------------------------------------------
+
+
+def _toggle(rel: str, depth: int) -> None:
+    """Open or shut a folder. The tree is the only thing that changes."""
+    APP.toggle_folder(rel, depth)
+    pane.refresh()
+
+
+def _open(node: tree.Node) -> None:
+    if node.kind == SPEC:
+        _open_spec(APP.root / node.rel)
+    else:
+        _select(node.kind, node.ident)
 
 
 def _select(kind: str, name: str) -> None:

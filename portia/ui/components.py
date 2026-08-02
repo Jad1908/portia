@@ -74,17 +74,6 @@ def section_header(value: str) -> ui.label:
     return ui.label(value).classes("p-section-header")
 
 
-def group_header(value: str) -> ui.label:
-    """A layer inside a section. Quieter than the section it sits under.
-
-    Uniform for every layer: same size, same weight, same colour. staging /
-    intermediate / mart is a **kind** of table and the order the tiers are built
-    in — never a ranking — so nothing here may grow, brighten or bold with the
-    tier (DESIGN.md → the rule specific to this product).
-    """
-    return ui.label(value).classes("p-group-header")
-
-
 def pane_title(value: str) -> ui.label:
     return ui.label(value).classes("t-heading-lg")
 
@@ -243,11 +232,22 @@ def artifact_row(
     meta: str = "",
     note: str = "",
     selected: bool = False,
+    depth: int = 0,
+    caret: str = "",
     on_click: Callable[..., Any] | None = None,
 ) -> ui.element:
-    """One file portia knows about. Selected is one of the accent's three jobs."""
+    """One file portia knows about. Selected is one of the accent's three jobs.
+
+    ``depth`` indents it inside the left tree and ``caret`` gives it a disclosure
+    triangle, so a folder and a file are **one row type at two settings** rather
+    than two components that have to be kept looking alike. The indent is handed
+    to CSS as a custom property rather than computed into a padding here: how far
+    a level steps in is a look, and looks live in ``assets/portia.css``.
+    """
     classes = "artifact-row" + (" artifact-row--selected" if selected else "")
-    with ui.element("div").classes(classes) as row:
+    with ui.element("div").classes(classes).style(f"--depth:{depth}") as row:
+        if caret:
+            ui.icon(caret).classes("artifact-caret")
         ui.icon(icon).classes("artifact-icon")
         # Own class rather than utility classes: this wrapper's job is to be the
         # thing that shrinks, and a long path is exactly what it holds.

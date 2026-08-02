@@ -159,10 +159,10 @@ def project_context() -> None:
     with ui.element("div").classes("p-centered"):
         with ui.element("div").classes("p-centered-column"):
             ui.label("What is this project?").classes("t-heading-md")
-            c.text(_CONTEXT_WHY, color="c-mute")
+            c.text(CONTEXT_WHY, color="c-mute")
 
             box = (
-                ui.textarea(placeholder=_CONTEXT_PLACEHOLDER)
+                ui.textarea(placeholder=CONTEXT_PLACEHOLDER)
                 .classes("p-field p-editor w-full")
                 .props("borderless autofocus")
                 .style("min-height:180px")
@@ -170,7 +170,7 @@ def project_context() -> None:
             box.bind_value(APP, "goal")  # reused as scratch until it is saved
 
             with ui.element("div").classes("stack-xs"):
-                for line in _CONTEXT_SHAPE:
+                for line in CONTEXT_SHAPE:
                     c.caption(line, color="c-stone")
 
             with ui.element("div").classes("row-gap-sm"):
@@ -343,54 +343,6 @@ def build_add_dialog() -> None:
 def open_add_dialog() -> None:
     """Show it. Says so if it isn't there, rather than doing nothing quietly."""
     _show(_ADD_DIALOG)
-
-
-# --- editing the brief ------------------------------------------------------
-
-#: The brief dialog for this page. Same rule as the add dialog: built once, at
-#: page level, never inside a refreshable.
-_BRIEF_DIALOG: ui.dialog | None = None
-
-
-def build_brief_dialog() -> None:
-    """The project brief, editable after the fact.
-
-    The gate writes it once; nothing else could change it, which made the most
-    consequential text in the product the only text you couldn't correct. It
-    writes through `catalog.init_project` — the same call the gate makes.
-    """
-    global _BRIEF_DIALOG
-    with ui.dialog().props("transition-duration=0") as dialog:
-        with ui.element("div").classes("write-confirm").style(DIALOG_WIDTH):
-            ui.label("What is this project?").classes("t-heading-md")
-            c.text(_CONTEXT_WHY, color="c-mute")
-            box = (
-                ui.textarea(placeholder=_CONTEXT_PLACEHOLDER)
-                .classes("p-field p-editor w-full")
-                .props("borderless")
-                .style("min-height:160px")
-            )
-            dialog.on("show", lambda: box.set_value(APP.project_context))
-            with ui.element("div").classes("row-gap-sm"):
-                c.button("Save", lambda: _save_brief(box.value, dialog), kind="primary")
-                c.button("Cancel", dialog.close, kind="secondary")
-    _BRIEF_DIALOG = dialog
-
-
-def open_brief_dialog() -> None:
-    _show(_BRIEF_DIALOG)
-
-
-def _save_brief(text: str, dialog: ui.dialog) -> None:
-    from portia.ui import app as app_module
-
-    if not (text or "").strip():
-        ui.notify("the brief cannot be empty")
-        return
-    engine.set_context(text, APP)
-    dialog.close()
-    app_module.toolbar.refresh()
-    ui.notify("brief saved")
 
 
 def _show(dialog: ui.dialog | None) -> None:
@@ -714,11 +666,11 @@ def _default_model() -> str:
 _OPEN_SUBTITLE = "Open a project directory. If it doesn't exist yet, it gets created."
 _OPEN_NEW = "Type a path instead"
 
-_CONTEXT_WHY = (
+CONTEXT_WHY = (
     "This is what makes a column's meaning decidable. A generic brief yields generic judgment."
 )
-_CONTEXT_PLACEHOLDER = "Describe the project in your own words…"
-_CONTEXT_SHAPE = (
+CONTEXT_PLACEHOLDER = "Describe the project in your own words…"
+CONTEXT_SHAPE = (
     "Say what the business does and what you are trying to produce.",
     "Say what one row means, and which source is authoritative for what.",
     "Say what the result gets used for, and what would make it wrong.",

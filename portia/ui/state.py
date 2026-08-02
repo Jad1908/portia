@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from portia.core.present import PREVIEW_ROWS
+from portia.ui import tree
 
 #: How much of a table a preview shows — one number for every surface, so
 #: "showing 15 of 40" means the same thing in the app and in a saved report.
@@ -35,6 +36,8 @@ __all__ = [
     "OUTPUT",
     "RUN",
     "TURN",
+    "UNINDEXED",
+    "BRIEF",
     "GOAL",
     "INDEXING",
     "REREAD",
@@ -65,6 +68,14 @@ MODEL = "model"
 OUTPUT = "output"
 RUN = "run"
 TURN = "turn"
+#: A file in the tree that portia can read and has never profiled. It is a
+#: selection because the tree shows such files, and a row you can click into
+#: nothing is a dead end — the inspector says what it is and offers to index it.
+UNINDEXED = tree.DATA
+#: The project brief. Not a file in the tree — ``.portia/`` is not walked — but
+#: pinned above it, because it is the most consequential text in the product and
+#: it was previously reachable only from a toolbar button.
+BRIEF = "brief"
 
 
 @dataclass
@@ -196,6 +207,17 @@ class App:
 
     selection: tuple[str, str] | None = None  # (kind, name) — None = the workflow
     selected_step: str | None = None
+    #: Which folders in the left tree the operator has opened, and which they have
+    #: shut. Two sets rather than one because the default is neither: **the top
+    #: level is open and everything below it is closed**, so "open" and "closed"
+    #: are both overrides of a rule, and one set could not say which.
+    #:
+    #: Frozensets because they are replaced rather than mutated, and paths rather
+    #: than nodes because the tree is rebuilt from disk on every render — a folder
+    #: that exists in two consecutive renders is the same row to the operator, and
+    #: `rel` is the only thing that survives the rebuild.
+    open_folders: frozenset[str] = frozenset()
+    closed_folders: frozenset[str] = frozenset()
     #: Which model cards are open on the canvas, showing the steps that build them.
     #: A frozenset because it is replaced rather than mutated, which is what makes
     #: "did the graph change?" answerable by comparing two values.
@@ -338,6 +360,26 @@ class App:
 
     def is_selected(self, kind: str, name: str) -> bool:
         return self.selection == (kind, name)
+
+    def folder_open(self, rel: str, depth: int) -> bool:
+        """Whether a folder in the left tree is showing its contents.
+
+        Open if you opened it, or if it is top level and you have not closed it.
+        The default is deliberately shallow: a project's own folders are the
+        thing you want to see on opening, and everything under them is a walk you
+        asked for.
+        """
+        if rel in self.open_folders:
+            return True
+        return depth == 0 and rel not in self.closed_folders
+
+    def toggle_folder(self, rel: str, depth: int) -> None:
+        if self.folder_open(rel, depth):
+            self.open_folders -= {rel}
+            self.closed_folders |= {rel}
+        else:
+            self.closed_folders -= {rel}
+            self.open_folders |= {rel}
 
     def start_turn(
         self,

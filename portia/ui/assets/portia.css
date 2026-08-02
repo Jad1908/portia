@@ -745,8 +745,11 @@ html body {
   border-bottom: none;
 }
 
-/* ── left pane — files & artifacts ────────────────────────────────────────── */
+/* ── left pane — the project tree ─────────────────────────────────────────── */
 
+/* One row type for a folder and for a file, at two settings: `--depth` indents
+ * it and a caret appears when it can be opened. Two components that had to be
+ * kept looking alike would drift the first time either was touched. */
 .artifact-row {
   display: flex;
   align-items: center;
@@ -756,11 +759,23 @@ html body {
   max-width: 100%;
   gap: var(--sp-sm);
   padding: var(--sp-sm) var(--sp-md);
+  /* How far one level of the tree steps in. It lives here rather than being
+   * computed into a padding in Python, for the same reason every other number in
+   * this file does: the indent is a look. */
+  padding-left: calc(var(--sp-md) + var(--depth, 0) * 14px);
   margin: 0 var(--sp-sm);
   border-radius: var(--r-sm);
   background: transparent;
   cursor: pointer;
   min-width: 0;
+}
+.artifact-row .artifact-caret {
+  color: var(--ash);
+  font-size: 16px;
+  flex: 0 0 auto;
+  /* Pulled tight against the folder icon: the caret and the icon are one
+   * affordance, not two things in a row. */
+  margin-right: calc(-1 * var(--sp-xs));
 }
 .artifact-row .artifact-icon {
   color: var(--mute);
@@ -1545,16 +1560,6 @@ body.body--dark .step-card {
   color: var(--mute);
   min-width: 38px;
   text-align: center;
-}
-
-/* A layer inside a left-pane section. Uniform for every layer — same size, same
- * weight, same colour — because staging/intermediate/mart is a kind of table and
- * the order the tiers are built in, never a ranking. */
-.p-group-header {
-  font-size: 11px;
-  letter-spacing: 0.2px;
-  color: var(--ash);
-  padding: var(--sp-sm) var(--sp-md) var(--sp-xxs) var(--sp-lg);
 }
 
 /* A generated .sql that no longer matches its spec. Drift, not a blocking zero:

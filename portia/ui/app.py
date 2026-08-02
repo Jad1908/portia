@@ -37,7 +37,6 @@ def page() -> None:
     # At page level, deliberately: a dialog built inside a refreshable is deleted
     # by the first refresh (see `screens.build_add_dialog`).
     screens.build_add_dialog()
-    screens.build_brief_dialog()
     # `DESIGN.md` → Width behaviour, which cannot be done in CSS once the panes
     # are inside splitters: a splitter sets an inline pixel width on its panel, so
     # restyling the pane inside changes nothing about the space reserved beside it.
@@ -190,9 +189,6 @@ def _project_label() -> None:
     directory the window has stopped looking at.
     """
     theme.logo(small=True)
-    c.button("Brief", screens.open_brief_dialog, icon="notes", micro=True).tooltip(
-        APP.project_context or "no brief yet"
-    )
     label = c.button(
         APP.root.name or str(APP.root),
         _switch_project,
