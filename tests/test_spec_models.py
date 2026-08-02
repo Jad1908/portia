@@ -208,3 +208,30 @@ def test_the_apps_run_resolves_cross_spec_references(project: Path) -> None:
 
     assert app.run_error is None, app.run_error
     assert app.results and app.results[-1].provenance["result_rows"] == 3
+
+
+def test_discovery_returns_paths_relative_to_the_root_it_was_given(project: Path) -> None:
+    """Every caller joins the result back onto a base, so prefixing it here is a
+    double-prefix. It hid behind two accidents — joining an *absolute* path
+    discards the left side, and a root of "." makes the prefix a no-op — and broke
+    on the one remaining shape: a relative root that isn't ".".
+    """
+    _staging(project)
+
+    models = spec.discover_specs(project)
+
+    assert models["stg_orders"] == Path("specs/staging/stg_orders.yaml")
+    assert not models["stg_orders"].is_absolute()
+    assert (project / models["stg_orders"]).exists()
+
+
+def test_a_relative_root_that_is_not_dot_finds_its_specs(project: Path, monkeypatch) -> None:
+    """`python -m portia.cli.build --root sandbox/gui` looked under
+    `sandbox/gui/sandbox/gui/specs` and found nothing."""
+    _staging(project)
+    monkeypatch.chdir(project.parent)
+
+    models = spec.discover_specs(project.name)
+
+    assert set(models) == {"stg_orders"}
+    assert pipeline.stale_models(project.name) == []

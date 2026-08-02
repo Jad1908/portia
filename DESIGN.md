@@ -202,9 +202,20 @@ positive at small sizes to keep the cool surfaces airy.
 
 ### Width behavior
 - **Wide (≥1400px):** all three panes visible.
-- **Medium (≥1024px):** the transcript collapses to a toolbar toggle.
-- **Narrow (<1024px):** the left pane collapses to an overlay. The workflow pane and the Run action
-  stay reachable at every width.
+- **Medium (≥1024px):** the transcript is closed by default and reachable from its toolbar toggle.
+- **Narrow (<1024px):** the left pane is closed by default too. The workflow pane and the Run
+  action stay reachable at every width.
+- These are **defaults, not constraints.** Crossing a threshold changes what is showing; the
+  toolbar toggles win afterwards, and resizing *within* a band never overrules you. A hard rule
+  would take the transcript away from anyone on a 1280px screen, and it holds the two components
+  this app exists for.
+- **It cannot be done in CSS**, and the first attempt at it was three media queries that did
+  nothing. A splitter sets an inline pixel width on its panel, so restyling the pane inside that
+  panel changes nothing about the space reserved beside it — "the left pane overlays" produced a
+  260px gap with an absolutely-positioned pane sitting in it. The window width is reported to the
+  server instead (`ui/assets/viewport.js`) and the layout is decided where the pane sizes are.
+- Every side pane's drag ceiling is computed against **the workflow pane's floor**, so no
+  combination of drags can squeeze the middle pane past the width at which it stops working.
 
 ## Elevation & Depth
 
@@ -302,6 +313,14 @@ These exist so a test run never needs a terminal (`VISION.md` → "The no-termin
   the UI must not blur the two.
 - Once a project has sources this shrinks to a row-height affordance at the foot of the left pane.
 
+**`import-plan`** — what an import is about to copy, and where
+- A `write-confirm` panel: the heading names the count, then one row per `from → to` pair in
+  `{typography.mono}`, then **Copy and index** and **Cancel**.
+- **Every pair is listed, never summarised.** "3 files into data/" describes a plan; this is the
+  plan. It is also the one moment a wrong destination or a name collision is cheap to notice.
+- A refusal — destination outside the project, name already taken — replaces the panel with the
+  engine's own sentence rather than a toast, because it is a thing to read and act on.
+
 **`index-progress`** — a file landing
 - Each file appears as an `artifact-row` the moment it profiles, carrying the **uninterpreted**
   marker until the turn writes its summary. Profiling is instant and deterministic; the
@@ -347,6 +366,16 @@ These exist so a test run never needs a terminal (`VISION.md` → "The no-termin
 - **Selected**: 1px border `{colors.accent-primary}` at ~60% with a faint `{colors.accent-soft}`
   wash. Second of the three accent places.
 - **Blocked**: 1px `{colors.error}` at ~60%, `{colors.error-soft}` wash.
+
+**`model-card`** + **`model-card-open`** + **`model-card-selected`** — another spec's table
+- `{colors.surface-card}` fill, 1px `{colors.hairline-strong}`, `{rounded.md}`. A header row of
+  48px: caret, name in `{typography.mono}`, the layer as a `type-chip`, the step count.
+- Opening it keeps the header and insets its step graph below, and the card is sized to fit. It is
+  a different **kind** of node from a source, not a more important one — a source is a file that
+  arrived, this is a table portia built and can open.
+- **The layer is its name and nothing else.** No hue per tier, no size, no weight.
+  staging/intermediate/mart is a kind of table and the order the tiers are built in; it is also the
+  one thing on the card that nothing measured. See the product rule at the top of this file.
 
 **`source-node`** — an input table in the graph
 - Fill `{colors.canvas}`, 1px `{colors.hairline-soft}`, name `{colors.mute}` `{typography.mono}`,
@@ -500,6 +529,14 @@ questions-and-insights UX *is* the product" — and they get the most design att
 **`keycap`** — `{colors.surface-card}` fill, `{colors.body}` `{typography.mono}`, padding `1px 6px`,
 `{rounded.xs}`.
 
+**`group-header`** — a layer inside a left-pane section
+- 11px, `{colors.ash}`, indented under its `{spacing.lg}` section header. Identical for every
+  layer. A project that declares no layer gets no group headers at all.
+
+**`stale-banner`** — a generated `.sql` that no longer matches its spec
+- `{colors.warning-soft}` fill, 1px `{colors.warning}` at 40%, `{rounded.md}`. Drift, not a
+  blocking zero: nothing is broken, the file describes an older version of the decision record.
+
 **`fact`** — one measured value as a small icon plus the number
 - 14px icon in `{colors.stone}`, value in `{typography.mono-sm}` `{colors.body}`, `{spacing.xs}`
   between them. **The icon is shorthand and never the whole story** — every `fact` carries a tooltip
@@ -575,7 +612,19 @@ Their *visual language* lives on in the components above.
 
 - **Light-mode values are first-pass**, inherited and tuned by reasoning rather than capture; verify contrast on device. *Light mode has now been looked at on screen and reads correctly; the values have still never been measured.*
 - **Hover states** are left to platform convention and not specified here. *V0 gives artifact rows and option rows a `{colors.surface-card}` hover and nothing else.*
-- **The graph's visual grammar is provisional.** Cards-are-steps and edges-are-data-dependency is V0's working answer to `VISION.md`'s open question; rendering it is how we find out whether it reads correctly. *First reading: on a two-source, one-step spec it is legible and unremarkable — which is the answer for the easy case only. It has not been seen on a multi-hop spec, and the layout is a fixed grid with no pan, zoom or collapse, so a long chain will run off the canvas before the grammar is what fails.*
+- ~~**The graph's visual grammar is provisional.**~~ *Settled 2026-08-01, and the answer to
+  cards-are-steps-or-tables is **both at different levels** (`PIPELINE.md` §6). The canvas pans and
+  zooms and a model card expands in place. Read on a three-model, two-layer project — legible, and
+  the source / model distinction does the work it was added for. Not yet seen on a project big
+  enough for the grammar rather than the density to be what fails, and **zoom does not yet change
+  what a card shows**: at 40% a step card is an unreadable rectangle. Dropping detail as you zoom
+  out would read better and is exactly the sort of thing that starts quietly ranking what survives,
+  so the product rule needs thinking through before it is built (`BACKLOG.md`).*
+- **Panning was scroll-based and silently dead.** A graph that fitted its pane had nothing to
+  scroll, and the dot grid was pinned to the element rather than its contents, so on the one graph
+  large enough to pan the nodes slid under a stationary grid. Both gone: `--pan-x`/`--pan-y` drive
+  a transform on the content and the grid's `background-position` together. Worth remembering as a
+  shape of bug — the feature was present, reviewed, and had never worked.
 - ~~**First-run chrome is specced but unbuilt**~~ — *built: `project-open`, `project-context`, `source-dropzone`, `index-progress`. The context panel is still a text box with guidance beneath it, and it still deserves more than that.*
 - ~~**Drag-and-drop file handling is unverified**~~ — *still unverified. The sanctioned fallback is what shipped and what was tested: the picker, plus an "add by path" field that takes a file, a directory or a glob.*
 - **Teal pill contrast on dark** — white on `#0D9488` sits just under 4.5:1 for 13px text; verify on device and darken toward `#0C7D72` if it reads weak. *Unmeasured.*

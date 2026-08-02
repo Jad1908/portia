@@ -31,6 +31,7 @@ __all__ = [
     "Turn",
     "SOURCE",
     "SPEC",
+    "MODEL",
     "OUTPUT",
     "RUN",
     "TURN",
@@ -41,6 +42,9 @@ __all__ = [
     "INDEX",
     "TABS",
     "Stream",
+    "WIDE",
+    "MEDIUM",
+    "band_for",
 ]
 
 #: What a left-pane selection can be. ``None`` means the workflow is in view.
@@ -53,6 +57,11 @@ __all__ = [
 #: portia knows about.
 SOURCE = "source"
 SPEC = "spec"
+#: A compiled ``models/*.sql`` — **the deliverable**, and deliberately not an
+#: OUTPUT. A run's CSV is a result of executing the pipeline; this is the
+#: pipeline (`docs/PIPELINE.md` §2.2). One list holding both would make "output"
+#: mean two things in the pane whose whole job is saying what portia knows about.
+MODEL = "model"
 OUTPUT = "output"
 RUN = "run"
 TURN = "turn"
@@ -99,6 +108,25 @@ TABS = (CHAT, INDEX)
 
 #: Which tab a turn's transcript belongs to.
 TAB_FOR_KIND = {GOAL: CHAT, INDEXING: INDEX, REREAD: INDEX}
+
+#: `DESIGN.md` → Width behaviour, as three bands. The workflow pane and Run stay
+#: reachable at every width, so it is always a side pane that gives way.
+#:
+#: These set **defaults**, not constraints: crossing a threshold changes what is
+#: showing, and the toolbar toggles still win afterwards. A hard rule would take
+#: the transcript — which holds the question form and the write confirmation, the
+#: two things this app exists for — away from anyone on a 1280px screen.
+WIDE = 1400
+MEDIUM = 1024
+WIDE_BAND = "wide"
+MEDIUM_BAND = "medium"
+NARROW_BAND = "narrow"
+
+
+def band_for(width: int) -> str:
+    if width >= WIDE:
+        return WIDE_BAND
+    return MEDIUM_BAND if width >= MEDIUM else NARROW_BAND
 
 
 @dataclass
@@ -159,11 +187,32 @@ class App:
     spec_path: Path | None = None
     spec: dict | None = None
     results: list | None = None  # list[spec.StepResult] once a run has happened
+    #: Every model the last run built — the open spec plus everything it reads.
+    #: `results` is the open spec's steps; this is what else was executed, so the
+    #: run header can say so rather than implying one spec ran alone.
+    built: list = field(default_factory=list)  # list[pipeline.BuiltModel]
     run_error: str | None = None
     outputs: list[Path] = field(default_factory=list)
 
     selection: tuple[str, str] | None = None  # (kind, name) — None = the workflow
     selected_step: str | None = None
+    #: Which model cards are open on the canvas, showing the steps that build them.
+    #: A frozenset because it is replaced rather than mutated, which is what makes
+    #: "did the graph change?" answerable by comparing two values.
+    expanded: frozenset[str] = frozenset()
+    #: A model to bring into view. Picking a spec on the left pans the canvas to
+    #: its card instead of replacing the view — the canvas is the one place both
+    #: zoom levels are true at once.
+    focus_model: str | None = None
+    #: Bumped on each explicit focus request, and rendered onto the marked card so
+    #: the client can act on it **once**. It is not a counter of anything and
+    #: nothing reads it as one.
+    #:
+    #: The obvious version — clear `focus_model` as the render consumes it — was
+    #: wrong: the workflow pane renders more than once per click, so the first
+    #: render ate the flag and the render that reached the DOM had nothing to mark.
+    #: A token makes a repeated render harmless instead of making it a race.
+    focus_token: int = 0
     #: The source whose interpretation is being edited by hand, if any. Editing is
     #: a mode rather than a dialog: the check facts have to stay on screen while
     #: you write the prose, because they are what the prose is a read *of*.
@@ -174,6 +223,16 @@ class App:
     removing: str | None = None
     #: Whether the operator chose to get on with it without adding data yet.
     skipped_sources: bool = False
+    #: Where an import will put what it copies, relative to the project root.
+    #: Data lives in the repo (`docs/PIPELINE.md` §2.7), so this is a place inside
+    #: it, never a way out of it.
+    import_destination: str = "data"
+    #: The pending import, as ``(from, to)`` pairs — exactly what will be copied
+    #: and where. Held so the confirmation shows the real thing rather than a
+    #: description of one, and cleared the moment it is acted on or abandoned.
+    import_plan: list = field(default_factory=list)  # list[tuple[Path, Path]]
+    #: Why the last import could not be planned, in the operator's terms.
+    import_error: str = ""
     #: What indexing is doing right now, as a sentence to put on screen — empty
     #: when nothing is running. Profiling twenty real extracts takes a minute,
     #: and a window that says nothing for a minute reads as broken.
@@ -193,6 +252,15 @@ class App:
     left_add_data: bool = False
     show_transcript: bool = True
     show_files: bool = True
+    #: How wide the window is, reported by `assets/viewport.js`. Layout only — the
+    #: splitters need it to work out how much room they may give a side pane
+    #: before the workflow pane stops being usable, and CSS cannot express that
+    #: once a splitter is setting inline pixel widths on its panels.
+    width: int = WIDE
+    #: Which width band that was, so the band's defaults are applied when you
+    #: cross a threshold and **not** on every resize event. Dragging a window
+    #: narrower should not keep reopening a pane you just closed.
+    band: str = WIDE_BAND
 
     #: One transcript per tab, and which tab is showing.
     streams: dict[str, Stream] = field(default_factory=lambda: {t: Stream() for t in TABS})
@@ -243,6 +311,27 @@ class App:
     def busy(self) -> bool:
         """A turn is live **anywhere**. Starting a second would interleave two."""
         return any(s.busy for s in self.streams.values())
+
+    def focus(self, model: str) -> None:
+        """Ask the canvas to bring ``model`` into view on the next render."""
+        self.focus_model = model
+        self.focus_token += 1
+
+    def resize(self, width: int) -> bool:
+        """Record the window width; return whether the layout has to be redrawn.
+
+        Only a **band change** reapplies defaults. Resizing within a band leaves
+        the panes exactly as you left them, which is the difference between a
+        layout that adapts and one that keeps overruling you.
+        """
+        self.width = width
+        band = band_for(width)
+        if band == self.band:
+            return False
+        self.band = band
+        self.show_files = band != NARROW_BAND
+        self.show_transcript = band == WIDE_BAND
+        return True
 
     def select(self, kind: str | None, name: str = "") -> None:
         self.selection = None if kind is None else (kind, name)

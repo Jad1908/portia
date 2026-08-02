@@ -74,6 +74,17 @@ def section_header(value: str) -> ui.label:
     return ui.label(value).classes("p-section-header")
 
 
+def group_header(value: str) -> ui.label:
+    """A layer inside a section. Quieter than the section it sits under.
+
+    Uniform for every layer: same size, same weight, same colour. staging /
+    intermediate / mart is a **kind** of table and the order the tiers are built
+    in — never a ranking — so nothing here may grow, brighten or bold with the
+    tier (DESIGN.md → the rule specific to this product).
+    """
+    return ui.label(value).classes("p-group-header")
+
+
 def pane_title(value: str) -> ui.label:
     return ui.label(value).classes("t-heading-lg")
 

@@ -323,3 +323,107 @@ def test_write_outputs_falls_back_to_the_last_step_id(project: Path) -> None:
     """What a caller holding results but no spec path can honestly say."""
     written = spec.write_outputs(_run(_doc(), project), project / "out")
     assert [p.name for p in written] == ["orders_with_customers.csv"]
+
+
+# --- building one model, and what it is allowed to touch ---------------------
+
+
+def _unrelated(project: Path) -> None:
+    """A model nothing else reads, so a scoped build has something to leave alone."""
+    _spec_file(
+        project,
+        "stg_customers",
+        {
+            "version": 1,
+            "layer": "staging",
+            "sources": {"customers": "data/customers.csv"},
+            "steps": [
+                {
+                    "id": "tidied",
+                    "op": "normalize",
+                    "input": "customers",
+                    "transforms": [{"column": "name", "op": "strip"}],
+                }
+            ],
+        },
+    )
+
+
+def test_building_one_model_builds_what_it_reads(project: Path) -> None:
+    """ "Run this spec" means running its inputs — a table isn't built until the
+    tables it reads are. The scope is the model plus its upstreams, nothing else.
+    """
+    _two_layer_project(project)
+    _unrelated(project)
+
+    built = pipeline.build_project(project, only="mart_orders")
+
+    assert [m.name for m in built] == ["stg_orders", "mart_orders"]
+    assert not (project / "models" / "staging" / "stg_customers.sql").exists()
+
+
+def test_a_scoped_build_still_writes_every_source(project: Path) -> None:
+    """The sources file creates the names *every* model reads. Writing only the
+    scoped subset would leave the rest of the pipeline unable to run — a narrower
+    build must not break a file it was not asked to touch.
+    """
+    _two_layer_project(project)
+    _unrelated(project)
+
+    pipeline.build_project(project, only="stg_orders")
+
+    sources = (project / "models" / pipeline.SOURCES_FILE).read_text()
+    assert '"orders"' in sources
+    assert '"customers"' in sources, "a source only the unbuilt models read is still declared"
+
+
+def test_a_scoped_build_produces_the_same_sql_as_a_full_one(project: Path) -> None:
+    """Scope narrows what runs; it never changes what comes out."""
+    _two_layer_project(project)
+
+    pipeline.build_project(project)
+    full = (project / "models" / "mart" / "mart_orders.sql").read_text()
+    (project / "models" / "mart" / "mart_orders.sql").unlink()
+    pipeline.build_project(project, only="mart_orders")
+    scoped = (project / "models" / "mart" / "mart_orders.sql").read_text()
+
+    assert _without_timestamp(full) == _without_timestamp(scoped)
+
+
+def test_a_scoped_build_clears_that_models_staleness(project: Path) -> None:
+    """Run writes the .sql for what it ran, so the deliverable cannot fall behind
+    the spec from inside the app. Anything it did not run stays stale."""
+    _two_layer_project(project)
+    pipeline.build_project(project)
+
+    doc = spec.load_spec(project / "specs" / "stg_orders.yaml")
+    doc["steps"][0]["transforms"] = [{"column": "customer_id", "op": "lower"}]
+    _spec_file(project, "stg_orders", doc)
+    assert pipeline.stale_models(project) == ["stg_orders"]
+
+    pipeline.build_project(project, only="stg_orders")
+
+    assert pipeline.stale_models(project) == []
+
+
+def test_upstream_of_orders_a_model_after_everything_it_reads(project: Path) -> None:
+    _two_layer_project(project)
+    models = spec.discover_specs(project)
+
+    assert spec.upstream_of("mart_orders", models, base_dir=project) == [
+        "stg_orders",
+        "mart_orders",
+    ]
+    assert spec.upstream_of("stg_orders", models, base_dir=project) == ["stg_orders"]
+
+
+def test_upstream_of_an_unknown_model_says_what_there_is(project: Path) -> None:
+    _two_layer_project(project)
+    models = spec.discover_specs(project)
+
+    with pytest.raises(ValueError, match="no spec produces 'nope'"):
+        spec.upstream_of("nope", models, base_dir=project)
+
+
+def _without_timestamp(sql: str) -> str:
+    return "\n".join(line for line in sql.splitlines() if not line.startswith("-- generated "))

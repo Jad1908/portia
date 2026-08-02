@@ -272,8 +272,17 @@ html body {
   flex-direction: column;
   /* Fill the panel rather than shrinking to content. Without this the graph
    * canvas ended where the graph did, leaving dead space below it that looked
-   * like the pane but wasn't — nothing to pan on, and no grid drawn. */
+   * like the pane but wasn't — nothing to pan on, and no grid drawn.
+   *
+   * `width: 100%` is not redundant with `flex: 1 1 auto`, which only governs the
+   * main axis — and this is a column, so the main axis is height. A splitter panel
+   * does not stretch its children, so the pane was as wide as its widest in-flow
+   * child. That was survivable while the graph sat in the flow and dragged the
+   * pane out to its own width; the moment the canvas started positioning its
+   * content absolutely the pane collapsed to the width of the header row, and
+   * every card past the second one was clipped away. */
   flex: 1 1 auto;
+  width: 100%;
   min-height: 0;
   min-width: 0;
 }
@@ -354,31 +363,13 @@ html body {
   flex-direction: column;
 }
 
-/* Width behaviour — the workflow pane and Run stay reachable at every width, so
- * it is always the side panes that give way. Below 1024 the left pane stops
- * taking layout space and overlays instead; a transient overlay is the one place
- * a shadow is allowed. Both panes are toggled from the toolbar at every width. */
-@media (max-width: 1399px) {
-  .p-pane-right {
-    flex: 0 0 340px;
-  }
-}
-@media (max-width: 1023px) {
-  .p-body {
-    position: relative;
-  }
-  .p-pane-left {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 0;
-    z-index: 10;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
-  }
-  .p-pane-right {
-    flex: 0 0 300px;
-  }
-}
+/* Width behaviour lives in `app.py` and `state.py`, not here — see
+ * `assets/viewport.js`. This file used to hold three media queries for it and
+ * every one of them was inert: a Quasar splitter sets an inline pixel width on
+ * its panel, so `flex` or `position` on the pane *inside* that panel changes
+ * nothing about the space reserved beside it. Below 1024 the left pane duly went
+ * `position: absolute` to "overlay" and its splitter panel went on holding 260px
+ * of layout next to it, which is not an overlay, it is a gap. */
 
 /* ── buttons ──────────────────────────────────────────────────────────────── */
 
@@ -829,19 +820,65 @@ html body {
 
 /* A dot grid, the way a node canvas reads everywhere: it says "this space is
  * navigable" before you touch it, and gives the eye something to judge panning
- * against. Faint enough that the cards still carry the contrast. */
+ * against. Faint enough that the cards still carry the contrast.
+ *
+ * The canvas clips and the content inside it is transformed (see `canvas.js`).
+ * It used to scroll instead, which had two consequences and both were bugs: a
+ * graph that fitted its pane had nothing to scroll, so dragging did nothing at
+ * all; and `background-attachment` defaults to `scroll`, which pins the grid to
+ * the *element* rather than to its contents — so on the one graph big enough to
+ * pan, the nodes slid under a stationary grid and the canvas read as dead.
+ * Driving both off `--pan-x`/`--pan-y` is what keeps them in step. */
 .graph-canvas {
+  --pan-x: 0px;
+  --pan-y: 0px;
+  --zoom: 1;
+  --grid: 20px;
   position: relative;
-  padding: var(--sp-lg);
-  overflow: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
   cursor: grab;
   background-image: radial-gradient(var(--hairline-strong) 1.5px, transparent 1.5px);
-  background-size: 20px 20px;
-  background-position: -1px -1px;
+  /* The grid scales with the content, so zooming out shows *more* grid rather
+   * than a coarser one — it stays a texture the eye can judge movement against
+   * instead of becoming a second, contradictory sense of scale. */
+  background-size: calc(var(--grid) * var(--zoom)) calc(var(--grid) * var(--zoom));
+  background-position: calc(var(--pan-x) - 1px) calc(var(--pan-y) - 1px);
 }
 .graph-canvas.is-panning {
   cursor: grabbing;
   user-select: none;
+}
+.graph-canvas > .empty-note {
+  padding: var(--sp-lg);
+}
+
+/* The laid-out graph. Absolute, so it can be translated past the canvas edge in
+ * either direction — the pane is a window onto the graph, not a box the graph
+ * has to fit inside. Inset by the pane padding, because an absolute child is
+ * positioned against the padding box and would otherwise sit in the corner. */
+.graph-content {
+  position: absolute;
+  top: var(--sp-lg);
+  left: var(--sp-lg);
+  /* `transform-origin: 0 0` so the scale happens about the content's own corner
+   * and `canvas.js` can do the arithmetic that keeps the point under the cursor
+   * still. With the default centre origin, zooming walks whatever you were
+   * looking at off the screen. */
+  transform-origin: 0 0;
+  transform: translate(var(--pan-x), var(--pan-y)) scale(var(--zoom));
+}
+
+/* The selected card, verbatim, below the canvas rather than inside it. Inside,
+ * it was part of the pannable content and moved away when you dragged; it is a
+ * detail panel about the selection, not a thing on the canvas. */
+.graph-detail {
+  flex: 0 0 auto;
+  max-height: 45%;
+  overflow-y: auto;
+  border-top: 1px solid var(--hairline);
+  padding: 0 var(--sp-lg) var(--sp-lg);
 }
 
 .graph-edges {
@@ -897,6 +934,67 @@ body.body--dark .step-card {
   white-space: nowrap;
 }
 
+/* Another spec's table — something portia built, with a spec behind it you can
+ * open. A source is a file that arrived; this is a decision that produced a
+ * table. They drew identically until the pipeline overhaul, which meant the
+ * graph could not say which of its inputs it was responsible for.
+ *
+ * The layer rides in the header as a plain `type-chip` with the layer's name and
+ * no colour of its own. staging/intermediate/mart is build order, and it is the
+ * one thing on this card that nothing measured — so it says what kind of table
+ * this is, and never makes one card louder than another. */
+.model-card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-card);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.model-card--selected {
+  border-color: color-mix(in srgb, var(--accent-primary) 60%, transparent);
+}
+
+.model-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  min-width: 0;
+  height: 48px;
+  flex: 0 0 48px;
+  padding: 0 var(--sp-md);
+  cursor: pointer;
+}
+.model-head:hover {
+  background: var(--surface-elevated);
+}
+.model-card--open .model-head {
+  border-bottom: 1px solid var(--hairline);
+}
+.model-caret {
+  font-size: 16px;
+  color: var(--mute);
+  flex: 0 0 auto;
+}
+.model-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* The steps that build this table, one zoom level in — the same cards the spec
+ * graph drew, on the same canvas, inside the card for the table they produce. */
+.model-body {
+  position: relative;
+  margin: var(--sp-md) var(--sp-md) 0;
+  flex: 0 0 auto;
+}
+
 /* Deliberately quieter than a step: steps are the decisions. */
 .source-node {
   height: 100%;
@@ -912,6 +1010,11 @@ body.body--dark .step-card {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: pointer;
+}
+.source-node:hover {
+  border-color: var(--hairline-strong);
+  color: var(--body);
 }
 
 /* ── middle pane, bottom — the run report ─────────────────────────────────── */
@@ -1430,4 +1533,39 @@ body.body--dark .step-card {
   border: 1px solid var(--hairline);
   font-size: 11px;
   border-radius: var(--r-sm);
+}
+
+/* The zoom readout between the − and + buttons. Written by `canvas.js`, because
+ * the zoom level is client state — see that file's header. Tabular width so the
+ * buttons do not shift as it goes 100% → 80%. */
+.zoom-level {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-feature-settings: "tnum";
+  color: var(--mute);
+  min-width: 38px;
+  text-align: center;
+}
+
+/* A layer inside a left-pane section. Uniform for every layer — same size, same
+ * weight, same colour — because staging/intermediate/mart is a kind of table and
+ * the order the tiers are built in, never a ranking. */
+.p-group-header {
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: var(--ash);
+  padding: var(--sp-sm) var(--sp-md) var(--sp-xxs) var(--sp-lg);
+}
+
+/* A generated .sql that no longer matches its spec. Drift, not a blocking zero:
+ * nothing is broken, the file is describing an older version of the decision
+ * record. Same colour the drift badge uses, for the same reason. */
+.stale-banner {
+  background: var(--warning-soft);
+  border: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
+  border-radius: var(--r-md);
+  padding: var(--sp-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
 }

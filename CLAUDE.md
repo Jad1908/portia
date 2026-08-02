@@ -201,8 +201,11 @@ adding code, and extend them rather than working around them:
   `/tmp`, and the first cluttered the tree while the second was gone by morning.
 - `portia/cli/` — play surfaces: `python -m portia.cli.<tool>` (e.g. `profile`, `join`, `run`,
   `index`, `runs`) · **`build`** compiles every spec to `models/*.sql` (`--check` is the CI form:
-  writes nothing, fails if a `.sql` no longer matches its spec) · **`import_data`** is the only way
-  outside data enters the repo, and it copies rather than moves.
+  writes nothing, fails if a `.sql` no longer matches its spec) · **`import_data`** is how outside
+  data enters the repo, and it copies rather than moves. Its `plan()` — what would be copied where,
+  computed before anything is written — is **called by both edges**, so the window and the terminal
+  cannot disagree about where a file is going. It raises `ValueError`, never `SystemExit`: exiting
+  is `main`'s way of reporting a refusal, not the function's.
 - `portia/ui/` — the **app** (`python -m portia.ui`, `ui` extra): three panes on the same event
   stream, driving a turn through `ask.py`'s injected `answer`/`confirm`. Same status as `cli/` — an
   **edge**, and the two must never disagree about a number.
@@ -213,10 +216,28 @@ adding code, and extend them rather than working around them:
     (markdown, project-root `runs/`); a *turn* was the copilot deciding what the spec should say
     (JSONL, `.portia/runs/`, `runlog.py`). Selecting a turn replays it through `transcript`'s own
     renderers — one set of renderers, live and replayed, or the window ends up with a second
-    opinion about a turn that is already written down.
+    opinion about a turn that is already written down. **Models is a third**, and it is the
+    deliverable: a run's CSV under `out/` is a result, `models/*.sql` is the pipeline.
+  - **The middle pane is one canvas at two zoom levels** (`docs/PIPELINE.md` §6). A card in the
+    project graph is a *table* — one spec, one table — and a card inside an opened one is a *step*.
+    Three node kinds, and the distinction is the point: a `SOURCE` is a file that arrived, a
+    `MODEL` is a table portia built. Picking a spec on the left **navigates** the canvas rather
+    than replacing it.
+  - **Run is scoped, not partial.** Run executes the open spec *and everything it reads*, then
+    writes their `.sql`; Build does the project. One mechanism (`pipeline.build_project(only=…)`),
+    so the window and `cli.build` cannot produce different SQL.
   - `state.py` and `graph.py` import no NiceGUI, so the app's logic is testable without a browser.
   - The look lives in `ui/assets/portia.css` as `DESIGN.md`'s tokens — not in Python strings, and
-    not in NiceGUI APIs, so swapping the framework stays cheap (`TECH_STACK.md`).
+    not in NiceGUI APIs, so swapping the framework stays cheap (`TECH_STACK.md`). Behaviour that
+    has to be client-side lives beside it as its own file for the same reason: `canvas.js` (pan and
+    zoom), `viewport.js` (the window width, which `DESIGN.md`'s width bands need and CSS cannot
+    supply once panes are inside splitters), `choose_files.applescript` (the native file chooser).
+  - **The canvas view is the one piece of state the client owns.** Where it is panned and zoomed to
+    never reaches Python — a round trip per wheel tick would make the only directly-manipulated
+    surface the laggiest. It is not measured and not persisted. Anything the *server* wants the
+    canvas to do is stated declaratively in the DOM with a token, never driven by a
+    `run_javascript` during a render: that races the DOM patch, and NiceGUI rebuilds the pane
+    rather than patching it.
   - **`DESIGN.md`'s product rule is the UI's version of facts vs judgment: colour and prominence
     communicate *kind*, never *rank*.** No sorting by severity, no badge that grows with its number,
     no roll-up that implies a score. The engine refuses to rank; the screen must not do it on the

@@ -1,10 +1,20 @@
-"""Middle pane — the spec as a graph over its run report.
+"""Middle pane — the project as a graph over the open spec's run report.
 
-The top half draws what the YAML already encodes: cards are **steps**, an edge
-means *this step's output is that step's input*. Clicking a card shows the step
-verbatim, and **an acknowledged blocking flag is impossible to miss there** —
-Run 5 buried one mid-dict in a terminal confirmation and shipped a 3.85%-inflated
-table (docs/EVALUATION.md). This screen is the second chance at that.
+The top half draws what the YAML already encodes, at two zoom levels on one
+canvas. Across the project a card is a **table** — one spec, one table — and an
+edge is one model reading another; open a card and the cards inside it are the
+**steps** that build that table. That is `VISION.md`'s oldest open question,
+*are cards steps or tables?*, answered as **both, at different levels**.
+
+A third kind of card is the point of the distinction: a `SOURCE` is a file that
+arrived, a `MODEL` is a table portia built. They drew identically until the
+pipeline overhaul, which left the graph unable to say which of its inputs it was
+responsible for.
+
+Clicking a step shows it verbatim, and **an acknowledged blocking flag is
+impossible to miss there** — Run 5 buried one mid-dict in a terminal confirmation
+and shipped a 3.85%-inflated table (docs/EVALUATION.md). This screen is the
+second chance at that.
 
 The bottom half is `cli/run.py`'s output with the table attached: per step, what
 ``StepResult`` already carries — provenance, drift against ``expect``, the
@@ -30,11 +40,11 @@ from portia.checks.outcome import BLOCKING_FLAGS, describe_contribution, describ
 from portia.core.present import format_rate
 from portia.ui import components as c
 from portia.ui import engine, graph, state
-from portia.ui.state import APP, OUTPUT, RUN, SOURCE, TURN
+from portia.ui.state import APP, MODEL, OUTPUT, RUN, SOURCE, SPEC, TURN
 
 #: How tall the graph half sits by default, as a percentage. The report half is
 #: the taller of the two — it is where the evidence is (DESIGN.md → Layout).
-GRAPH_SPLIT = 38
+GRAPH_SPLIT = 44
 
 
 @ui.refreshable
@@ -42,6 +52,8 @@ async def pane() -> None:
     kind, name = APP.selection or (None, "")
     if kind == SOURCE:
         await _source_inspector(name)
+    elif kind == MODEL:
+        await _model_inspector(name)
     elif kind == OUTPUT:
         await _output_inspector(name)
     elif kind == RUN:
@@ -64,51 +76,191 @@ def _workflow() -> None:
 
 
 def _graph_half() -> None:
+    """The project as a DAG of tables, with the open spec's card opened onto its steps.
+
+    One canvas, two zoom levels: a card here is a **table** (one spec, one table),
+    and a card inside an opened one is a **step**. `VISION.md`'s oldest open
+    question — are cards steps or tables? — is answered as *both, at different
+    levels*, and this is where you can see both at once.
+    """
+    docs = engine.project_docs(APP)
+    placed = graph.project_layout(docs, expanded=APP.expanded, badges=_badge_counts(docs))
     with ui.element("div").classes("p-pane"):
-        _graph_header()
-        with ui.element("div").classes("p-scroll graph-canvas"):
-            placed = graph.layout(APP.spec)
+        _graph_header(docs)
+        with ui.element("div").classes("graph-canvas"):
             if placed.empty:
-                c.empty_note(_NO_STEPS if APP.spec_path else _NO_SPEC)
+                c.empty_note(_NO_SPECS)
             else:
                 _graph(placed)
-            _step_detail()
+        _step_detail()
 
 
-def _graph_header() -> None:
+def _graph_header(docs: dict) -> None:
     with ui.element("div").classes("row-gap-sm px-4 pt-3"):
-        name = APP.spec_path.name if APP.spec_path else "no spec open"
-        ui.label(name).classes("t-heading-sm")
-        steps = len((APP.spec or {}).get("steps") or [])
-        c.caption(c.count(steps, "step"))
+        ui.label("Pipeline").classes("t-heading-sm")
+        c.caption(c.count(len(docs), "model"))
+        stale = engine.stale_models(APP)
+        if stale:
+            # A `.sql` that no longer matches its spec is a fact about the
+            # deliverable, so it belongs where the deliverable is drawn — not only
+            # in `build --check`, where you find it after the fact.
+            c.flag_badge(f"{c.count(len(stale), 'model')} stale", c.DRIFT).tooltip(
+                f"{', '.join(stale)} — the .sql no longer matches the spec. Build to regenerate."
+            )
+        ui.element("div").classes("flex-1")
+        _view_controls()
+
+
+def _view_controls() -> None:
+    """Zoom, and the way back from having moved.
+
+    The gestures come first — drag to move, two fingers up and down to zoom — and
+    these are for the times a gesture isn't available or isn't precise enough. The readout between
+    them is written by `canvas.js`, because where the canvas is panned and zoomed
+    to is the one piece of state in this app the client owns; a round trip per
+    wheel tick would make the only directly-manipulated surface the laggiest.
+
+    The canvas pans and zooms with no bound, which is what makes it a surface
+    rather than a picture — and is exactly why Recenter has to exist. It undoes
+    both at once, as does double-clicking the canvas.
+    """
+    with ui.element("div").classes("row-gap-xs"):
+        c.button("", _zoom_out, icon="remove", micro=True).tooltip(_ZOOM_OUT_TIP)
+        ui.label("100%").classes("zoom-level")
+        c.button("", _zoom_in, icon="add", micro=True).tooltip(_ZOOM_IN_TIP)
+    c.button("Recenter", _recenter, icon="filter_center_focus", micro=True).tooltip(_RECENTER_TIP)
+
+
+def _zoom_in() -> None:
+    ui.run_javascript("portiaZoomIn()")
+
+
+def _zoom_out() -> None:
+    ui.run_javascript("portiaZoomOut()")
+
+
+def _recenter() -> None:
+    ui.run_javascript("portiaRecenter()")
+
+
+def _badge_counts(docs: dict) -> dict[str, int]:
+    """How many badges each step card will carry, so every card can fit the most.
+
+    Counting what is about to be drawn, not measuring anything: the flags
+    themselves come from `StepResult`, and before a run from what the spec
+    acknowledges. Cards stay uniform — this only decides what that one size is.
+    """
+    counts: dict[str, int] = {}
+    for doc in docs.values():
+        for step in doc.get("steps") or []:
+            step_id = step.get("id")
+            if not step_id:
+                continue
+            result = _result(step_id)
+            if result is None:
+                counts[step_id] = len(step.get("acknowledge") or [])
+            else:
+                counts[step_id] = (
+                    len(result.blocking) + len(result.acknowledged) + len(result.drift)
+                )
+    return counts
 
 
 def _graph(placed: graph.Layout) -> None:
-    style = f"position:relative;width:{placed.width}px;height:{placed.height}px"
-    with ui.element("div").style(style):
+    """Draw the laid-out graph, marking the card the canvas should move to.
+
+    The mark is **declarative on purpose**, and it took two goes to get there.
+    Picking a spec navigates the canvas rather than replacing it; the first
+    version did the moving with a `run_javascript` from inside this render, which
+    raced the DOM patch and reliably landed on the canvas that was about to be
+    discarded — so the pan never moved at all. The second marked the node and
+    cleared the request as the render consumed it, which failed for a quieter
+    reason: this pane renders more than once per click, so the first render ate
+    the request and the render that reached the screen had nothing to mark.
+
+    So the request carries a token and the client acts on each one once. A
+    repeated render is then simply harmless, rather than something the server has
+    to get right.
+    """
+    style = f"width:{placed.width}px;height:{placed.height}px"
+    with ui.element("div").classes("graph-content").style(style):
         ui.html(_edges_svg(placed))
         for node in placed.nodes:
-            _node(node)
+            _node(node, focused=node.id == APP.focus_model)
 
 
-def _edges_svg(placed: graph.Layout) -> str:
+def _edges_svg(placed: graph.Layout, *, inner: bool = False) -> str:
     """One overlay for every edge. 1px hairline-strong, small arrowheads, no labels."""
     parts = [
         f'<path d="{edge.path()}"/><polygon points="{edge.arrowhead()}"/>' for edge in placed.edges
     ]
+    cls = "graph-edges graph-edges--inner" if inner else "graph-edges"
     return (
-        f'<svg class="graph-edges" width="{placed.width}" height="{placed.height}">'
-        f"{''.join(parts)}</svg>"
+        f'<svg class="{cls}" width="{placed.width}" height="{placed.height}">{"".join(parts)}</svg>'
     )
 
 
-def _node(node: graph.Node) -> None:
+def _node(node: graph.Node, *, focused: bool = False) -> None:
     style = f"left:{node.x}px;top:{node.y}px;width:{node.w}px;height:{node.h}px"
-    with ui.element("div").classes("graph-node").style(style):
+    classes = "graph-node" + (" graph-node--focus" if focused else "")
+    box = ui.element("div").classes(classes).style(style)
+    if focused:
+        box.props(f"data-focus-token={APP.focus_token}")
+    with box:
         if node.kind == graph.SOURCE:
-            ui.label(node.id).classes("source-node")
+            _source_node(node)
+        elif node.kind == graph.MODEL:
+            _model_card(node)
         else:
             _step_card(node)
+
+
+def _source_node(node: graph.Node) -> None:
+    """A file. Deliberately the quietest thing on the canvas — it is what arrived,
+    not what was decided."""
+    label = ui.label(node.id).classes("source-node")
+    label.on("click", lambda n=node.id: _select_source(n))
+
+
+def _model_card(node: graph.Node) -> None:
+    """Another spec's table — a thing portia built, and can open.
+
+    Distinct from a source on purpose. Until now every input that was not a step
+    drew as the same grey box, so a table with its own spec, steps and rationale
+    was indistinguishable from a CSV somebody dropped in the folder.
+
+    The layer is shown as its **name**, with no colour and no size of its own.
+    staging/intermediate/mart is build order, not a quality ladder, and it is the
+    one field on this card that nothing measured — so it may say what kind of
+    table this is and must never make one card louder than another.
+    """
+    selected = APP.spec_path is not None and APP.spec_path.stem == node.id
+    classes = "model-card"
+    if node.expanded:
+        classes += " model-card--open"
+    if selected:
+        classes += " model-card--selected"
+
+    with ui.element("div").classes(classes):
+        with ui.element("div").classes("model-head") as head:
+            ui.icon("expand_more" if node.expanded else "chevron_right").classes("model-caret")
+            ui.label(node.id).classes("model-name").tooltip(node.id)
+            ui.element("div").classes("flex-1")
+            if node.layer:
+                c.chip(node.layer)
+            c.caption(c.count(node.steps, "step"))
+        head.on("click", lambda n=node.id: _open_model(n))
+        if node.inner is not None:
+            _model_body(node.inner)
+
+
+def _model_body(inner: graph.Layout) -> None:
+    """The steps that build this table, on the same canvas one level in."""
+    style = f"width:{inner.width}px;height:{inner.height}px"
+    with ui.element("div").classes("model-body").style(style):
+        ui.html(_edges_svg(inner, inner=True))
+        for node in inner.nodes:
+            _node(node)
 
 
 def _step_card(node: graph.Node) -> None:
@@ -141,12 +293,15 @@ def _step_card(node: graph.Node) -> None:
 
 
 def _step_detail() -> None:
-    """The selected step, verbatim. Its acknowledgement sits above everything."""
+    """The selected step, verbatim. Its acknowledgement sits above everything.
+
+    Below the canvas rather than on it: it describes the selection, so panning
+    the graph should not carry it off screen.
+    """
     step = _step(APP.selected_step)
     if step is None:
         return
-    with ui.element("div").classes("stack-md mt-4"):
-        c.rule()
+    with ui.element("div").classes("graph-detail stack-md"):
         with ui.element("div").classes("row-gap-sm pt-3"):
             ui.label(step["id"]).classes("t-heading-md")
             c.chip(step.get("op", "?"))
@@ -183,6 +338,13 @@ def _run_error() -> None:
 
 
 def _run_header() -> None:
+    """What the run did — including the models below this one that it had to build.
+
+    Run executes the open spec's upstreams too, so a header that named only this
+    spec would understate what just happened. The upstream names are stated, never
+    summarised into "and 2 others": which tables were rebuilt is the kind of thing
+    you need to be able to check rather than trust.
+    """
     results = APP.results or []
     blocking = sorted({flag for r in results for flag in r.blocking})
     with ui.element("div").classes("row-gap-sm"):
@@ -191,6 +353,11 @@ def _run_header() -> None:
             c.flag_badge(flag, c.BLOCKING)
         if not blocking:
             c.caption("no blocking flag")
+    upstream = [
+        m.name for m in APP.built if m.name != (APP.spec_path.stem if APP.spec_path else "")
+    ]
+    if upstream:
+        c.caption(f"also built · {' · '.join(upstream)}")
     c.rule()
 
 
@@ -657,6 +824,41 @@ def _turn_cost(summary: dict) -> str:
     return "—" if not cost else f"~${cost:.4f}"
 
 
+async def _model_inspector(rel: str) -> None:
+    """A compiled model, as it sits on disk — the deliverable, read verbatim.
+
+    Rendered from the file rather than recompiled from the spec, for the same
+    reason `_run_inspector` reads its markdown off disk: what this shows has to be
+    exactly what a reviewer sees in the diff, or committing it was pointless. That
+    is also what makes the staleness banner meaningful — it is the difference
+    between this file and what the spec would produce now.
+    """
+    path = APP.root / rel
+    with ui.element("div").classes("p-scroll p-pad stack-lg"):
+        _inspector_header(path.name, str(path))
+        if not path.exists():
+            c.empty_note("that model is gone — press Build to write it again")
+            return
+        if path.stem in engine.stale_models(APP):
+            _stale_banner(path.stem)
+        c.code_block(await engine.read_text(path))
+
+
+def _stale_banner(name: str) -> None:
+    """The `.sql` no longer matches its spec. A fact, stated where it matters.
+
+    Drift-coloured rather than blocking: nothing is broken, the file is simply
+    describing an older version of the decision record. `build --check` is the
+    same fact in CI; this is it in the window, which is the point — you should not
+    have to run a terminal command to find out the deliverable is out of date.
+    """
+    with ui.element("div").classes("stale-banner"):
+        with ui.element("div").classes("row-gap-sm"):
+            c.flag_badge("stale", c.DRIFT)
+            ui.label(f"{name}.sql no longer matches {name}.yaml").classes("t-body-strong c-ink")
+        c.text(_STALE_WHY, color="c-body")
+
+
 async def _output_inspector(name: str) -> None:
     path = APP.root / engine.OUT_DIR / name
     with ui.element("div").classes("p-scroll p-pad stack-lg"):
@@ -692,6 +894,41 @@ def _select_step(step_id: str) -> None:
     pane.refresh()
 
 
+def _open_model(name: str) -> None:
+    """Open a table's card, and make its spec the one the report half is about.
+
+    Clicking the card of the spec that is already open closes it again, so the
+    same gesture opens and collapses. Clicking a different one always opens it —
+    you asked to look inside that table, and having to click twice because the
+    last click was on something else is the kind of state the canvas should hide.
+    """
+    from portia.ui import app as app_module
+    from portia.ui import artifacts
+
+    already_open = APP.spec_path is not None and APP.spec_path.stem == name
+    if already_open and name in APP.expanded:
+        APP.expanded = APP.expanded - {name}
+    else:
+        APP.expanded = APP.expanded | {name}
+
+    path = engine.spec_path_for(APP, name)
+    if path is not None and not already_open:
+        engine.select_spec(path, APP)
+        APP.select(SPEC, path.name)
+    pane.refresh()
+    artifacts.pane.refresh()
+    app_module.toolbar.refresh()
+
+
+def _select_source(name: str) -> None:
+    """A file node opens its catalog entry, exactly as the left panel does."""
+    from portia.ui import artifacts
+
+    APP.select(SOURCE, name)
+    pane.refresh()
+    artifacts.pane.refresh()
+
+
 def _step(step_id: str | None) -> dict | None:
     if not step_id:
         return None
@@ -712,9 +949,17 @@ def spec_label(path: Path | None) -> str:
     return path.name if path else "no spec"
 
 
-_NO_SPEC = "No spec open. The copilot writes one as it records steps; pick one on the left."
-_NO_STEPS = "This spec has no steps yet."
+_NO_SPECS = (
+    "No specs yet. The copilot writes one as it records steps, and each one becomes a table."
+)
 _NO_RUN = "No run yet. Press Run in the toolbar to execute this spec."
+_ZOOM_IN_TIP = "Zoom in · or two fingers up on the canvas"
+_ZOOM_OUT_TIP = "Zoom out · or two fingers down on the canvas"
+_RECENTER_TIP = "Back to 100%, centred · or double-click the canvas. Drag to move around."
+_STALE_WHY = (
+    "The spec has changed since this file was generated. Run the spec, or Build the "
+    "project, to regenerate it — the .sql is a build output and is never hand-edited."
+)
 _EDIT_SCOPE = "writes the prose and the roles; the measured facts are untouched"
 _ASK_HEADING = "What did it miss?"
 _ASK_WHY = "It re-reads this source with your note in hand, and asks if the two disagree."

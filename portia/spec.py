@@ -143,17 +143,70 @@ def discover_specs(root: str | Path = ".") -> dict[str, Path]:
     **Names must be unique across the project**, and this is where that is
     enforced. It is the one rule §2.4 costs us, and it is wanted anyway: it is also
     what keeps compiled `.sql` filenames unique.
+
+    **Paths come back relative to ``root``**, because every caller joins them onto
+    a base again — ``root / models[name]``, ``base / models[ref]``. Returning them
+    already prefixed made that join a silent double-prefix, which an absolute root
+    hides (joining an absolute path discards the left side) and ``root="."`` also
+    hides. It broke on exactly one shape, a *relative* root that isn't ``.`` — so
+    `python -m portia.cli.build --root sandbox/gui` looked for its specs under
+    ``sandbox/gui/sandbox/gui/specs``. Relative is also the right currency here:
+    a spec path is recorded and compared project-relative everywhere else
+    (`docs/PIPELINE.md` §2.7).
     """
-    directory = Path(root) / SPECS_DIR
+    base = Path(root)
+    directory = base / SPECS_DIR
     found: dict[str, Path] = {}
     for path in sorted(directory.rglob("*.yaml")) if directory.is_dir() else []:
+        relative = path.relative_to(base)
         if path.stem in found:
             raise ValueError(
-                f"two specs both produce {path.stem!r}: {found[path.stem]} and {path}. "
+                f"two specs both produce {path.stem!r}: {found[path.stem]} and {relative}. "
                 "Model names are unique across a project — rename one."
             )
-        found[path.stem] = path
+        found[path.stem] = relative
     return found
+
+
+def dependencies(models: dict[str, Path], *, base_dir: str | Path = ".") -> dict[str, set[str]]:
+    """Which models each model reads, derived from what its steps say they read.
+
+    The project's DAG, and the one place it is worked out. Nothing declares an
+    order and nothing should — this is read off `step_inputs`, exactly as a step's
+    inputs inside one spec are.
+    """
+    docs = {name: load_spec(Path(base_dir) / path) for name, path in models.items()}
+    return {
+        name: {ref for step in (doc.get("steps") or []) for ref in step_inputs(step)}
+        & set(models) - {name}
+        for name, doc in docs.items()
+    }
+
+
+def upstream_of(name: str, models: dict[str, Path], *, base_dir: str | Path = ".") -> list[str]:
+    """``name`` and every model it transitively reads, in build order.
+
+    What "run this spec" means once specs reference each other: a table is not
+    built until the tables it reads are. `run_spec` already re-runs upstreams to
+    execute one spec, so this does not change what happens — it names the set, so
+    a caller can say which models it is about to touch instead of running the
+    whole project to be safe.
+    """
+    if name not in models:
+        raise ValueError(f"no spec produces {name!r}. In this project: {', '.join(sorted(models))}")
+    deps = dependencies(models, base_dir=base_dir)
+
+    wanted: set[str] = set()
+
+    def walk(current: str) -> None:
+        if current in wanted:
+            return
+        wanted.add(current)
+        for parent in deps.get(current, ()):
+            walk(parent)
+
+    walk(name)
+    return [n for n in run_order(models, base_dir=base_dir) if n in wanted]
 
 
 def run_order(models: dict[str, Path], *, base_dir: str | Path = ".") -> list[str]:
@@ -162,12 +215,7 @@ def run_order(models: dict[str, Path], *, base_dir: str | Path = ".") -> list[st
     Derived from what the specs already say they read — nothing declares an order
     and nothing should. A cycle raises rather than looping.
     """
-    docs = {name: load_spec(Path(base_dir) / path) for name, path in models.items()}
-    deps = {
-        name: {ref for step in (doc.get("steps") or []) for ref in step_inputs(step)}
-        & set(models) - {name}
-        for name, doc in docs.items()
-    }
+    deps = dependencies(models, base_dir=base_dir)
 
     ordered: list[str] = []
     state: dict[str, int] = {}  # 1 = visiting, 2 = done

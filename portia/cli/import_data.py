@@ -28,16 +28,22 @@ def plan(sources: list[Path], destination: Path, root: Path) -> list[tuple[Path,
 
     Separate from doing it so the confirmation shows the real thing rather than a
     description of it, and so a name collision is found before the first byte
-    moves rather than halfway through a batch.
+    moves rather than halfway through a batch. **Both edges call this** — the
+    terminal and the window show the same plan because it is the same plan, not
+    because two surfaces were written to agree.
+
+    Raises ``ValueError``, not ``SystemExit``: a refusal here is "this import
+    cannot go ahead", which a window has to be able to put on screen. Exiting is
+    `main`'s way of reporting that, and it is the only caller allowed to decide it.
     """
     if not destination.resolve().is_relative_to(root.resolve()):
-        raise SystemExit(f"--to must be inside the project ({root}), got {destination}")
+        raise ValueError(f"the destination must be inside the project ({root}), got {destination}")
 
     pairs = [(src, destination / src.name) for src in sources]
     clashes = [dst for _, dst in pairs if dst.exists()]
     if clashes:
         names = ", ".join(str(c) for c in clashes)
-        raise SystemExit(f"already there, refusing to overwrite: {names}")
+        raise ValueError(f"already there, refusing to overwrite: {names}")
     return pairs
 
 
@@ -58,7 +64,10 @@ def main() -> None:
         raise SystemExit(str(exc)) from None
 
     destination = Path(args.to)
-    pairs = plan(sources, destination, root)
+    try:
+        pairs = plan(sources, destination, root)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from None
 
     print(f"copying {len(pairs)} file(s) into {destination}/ — the originals are left alone:\n")
     for src, dst in pairs:

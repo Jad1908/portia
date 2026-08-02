@@ -1,8 +1,9 @@
 # The pipeline overhaul — SQL as the artifact
 
-> **Status: designed 2026-07-30, built 2026-07-31.** All seven decisions in §2 are implemented and
-> tested. §3 describes how compilation actually works, and it is accurate. **What is left is
-> rendering and three design questions, all in §6** — the engine is done, the app is not.
+> **Status: designed 2026-07-30, built 2026-07-31, rendered 2026-08-01.** All seven decisions in
+> §2 are implemented and tested. §3 describes how compilation actually works, and it is accurate.
+> §6's three design questions are answered, the app renders the pipeline, and §2.7's import
+> surface is built. Nothing from this design is outstanding.
 >
 > The design is kept in full rather than trimmed to a changelog, because the *reasoning* is what a
 > future session needs: several decisions removed things (`core/store.py` is deleted), and a reader
@@ -263,35 +264,59 @@ Rough map for whoever picks this up — not a task list, and not exhaustive.
 > a generated file still matches its spec, and the app's half of `python -m portia.cli.build`. The
 > engine side is done; **rendering them is not, and neither are the three design questions below.**
 
-### Still to do — rendering
+### Rendering — done 2026-08-01
 
-- **`.sql` files as a left-panel section.** `engine.models_in` returns them; nothing draws them yet.
-  They are not outputs — a run's CSV is a result, the pipeline is the deliverable — so this is a
-  new section, not a new row in Outputs.
-- **The staleness warning needs somewhere to land** (§2.3). `engine.stale_models` is cheap enough to
-  call on any render; a `.sql` that no longer matches its spec has to be visible in the app, not
-  only in `build --check`.
-- **A Build action.** `engine.build` exists; no button calls it.
-- **The import flow is a new surface** (§2.7): choose a file outside the repo, choose where in the
-  repo it lands, see plainly what will be copied and to where, confirm, then index.
-  `cli/import_data.py`'s `plan()` is deliberately separate from the copying so a UI can show the
-  same plan the terminal shows.
+All four, plus one thing the pass turned up.
 
-### Still to decide — three questions the engine cannot answer alone
+- **The compiled models are a left-panel section.** `models/*.sql`, grouped by
+  layer, its own heading rather than a row in Outputs — a run's CSV is a result, the
+  pipeline is the deliverable. Selecting one shows the SQL read **off disk**, not
+  recompiled from the spec, for the same reason a saved run report is read off disk:
+  what the window shows has to be what a reviewer sees in the diff.
+- **Staleness has two places to land**, both cheap enough for any render: a badge in
+  the graph header naming how many, and a banner on the model saying what changed and
+  what to do. Drift-coloured, never blocking — nothing is broken, the file is simply
+  describing an older version of the decision record.
+- **Build is in the toolbar**, and Run writes SQL too (see below).
+- **The import flow is built** (§2.7). One destination field governs both routes — a
+  browser drop and an import from disk — because where a file lands should not depend on
+  how it arrived. Choosing files (natively, or by path/glob) produces a **plan**: every
+  `from → to` pair listed in full, not summarised, because "3 files into data/" describes
+  a plan and the list *is* one. Nothing is written until you confirm. `cli.import_data.plan`
+  is the same function the terminal calls, so the two cannot disagree about where a file
+  is going; it raises `ValueError` now rather than `SystemExit`, since a refusal is
+  something a window has to be able to put on screen.
+- **One thing the pass found:** `discover_specs` returned root-prefixed paths that
+  every caller then re-joined to the root. Two accidents hid it — an absolute root
+  makes the join a no-op, and `root="."` makes the prefix one — so it broke only on a
+  relative root that isn't `.`, i.e. `cli.build --root sandbox/gui`. Fixed, with a test.
 
-- **There are now two graphs, and the middle pane only knows about one.** Within a spec, steps form
-  a DAG (rendered today). Across specs, models form a DAG (`spec.run_order` derives it, nothing
-  draws it). Does the workflow pane show one spec's steps, the project's models, or both at two
-  zoom levels? This collides with `VISION.md`'s oldest open question — *are cards steps or tables?*
-  — and the answer just changed shape, because **both are now true at different levels**: a card in
-  the project graph is a table, a card inside a spec is a step.
-- **"Run" is ambiguous now.** Today it runs one spec. With cross-spec references it could mean run
-  this spec, or run everything it depends on first. `run_spec` already resolves upstreams by
-  re-running them, so the *behaviour* exists; what is undecided is what the button should say it is
-  doing, and whether "Run" and "Build" are one action or two.
-- **Layers are a grouping, never an ordering of quality.** `DESIGN.md`'s rule applies directly:
-  staging/intermediate/mart is a **kind**, so it may colour or group a graph, and it must never be
-  rendered as a progression from worse to better, or rolled into a score.
+### The three questions — answered 2026-08-01
+
+- **Two graphs → one canvas, two zoom levels.** The middle pane draws the project's
+  models; a card opens **in place** to reveal its steps, and its neighbours reflow
+  around it. Both readings of a card are true and the level says which one applies.
+  Picking a spec in the left panel *navigates* to its card rather than replacing the
+  view, because the canvas is the only place both levels are visible at once.
+  The layout is `graph.project_layout`; it imports no NiceGUI, so this is settled by
+  tests rather than by screenshots.
+- **"Run" means this model and everything it reads**, and it writes their `.sql`.
+  Build is the same mechanism at project scope. The behaviour already existed and was
+  unnamed — `run_spec` re-runs upstreams because a table cannot be built before its
+  inputs are — so `spec.upstream_of` names the set and `build_project(only=...)`
+  scopes to it. Writing the SQL on every run is what narrows the staleness warning to
+  what it should always have meant: *a spec edited outside the app*.
+- **Layers are a grouping and a build order, never a quality ladder.** They group the
+  left panel and ride on a model card as their plain name — no colour, no size, no
+  per-tier roll-up, and no effect on position. The argument, because it comes up: a
+  mart is more *processed*, not more *correct*. In the sandbox this was built against,
+  the mart is the only model carrying blocking flags, and the defect was authored in
+  staging (a `strip` that cast a numeric key to text, so `'1000.0'` never matched
+  `'1000'`) and only *detected* in the mart. A ladder would rate the tier that erred
+  as "raw, expected to be rough" and the tier that caught it as the good one. A
+  `layer` is also a string a human typed and `validate_layer` only checks it is one of
+  three words — it is the one field on that card with no evidence behind it. What says
+  whether a table is right is its outcome check, per step.
 
 ### The original pass — kept for the reasoning
 

@@ -263,23 +263,26 @@ appears if portia knows about it.** Sources come from the catalog, not a directo
 from `spec.discover_specs` (which finds them in layer subdirectories, and enforces the one-name-per-
 project rule); outputs are whatever a run wrote. Nothing else is shown, which is the curation.
 
-> **Not built yet: the compiled models.** `models/*.sql` is a sixth artifact kind and arguably the
-> most important row on this panel — it is the deliverable. `engine.models_in` and
-> `engine.stale_models` return it and nothing draws it (`PIPELINE.md` §6).
+**Models are a sixth artifact kind and the most important rows on this panel** — they are the
+deliverable. Their own section, not a row in Outputs: a run's CSV is a result of executing the
+pipeline, `models/*.sql` *is* the pipeline. Specs and models group by layer where a project
+declares one, in build order, with no tier louder than another.
 
 Clicking a source shows its catalog entry — the prose summary, the per-column roles, the check
 facts. That alone is most of what is currently invisible.
 
 ### Middle — the workflow
 
-**Top: the spec as a graph.** This is free today and nobody has looked at it: every step has an
-`id` and names the tables it reads (`left`/`right`/`input`/`inputs`), so the DAG is already fully
-determined by the YAML. Cards are **steps**, an arrow means **"this step's output is that step's
-input"**.
+**Top: the project as a graph, at two zoom levels.** All of it is free: every step names the
+tables it reads and every spec names the specs it reads, so both DAGs are fully determined by the
+YAML. Across the project a card is a **table** and an arrow means *this table reads that one*;
+open a card and the cards inside are the **steps** that build it. A `SOURCE` (a file) and a
+`MODEL` (a table portia built) are drawn differently — they were not, and the graph could not say
+which of its inputs it was responsible for.
 
-> That is V0's *provisional* answer to the open question below, chosen because it is what the data
-> already encodes — not because it is settled. Build the graph so the answer is cheap to change;
-> the reason to render it at all is to find out whether it reads correctly.
+> This is the answer to the open question below, and it is **both**: a card is a table or a step
+> depending on which level you are looking at. Picking a spec on the left navigates to its card
+> rather than replacing the view, because this is the only place both levels are visible at once.
 
 Clicking a card shows the step verbatim: op, keys/how, the SQL for a hatch step, `grain`, `expect`,
 `rationale`, and any `acknowledge`. **An acknowledged blocking flag must be impossible to miss
@@ -346,6 +349,7 @@ regressed** — this is the checklist, not a nice-to-have.
 | Terminal today | In V0 |
 |---|---|
 | `mkdir ~/portia-runN` + copy data in | Open-project path field · drop zone |
+| `run <spec>` for an upstream first | Nothing — **Run** does its upstreams, and says which |
 | `index --init "<brief>"` | Mandatory context panel → `catalog.init_project` |
 | `index .` (profiling half) | Automatic on drop → `catalog.index_source` |
 | `index .` (interpret half) | A turn, with its `set_interpretation` write confirmations |
@@ -356,9 +360,10 @@ regressed** — this is the checklist, not a nice-to-have.
 | answering `allow? [Y/n]` on stdin | `write-confirm` |
 | `run <spec>` | **Run** in the workflow pane |
 | `run --write out` | Same, with an output location — outputs land in the left panel |
-| `build` | **Not built yet** — `engine.build` exists, no button calls it (`PIPELINE.md` §6) |
-| `build --check` | **Not built yet** — `engine.stale_models` is cheap enough to show on any render |
-| `import_data <f> --to <dir>` | **Not built yet** — the drop zone copies in, but does not let you choose where, nor state what it will copy before doing it |
+| `build` | **Build** in the toolbar. Run does the same at one model's scope |
+| `build --check` | The stale badge on the graph header, and a banner on the model itself |
+| `import_data <f> --to <dir>` | Destination field + **Plan import** → every `from → to` pair → **Copy and index** |
+| `cat models/*.sql` | The **Models** section; clicking one shows the file as committed |
 | `cat specs/*.yaml` | The graph, and each step's detail |
 | `cat out/*.csv` | `table-preview` |
 | `cat .portia/sources/*.yaml` | Clicking a source |
@@ -397,12 +402,17 @@ are shaped are all open.
 
 ## Open questions (revisit later — not now)
 
-- **Nature of the cards:** tables/datasets vs. steps/actions vs. a hybrid (a *step* card that
-  *produces* a table, so clicking it shows both its config — keys, expected output schema — and its
-  output table + stats). What's the right mental model?
+- ~~**Nature of the cards:** tables/datasets vs. steps/actions vs. a hybrid.~~ *Decided
+  2026-08-01: **both, at different levels.** A card in the project graph is a table (one spec, one
+  table); a card inside an opened one is a step. Expanding happens in place on the same canvas, so
+  neither reading has to be given up for the other (`PIPELINE.md` §6).*
 - **Meaning of an arrow:** data dependency? execution order? lineage/provenance? Some combination?
-- **Run semantics:** full run vs. partial/step-level run; caching of unchanged steps; what "run"
-  does to already-answered decisions.
+  *Narrowed: at the project level it is unambiguously "this table reads that one", which is what
+  `spec.run_order` derives the build order from. Within a spec it is still all three at once.*
+- **Run semantics:** ~~full run vs. partial run~~ — *decided 2026-08-01: **Run is this model and
+  everything it reads**; Build is the whole project; both write the `.sql` for what they ran.*
+  **Still open:** caching unchanged models (`BACKLOG.md` → Spec), and what "run" does to
+  already-answered decisions.
 - ~~**Indexing:** what "indexed" concretely means and where that index lives.~~ *Decided: deterministic
   profiling (always, free) + a model-written interpretation (default on, opt-out), stored in
   `.portia/` — see the flow above.*

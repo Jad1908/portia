@@ -17,7 +17,11 @@ What the app is allowed to call, and why each is on the list:
 - ``pipeline.build_project`` / ``stale_models`` — compiling to SQL, and whether a
   generated file still matches the spec that produced it
 - ``core.io.load_table`` — previewing a produced table (the one way to load data)
-- ``core.io.find_data_files`` — resolving what "add by path" points at
+- ``core.io.find_data_files`` — resolving what an import points at
+- ``cli.import_data.plan`` — what a set of files would be copied to, and where.
+  Shared with the terminal deliberately (`docs/PIPELINE.md` §6): the window shows
+  the same plan `import_data` shows because it *is* the same plan, not because
+  two surfaces were written to agree about one
 - ``agent.session.run`` — a turn, driven with the app's own answer/confirm
 - ``runlog.runs_in`` / ``read`` / ``read_header`` / ``summary`` — past copilot
   turns for the Turns section and the replay. The summary in particular: those
@@ -42,10 +46,12 @@ import shutil
 import subprocess
 import sys
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 
 from portia import catalog, pipeline, runlog
 from portia import spec as spec_module
+from portia.cli.import_data import plan as plan_copy
 from portia.core.io import connect, find_data_files, load_table
 from portia.ui import state as State
 from portia.ui.state import App
@@ -106,11 +112,15 @@ def open_project(path: str | Path, app: App) -> Path:
     return root
 
 
-#: Ask the OS for a folder. macOS only, and deliberately so: the app is
-#: local-first (`TECH_STACK.md` — `pip install` → localhost), so the machine
-#: running the server is the machine with the Finder. Elsewhere the path field is
-#: the way in, which is why it is still there.
+#: Ask the OS for a folder, or for files. macOS only, and deliberately so: the
+#: app is local-first (`TECH_STACK.md` — `pip install` → localhost), so the
+#: machine running the server is the machine with the Finder. Elsewhere the path
+#: field is the way in, which is why it is still there.
 _CHOOSE_FOLDER = 'POSIX path of (choose folder with prompt "Choose a project folder")'
+
+#: The file chooser is long enough to be worth reading as AppleScript rather than
+#: as a Python string, so it lives beside the CSS and the canvas behaviour.
+_CHOOSE_FILES = Path(__file__).parent / "assets" / "choose_files.applescript"
 
 
 def can_browse() -> bool:
@@ -125,19 +135,36 @@ async def browse_for_folder() -> Path | None:
 
 
 def _choose_folder() -> Path | None:
+    chosen = _osascript(_CHOOSE_FOLDER)
+    return Path(chosen[0]) if chosen else None
+
+
+async def browse_for_files() -> list[Path]:
+    """Open the native file chooser. Empty if it isn't available or was cancelled."""
+    if not can_browse():
+        return []
+    return await asyncio.to_thread(_choose_files)
+
+
+def _choose_files() -> list[Path]:
+    return [Path(line) for line in _osascript(_CHOOSE_FILES.read_text())]
+
+
+def _osascript(script: str) -> list[str]:
+    """Run a chooser and return its lines, or nothing at all.
+
+    A cancelled dialog exits non-zero with "User canceled." on stderr — not an
+    error worth surfacing, just an answer of "no".
+    """
     try:
         done = subprocess.run(
-            ["osascript", "-e", _CHOOSE_FOLDER],
-            capture_output=True,
-            text=True,
-            check=False,
+            ["osascript", "-e", script], capture_output=True, text=True, check=False
         )
     except OSError:
-        return None
-    chosen = done.stdout.strip()
-    # A cancelled dialog exits non-zero with "User canceled." on stderr — not an
-    # error worth surfacing, just an answer of "no".
-    return Path(chosen) if done.returncode == 0 and chosen else None
+        return []
+    if done.returncode != 0:
+        return []
+    return [line for line in done.stdout.strip().splitlines() if line.strip()]
 
 
 def recents() -> list[tuple[Path, str]]:
@@ -193,8 +220,8 @@ def set_interpretation(
 # --- adding data ------------------------------------------------------------
 
 
-async def store_upload(upload, app: App) -> Path:
-    """Copy a dropped file into the project's data directory.
+async def store_upload(upload, app: App, destination: str = DATA_DIR) -> Path:
+    """Save a dropped file into the project, at the chosen destination.
 
     Streams, through the upload's own ``save``. This used to be
     ``write_bytes(await upload.read())``, and ``read()`` pulls the whole file
@@ -203,21 +230,59 @@ async def store_upload(upload, app: App) -> Path:
     once. The rest of the engine stopped holding whole tables; the front door
     should not be the one place that still does.
     """
-    target = app.root / DATA_DIR / Path(upload.name).name
+    target = destination_in(destination, app) / Path(upload.name).name
     target.parent.mkdir(parents=True, exist_ok=True)
     await upload.save(target)
     return target
 
 
-def copy_into_project(source: Path, app: App) -> Path:
-    """Bring a file that is already on disk into the project, unless it's inside it."""
-    source = source.expanduser().resolve()
-    if source.is_relative_to(app.root):
-        return source
-    target = app.root / DATA_DIR / source.name
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, target)
-    return target
+def plan_import(target: str, destination: str, app: App) -> list[tuple[Path, Path]]:
+    """What importing ``target`` into ``destination`` would copy, and to where.
+
+    The deliberate half of `docs/PIPELINE.md` §2.7. Nothing is written: this is
+    what the confirmation shows, so that what you agree to is the real thing
+    rather than a description of one, and so a name collision surfaces before the
+    first byte moves rather than halfway through a batch.
+
+    ``plan_copy`` is `cli.import_data.plan` — the same function the terminal
+    calls, which is why the two cannot disagree about where a file is going.
+    Raises ``ValueError`` for anything the operator can fix: nothing matched, the
+    destination is outside the project, a name is already taken.
+    """
+    sources = find_data_files(target)
+    return plan_copy(sources, destination_in(destination, app), app.root)
+
+
+def destination_in(raw: str, app: App) -> Path:
+    """A destination the operator typed, as a path inside the project.
+
+    Relative to the project root, always — an absolute path that happens to point
+    inside is accepted, and one that points outside is refused by ``plan``. Data
+    lives in the repo (`PIPELINE.md` §2.7) and the destination field is not the
+    place to make an exception to that.
+    """
+    typed = Path((raw or "").strip() or DATA_DIR)
+    return typed if typed.is_absolute() else app.root / typed
+
+
+async def import_files(pairs: list[tuple[Path, Path]], app: App) -> list[Path]:
+    """Do what the plan said, and nothing it didn't.
+
+    **A copy, never a move.** The original is not touched, not deleted, not
+    rewritten — a tool that relocates someone's data is not a data-harmonization
+    concern (`CLAUDE.md`), and the one time it matters is the time you find out
+    afterwards.
+    """
+    return await asyncio.to_thread(_copy_all, pairs)
+
+
+def _copy_all(pairs: list[tuple[Path, Path]]) -> list[Path]:
+    copied = []
+    for src, dst in pairs:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        copied.append(dst)
+    return copied
 
 
 def resolve_data(target: str) -> list[Path]:
@@ -273,6 +338,32 @@ def specs_in(app: App) -> list[Path]:
     return sorted(app.root / path for path in spec_module.discover_specs(app.root).values())
 
 
+def project_docs(app: App) -> dict[str, dict]:
+    """Every spec in the project, loaded, as ``model name -> doc``.
+
+    What the project graph is drawn from. The name is the spec's filename because
+    one spec produces one table, so this mapping is also what resolves a
+    cross-spec reference — the same `spec.discover_specs` the engine builds from,
+    which is the point: the window must not have a different idea of what the
+    project contains than `cli.build` does.
+    """
+    docs = {}
+    for name, path in spec_module.discover_specs(app.root).items():
+        try:
+            docs[name] = spec_module.load_spec(app.root / path) or {}
+        except (OSError, ValueError):
+            # One unreadable spec is that spec's problem to report; it is not a
+            # reason for the whole graph to refuse to draw.
+            continue
+    return docs
+
+
+def spec_path_for(app: App, model: str) -> Path | None:
+    """Where the spec that produces ``model`` lives, or None if nothing does."""
+    found = spec_module.discover_specs(app.root).get(model)
+    return app.root / found if found else None
+
+
 def models_in(app: App) -> list[Path]:
     """The compiled ``.sql`` files — the pipeline, which is the deliverable.
 
@@ -296,9 +387,16 @@ def stale_models(app: App) -> list[str]:
         return []
 
 
-async def build(app: App) -> list[pipeline.BuiltModel]:
-    """Compile the project to SQL — the app's half of ``python -m portia.cli.build``."""
-    return await asyncio.to_thread(pipeline.build_project, app.root)
+async def build(app: App, *, only: str | None = None) -> list[pipeline.BuiltModel]:
+    """Run specs and write their ``.sql`` — the app's half of ``cli.build``.
+
+    ``only`` scopes it to one model and everything it reads, which is what the
+    Run button does; without it this is the whole project, which is Build. One
+    call for both, because they are one mechanism at two scopes — and because two
+    code paths for "execute the pipeline" is exactly how the window and the
+    terminal end up disagreeing about a number.
+    """
+    return await asyncio.to_thread(partial(pipeline.build_project, app.root, only=only))
 
 
 def count_steps(path: Path) -> int | None:
@@ -324,23 +422,36 @@ def select_spec(path: Path | None, app: App) -> None:
 
 
 async def run_spec(app: App) -> None:
-    """Execute the open spec and keep every ``StepResult`` for the report pane."""
+    """Run the open spec **and everything it reads**, then write their ``.sql``.
+
+    Both halves of that are decisions, not conveniences. A spec that references
+    another spec's table cannot run until that table is built, so "run this spec"
+    has always meant running its upstreams — `run_spec` did it implicitly. Doing it
+    through `build_project(only=...)` is the same work, named, so the app can say
+    which models it touched.
+
+    And it **writes the SQL for what it ran**, so a run can never leave the
+    deliverable describing an older version of the spec. That makes the staleness
+    warning mean something narrower and more useful: it can now only fire on a
+    spec edited outside the app.
+
+    The report half is about the spec you have open, so ``results`` is that
+    model's steps; ``built`` is the whole set, for the header to be honest about
+    what else ran.
+    """
     app.run_error = None
-    if app.spec is None:
+    app.built = []
+    if app.spec_path is None or app.spec is None:
         return
     try:
-        # `models` is not optional here: a spec may read another spec's table by
-        # name, and without the registry the app would fail on a spec the CLI
-        # runs fine. `cli/` and `ui/` are two renderers of one engine (VISION.md).
-        app.results = await asyncio.to_thread(
-            spec_module.run_spec,
-            app.spec,
-            base_dir=app.root,
-            models=spec_module.discover_specs(app.root),
-        )
+        built = await build(app, only=app.spec_path.stem)
     except Exception as exc:  # noqa: BLE001 — shown to the operator, not swallowed
         app.results = None
         app.run_error = f"{type(exc).__name__}: {exc}"
+        return
+    app.built = built
+    target = next((m for m in built if m.name == app.spec_path.stem), None)
+    app.results = target.results if target else None
 
 
 def runs_in(app: App) -> list[Path]:
