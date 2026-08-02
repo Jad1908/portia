@@ -190,10 +190,16 @@ positive at small sizes to keep the cool surfaces airy.
   divider. The report half is the taller of the two by default — it is where the evidence is.
 - Minimum viewport ~`1024×640`. Left default 260px, transcript default 400px, both draggable. The
   workflow pane is always present and takes the remainder.
-- **Pane minimums are pixels, not percentages** — 200px left, 330px transcript. A percentage floor
+- **Pane minimums are pixels, not percentages** — 150px left, 260px transcript. A percentage floor
   moves with the window, and the transcript holds the `question-form` and the `write-confirm`, the
   two components this app exists for. Below its minimum it stops being worth having, and the honest
   move at that point is to close it rather than to squeeze it.
+- **Those two numbers were 200 and 330 and were lowered on 2026-08-02**, because the floor doubles
+  as the close threshold. Written when a toolbar toggle was the only way to close a pane, a generous
+  floor cost nothing; once the floor became the gesture, a generous one reads as a pane that gives up
+  under a drag that only meant "make this narrower". They are still real floors — 150 holds a file
+  name at the tree's indent, 260 holds the question form's option rows — and the pane's CSS
+  `min-width` must be kept equal to them, or a drag renders a pane wider than the panel beside it.
 - **So the floor is a threshold, not a wall: dragging past it closes the pane**, leaving a
   `pane-rail`. That is the whole of how a pane is closed — there is no toolbar toggle, because
   closing a pane is something you do at the side of the window and not at the top of it. The
@@ -271,6 +277,15 @@ Cards never go flat (0px) and never exceed 16px except for full pills. Most chro
 - Fill `{colors.surface-elevated}`, label `{colors.ink}`, 1px `{colors.hairline}`, padding `6px 14px`, `{rounded.md}`. Mid-emphasis in-pane actions.
 
 **`button-disabled`** — fill `{colors.surface-elevated}`, label `{colors.ash}`, no border.
+
+**`button-split`** — an icon ruled off from its word
+- Any of the three fills, with a 1px `currentColor` at 35% between the icon and the label,
+  `{spacing.sm}` either side of it. `currentColor` and not a hairline token deliberately: this
+  variant appears on the accent fill, where the foreground is white, and on the tertiary one, where
+  it is ink — a fixed border colour is invisible on one of them.
+- **Opt-in, never automatic.** Most icon-plus-label buttons are ordinary buttons that happen to have
+  an icon; a rule through all of them is decoration. Use it where the icon is doing as much work as
+  the word — currently Run and Build in the `action-bar`.
 
 ### Chips & badges
 
@@ -359,8 +374,20 @@ These exist so a test run never needs a terminal (`VISION.md` → "The no-termin
 **`artifact-row`** + **`artifact-row-selected`** — one row, for a folder or a file
 - Default: transparent, optional caret `{colors.ash}`, leading kind icon `{colors.mute}`, name
   `{colors.body}` `{typography.mono}`, trailing metadata (`14 col`, `5 step`) `{colors.mute}`
-  `{typography.caption}`, padding `8px 12px`, `{rounded.sm}`. Each level indents by 14px, held in
-  CSS as `--depth` — how far a level steps in is a look.
+  `{typography.caption}`, padding `8px 12px`, `{rounded.sm}`.
+- **Each level indents by 20px and draws a `{colors.hairline-soft}` guide at every ancestor level.**
+  One `--indent` drives the padding and the guide, so a guide can never drift off the indent it
+  marks. It was 14px and guideless, and a nested file read as a sibling that happened to start
+  slightly later — *further right* is not the same statement as *inside*. The guides are a repeating
+  background across the row's own indent rather than nested elements: nesting the DOM would nest the
+  hover and the selection with it.
+- **Hover eases over 120ms.** A tree is a list you run the pointer down, and an instant fill on every
+  row you cross on the way somewhere else is flicker, not feedback. Both the hover and the selected
+  wash set `background-color` and never the `background` shorthand, which would erase the guides.
+- **No tooltips on a row.** Every row popped a box repeating its own path and every note popped one
+  repeating the note — text already on screen, fired all the way down the pane as you scanned it. A
+  tooltip in a list has to say something the row cannot; the project brief's is the only one that
+  does, and it waits 600ms before appearing.
 - **Selected**: `{colors.accent-soft}` fill, name and icon `{colors.accent-text}`. One of the three
   places the accent appears.
 - **One row type at two settings, not two components.** A folder is this row with a caret; a file is
@@ -534,8 +561,11 @@ questions-and-insights UX *is* the product" — and they get the most design att
 ### Chrome
 
 **`toolbar`** — the top bar
-- `{colors.canvas}`, 1px `{colors.hairline}` bottom rule. Holds: the mark and the **session name**
-  (left), a spacer, and the **settings** gear. That is all of it.
+- `{colors.canvas}`, 1px `{colors.hairline}` bottom rule, **32px tall**, `{spacing.md}` padding.
+  Holds: the mark (22px) and the **session name** (left), a spacer, and the **settings** gear. That
+  is all of it.
+- **Thin because it holds almost nothing.** It was 48px when it carried the run actions and three
+  preferences; a bar that says where you are does not need the height of one that acts.
 - **It got very short, and that is the design.** A toolbar says where you are and acts on what is in
   front of you. The theme cycler, the Brief button and the two pane toggles were none of those and
   have gone to `settings-panel`, the left pane and `pane-rail` respectively; the four run actions
@@ -551,13 +581,18 @@ questions-and-insights UX *is* the product" — and they get the most design att
   a pane of its own now, which is where a paragraph you are meant to rewrite belongs.
 
 **`action-bar`** — Run, Build, Write outputs, Save report, at the top of the workflow pane
-- Fill `{colors.surface}`, 1px `{colors.hairline}` bottom rule, min-height 40px, padding
-  `{spacing.sm}` `{spacing.md}`, the four icons right-aligned.
-- **Icon-only**, `{rounded.md}`, square padding, and **each tooltip is the name of the action and
-  nothing else**: *Run spec* · *Build full pipeline* · *Write outputs* · *Save report*. An icon has
-  to name its verb; it does not have to explain it. A tooltip is read in the moment before a click,
-  and what an action does and where it writes is prose — it belongs in this file and in the code,
-  read at the speed prose is read at.
+- Fill `{colors.surface}`, 1px `{colors.hairline}` bottom rule, padding `{spacing.xs}`
+  `{spacing.md}`, the four buttons right-aligned and **26px tall** — shorter than a form button,
+  because every pixel here is a pixel of graph or report.
+- **Run and Build carry their word; the two saves do not.** Run and Build are `button-split`: the
+  icon, a 1px `currentColor`-at-35% rule, then the label. The pair that *executes* something is the
+  pair worth naming on screen. Write outputs and Save report are 26px square icon buttons — the
+  quiet half, only ever pressed after one of the other two, and four labelled buttons is the row
+  that made this a toolbar problem in the first place.
+- **Each tooltip is the name of the action and nothing else**: *Run spec* · *Build full pipeline* ·
+  *Write outputs* · *Save report*. An icon has to name its verb; it does not have to explain it. A
+  tooltip is read in the moment before a click, and what an action does and where it writes is
+  prose — it belongs in this file and in the code, read at the speed prose is read at.
 - Run keeps the one accent fill once a spec has steps; the other three stay `button-tertiary`.
 - **Right-aligned to the middle pane, not to the window.** All four act on the workflow pane, and
   from the toolbar's far corner they sat above the transcript — the one pane they have nothing to do
@@ -590,9 +625,12 @@ questions-and-insights UX *is* the product" — and they get the most design att
 
 **`dialog`** — a transient overlay (adding data)
 - `{colors.surface}` panel on the standard scrim, `{rounded.lg}`, one soft shadow — the exception to
-  the no-shadow rule. **No scale-in**: the panel appears at full size. Animation is not part of this
+  the no-shadow rule. **No scale-in**: the panel appears at full size. Motion is not part of this
   app's vocabulary, and a transition that depends on an animation frame shows an empty overlay on a
   tab that isn't animating.
+- The one exception is a **colour** transition on `artifact-row`'s hover, which is 120ms and moves
+  nothing. That is the distinction worth holding: a fill that eases is feedback on a list you drag a
+  pointer down, an element that travels or scales is an animation, and this app has none.
 
 **`keycap`** — `{colors.surface-card}` fill, `{colors.body}` `{typography.mono}`, padding `1px 6px`,
 `{rounded.xs}`.
@@ -685,7 +723,11 @@ the component that drew a layer inside a flat section has nothing left to draw.
 *V0 is built (`portia/ui/`). Gaps below are marked with what the build settled and what it didn't.*
 
 - **Light-mode values are first-pass**, inherited and tuned by reasoning rather than capture; verify contrast on device. *Light mode has now been looked at on screen and reads correctly; the values have still never been measured.*
-- **Hover states** are left to platform convention and not specified here. *V0 gives artifact rows and option rows a `{colors.surface-card}` hover and nothing else.*
+- **Hover states** are left to platform convention and mostly unspecified. *V0 gives artifact rows
+  and option rows a `{colors.surface-card}` hover and nothing else — with one rule now written down,
+  because it was a complaint: an `artifact-row`'s hover eases over 120ms, since the left pane is a
+  list you run a pointer down and an instant fill on every row you cross is flicker. The other hover
+  surfaces have not been looked at with that in mind.*
 - ~~**The graph's visual grammar is provisional.**~~ *Settled 2026-08-01, and the answer to
   cards-are-steps-or-tables is **both at different levels** (`PIPELINE.md` §6). The canvas pans and
   zooms and a model card expands in place. Read on a three-model, two-layer project — legible, and
