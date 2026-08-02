@@ -47,3 +47,5 @@ runs/
 # the package (portia/ui/assets/cute-portia.png); this one is 1.5 MB and trips
 # the large-file hook. Keep it somewhere, just not in git — unless we decide to.
 /cute-portia.png
+
+.dossier

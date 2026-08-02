@@ -7,30 +7,35 @@ stack, and product vision. Read them every session, before proposing changes or 
 - `docs/EVALUATION.md` — how we measure the copilot, and its **current honest score**. Read this
   before trusting any claim that a part of the loop works; it also records a result we retracted.
 - `docs/TECH_STACK.md` — the tech stack and the reasoning behind it
-- `docs/VISION.md` — product vision & UI flows (the three-panel app), incl. the **V0 viewer** spec
+- `docs/VISION.md` — product vision & UI flows (the three-panel app), incl. the **V0** spec and its
+  no-terminal audit. V0 *drives* the copilot rather than viewing it; the file records why the
+  read-only draft was wrong.
 - `DESIGN.md` — **the look**: mode-aware tokens, type, components. Required reading before writing
   any UI. It owns appearance; `VISION.md` owns layout and behavior. Note its one product-specific
   rule — *color and prominence communicate kind, never rank* — which is "facts vs judgment" applied
   to pixels.
 - `docs/brief.md` — the original working brief (foundational context)
-- `docs/DUCKDB_MIGRATION.md` — **the scale tier**, shipped 2026-07-28. Why pandas capped us, what
-  the swap cost, and — the part worth your time — **§6.1 and §13, where measurement contradicted the
-  plan**: the specced sandbox turned out to be impossible, and a profile's memory still scales with
-  cardinality because `possible_key` needs an exact `count(DISTINCT)`. Required reading before
-  touching `checks/`, `ops/`, `core/io.py`, or anything that looks like a performance fix.
-  **§3 was reversed on 2026-07-31** — the ingested store is gone — and it is kept, with the
+- `docs/DUCKDB_MIGRATION.md` — **the scale tier**, shipped 2026-07-28, compacted 2026-08-02 to what
+  the code cannot say about itself. The part worth your time is **§6.1 and §13, where measurement
+  contradicted the plan**: the specced sandbox turned out to be impossible, and a profile's memory
+  still scales with cardinality because `possible_key` needs an exact `count(DISTINCT)`. Required
+  reading before touching `checks/`, `ops/`, `core/io.py`, or anything that looks like a performance
+  fix. **§3 was reversed on 2026-07-31** — the ingested store is gone — and it is kept, with the
   reasoning that failed, because it is the clearest example in this repo of an argument that read
-  well and did not survive contact with how the code was actually used.
+  well and did not survive contact with how the code was actually used. *Section numbers are load-
+  bearing: a dozen comments in `portia/` and `tests/` cite them.*
 - `docs/PIPELINE.md` — **SQL as the artifact.** Designed 2026-07-30, shipped 2026-07-31.
   One `.sql` per spec, dbt-shaped and committed · cross-spec references **by name** with portia
   deriving the run order · an optional `layer` whose *absence* is the simple case · the agent
   deciding "new spec or new step" · and indexing restricted to files already in the repo, which
   **retired `.portia/store.duckdb`** (deleted — `core/io.connect` and `catalog.is_stale` are what
   survived it). Required reading before touching `spec.py`, `pipeline.py`, `ops/`, `catalog.py` or
-  `cli/index.py`. **§6 is the open part**: the app does not yet render the compiled models, and
-  three design questions are unanswered.
-- `docs/BACKLOG.md` — parking lot of deferred ideas, by stream. Not required reading; scan it when
-  picking the next thing to build, and **add to it whenever we postpone something mid-work.**
+  `cli/index.py`. **§6 is where the app half landed** — the compiled models are rendered, and the
+  three design questions are answered there (a card is a table *or* a step depending on zoom level ·
+  Run means this model and everything it reads · layers group and order, never rank).
+- `docs/BACKLOG.md` — parking lot of deferred ideas, by stream, with a compact **Shipped** list at
+  the bottom. Not required reading; scan it when picking the next thing to build, and **add to it
+  whenever we postpone something mid-work.**
 
 ## How we work here
 

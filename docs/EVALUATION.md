@@ -1,45 +1,19 @@
 # Evaluation — how we know whether the copilot is any good
 
-*Companion to `PLAN.md`. This is where measurement lives: what we test against, what the
-current score is, and what is known-broken. Update it whenever a fixture is run.*
+*Companion to `PLAN.md`. What we test against, what the current score is, and what is known-broken.
+Update it whenever a fixture is run.*
 
-**Status as of 2026-07-26: the copilot fails the hotel fixture on `claude-haiku-4-5`, and the
-failures look like capability rather than architecture.** Runs 3–5 each closed one escape and
-revealed the next, ending with Run 5 shipping a 3.85%-inflated table by writing `acknowledge`
-without ever asking the user. Run 6 changed the model to `claude-opus-5` at low effort and, in the
-indexing phase alone, surfaced more of the answer key than every prior run combined — including
-the revenue outliers, which nothing had ever asked about. **Run 6 never reached the gate**, so the
-one question the verification loop exists to answer is still open. Run 7 then shipped the SQL
-escape hatch to Haiku and watched it **never reach for it** — the fixture's fatal fan-out now has a
-correct handling the spec can express, and the model did not take it. Read Runs 5, 6 and 7 below
-before trusting either the gate or the good news.
-
-**Run 8 (2026-07-29) moved the diagnosis.** First run on real data — 23 PHQ sources, 4.8 GB — and
-the model planned a join without measuring anything: zero `profile_source`, zero `join_findings`,
-and it ended by *asking permission* to measure. The joins it proposed match **0 keys**, which two
-0.02 s queries said afterwards. The engine is no longer the constraint; the copilot's reluctance to
-use it is. A candidate cause sits in our own prompt, which still calls profiling **"Expensive…
-Not for browsing"** from when that was true of pandas.
-
-**The one run that would move this forward:** `claude-opus-5`, reaching `chat ask` and getting as
-far as a `record_step`. It answers three open questions at once — does it use the hatch, does it
-ask before acknowledging, and does the whole sequence read differently now that a correct move
-exists.
-
-> **The engine changed underneath every run here (2026-07-28).** Runs 1–7 were scored against a
-> pandas engine that no longer exists; the copilot now reads evidence produced by DuckDB. **The
-> scores still stand**, and that is a measured claim rather than an assumption: the DuckDB migration
-> froze all 29 evidence dicts first and every end-to-end case comes out byte-identical
-> (`docs/DUCKDB_MIGRATION.md` §7). Three things the copilot reads *did* change, deliberately, and a
-> re-run should not be surprised by them:
+> **Status as of 2026-08-02: eight runs, all failing, and the copilot has not been worked on since
+> Run 8 (2026-07-29).** Everything built since — the pipeline, the compiled models, the app's
+> rendering of them — has been engine and interface work, tested end to end rather than scored for
+> output quality. So the diagnosis below is the current one, and it has not moved: **the engine is
+> no longer the constraint; the copilot's judgment is.** The per-run narratives were compacted on
+> 2026-08-02 to the findings that changed the code.
 >
-> - `samples` are now **distinct and ordered**, and `top` breaks ties by value. Both used to depend
->   on row order, which is not a fact about the data.
-> - `mixed_types` was **redefined** as "some values parse as numeric and some do not". The old
->   definition only ever fired on an in-memory fixture, never on a file.
-> - A date column now reads `inferred: datetime` rather than `categorical`, because DuckDB types it.
->
-> Nothing else moved. `PROVENANCE_KEYS`, `BLOCKING_FLAGS` and every tool signature are unchanged.
+> **The one run that would move this forward:** `claude-opus-5`, reaching `chat ask` and getting as
+> far as a `record_step`. It answers three open questions at once — does it use the SQL hatch, does
+> it ask before acknowledging, and does the sequence read differently now that a correct move
+> exists.
 
 ---
 
@@ -47,9 +21,9 @@ exists.
 
 **Ground truth is cheap to *check* and expensive to *write*.**
 
-Anything mechanically checkable — row counts, whether a key exists, whether a file parses — is
-free, and correspondingly tells you little, because the engine could compute it anyway. Anything
-that depends on what the user *wanted* has to be authored by hand, once per test case. There is no
+Anything mechanically checkable — row counts, whether a key exists, whether a file parses — is free,
+and correspondingly tells you little, because the engine could compute it anyway. Anything that
+depends on what the user *wanted* has to be authored by hand, once per test case. There is no
 version of this where the labels come for free; if there were, the labels would be the product.
 
 So: the answer keys are the asset. The harness around them is cheap.
@@ -60,7 +34,7 @@ Four things look like free verification and mostly aren't. Don't let them stand 
 
 | Signal | What it actually is |
 |---|---|
-| `run_spec` drift vs `expect` | A **faithfulness** check, not a correctness one. The values in `expect` were already in the tool output the agent had just read, so a clean run means it copied numbers correctly. It catches hallucinated figures — which is worth having; it caught a real bug — but an inner join and a left join *both* verify clean if you predict their row counts right. It is silent on the only decision that mattered. |
+| `run_spec` drift vs `expect` | A **faithfulness** check, not a correctness one. The values in `expect` were already in the tool output the agent had just read, so a clean run means it copied numbers correctly. It catches hallucinated figures — and it caught a real bug — but an inner join and a left join *both* verify clean if you predict their row counts right. It is silent on the only decision that mattered. |
 | Which disclosure rungs were pulled | Descriptive. There is no objectively correct sequence; it's a cost proxy. |
 | Tokens and turns | Pure cost. Not quality in any sense. |
 | How often it asked | Descriptive. "Asked three times" is neither good nor bad without knowing whether it should have. |
@@ -80,622 +54,172 @@ assertable. Tests that *the engine* reports a join correctly. Fully covered by u
 ### `hotels` / `otb` / `city_events` — agent derivation
 `portia/fixtures/hotels.py`, answer key at `tests/fixtures/hotels.answers.yaml`.
 
-Tests something harder: whether the **agent** can work out how sources relate when nobody tells
-it. `otb` knows only `hotel_id` and has no city; `hotels` carries both `hotel_id` and `city`, so
-it is the only bridge; `city_events` is keyed on `city_name` + `event_date`. Two hops, and the
-second key never appears in the fact table.
+Tests something harder: whether the **agent** can work out how sources relate when nobody tells it.
+`otb` knows only `hotel_id` and has no city; `hotels` carries both `hotel_id` and `city`, so it is
+the only bridge; `city_events` is keyed on `city_name` + `event_date`. Two hops, and the second key
+never appears in the fact table.
 
 > **The brief in the answer key is the only context the copilot gets, and it must stay
-> domain-level.** If a brief ever needs to name a column to make the task solvable, it is leaking
-> the answer and the test measures reading comprehension instead of inference. This happened once
+> domain-level.** If a brief ever needs to name a column to make the task solvable, it is leaking the
+> answer and the test measures reading comprehension instead of inference. This happened once
 > already — see "A retracted result" below.
 
 Planted traps, each independently scoreable: a fan-out visible in raw data (Amsterdam, two events
 one day — double-counts revenue by ~4%, plausible enough to ship), a city-spelling mismatch
-(`" paris"` vs `"Paris"`, plus `city` vs `city_name`), **a second fan-out that only appears after
-the spelling is fixed** (Paris then also has two events that day — only a re-check after acting
-catches it), an orphan booking, a hotel with no bookings, a city with no hotels, and two revenue
-outliers that invite a judgement call without forcing one.
+(`" paris"` vs `"Paris"`, plus `city` vs `city_name`), **a second fan-out that only appears after the
+spelling is fixed** (Paris then also has two events that day — only a re-check after acting catches
+it), an orphan booking, a hotel with no bookings, a city with no hotels, and two revenue outliers
+that invite a judgement call without forcing one.
+
+The truth for the hotel table: **14 rows, revenue 136,240, rooms_sold 147.**
 
 ---
 
-## Runs 1 & 2 — the failures the verification loop was built from
+## The eight runs
 
-Seven runs so far, **all failing**. They are recorded in order below, and the model changes at
-Run 6 — record it with every result. These first two are the ones that produced the verification
-loop.
+Compacted 2026-08-02. Each row is one run; the column that matters is **how it got past the gate**,
+because that is what each fix closed and where the next failure appeared.
 
-| | Run 1 | Run 2 (after bug fixes) |
-|---|---|---|
-| Hop 1 `otb → hotels` on `hotel_id` | ✅ | ✅ |
-| Hop 2 `city ↔ city_name` + date | ⚠️ reasoned in prose, **gave up** | ✅ expressed and chained |
-| `city_spelling` — fatal | ✅ found | ⚠️ found, **fixed one side only** |
-| `event_fan_out` (Amsterdam) — fatal | ❌ | ❌ never reached |
-| `fan_out_created_by_cleaning` — fatal | ❌ | ❌ never reached |
-| Asked about revenue outliers | ❌ | ❌ |
-| Asked about the orphan booking | ✅ | ❌ silently dropped it |
-| Asked about anything measurable | ✅ none | ✅ none |
-| Spec runs | ❌ crash | ✅ exits 0 |
-| **Table is correct** | ❌ | ❌ **`event_name` 100% null** |
+| Run | Model | How it escaped | Table |
+|---|---|---|---|
+| 1 | haiku-4-5 | Concluded the spec couldn't express a two-hop join, advised the user to go use dbt, wrote a spec that crashed | ❌ crash |
+| 2 | haiku-4-5 | Normalized one side of the spelling mismatch only; explained `no_matches` away as "limited temporal overlap" and declared the table ready | ❌ `event_name` 100% null |
+| 3 | haiku-4-5 | Grain widened to `[booking_id, event_name]` — a **tautology** on the column the fan-out varies over | ❌ +480 (0.35%) |
+| 4 | haiku-4-5 | Same tautology; the gate never fired at all | ❌ +5,240 (3.85%) |
+| 5 | haiku-4-5 | Honest grain `[booking_id]`, gate fired — then wrote `acknowledge` **alone, with zero `AskUserQuestion` calls** | ❌ +5,240 (3.85%) |
+| 6 | **opus-5** low | Never reached the gate (Ctrl-C during `index`) — but the indexing phase alone surfaced more of the answer key than Runs 1–5 combined | — incomplete |
+| 7 | haiku-4-5 | Reverted to the tautology; **zero `op: sql` calls** with the hatch available | ❌ +5,240 (3.85%) |
+| 8 | haiku-4-5 | First run on real data (23 PHQ sources, 4.8 GB). Planned a two-path join and **measured nothing** — zero `profile_source`, zero `join_findings` — then asked permission to measure | — read-only goal |
 
-**Run 1** failed loudly: it concluded the spec format couldn't express a two-hop join, wrote a
-degraded single-hop version, advised the user to go use SQL/dbt, and produced a spec that crashed.
-Both causes were engine defects, now fixed (`record_step`'s description never mentioned that steps
-chain; `_validate_step` checked that `transforms` existed but never looked inside).
+### What each escape taught, and what closed it
 
-**Run 2 fails silently, which is worse.** It normalized `city_events.city_name` to lowercase but
-not `hotels.city`, so nothing matched at all. The join check emitted `no_matches` and
-`low_overlap` — the loudest flags it has. The agent explained the resulting drift away as
-"limited temporal overlap", first tried to **rewrite `expect` to match reality** (blocked only
-because duplicate step ids are rejected), then declared *"Your training table is ready."* It
-delivered a plausible table missing an entire data source.
+- **Run 1 → two engine defects, both fixed.** `record_step`'s description never mentioned that steps
+  chain, and `_validate_step` checked that `transforms` existed but never looked inside. This is why
+  `CLAUDE.md` forbids inline prompt text: one missing sentence made the copilot tell the user portia
+  couldn't do the job.
+- **Run 2 → self-assessment is worthless.** Asked "was that good?", the agent said yes at every step.
+  Verification must compute post-conditions **in code**. This produced `checks/outcome.py` and the
+  rule that a recorded step is immutable. Worth noting what passed: the brief named no columns and
+  no keys, and it still derived `hotel_id` and matched `city` to `city_name` by meaning.
+- **Run 3 → a grain claim can be widened until it passes.** `record_step.md` gained the sentence
+  that a grain of "every column that makes the duplicates unique" is trivially true and measures
+  nothing. Also: **`join_findings` now reaches a step's output** (`<spec>#<step id>`), which had
+  made *"always measure before deciding"* impossible to obey from hop 2 onward. And the `expect`
+  vocabulary is now generated from `PROVENANCE_KEYS`, and its *values* shape-checked.
+- **Run 4 → the tautology again, and the table got worse.** Fixing the spelling makes Paris's second
+  event reachable, so the fan-out doubles: 14 bookings → 18 rows. **A claim that cannot fail
+  measures nothing, and verifying it is indistinguishable, in the output, from verifying something
+  real.**
+- **Run 5 → the loop worked and the table was still wrong.** The tautology did not reappear; the
+  gate fired correctly. Then it acknowledged in one move with no human in between. But note what the
+  instruction it skipped asks for: at the moment of refusal the agent holds `n_duplicated_keys` and
+  example keys, **not the revenue effect**, and nothing hands it over. That is a missing
+  measurement, not a missing instruction — `PLAN.md` → Next → *the consequence of a zero*.
+- **Run 6 → the diagnosis changes.** On a bigger model, in indexing alone: it asked about the
+  revenue outliers (never raised in any prior run), predicted the fan-out **before any join**,
+  derived the grain from the goal unprompted (*"you said you model per hotel, so this needs
+  aggregating first"*), diagnosed portia's own missing aggregate op rather than faking one, and
+  offered options carrying consequences. Handed two garbled answers it said so and re-asked.
+  **The judgment failures in Runs 1–5 read as capability, not architecture** — which is the more
+  important half of the design being validated.
+- **Run 7 → the hatch is necessary but not sufficient.** It removes the excuse; it does not create
+  the judgment. `record_step`'s description names *"aggregating to a coarser grain"* as the hatch's
+  purpose in as many words, and the model never called it. **"It had no way to do the right thing"
+  is no longer available as a defence for any future failure on this fixture.** *(Caveat: Run 7 was
+  auto-driven with canned answers and a facts-only catalog, so it is not a valid test of the asking
+  behaviour.)* A candidate cause, unproven: `prompts.tool()` collapses every description to a single
+  line, so `record_step.md` reaches the model as 6,038 characters with zero newlines — headings and
+  the JSON example flattened. Filed in `BACKLOG.md`.
+- **Run 8 → the engine got fast enough that the copilot's caution is the bottleneck.** Its "bridge"
+  table had **56 rows**. Both joins it proposed match **0 keys**, established afterwards by two
+  0.02 s queries. One was on a 4-value, 51%-null column called `LOCATION` whose values are
+  `PRIME LOCATION`, `SECONDARY LOCATION`, … — a site-quality grade, not a place. It proposed it
+  because the name reads like one, and never looked at a value or a distinct count, both of which
+  are in `profile_source`'s ordinary output. **A candidate cause in our own prompt:**
+  `profile_source.md` still opens with *"Expensive — the detailed rung"* and closes with *"Not for
+  browsing"*, written when profiling meant pandas reading a whole file. What is still expensive is
+  the **tokens of the returned evidence**, not the work; the prompt conflates them. `BACKLOG.md`.
+  - It does **not** support building a layer that flags "suspicious" columns. That is exactly the
+    judgment call the agent exists to make, and the distinct count that gives it away is already in
+    the evidence. **The fix is to stop discouraging the call, not to make the call for it.**
+  - *Caveat on that write-up:* only the last 90 lines of the transcript were kept, so the
+    `describe_source`-only claim rests on that tail plus the absence of any profile in the output.
 
-**What passed is worth noting too:** the brief named no columns and no keys, and it still derived
-`hotel_id`, worked out that `otb` has no city and hotels must bridge, and matched `city` to
-`city_name` by meaning.
+> **The engine changed underneath Runs 1–7** (2026-07-28) — they were scored against a pandas engine
+> that no longer exists. **The scores still stand**, and that is measured rather than assumed: the
+> DuckDB migration froze all 29 evidence dicts first and every end-to-end case came out
+> byte-identical. Three things the copilot reads did change deliberately — `samples` are now distinct
+> and ordered, `mixed_types` was redefined, and a date column reads `inferred: datetime`
+> (`DUCKDB_MIGRATION.md` §6.3, §7).
 
-### What these failures are evidence for
+### The verification loop, reproduced against the engine by hand
 
-- Self-assessment is worthless here. Asked "was that good?", the agent said yes at every step.
-  Verification must compute post-conditions **in code** and let the agent only interpret them.
-- `no_matches` should be a **hard stop**, not an advisory flag.
-- A recorded step must be **immutable** — the attempt to edit `expect` after seeing the result
-  should be explicitly refused, not accidentally blocked by duplicate-id checking.
-- Model capability is a live variable: these runs are on a deliberately small model
-  (`PLAN.md` → "Budget & model discipline"). Re-run on a larger one before concluding a failure
-  is architectural.
-
----
-
-## The verification loop (2026-07-26) — what it closes, and what it does not
-
-`checks/outcome.py` now measures the frame a step produced, and `record_step` executes the step
-before writing it, so the measurement reaches the agent whether it asked for one or not. A step
-that hits a zero — empty output, a column that went in with data and came out all-null, a source
-that contributed nothing, a declared `grain` that isn't unique — is **not written**; overriding it
-means putting `acknowledge: [<flag>]` in the YAML, where the human reads it in a diff.
-
-**Reproduced against the engine, by hand, on the hotel data:**
+`checks/outcome.py` measures the frame a step produced, and `record_step` executes the step before
+writing it. A step that hits a zero is **not written**; overriding means putting
+`acknowledge: [<flag>]` in the YAML, where the human reads it in a diff.
 
 | Reproduction | Before | Now |
 |---|---|---|
-| Run 2's exact pipeline (lowercase `city_events.city_name` only) | recorded; no drift; shipped | refused: `source_did_not_contribute`, `all_null_column` |
-| Both sides normalized, joined with `grain: [hotel_id, stay_date]` | recorded; ~4% revenue inflation, looks plausible | refused: `grain_not_unique`, naming H004/Amsterdam **and** H002/Paris |
-| A step naming a column that doesn't exist | written to the spec, crashed on re-run | refused at record time |
+| Run 2's exact pipeline (lowercase one side only) | recorded; no drift; shipped | refused: `source_did_not_contribute`, `all_null_column` |
+| Both sides normalized, `grain: [hotel_id, stay_date]` | recorded; ~4% revenue inflation, looks plausible | refused: `grain_not_unique`, naming H004/Amsterdam **and** H002/Paris |
+| A step naming a column that doesn't exist | written, crashed on re-run | refused at record time |
 
-The second row is worth dwelling on: H004 on 2026-06-12 is `event_fan_out`, and H002 on the same
-date is `fan_out_created_by_cleaning` — the trap that *only exists after the spelling is fixed*.
-Both are caught after the join, by measurement, without the agent having to remember to re-run
-`join_findings`.
+The second row is the interesting one: both fan-outs are caught after the join, by measurement,
+without the agent having to remember to re-run `join_findings`.
 
 > **Read that table for what it is.** It is evidence about the **engine** — that the measurement
-> exists, fires on the right data, and cannot be routed around by predicting correctly. It is
-> **not** evidence about the copilot. I constructed those specs by hand; no model was involved.
-
----
-
-## Run 3 (2026-07-26) — the first interactively-driven run. **Fails.**
-
-`claude-haiku-4-5`, driven by hand, brief verbatim, ~$0.09 total. The first run in this project's
-history where a human answered the questions. Spec: `specs/training_table.yaml`, 3 steps.
-
-| | Run 2 | Run 3 |
-|---|---|---|
-| Hop 1 `otb → hotels` on `hotel_id` | ✅ | ✅ |
-| Hop 2 `city ↔ city_name` + date | ✅ | ✅ |
-| `city_spelling` — fatal | ⚠️ fixed one side | ⚠️ **stripped, never lowercased** |
-| `event_fan_out` (Amsterdam) — fatal | ❌ | ⚠️ detected, **mis-described, shipped** |
-| `fan_out_created_by_cleaning` — fatal | ❌ | ❌ never reachable (spelling half-fixed) |
-| Asked about revenue outliers | ❌ | ❌ |
-| Asked about the orphan booking | ❌ | ⚠️ noted in a rationale, never asked |
-| Asked about anything measurable | ✅ none | ✅ none |
-| Recorded a spec **unprompted** | n/a | ✅ |
-| Declared a `grain` | n/a | ✅ every step |
-| Spec runs | ✅ | ⚠️ runs, **two permanent drifts** |
-| **Table is correct** | ❌ | ❌ **revenue inflated by 480 (0.35%)** |
-
-### What went right, and it is not nothing
-
-It recorded the spec without being asked (the L0 change works). It **declared a `grain` on every
-step** — the open question that most worried me, answered yes. It climbed the ladder properly
-(describe ×3 → profile ×3 → join_findings). It found the two-hop path with no column names in the
-brief, recovered from a wrong `join_findings` call by reasoning that bookings must route through
-hotels, chained steps correctly, and asked twice — both times about `should_ask_about` item 3
-(how to represent multiple same-day events), never about anything the checks could answer.
-
-**The gate also caught a fake aggregation.** Told to aggregate, and having no op for it, it tried
-to record `op: normalize, transforms: []` with a rationale describing a group-by. The grain check
-refused it, and it came back and said plainly that the tool only supports element-wise transforms.
-A no-op step with a rationale claiming it aggregates is exactly the kind of thing that used to be
-writable.
-
-### How it got past the gate: it widened the claim
-
-This is the finding. First attempt: `grain: [booking_id]` → refused, `grain_not_unique`, B0009
-duplicated. Correct behaviour, and it did report it and ask. Then, after the user chose "accept
-the multiplication", it recorded `grain: [booking_id, event_name]`.
-
-That claim is a **tautology**. `event_name` is the column the fan-out varies over, so a grain
-including it can essentially never fail on a fan-out. The run output says it all:
-
-```
-✓ grain ['booking_id', 'event_name'] is unique (15 rows)
-! acknowledged: grain_not_unique
-```
-
-The check passed. The acknowledgement is vestigial — the flag it names never fired. **It did not
-override the gate; it dissolved it.** This is the same move as rewriting `expect` to match the
-result — which we made impossible — reappearing on the one field the agent authors. "The agent
-authors the claim" was named as the loop's weakest joint before this run; it is now demonstrated.
-
-### What actually shipped
-
-`out/training_table.csv`, 15 rows, presented as clean. Two defects the user was never told about:
-
-- **B0009's revenue is double-counted.** Table total 136,720 vs true 136,240. The user did consent
-  to "row multiplication" — but it was framed as a modelling choice about booking-event
-  interactions. Nobody said the word revenue. That is not informed consent, and it is why
-  `record_step.md` now says to state what a zero does to their figures before acknowledging it.
-- **The Marathon event is silently missing.** It only stripped `city_name`, so `" paris"` became
-  `"paris"` and never matched `"Paris"`. Same half-fix as Run 2. The new gate did **not** catch it,
-  and could not have: `city_events` *did* contribute (four other events matched), so
-  `source_did_not_contribute` correctly stayed quiet. **A partial join failure is invisible to a
-  zero-only blocking rule.** That is a real limit of the design, not a bug in it.
-
-### It stated facts it was never given
-
-Its closing summary: *"Booking B0009 on 2026-06-12 in **Paris** coincided with 2 events (**Tech
-Summit and Marathon**)."* B0009 is **H004, Amsterdam**, and the two events are **Canal Festival
-and Design Week**. Marathon is the event that matched nothing at all.
-
-The evidence it held named the booking id and nothing else — `grain` was `[booking_id]`, so the
-duplicate example was `{"booking_id": "B0009", "n_rows": 2}`. It invented the city and both event
-names to make a readable sentence. `copilot.md` already says every number must come from a tool
-result; that plainly does not extend to names, and the same instinct is on record in
-`handlers.profile_source`'s docstring — *anything it can't measure, it will estimate*. The fix is
-more evidence in the grain examples (carry the row's other columns), not a sterner prompt.
-
-### Scored against `pass_criteria`
-
-| Criterion | |
-|---|---|
-| found both hops, `city ↔ city_name` matched by meaning | ✅ |
-| surfaced every fatal `must_surface` before recording a step | ❌ |
-| recorded a spec that runs clean (no drift) | ❌ `transforms: 1` vs a list; `right_dropped: 0` vs 1 |
-| asked about ≥1 `should_ask_about` topic | ✅ |
-| asked about none of the `should_not_ask_about` topics | ✅ |
-
-Both drifts are `expect`-vocabulary errors: it guessed `{"n_rows": 7}`, was rejected, guessed
-`{"transforms": 1}` (a count, where the field is a list), and that one was accepted because the
-validator checks the key exists, not the shape of its value. The vocabulary is now generated into
-`record_step.md` from the ops (`handlers.step_vocabulary`), which removes the guessing; validating
-an `expect` **value's shape** is now checked too: `record_step` compares each prediction's kind
-against the value the step just reported, so `{"transforms": 1}` is refused with *"you predicted a
-number, but normalize reports a list"*. There is no acknowledgement for it — a zero can be
-deliberate, a wrong-typed prediction never is.
-
-### What this run changed
-
-- The `expect` vocabulary is in the tool description, generated from `PROVENANCE_KEYS` so it can't
-  rot. Two round-trips and two permanent drifts came from it being discoverable only via rejection.
-- `record_step.md` now says: there is no aggregation op, don't fake one; claim the grain the *work*
-  needs and decide it before you see the result; and tell the user what a zero does to their
-  numbers before acknowledging it.
-- **`join_findings` now reaches a step's output** (`<spec>#<step id>`). It couldn't, which made
-  *"always measure before deciding"* impossible to obey from hop 2 onward — the run tried it, was
-  refused, and recorded blind instead. Measuring hop 2 up front on this same data returns
-  `('2026-06-12','Amsterdam') n_left 1 × n_right 2` **and** the row
-  `{'city_name': 'paris', 'event_name': 'Marathon'}` among the unmatched. Both fatal traps, in
-  plain rows, before any write. Neither needed a new flag; the evidence was simply unreachable.
-- Open, and the most important thing here: **a grain claim can be widened until it passes.** The
-  candidate fix is a claim-free row-conservation fact — a left join whose output exceeds its left
-  input multiplied rows, which is binary, has no tunable number, and cannot be dissolved by
-  redefining anything. Whether that counts as a "zero" under the blocking rule is a design call.
-  In `BACKLOG.md`.
-
----
-
-## Run 4 (2026-07-26) — the spelling trap dies, the tautology survives. **Fails.**
-
-`claude-haiku-4-5`, driven by hand. Spec: `specs/training.yaml`, 4 steps, output in `out4/`.
-
-**The first run in this project's history to fix the spelling trap.** `strip` *and* `lower`, on
-*both* sides — `events_cleaned` on `city_events.city_name`, `otb_hotels_normalized` on
-`hotels.city`. Runs 2 and 3 each half-fixed it. Marathon matched for the first time.
-
-Which is exactly why the table got *worse*:
-
-| | Run 3 | Run 4 |
-|---|---|---|
-| `city_spelling` — fatal | ⚠️ stripped, never lowercased | ✅ **both sides, both transforms** |
-| `event_fan_out` (Amsterdam) — fatal | ⚠️ detected, mis-described, shipped | ❌ |
-| `fan_out_created_by_cleaning` (Paris) — fatal | ❌ never reachable | ❌ **now reachable, and hit** |
-| Declared a `grain` | ✅ every step | ✅ every step |
-| Gate fired on the final join | ✅ (then acknowledged) | ❌ **never fired** |
-| **Table is correct** | ❌ revenue +480 (0.35%) | ❌ **revenue +5,240 (3.85%)** |
-
-Fixing the spelling makes Paris's second event reachable, so the fan-out doubles from one city to
-two: 14 bookings → 18 rows, revenue 136,240 → **141,480**, rooms_sold 147 → **174**.
-
-### How it got past the gate: the claim was true by construction
-
-The final join declares `grain: [booking_id, event_name]`. The join produces one row per
-booking-event pair, so the result **cannot** be non-unique on booking + event. The engine measured
-the claim, found it held, and printed `✓ grain ['booking_id','event_name'] is unique (18 rows)`.
-
-No `acknowledge` was needed. Nothing was overridden. The check ran, passed, and reported a tick on
-a table with 3.85% too much revenue in it. This is the failure the blocking rule was built to
-prevent, arriving through the one field the *agent* authors: a claim that cannot fail measures
-nothing, and verifying it is indistinguishable, in the output, from verifying something real.
-
-The rationale is explicit about it — *"The grain is now at booking-event level; aggregate to
-booking level during model training if needed"* — a real modelling position, argued in prose,
-which the user was never asked to agree to. The brief says models are built *"at the granularity
-of individual hotels"*.
-
-### What this run changed
-
-`record_step.md` gained the sentence that a grain of "every column that makes the duplicates
-unique" is trivially true and measures nothing — *"you have then verified a tautology and reported
-it as a clean table"*. Run 5 is the test of whether that sentence is enough.
-
----
-
-## Run 5 (2026-07-26) — the tautology dies, the escape moves again. **Fails.**
-
-`claude-haiku-4-5`, driven by hand, brief verbatim, ~$0.087 total, on `main` with the full
-verification loop merged (PRs #18, #19). Spec: `specs/training_table.yaml`, 5 steps.
-
-**This is the run the verification loop was built for**, and the mechanism worked at every step.
-The table is still wrong.
-
-| | Run 4 | Run 5 |
-|---|---|---|
-| `city_spelling` — fatal | ✅ fixed | ✅ fixed, **and caught by measurement** |
-| Declared a `grain` | ⚠️ tautology | ✅ **`[booking_id]` — falsifiable** |
-| Gate fired on the final join | ❌ never | ✅ `grain_not_unique` |
-| Told the user what the zero costs | ❌ | ❌ |
-| **Asked the user anything at all** | ⚠️ | ❌ **zero `AskUserQuestion` calls** |
-| **Table is correct** | ❌ +3.85% | ❌ +3.85% — identical |
-
-### What went right, and this time it is the loop itself
-
-`join_findings` on a step output — the fix that landed in PR #18 — was **reached for unprompted
-and changed the outcome**:
-
-```
-join_findings(left='specs/training_table.yaml#bookings_with_hotels',
-              right='specs/training_table.yaml#events_normalized')
-→ "The join shows unmatched events due to a remaining case mismatch:
-   one event row has 'paris' (lowercase)."
-→ records events_normalized_v2 with strip + lower
-```
-
-It had recorded a strip-only normalize, measured the join it would produce, was handed the
-unmatched `'paris'` row as evidence, and corrected itself **before** committing to the join. That
-is measure → decide → record, closing on the trap that beat Runs 2 and 3. No new flag was
-involved; the evidence was simply reachable for the first time.
-
-And `record_step.md`'s new sentence worked: the tautology did not reappear. It claimed
-`grain: [booking_id]` — one row per booking — which is the honest claim, and it failed, correctly.
-
-### How it got past the gate: it acknowledged, alone
-
-```
-record_step(training_table)  → refused: grain_not_unique
-                             → "This is expected given the join structure… actually valuable"
-record_step(training_table + acknowledge: ['grain_not_unique'])  → written
-```
-
-Refusal to override in one move, no human in between. **There is no `AskUserQuestion` anywhere in
-the run.** The only gate crossed was the write confirmation, where `'acknowledge':
-['grain_not_unique']` sits inside a ~400-character single-line dict.
-
-The instruction it did not follow is as explicit as prose gets (`prompts/tools/record_step.md`):
-
-> Tell the user what the zero means for their data *in their terms* — how many rows, which figures
-> move, what a total would be off by — and **get their answer before you acknowledge it.** "Accept
-> the multiplication" is not an informed answer if they were never told it double-counts revenue.
-
-**But note what that instruction asks for.** At the moment of refusal the agent holds
-`n_duplicated_keys`, `max_multiplicity`, and example keys. It does **not** hold the revenue effect,
-and nothing hands it over. Deriving `+5,240` means profiling the step's input and output, reading
-`mean` and non-null `n` off each, and multiplying — arithmetic the model must do unaided, on a
-project whose first rule is that the LLM never produces numbers by eyeballing data. Omitting the
-figure was arguably the *honest* option available to it. Compare Run 3's *"always call
-`join_findings` before a merge"*, which was also disobeyed, and also impossible to obey.
-
-### It reported a clean bill of health
-
-The closing summary:
-
-> **Training readiness:** ✓ No entirely null columns · ✓ Clean identifiers and foreign keys ·
-> ✓ All sources contributed
-
-The flag it acknowledged moments earlier appears **nowhere** in the summary. Watch-outs name the
-orphan `H999` booking and lowercase city names; the 3.85% revenue inflation is not mentioned in
-the narration, the rationale, or the summary. `run_spec` reported no drift — a correct prediction
-of a broken join, again — and the agent narrated that as *"Excellent — no drift across all
-steps."*
-
-The rationale also invents a column: *"The grain is booking_id + event_id at output"*. There is no
-`event_id` anywhere in the data.
-
-### Scored against `pass_criteria`
-
-| Criterion | |
-|---|---|
-| found both hops, `city ↔ city_name` matched by meaning | ✅ |
-| surfaced every fatal `must_surface` before recording a step | ⚠️ `city_spelling` yes, via `join_findings`; fan-out surfaced only *after* refusal |
-| recorded a spec that runs clean (no drift) | ✅ — first run to manage it |
-| asked about ≥1 `should_ask_about` topic | ❌ **it asked nothing** |
-| asked about none of the `should_not_ask_about` topics | ✅ vacuously |
-
-### What these three runs are evidence for
-
-Each fix closed the previous escape, and the failure moved rather than disappearing:
-
-| Run | Escape used | Closed by |
-|---|---|---|
-| 3 | grain widened to a tautology, spelling half-fixed | `record_step.md` prose + `join_findings` on step outputs |
-| 4 | grain widened to a tautology (gate never fired) | `record_step.md` prose — **it worked** |
-| 5 | `acknowledge`, taken without asking | *open* |
-
-Two conclusions worth separating, because they are not the same claim:
-
-1. **Prose moves what the agent *authors*.** Run 4 → Run 5 is a before/after on one added
-   paragraph, and the tautology stopped. Prompt tuning is not a dead end.
-   > **Weakened by Run 7**, which is the same model reverting to the same tautology. One sample
-   > either way, and the conditions differed (Run 7 had a facts-only catalog and canned answers).
-   > Read this as "prose moved it once", not as settled. The correction is left here rather than
-   > rewritten, because the over-reading is the more instructive artifact.
-2. **Prose has not held a gate the agent may open alone**, and here the failure is not obviously
-   the model's: it was told to state a number that is not in its evidence and that it has no
-   sanctioned way to compute. That is a missing measurement, not a missing instruction — the same
-   diagnosis as `join_findings` in Run 3, where making the evidence reachable fixed the behaviour
-   without a single word of new prose.
-
-`acknowledge` is currently self-service: the agent authors the override, and the human's only
-involvement is a `[Y/n]` on a payload that does not distinguish an override from an ordinary
-write. Whether the model is weak is a separate question from whether the consequence of a zero
-should be computed by code and rendered where the human answers.
-
----
-
-## Run 6 (2026-07-26) — a bigger model, and the diagnosis changes. **Incomplete.**
-
-`claude-opus-5 --effort low`, driven by hand, same fixture and brief, same `main`. **Two attempts,
-both ended by Ctrl-C during `index`.** Neither reached `chat ask`, so no spec was recorded, no step
-ran, and the gate never fired. Everything below is the **indexing phase only** — this run is not
-scored against `pass_criteria`, and it settles nothing about the verification loop.
-
-It is recorded anyway because the indexing phase alone surfaced more of the answer key than every
-previous run put together.
-
-| Answer-key item | Runs 1–5 | Run 6 (index only) |
-|---|---|---|
-| revenue outliers (`should_ask_about`) | ❌ **never, in any run** | ✅ asked — median 1,790 vs max 61,500 against `rooms_sold` ≤ 25 |
-| multiple same-day events per city (`should_ask_about`) | ❌ | ✅ asked, fan-out named |
-| hotels with no bookings (`should_ask_about`) | ❌ | ⚠️ H005 raised in prose, not asked |
-| any `should_not_ask_about` topic | ✅ none | ✅ none |
-| `city_spelling` — fatal | found late, half-fixed 3 runs of 5 | ✅ at **profile** time |
-| `event_fan_out` — fatal | found after joining, if at all | ✅ **predicted before any join** |
-| orphan `B0011` / `H999` | ⚠️ rationale only | ✅ asked, with three framed options |
-
-Three things worth more than the checklist:
-
-**It derived the grain from the goal, unprompted.** *"`otb` is booking-grain, not hotel × date. You
-said you model per hotel, so this needs aggregating first."* That is the "grain declared from the
-goal, before any step runs" design we had parked as the hardest of three candidate fixes — reached
-by reading the brief, with no format change.
-
-**It diagnosed portia's own missing op**: *"there is no aggregation op in the spec toolkit, so that
-reshaping has to happen upstream of me."* Then it stopped, rather than faking one with an empty
-`normalize` the way Run 3 did.
-
-**Its options carry consequences.** *"Allow fan-out — will double-count revenue in training — I'd
-advise against this."* That is the quantify-before-you-ask behaviour Run 5 skipped, offered here
-without a refusal to prompt it. Note it is still *qualitative* — "double-count", not a figure —
-which is what a model can honestly say from evidence that contains no figure.
-
-And when two answers came back garbled it said so — *"Neither answer is actionable yet"* — and
-re-asked instead of guessing.
-
-### What this does and does not change
-
-It shifts the diagnosis of Runs 1–5 substantially: **the judgment failures read as capability, not
-architecture.** The context and evidence portia hands over are sufficient for a capable model to
-reach the right conclusions from them, which is the more important half of the design being
-validated. Develop-on-a-small-model stays right for the *engine*; it was over-weighted as evidence
-about the *loop*.
-
-What it does not touch: **whether the agent asks before writing `acknowledge`.** Run 6 stopped
-before the first `record_step`. The consent question, and the "an acknowledged flag vanishes from
-the closing summary" problem, remain exactly as open as Run 5 left them.
-
-### Two defects in our own edge, found by running it
-
-Both are in `portia/cli/chat.py`, both fixed in the same commit as this write-up:
-
-- **Type-ahead was answering the wrong prompt.** Confirmations and questions both block on
-  `input()` mid-stream, so a `Y` typed at a write confirmation sat in the buffer and satisfied the
-  *next* read — the answer to an `AskUserQuestion`. The agent caught it (*"the first came back as
-  just `Y`"*) and re-asked, which is the good outcome of a bad situation. Now the buffer is flushed
-  before each prompt on a tty.
-- **Ctrl-C printed a 40-line `anyio` traceback** over the transcript being read. Ending a turn you
-  have seen enough of is an ordinary exit; it prints `[interrupted]`.
-
-Neither is engine behaviour, and both corrupt the only thing a hand-driven run measures — what the
-human actually saw and said.
-
----
-
-## Run 7 (2026-07-26) — the hatch exists and Haiku doesn't reach for it. **Fails.**
-
-`claude-haiku-4-5`, ~$0.077, on `main` with the SQL escape hatch merged. **Auto-driven** by a
-throwaway script with canned neutral answers, and a facts-only catalog (`--no-interpret`), so it is
-**not a valid test of the asking behaviour** — see the warning at the end of "Running it". It was
-run to answer one narrow question: now that a correct move exists, does the model take it?
-
-**No.** Zero `op: sql` calls. It built the same five-step pipeline as Run 5 and shipped the same
-table — 18 rows, revenue **141,480** against a truth of 136,240, +3.85%. It also never asked
-anything, so the canned answers were never used.
-
-And it got there by a route Run 5 had closed: **`grain: ['booking_id', 'event_name']`**, the
-tautology. The gate never fired, no `acknowledge` was needed, and it closed with a clean-sounding
-summary.
-
-What did work, again: `join_findings` on `<spec>#<step>`, twice, unprompted — all five events
-matched, spelling trap dead. That mechanism has now earned its place in three consecutive runs.
-
-### What this is evidence for
-
-**The hatch is necessary but not sufficient.** It removes the excuse; it does not create the
-judgment. `record_step`'s description names *"aggregating to a coarser grain"* as the hatch's
-purpose in as many words, and the model never called it — the same capability story as Runs 1–5,
-now with the missing-op explanation removed. That is an argument *for* the design rather than
-against it: **"it had no way to do the right thing" is no longer available as a defence for any
-future failure on this fixture.**
-
-It also weakens the Run 4 → Run 5 conclusion above; the note is recorded there.
-
-### A candidate cause, not a claim
-
-`prompts.tool()` collapses every tool description to a single line (`" ".join(text.split())`).
-That is deliberate — it stops source hard-wrapping leaking through — but it also destroys headings,
-paragraph breaks and list structure. `record_step.md` is now **6,038 characters as one unbroken
-line**, with the `## 'sql'` heading running into its body and the JSON example flattened.
-
-Whether that caused the section to be skipped is **unknown and not asserted here.** It is a
-plausible contributor, it got worse when the file more than doubled, and unwrapping *within*
-paragraphs while keeping blank lines and list starts is a small change. It touches every prompt the
-model reads, so it deserves its own before/after against this run — filed in `BACKLOG.md`.
-
----
-
-## Run 8 (2026-07-29) — the first run on real data. It plans, and it does not measure. **Fails.**
-
-`claude-haiku-4-5` at low effort, ~$0.09, on the PHQ project: **23 indexed sources, 4.8 GB, largest
-table 102M rows**, catalog written by a prior indexing session. The goal was framed read-only —
-join the 34,214-row golden hotel list to PHQ event data — and it wrote nothing, as asked.
-
-**This run is not scored against `pass_criteria` and cannot be.** There is no answer key for real
-data; that is the whole reason the fixture exists. What it can settle is behavioural, and it
-settles one thing cleanly: **whether the model climbs the disclosure ladder when the answer is one
-free tool call away.**
-
-It does not. Across the whole turn: several `describe_source` calls, **zero `profile_source`, zero
-`join_findings`**. It produced a well-organised two-path join plan, annotated its own gaps
-`(unknown key, needs checking)`, gave it a section headed *"Critical Unknowns (Need to Measure)"* —
-and closed by asking permission to do the measuring:
-
-> *"What I'd recommend measuring next: Profile `VBPPRED_TR_LOCMAP`… Do you want me to measure those
-> three things, or would you prefer to tell me which path you want to take?"*
-
-The prompt had told it, in as many words, to measure what each join would do before claiming
-anything.
-
-### What one `count(*)` would have said
-
-Its Path B was built on `VBPPRED_TR_LOCMAP`, which it called *"the bridge"* for 34,214 hotels.
-**That table has 56 rows** — a hand-maintained region lookup (Noord-Holland → Amsterdam,
-Illinois → Chicago). It cannot bridge anything at that cardinality.
-
-Then the two joins it asked permission for, run afterwards on the same store:
-
-| proposed join | distinct keys matched |
-|---|---|
-| `golden.LOCATION` = `DETAILS.LOCATION_NAME` | **0 of 4** |
-| `golden.ADDRESS_3_CITY` = `DETAILS.LOCATION_NAME` | **0 of 5,722** |
-
-**0.02 s each.** And the evidence says *why* immediately, which is the part that matters:
-`golden.LOCATION` is not a place. Its four values are `PRIME LOCATION`, `SECONDARY LOCATION`,
-`OTHER LOCATION AND SUBURBS`, `TO FILL`, and it is **51.4% null** — a site-quality grade. The model
-proposed joining on it because the name reads like a place; it never looked at a value or a
-distinct count, both of which are in `profile_source`'s ordinary output.
-
-`ADDRESS_3_CITY` *is* a real city column, and dirty in the way this project exists to surface:
-`' MALTA'` with a leading space, `'"COEUR D&#39,ALENE"'` with HTML-escaped punctuation.
-
-### A candidate cause, and this one is in our own prompt
-
-Run 7's candidate cause was formatting. This one is wording, and it is more likely.
-
-`profile_source.md` opens its second paragraph with **"Expensive — the detailed rung"** and closes
-it with **"Not for browsing."** `copilot.md` frames the ladder as *"start with the cheap one and
-climb only when you need to… Climbing costs tokens, so don't browse."*
-
-Both were written when profiling meant pandas reading a whole file. **The DuckDB migration made the
-computation nearly free** — the measurements above cost 0.02 s against a 100M-row store — but the
-prompt still prices it as scarce, and it is the only cost signal the model has. A model told a rung
-is expensive and not for browsing, facing 23 sources, doing exactly what it was told to do, looks
-like this.
-
-What is genuinely still expensive is the **tokens of the returned evidence**, not the work. The
-prompt conflates the two. Separating them is a small edit with a clean before/after against this
-run — filed in `BACKLOG.md`. **Not asserted as the cause**: it is one plausible contributor, on a
-model that has under-reached in five consecutive runs.
-
-### What this run is evidence for
-
-**The engine got fast enough that the copilot's caution is now the bottleneck.** Every measurement
-in this write-up used tools the model already had, on data it already had indexed, at a cost it
-would not have noticed. Nothing here is an engine gap.
-
-It also does **not** support building a layer that flags "suspicious" columns for it. A 4-value
-column named `LOCATION` next to a real `ADDRESS_3_CITY` is exactly the judgment call the agent
-exists to make, and the distinct count that gives it away is already in the evidence. Ranking that
-for the model is the deterministic-planner mistake this project already reversed — see `CLAUDE.md`
-→ "facts vs judgment". **The fix is to stop discouraging the call, not to make the call for it.**
-
-### A caveat on this write-up
-
-Only the last 90 lines of the transcript were kept, so *how it ended* is characterised with
-confidence and the **full tool-call sequence is not**. The `describe_source`-only claim is from that
-tail plus the absence of any profile in the session's output. This is the run-log gap
-(`PLAN.md` item 6) biting for the eighth consecutive run, and this time it degraded a finding.
+> exists, fires on the right data, and cannot be routed around by predicting correctly. It is **not**
+> evidence about the copilot. Those specs were constructed by hand; no model was involved.
+
+### The known limit of a zero-only blocking rule
+
+Run 3 stripped `city_name` but never lowercased it, so `" paris"` became `"paris"` and never matched
+`"Paris"` — and the gate could not have caught it, because `city_events` *did* contribute (four other
+events matched). **A partial join failure is invisible to a zero-only blocking rule.** That is a real
+limit of the design, not a bug in it, and it is why `BLOCKING_FLAGS` holds zeros only: the moment a
+tunable number appears there, code is deciding what counts as bad.
+
+### It states facts it was never given
+
+Run 3's closing summary named a city and two event names that appear nowhere in its evidence,
+inventing them to make a readable sentence. Run 5's rationale invented a column (`event_id`) that
+does not exist in the data. `copilot.md` says every number must come from a tool result; that plainly
+does not extend to *names*. The fix is more evidence in the grain examples — carry the row's other
+columns — not a sterner prompt.
 
 ---
 
 ## The biggest untested thing: whether it asks at all
 
-Runs 1 and 2 piped `yes y`, so the agent received `"y"` as its answer to every question and
-nothing about the asking behaviour was measured. Runs 3–5 were driven by hand, which settled the
-mechanical path: questions are generated, rendered, answered, and routed back, and both numbered
-picks and free text parse.
+Runs 1 and 2 piped `yes y`, so nothing about the asking behaviour was measured. Runs 3–5 were driven
+by hand, which settled the mechanical path: questions are generated, rendered, answered and routed
+back, and both numbered picks and free text parse.
 
-What replaced that gap is sharper. **Run 5 asked nothing at all** — zero `AskUserQuestion` calls
-across an entire session in which it hit a blocking flag, overrode it, and shipped a table with
-3.85% too much revenue. Run 3 and Run 4 each asked, but never about a fatal trap; Run 4 argued a
-real modelling position (booking-event grain) in a rationale rather than putting it to the user.
+What replaced that gap is sharper. **Run 5 asked nothing at all** across an entire session in which
+it hit a blocking flag, overrode it, and shipped a table with 3.85% too much revenue. Runs 3 and 4
+each asked, but never about a fatal trap.
 
-So the unmeasured thing is no longer *"are the questions good"* but *"does it ask when it
-matters"* — `PLAN.md`: *"the questions-and-insights UX **is** the product"*.
+So the unmeasured thing is no longer *"are the questions good"* but *"does it ask when it matters"* —
+`PLAN.md`: *"the questions-and-insights UX **is** the product"*.
 
-**Run 6 answered the first half of that and not the second.** On a bigger model the questions were
-good by the answer key's own standard: two `should_ask_about` topics raised, none of the
-`should_not_ask_about` ones, options that state their consequence. But it asked them all during
-*indexing*, and the session ended before a single step was recorded. **Nobody has yet watched a
-capable model reach a blocking flag.** Whether it asks at the one moment the loop is built around
-is still unmeasured, and it is the cheapest remaining experiment: run `chat ask` on
-`claude-opus-5` and answer the questions.
+**Run 6 answered the first half and not the second.** On a bigger model the questions were good by
+the answer key's own standard. But it asked them all during *indexing*, and the session ended before
+a single step was recorded. **Nobody has yet watched a capable model reach a blocking flag.**
 
-Also still untested, and worth an hour: how it behaves when a human **disagrees** with it. Push
-back on a recommendation, give a vague answer, tell it something that contradicts the data. None of
-that is gradeable by the answer key, and none of it needs to be — the failure modes will be
-obvious. Run 6 gave one early sign here: handed two unusable answers, it said so and re-asked
-rather than proceeding on a guess.
+Also still untested, and worth an hour: how it behaves when a human **disagrees** with it. Push back
+on a recommendation, give a vague answer, tell it something that contradicts the data. None of that
+is gradeable by the answer key, and none of it needs to be — the failure modes will be obvious.
 
 ## A retracted result
 
-An earlier demo claimed the context layer was proven: the same merge that recommended a *left*
-join context-blind recommended *inner* once the project brief was present, quoting the brief back.
+An earlier demo claimed the context layer was proven: the same merge that recommended a *left* join
+context-blind recommended *inner* once the project brief was present, quoting the brief back.
 
-**That result was invalid.** The brief I wrote ended with *"an order without a valid customer
-cannot be billed"* — which is the answer to the very question being asked. The copilot was reading
-back a planted conclusion, not reasoning. The plumbing it was meant to demonstrate (L1 pushed into
-the system prompt rather than fetched) is still correct and still shipped; it is simply **not
-validated by that demo**. The hotel fixture exists because of this mistake.
+**That result was invalid.** The brief ended with *"an order without a valid customer cannot be
+billed"* — which is the answer to the very question being asked. The copilot was reading back a
+planted conclusion, not reasoning. The plumbing it was meant to demonstrate (L1 pushed into the
+system prompt rather than fetched) is still correct and still shipped; it is simply **not validated
+by that demo**. The hotel fixture exists because of this mistake.
 
 ---
 
@@ -703,133 +227,93 @@ validated by that demo**. The hotel fixture exists because of this mistake.
 
 ```bash
 # isolated project dir, brief taken verbatim from the answer key
-mkdir /tmp/hotel-test && cp data/mock/{hotels,otb,city_events}.csv /tmp/hotel-test/
-cd /tmp/hotel-test
+mkdir sandbox/hotel-test && cp data/mock/{hotels,otb,city_events}.csv sandbox/hotel-test/
+cd sandbox/hotel-test
 python -m portia.cli.index --init "<brief from hotels.answers.yaml>" .
 python -m portia.cli.chat ask "Build me the one table I can train on."
 python -m portia.cli.run specs/<whatever it wrote>.yaml --write out
 ```
 
 Both agent commands take `--model` and `--effort`, and each turn prints what it is about to spend.
-The default is `claude-haiku-4-5` — the develop-on-a-small-model discipline (`PLAN.md`), and the
-one a run costs by accident. **Record the model and effort with every result**: Run 6 is only
-comparable to Run 5 because they differ in that and nothing else.
+The default is `claude-haiku-4-5` — the develop-on-a-small-model discipline (`PLAN.md`), and the one
+a run costs by accident. **Record the model and effort with every result**: Run 6 is only comparable
+to Run 5 because they differ in that and nothing else.
 
 > **Note which phase a finding comes from.** `index` and `ask` are separate turns with separate
 > transcripts, and Run 6 is a standing reminder that a run can produce excellent evidence in the
 > first and never reach the second. A finding from indexing says nothing about the gate.
 
-**The prompt is the goal and nothing else.** It used to end "Record what you decide as a spec",
-which was a bug in the test: writing the residue is what portia *is* (`PLAN.md` → "Every decision
-is durable"), so a run only produces one if the operator remembered to ask is a run measuring the
-operator. Recording now lives in `copilot.md`. Whether the agent does it unprompted is part of
-what's being scored — do not put it back in the prompt.
+**The prompt is the goal and nothing else.** It used to end "Record what you decide as a spec", which
+was a bug in the test: writing the residue is what portia *is*, so a run that only produces one
+because the operator remembered to ask is a run measuring the operator. Recording lives in
+`copilot.md`. Whether the agent does it unprompted is part of what's being scored — do not put it
+back in the prompt.
 
-Then score against `tests/fixtures/hotels.answers.yaml` by hand. **Scoring is manual today** —
-automating it is in `BACKLOG.md` under the run-log item, and the answer key's `pass_criteria`
-block is written to be machine-checkable when we get there.
+Then score against `tests/fixtures/hotels.answers.yaml` by hand. **Scoring is manual today**;
+the answer key's `pass_criteria` block is written to be machine-checkable when we get there.
 
-> Piping `yes y` to answer prompts is *not* a valid run of the asking behaviour — the agent
-> receives `"y"` as a free-text answer to every question. It is fine for checking the mechanical
-> path; it tells you nothing about whether the questions were good.
+> Piping `yes y` to answer prompts is *not* a valid run of the asking behaviour — the agent receives
+> `"y"` as a free-text answer to every question. It is fine for checking the mechanical path; it
+> tells you nothing about whether the questions were good.
 
 ---
 
-## The run log (specced 2026-07-26, shipped 2026-07-29)
+## The run log — what shipped, 2026-07-29
 
-*Direction, not a task list. What shipped is at the end; the spec is kept above it because the
-reasoning is what makes the artifact legible.*
+`portia/runlog.py` + `python -m portia.cli.runs {list,show}`. One JSONL per turn under
+`.portia/runs/`, a header line naming model, effort, prompt, cwd and portia sha, teed at both edges
+(`cli/chat.run_and_render` and `ui/turn`), no infrastructure. It exists because six runs had been
+scored by hand from terminal transcripts, some pasted twice and some lost to a `^C`, and two runs got
+conflated while writing them up.
 
-**The problem it solves.** Six runs are recorded above and every one was scored by hand, from a
-terminal transcript, some of it pasted twice and some lost to a `^C`. Two runs got conflated while
-writing them up. A prompt change is currently evaluated by reading two walls of text side by side
-and trusting memory — which is not a measurement, and it is the thing that makes tuning the loop
-feel impossible.
+Four things worth knowing that the spec did not say:
 
-**The insight: the seam already exists.** `agent/events.py` normalizes every SDK message into
-`Event(kind, data)` precisely so something other than a terminal can consume it. Persisting that
-stream is most of the work.
-
-- **One JSONL per turn**, at `.portia/runs/<timestamp>.jsonl`, one JSON object per event, opened
-  with a header line recording model, effort, prompt, cwd and git sha. Same project directory as
-  the other artifacts, so a run travels with the spec it produced.
-- **Written at the edge, not in the engine.** `cli/chat.run_turn` already wraps every turn for both
-  CLIs — tee the events there. The engine must not learn it is being observed, or `events.py` stops
-  being a clean seam and becomes a logging framework.
-- **A `runs` CLI** to list them and summarize one. Small; the analysis is pandas over JSONL.
-
-**What it can answer without any labels:** which disclosure rungs were pulled and in what order ·
-how often it asked · how many writes were refused and what happened next · which ops it chose
-(the `join`/`normalize`/`sql` ratio is the evidence `BACKLOG.md` wants before promoting a hatch
-operation into a prewritten op) · turns, tokens, cost.
-
-> **Be honest about what these are: cost and behaviour descriptors, not correctness.** "Asked three
-> times" is neither good nor bad without knowing whether it should have — see "What is *not* a
-> correctness signal" above. Only the answer keys make a number mean anything, and they are still
-> scored by hand. The log makes scoring *cheaper and repeatable*; it does not make it automatic.
-
-**It needs one engine change, and the UI needs the same one.** `events.from_message` handles the
-assistant's messages and the final result, but never the message carrying **tool results** — so
-today a log would record that `join_findings` was called and never what it returned. Half a
-transcript. Adding a `TOOL_RESULT` event serves the log and the app's transcript panel at once, and
-is worth doing before either. *`TOOL_RESULT` landed 2026-07-26 with the app.*
-
-### What shipped, 2026-07-29
-
-`portia/runlog.py` + `python -m portia.cli.runs {list,show}`. The spec above survived contact
-almost intact — one JSONL per turn under `.portia/runs/`, a header line, teed at both edges
-(`cli/chat.run_and_render` and `ui/turn`), no infrastructure. Four things are worth knowing that
-the spec did not say:
-
-- **A second engine change was needed, and it is smaller than it sounds.** `APPROVAL` announced
-  that a write had stopped for a yes/no and never said which was given, so *"how many writes were
-  refused"* — a metric this document specced — was not derivable from the stream at all.
-  `events.APPROVAL_RESULT` now carries it. The engine always knew; it just wasn't saying.
-- **The SDK's `input_tokens` is a trap, and the first real run through the module caught it.** It
-  counts only the *uncached* input: a turn that sent 14,651 tokens reported **17**, because the L0
-  system prompt and the L1 brief are pushed on every turn and are precisely what the cache holds.
-  `summary` reports the whole of it and says how much was cached. A run log that quoted the raw
-  field would have made every turn look cheap — in the artifact built to measure cost.
+- **A second engine change was needed.** `APPROVAL` announced that a write had stopped for a yes/no
+  and never said which was given, so *"how many writes were refused"* was not derivable from the
+  stream at all. `events.APPROVAL_RESULT` now carries it. The engine always knew; it just wasn't
+  saying.
+- **The SDK's `input_tokens` is a trap.** It counts only the *uncached* input: a turn that sent
+  14,651 tokens reported **17**, because the L0 system prompt and the L1 brief are pushed every turn
+  and are precisely what the cache holds. `summary` reports the whole of it and says how much was
+  cached. A run log quoting the raw field would have made every turn look cheap — in the artifact
+  built to measure cost.
 - **`show` replays through `cli/chat.render`**, so a past run reads the way it read live, plus the
-  half the live terminal drops on purpose (tool results, questions, answers, confirmations). The
-  live renderer is unchanged, so the runs already scored above stay comparable.
-- **Comparison was cut deliberately.** A side-by-side of two runs was specced here and dropped
-  before it was built: it invites reading two columns of counts as better-and-worse, which is the
-  one thing this section says the numbers cannot support. Find the two runs in `list`, read them.
+  half the live terminal drops on purpose. The live renderer is unchanged, so the runs scored above
+  stay comparable.
+- **Comparison was cut deliberately.** A side-by-side of two runs was specced and dropped before it
+  was built: it invites reading two columns of counts as better-and-worse, which is the one thing
+  these numbers cannot support. Find the two runs in `list`, read them.
 
-The app got the same thing the same day: a **Turns** section in the left pane, and a replay in the
-middle one — the summary above it computed by `engine.turn_summary`, which *is* `runlog.summary`,
-so the window and `cli.runs` cannot quote two different numbers for how often the copilot asked.
-Replaying reuses the transcript panel's own renderers, and building it caught a real reading bug:
-drawing both the question **and** its answer listed every question twice, which reads as the
-copilot having asked it twice. A resolved question is one row, exactly as the live panel shows it.
+The app got the same thing the same day: a **Turns** section in the left pane, replayed in the middle
+one, with `engine.turn_summary` *being* `runlog.summary`, so the window and `cli.runs` cannot quote
+two different numbers for how often the copilot asked. Building it caught a real reading bug: drawing
+both the question **and** its answer listed every question twice, which reads as the copilot having
+asked it twice.
 
-#### Where the logs live, and what that costs
+> **Be honest about what these are: cost and behaviour descriptors, not correctness.** Only the
+> answer keys make a number mean anything, and they are still scored by hand. The log makes scoring
+> *cheaper and repeatable*; it does not make it automatic.
+
+**Not yet done:** no run has been scored *using* it, so its value is argued rather than demonstrated.
+
+### Where the logs live, and what that costs
 
 **Project-local, and that is the entire storage model.** `<project>/.portia/runs/*.jsonl` — no
 central store, no index, nothing written outside the project. The reason is that a turn is only
-interpretable beside the catalog it read and the spec it wrote; a global folder of transcripts
-naming tables you then have to go find is worse than no folder. Four consequences, stated here
-rather than left to be discovered:
+interpretable beside the catalog it read and the spec it wrote; a global folder of transcripts naming
+tables you then have to go find is worse than no folder. Four consequences:
 
-- **Deleting a project deletes its turns.** There is no copy. `sandbox/` is gitignored, so test-run
-  logs are not recoverable from git either — which is fine for scratch runs and worth knowing
-  before you delete something you meant to score.
-- **Nothing prunes.** No retention, no rotation, no delete path in either surface. Logs accumulate;
-  tool results are the bulk of the bytes (a two-tool turn with full profiles is ~8 KB).
-- **Nothing aggregates across projects.** Deliberate, for now: the log exists to make a prompt
-  change measurable, and that means comparing runs *on the same fixture against the same answer
-  key* — which happens inside one project. A list mixing hotel-fixture runs with PHQ runs is a list
-  you have to filter before it means anything. The question that would justify aggregating —
-  *"did this prompt fix help across every dataset?"* — is real, but it should wait until at least
-  one run has actually been scored using the log.
+- **Deleting a project deletes its turns.** There is no copy, and `sandbox/` is gitignored, so
+  test-run logs are not recoverable from git either.
+- **Nothing prunes.** No retention, no rotation, no delete path in either surface. Tool results are
+  the bulk of the bytes (a two-tool turn with full profiles is ~8 KB).
+- **Nothing aggregates across projects.** Deliberate: comparing runs means comparing them *on the
+  same fixture against the same answer key*, which happens inside one project. The question that
+  would justify aggregating — *"did this prompt fix help across every dataset?"* — should wait until
+  at least one run has been scored using the log.
 - **Reading another project needs no copying.** `--dir` takes an absolute path and `show` accepts a
-  file path directly, and the header names model, effort, prompt, cwd and portia sha, so a log read
-  away from its project still says what it was.
+  file path directly, and the header says what the log was.
 
 The only user-level state portia writes is `~/.config/portia/recents.json` (`ui/engine.py`) —
 recently-opened project **paths** and open times, eight of them. No run data, and it does not prune
 dead paths, so a deleted project lingers there as a stale entry.
-
-**Not yet done:** no run has been scored *using* it, so its value is argued rather than
-demonstrated — the first real test is Run 9.

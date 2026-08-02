@@ -2,11 +2,14 @@
 
 *A parking lot, not a committed roadmap. Things we've decided are worth doing **later** so we can
 stay focused **now**. Directional (per `PLAN.md`): each item is a one-line intent, not a spec.
-**When we postpone something mid-work, add it here** so it isn't lost. Remove an item when it ships
-(link the PR) or when we decide against it (say why).*
+**When we postpone something mid-work, add it here** so it isn't lost.*
+
+*When something ships, move it to **Shipped** at the bottom as one compact line — the record of what
+exists belongs in the code and in `PLAN.md`, and a parking lot half-full of finished work is a
+parking lot nobody scans. Something we decide against stays in its stream with the reason.*
 
 Streams mirror the architecture: `checks` · `ops` · `spec` · agent/decide · interface · scale ·
-validation. See the module map artifact + `CLAUDE.md` for what already exists.
+validation. See `CLAUDE.md` for what already exists.
 
 ---
 
@@ -27,13 +30,6 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
   dimension join**, which is how a real signal gets learned as noise. The fix is probably to flag on
   what actually multiplies the *result*, not on either side's multiplicity — but that changes a flag
   the copilot reads, so it needs its own review.
-- ~~**`handlers.profile_source` re-reads the file rather than the store.**~~ — *resolved by
-  decision, and **removed 2026-07-31** (`PIPELINE.md` §2.7), so reading the file is
-  the correct behaviour and this stops being a bug. Worth keeping the finding that led there: the
-  store was written at index time and then read by almost nothing — `run_spec`, every agent check
-  and every CLI tool went to the original files. A fast copy nobody reads is not a cache. If the
-  re-parse cost ever bites at the volume Run 8 wants, the answer is **parquet in the repo**, not a
-  hidden second copy.*
 - **`join_findings` cannot see nulls it is about to create.** It measures nulls in the **key
   columns** only — `n_null_keys` per side, and example null-key rows. It never looks at a non-key
   column and never reports anything about the *output's* columns, so it cannot say "under a left
@@ -63,14 +59,6 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
   deriving). `join` re-exports the join check's flags and `normalize` has `coercion_failures`;
   `sql` has nothing. What a SQL step *could* honestly flag is worth thinking about before adding
   anything — it must stay facts-only, and "the query did something surprising" is not a fact.
-
-- ~~**Nothing can aggregate**~~ — *fixed by the SQL escape hatch, shipped 2026-07-26
-  (`ops/sql.py`). `ops = {join, normalize, sql}`. The hotel fixture's fatal fan-out now has a
-  correct handling the spec can express — aggregate events to one row per city-date, then join —
-  and it produces the answer key's table exactly: 14 rows, 14 bookings, revenue 136,240, zero
-  inflation, with the event signal kept as `n_events`/`total_attendance` features. That is the
-  first correct answer to this fixture in the project's history, though **by construction, not by
-  a copilot** — no model has been watched reaching for it.*
 - **`impute` op** — fill nulls (mean/median/constant/…); pairs naturally with `rationale` (the
   mean-vs-median call is decided by one-off analysis, recorded as the "why"). Good next op.
 - **`dedupe` op** — resolve duplicate rows/keys; gives the `fan_out` situation a real resolution.
@@ -82,11 +70,10 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
   watched. Things to watch for in a run log: how often `sql` is chosen over `join`/`normalize`
   where those would have fit (a signal the hatch is too *easy*), and whether the SQL steps cluster
   around one operation.
-- **The hatch exists and a model has not reached for it.** Run 7: Haiku, on merged `main`, made
-  **zero** `sql` calls and shipped the same 3.85%-inflated table, reverting to the tautology grain.
-  So the promotion evidence above (*"what the agent strains to write"*) has nothing in it yet — and
-  the first thing to learn is not which op to promote but **whether the hatch is discoverable at
-  all**. Watch this on the next capable-model run before drawing anything from op ratios.
+  - **No model has reached for the hatch yet.** Run 7: Haiku made **zero** `sql` calls and shipped
+    the same 3.85%-inflated table. So the promotion evidence above has nothing in it, and the first
+    thing to learn is not which op to promote but **whether the hatch is discoverable at all.**
+    Watch this on the next capable-model run before drawing anything from op ratios.
 - **A SQL step's provenance is thin, and might be earned back.** `join` reports what it dropped
   from each side because it knows what a key is; `sql` reports only shape (`result_rows`,
   `columns`). `checks.outcome` still measures the produced table, so the blocking gate is intact —
@@ -95,18 +82,6 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
 
 ## Spec — the durable artifact
 
-- ~~**The escape hatch — DuckDB SQL**~~ — *shipped 2026-07-26 (`ops/sql.py`, branch
-  `sql-escape-hatch`). The agent declares `inputs` and authors one `SELECT` over them; the query is
-  captured verbatim in the spec and wrapped by the same provenance and outcome harness as any other
-  op. The rule tightened rather than bent — **the agent may author a transform; it may never author
-  a number** — and that is now in `CLAUDE.md`. DuckDB became a core dependency, as anticipated;
-  `TECH_STACK.md` records that it arrived for expressiveness, not scale.*
-  - *Sandbox: `check_sql` refuses anything that isn't a single SELECT before DuckDB is touched, and
-    the connection runs with `enable_external_access=False`. Two independent halves on purpose —
-    the string check is bypassable and exists to give a readable error; the config is what holds.*
-  - *Still open: the friction is the instrument, so **watch what it strains at** before promoting
-    any of it into a prewritten op (see Ops above). And nothing has yet observed a **model** using
-    the hatch — the correct hotel table was built by hand.*
 - **Structured `evidence` field** — beyond free-text `rationale`: the key numbers that justified a
   decision (`{skew: 2.3, n_outliers: 40}`), so drift can later check whether the *reason* still holds.
 - **Decision lifecycle** — a clean `accept`/re-baseline command (update `expect` intentionally,
@@ -114,24 +89,15 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
 - **Drift calibration** — split expectations into **invariants** (must never change → hard fail) vs
   **informational metrics** (row counts that naturally move → notice, not failure). Avoids alarm
   fatigue. Maybe drift-on-rationale (flag when a decision's justifying condition no longer holds).
-- ~~**Workflow chaining across specs**~~ — *designed 2026-07-30, **`docs/PIPELINE.md`**, not yet
-  built. A spec references another spec's output **by plain name**; portia scans the project's specs
-  and derives the run order. One spec produces one table; names are unique across the project. This
-  replaces the refusal at `agent/handlers.py:618`. Part of the pipeline overhaul, `PLAN.md` item 7.*
-  - **Still open and deliberately out of that task:** spec **versioning**, **drift across a chain**
-    (an upstream re-run invalidating a downstream `expect`), and **run caching / partial runs** —
-    once a project is a DAG of specs, "run only what changed" becomes askable.
-- ~~**`write_outputs` is all-or-nothing and CSV-only.**~~ — *half fixed 2026-07-31: it writes **one
-  file per model**, named for the spec, because a spec produces one table and its steps are CTEs in
-  the compiled pipeline rather than tables. It had no test at all before; it has two now.*
-  *Finished 2026-08-02: one file per model was right, but the app only ever wrote **one model**.
-  `pipeline.write_outputs` writes the table for every model a build produced, so the app's Write
-  outputs follows the same scope as the `.sql` it just wrote (`PIPELINE.md` §6).*
-  **Still open:** the output format is hard-coded to `.csv` even though `write_table` dispatches on
-  the extension, so a parquet output is one argument away and nothing passes it.
-  **Also open:** `cli.build` has no `--write`, so writing a whole project's tables is an app-only
-  gesture. `pipeline.write_outputs` is the engine half and takes one flag to reach the terminal;
-  left out of the fix above only to keep it to the bug.
+- **Spec versioning, and drift across a chain.** Deliberately out of the pipeline overhaul: an
+  upstream re-run invalidating a downstream `expect` has no answer today. Related, and now askable
+  because a project is a DAG of specs: **run caching / partial runs** — "run only what changed".
+- **Outputs are hard-coded to CSV**, on an engine that reads and writes Parquet. `write_table`
+  already dispatches on the extension, so pointing it at `.parquet` is one argument. What is missing
+  is the *decision* — a project-level output format, or per-spec — and it pulls against the
+  human-opens-it-in-Excel argument below, so decide the two together.
+- **`cli.build` has no `--write`**, so writing a whole project's tables is an app-only gesture.
+  `pipeline.write_outputs` is the engine half and takes one flag to reach the terminal.
 - **Reproducibility of custom steps** — pin the execution environment (DuckDB version, or Python +
   deps + seeds) so a captured step truly re-runs identically.
 - **A `sql` step's output row order is not stable, so `write_outputs` isn't byte-reproducible.**
@@ -141,26 +107,45 @@ validation. See the module map artifact + `CLAUDE.md` for what already exists.
   dict moves and nothing the copilot reads is affected — but `run --write` produces a CSV that
   re-diffs on every run, which cuts against "re-running against a changed source produces a
   readable diff". The golden harness sorts previews by value to sidestep it. Real fix is probably a
-  deterministic order at the write edge (`spec.write_outputs` sorts, or the step declares one),
-  **not** an `ORDER BY` the agent has to remember. Gets worse, not better, once every op is DuckDB.
+  deterministic order at the write edge (`write_outputs` sorts, or the step declares one), **not**
+  an `ORDER BY` the agent has to remember.
 
 ## Agent — the "decide" layer (the copilot)
 
-*Four findings from the 2026-07-30 audit of every tool and every prompt (that session's map is the
-thing to re-read before prompt work; the pipeline decisions it produced are in `PIPELINE.md`).*
+*Findings from the 2026-07-30 audit of every tool and every prompt — that session's map is the thing
+to re-read before prompt work.*
 
-- ~~**`copilot.md` tells the model something false about itself: "You never see raw rows."**~~
-  *Fixed 2026-07-31: the prompt now names `join_findings` as the one tool that shows rows, says why
-  (a judgment about rows you have never seen is a guess), and says they are examples rather than a
-  sample to generalise a number from. The original finding, kept because it is the kind of thing to
-  look for again:* It does.
-  `join_findings` returns up to **12 complete rows** of the user's data per call — `SELECT *`, capped
-  at 3 each for unmatched-left, unmatched-right, null-key-left and null-key-right
-  (`checks/join.py:401`). That is deliberate and `checks/join.py`'s own docstring argues for it
-  ("so the agent can weigh materiality from real rows, not just counts"), so the *code* is right and
-  the *prompt* is wrong. Not a safety problem — the rows are capped and there is no filesystem — but
-  a model told it cannot see something it is looking at may distrust the sample it is entitled to
-  reason from, or fail to tell the user it read real records. Fix the sentence, not the tool.
+- **The prompt still prices profiling as expensive, and DuckDB made it nearly free.**
+  `prompts/tools/profile_source.md` says *"Expensive — the detailed rung"* and *"Not for browsing"*;
+  `copilot.md` says *"Climbing costs tokens, so don't browse."* Both were written against a pandas
+  engine that read a whole file to profile it. Post-migration a profile is a DuckDB aggregate —
+  Run 8 measured two candidate joins over 100M rows in **0.02 s each**, after the model had declined
+  to measure them and asked permission instead. What is still costly is the **tokens of the returned
+  evidence**, not the work, and the prompt conflates the two. Separate them: keep "don't dump twenty
+  profiles into context", drop the language that reads as "this call is expensive". **Cheap to try,
+  with a clean before/after against Run 8** — the same shape of experiment as the `prompts.tool()`
+  one below, and these two must not be run in the same session or neither result means anything.
+- **Tool descriptions reach the model as one unbroken line.** `prompts.tool()` does
+  `" ".join(text.split())`, which correctly unwraps the source file's hard wrapping but also
+  destroys headings, blank lines and list structure. `record_step.md` is **6,038 characters with
+  zero newlines** — the `## 'sql'` heading runs into its body, the JSON example is flattened. Fix:
+  unwrap *within* a paragraph, preserve blank lines and line starts. Small, but it changes every
+  prompt the model reads, so it wants its own branch and a before/after against **Run 7**, where a
+  whole section of that description appears to have been ignored. *Suspected contributor, not a
+  proven cause.*
+- **A grain claim can be widened until it passes — the loop's open hole.** Run 3 was refused on
+  `grain: [booking_id]`, then recorded `grain: [booking_id, event_name]` and passed: `event_name`
+  is the column the fan-out varies over, so the claim is a tautology. It didn't override the gate,
+  it dissolved it — the same move as rewriting `expect`, on the one field the agent authors.
+  Candidate fix, claim-free so it can't be dissolved: **row conservation.** A left join whose output
+  exceeds its left input multiplied rows; an inner join can only shrink. Binary, no tunable number,
+  independent of anything the agent says. **Open design call:** a strict inequality is not literally
+  a zero, so admitting it stretches the "only zeros block" rule — but it needs no threshold, which
+  is what that rule is actually protecting. Decide before building.
+- **Grain examples should carry the row, not just the key.** Given only
+  `{"booking_id": "B0009", "n_rows": 2}`, Run 3 invented the city and both event names in its
+  summary. Anything it can't measure it will estimate (`handlers.profile_source`'s docstring, same
+  lesson). More evidence, not a sterner prompt.
 - **`--dir` never reaches the tools.** `portia_dir` flows into `build_system_prompt` only
   (`agent/session.py:73`). The MCP server runs in-process, so every handler falls back to
   `catalog.DEFAULT_DIR` unless the model spontaneously fills the optional `portia_dir` schema field —
@@ -179,71 +164,6 @@ thing to re-read before prompt work; the pipeline decisions it produced are in `
   (`high_null` and `low_overlap` at 0.5, `high_cardinality` and `numeric_stored_as_text` at 0.9) and
   carry judgment-flavoured *names* — nothing blocks on them, so the facts-vs-judgment rule holds
   where it is written down, but the naming does quiet judgment anyway.
-- **Prompt work the pipeline overhaul requires** (`PIPELINE.md` §2.6): `record_step.md` has to teach
-  the **new-spec-vs-new-step** decision and the `layer` field, and `copilot.md` has to cover
-  proposing the project's shape (flat or layered) and what the three layers mean. Portia supplies the
-  fact — how many other specs read a table — and the agent decides; no rule like "always promote a
-  join".
-- ~~**The copilot loop**~~ — *shipped (`portia/agent/`, branch `agent-loop`): in-process MCP server
-  over the checks/catalog/spec, `AskUserQuestion` routed to the human, event stream, chat CLI.
-  Proven end-to-end on both flows — `interpret` writes the catalog read, `merge` measures a join,
-  asks which trade-off to take, and writes a spec step whose `expect` block `run_spec` verifies
-  clean.*
-- ~~**`expect` vocabulary is hand-maintained**~~ — *fixed: each op declares `PROVENANCE_KEYS` next
-  to the code that emits them, `handlers._EXPECTABLE` reads those, and each op's tests assert the
-  declaration still matches a real run — so it can't rot silently.*
-- ~~**Context flow**~~ — *shipped: L0+L1 composed into the system prompt (`agent/context.py`), the
-  L2/L3 split (`describe_source` / `profile_source`), groups wired end to end, first-run stdin
-  prompt, and bulk index+interpret in one session.* **Shipped but NOT validated** — the demo that
-  appeared to prove it used a brief that stated the answer outright. See `EVALUATION.md` → "A
-  retracted result". The plumbing is right; the evidence was not.
-- ~~**The verification loop**~~ — *shipped (branch `verification-loop`): `checks/outcome.py`
-  measures the frame a step produced, `record_step` executes before it writes so the measurement is
-  pushed rather than offered, a step may declare a `grain` the engine checks, zero-conditions refuse
-  to be written, and overriding means an `acknowledge` in the YAML. `no_matches` needed no special
-  case — it surfaces as `empty_output` or `source_did_not_contribute`, derived from the output
-  rather than from the op's flags. The immutability message no longer says "pick another id".*
-  **Verified against the engine, not yet against the agent** — see `EVALUATION.md`.
-- **The prompt still prices profiling as expensive, and DuckDB made it nearly free.**
-  `prompts/tools/profile_source.md` says *"Expensive — the detailed rung"* and *"Not for browsing"*;
-  `copilot.md` says *"Climbing costs tokens, so don't browse."* Both were written against a pandas
-  engine that read a whole file to profile it. Post-migration a profile is a DuckDB aggregate —
-  Run 8 measured two candidate joins over a 100M-row store in **0.02 s each**, after the model had
-  declined to measure them and asked permission instead. What is still costly is the **tokens of
-  the returned evidence**, not the work, and the prompt conflates the two. Separate them: keep
-  "don't dump twenty profiles into context", drop the language that reads as "this call is
-  expensive". **Cheap to try, with a clean before/after against Run 8** — the same shape of
-  experiment as the `prompts.tool()` line-collapsing one below, and these two should not be run in
-  the same session or neither result means anything.
-- **A grain claim can be widened until it passes — the loop's open hole.** Run 3 was refused on
-  `grain: [booking_id]`, then recorded `grain: [booking_id, event_name]` and passed: `event_name`
-  is the column the fan-out varies over, so the claim is a tautology. It didn't override the gate,
-  it dissolved it — the same move as rewriting `expect`, on the one field the agent authors.
-  Candidate fix, claim-free so it can't be dissolved: **row conservation.** A left join whose output
-  exceeds its left input multiplied rows; an inner join can only shrink. Binary, no tunable number,
-  independent of anything the agent says. **Open design call:** a strict inequality is not literally
-  a zero, so admitting it stretches the "only zeros block" rule — but it needs no threshold, which
-  is what that rule is actually protecting. Decide before building.
-- ~~**`expect` values aren't shape-checked, only their keys**~~ — *fixed (branch
-  `expect-value-shapes`): `record_step` compares each prediction's kind against the value the step
-  actually reported, which it has because it just ran it. No acknowledgement for this one — unlike
-  a zero, a wrong-typed prediction is never legitimate.*
-- **Grain examples should carry the row, not just the key.** Given only
-  `{"booking_id": "B0009", "n_rows": 2}`, Run 3 invented the city and both event names in its
-  summary — "Paris… Tech Summit and Marathon" for what was Amsterdam/Canal Festival/Design Week.
-  Anything it can't measure it will estimate (`handlers.profile_source`'s docstring, same lesson).
-  More evidence, not a sterner prompt.
-- ~~**A partial join failure is invisible to a zero-only blocking rule**~~ — *largely answered, and
-  the answer was evidence rather than a flag.* Run 3 stripped `city_name` but never lowercased it,
-  so `" paris"` → `"paris"` never matched `"Paris"` and one event vanished;
-  `source_did_not_contribute` correctly stayed quiet because four other events matched. Catching
-  that with a **rule** needs a threshold, i.e. judgment, i.e. it isn't code's. But it needs no rule:
-  now that `join_findings` reaches a step's output, the same call on hop 2 returns
-  `{'city_name': 'paris', 'event_name': 'Marathon'}` in `unmatched_right_rows` and
-  `('2026-06-12','Amsterdam') n_left 1 × n_right 2` in `fan_out_examples` — both failures, in plain
-  rows, before anything is written. "Invest in richer observations, not a decision layer"
-  (`CLAUDE.md`), demonstrated. Whether the agent *looks* is the open part, and that is a prompt
-  question now rather than a structural one.
 - **`describe_source` / `profile_source` still can't see a step's output** — only `join_findings`
   takes `<spec>#<step id>`. Profiling an intermediate table (what are its columns actually like
   now?) is the obvious next want; the resolver is already shared, so it is a small change. Waiting
@@ -257,58 +177,26 @@ thing to re-read before prompt work; the pipeline decisions it produced are in `
   execution (cache each step's frame by id, invalidate downstream) before it goes anywhere real.
 - **Brief growth at scale** — L1 is ~30 tokens per source. Fine at 3, unproven at 50; the source
   index will need to become searchable or group-scoped rather than exhaustive.
-- **One tidy home for every injected instruction.** Prompt text currently lives in five places:
-  `agent/prompts/copilot.md` (L0), the brief template in `agent/context.py`, **every tool
-  description inline in `agent/tools.py`**, and the task prompts in `cli/chat.py` and
-  `cli/index.py`. Tool descriptions are the highest-leverage, most performance-sensitive text in
-  the system — the hotel run failed because one of them omitted a sentence — and they're buried in
-  decorators. Move them all under `agent/prompts/` so wording can be diffed, reviewed and A/B'd
-  without touching code, with a test that every tool resolves a description (no silent fallback).
-- **Tool descriptions reach the model as one unbroken line.** `prompts.tool()` does
-  `" ".join(text.split())`, which correctly unwraps the source file's hard wrapping but also
-  destroys headings, blank lines and list structure. `record_step.md` is now **6,038 characters
-  with zero newlines** — the `## 'sql'` heading runs into its body, the JSON example is flattened.
-  Fix: unwrap *within* a paragraph, preserve blank lines and line starts for headings and list
-  items. Small, but it changes every prompt the model reads, so it wants its own branch and a
-  before/after against **Run 7**, where a whole section of that description appears to have been
-  ignored. *Suspected contributor, not a proven cause — `EVALUATION.md` → Run 7.*
-- ~~**Run log + the metrics that need no labels**~~ — *shipped 2026-07-29: `portia/runlog.py` and
-  `python -m portia.cli.runs`. `EVALUATION.md` → "What shipped" for the two surprises (a second
-  engine event was needed to count refused writes; the SDK's `input_tokens` excludes the cache and
-  under-reports a turn by ~800×). Two things it does not yet do: **drift rate** — that lives in the
-  spec's run results, not the event stream, and joining the two is its own small job — and the app
-  side, below.*
+- **Drift rate is not in the run log** — it lives in the spec's run results rather than the event
+  stream, and joining the two is its own small job.
 - **Langfuse, once the JSONL hurts.** Its job is browsing a run's timeline when debugging why one
-  went sideways, not computing the metrics above. Free either way (self-host via Docker, or the
-  cloud Hobby tier: 50k units/month, 30-day retention, 2 seats). The SDK drives Claude Code as a
-  *subprocess*, so client auto-instrumentation sees nothing — `events.py` is the only sane
-  emission point, which is also why the JSONL is not throwaway work.
-- **Outputs are hardcoded to CSV, on an engine that now reads and writes Parquet.**
-  `spec.write_outputs` builds `out / f"{r.id}.csv"`, so a multi-GB result lands as CSV — the format
-  the Parquet work exists to get away from, and the one whose type sniffing we removed from the
-  answer. The plumbing is already there: `write_table` dispatches on the extension and the code
-  comment beside that line says pointing it at `.parquet` is the whole change. What is missing is
-  the *decision* — a project-level output format, or per-spec, and whether the human-opens-it-in-
-  Excel argument (see the item below) outweighs it. Note the two pull opposite ways, so decide them
-  together.
-- **Generated data has nowhere to live.** `run_spec --write` dumps `<step-id>.csv` and nothing
-  knows it exists. Needs: a **code-owned** layout (`outputs/` at the project root for the data —
-  users open these in Excel — index entry in `.portia/`), auto-profiling (free) but **not**
-  auto-interpretation (a model turn per run), and `derived_from: <spec>#<step>` so a generated
-  table can't be mistaken for source data. Path convention is not judgment: if every project
-  invents its own tree nothing can find anything and the GUI's left panel has no stable view.
-  This is what makes `VISION.md`'s workflow chaining safe.
+  went sideways, not computing metrics. Free either way (self-host via Docker, or the cloud Hobby
+  tier). The SDK drives Claude Code as a *subprocess*, so client auto-instrumentation sees nothing —
+  `events.py` is the only sane emission point, which is also why the JSONL is not throwaway work.
+- **Generated data has nowhere to live.** `run --write` dumps a CSV and nothing knows it exists.
+  Needs: a **code-owned** layout (`outputs/` at the project root for the data — users open these in
+  Excel — index entry in `.portia/`), auto-profiling (free) but **not** auto-interpretation (a model
+  turn per run), and `derived_from: <spec>` so a generated table can't be mistaken for source data.
+  Path convention is not judgment: if every project invents its own tree nothing can find anything
+  and the left panel has no stable view.
 - **Multi-turn chat** — `session.run` is one turn per invocation today; hold the `ClaudeSDKClient`
-  open for follow-ups and wire `interrupt()`.
+  open for follow-ups and wire `interrupt()`. **Not a prerequisite for the app** — a turn is a
+  complete unit of work, and V0 offers a fresh turn rather than a fake conversation.
 - **Don't reconstruct rows from samples** — asked for raw data the agent politely assembles a
   plausible table from `samples` and hedges. Honest, but consider whether the prompt should refuse
   outright.
 - **Sandbox data access** — hand the agent's code-execution a clean handle to the loaded frames so it
   can run read-only ad-hoc analysis (the imputation-shape question). Ephemeral; verdict → `rationale`.
-- ~~**Pro-auth verification**~~ — *answered 2026-07-25: the SDK drives a bundled Claude Code binary,
-  so it authenticates off the local login and meters against the **subscription** (confirmed against
-  real Haiku usage). The budget principle holds.* See `PLAN.md` → "Auth posture" for what portia
-  does and doesn't claim about this — the posture is unchanged by the good news.
 - **Don't re-ask what's decided** — the agent asks only about what the spec hasn't answered; drift
   can re-open a specific decision. (Best shaped by real use, per the user.)
 
@@ -317,15 +205,13 @@ thing to re-read before prompt work; the pipeline decisions it produced are in `
 *Substrate built (`catalog.py`): project context + groups + per-source Layer 1 prose / Layer 2
 column roles + facts; facts refresh, judgment preserved. Remaining:*
 
-- ~~**Semantic interpretation**~~ — *shipped: `catalog.set_interpretation` + the agent's
-  `interpret` flow. The agent now writes `summary` and column `role`s from the project context.*
 - **Role vocabulary** — the agent invents role names per run (`attribute` vs `category`,
   `unused` vs `dropped`). Fine while we learn what roles are useful; revisit once real use shows
   which ones carry weight, and only then consider constraining them.
 - **Broad "how sources interact" model** — likely joins / relationships across sources (the
   context-aware end goal). Deferred as too early — forge convictions via the UI first.
-- **Groups in use** — `groups` are stored but nothing consumes them yet; wire group context into
-  downstream reasoning once the agent lands.
+- **Groups in use** — `groups` are stored and rendered into the L1 brief, but nothing downstream
+  consumes them.
 - **Catalog storage shape** — one-file-per-source now; revisit one-file vs per-group vs harmonized
   once we've used it (kept deliberately un-locked / hand-editable).
 - **Context bundle** — a token-lean projection of the catalog for the agent to consume; and a
@@ -333,14 +219,17 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
 
 ## Interface — the app
 
-- ~~**The import flow has no surface yet**~~ — *built 2026-08-01 (`PIPELINE.md` §2.7). A
-  destination field governing both routes, a plan listing every `from → to` pair, and nothing
-  written until it is confirmed.*
-- ~~**The graph has pan but no zoom.**~~ — *built 2026-08-01: pinch or two-finger scroll, buttons
-  beside Recenter, anchored at the pointer. **What it still does not do is fit-to-content** — on a
-  project too wide for the pane you currently zoom out by feel. That wants the layout's own
-  dimensions, which `graph.Layout` already carries, so it is cheap when a project is big enough to
-  ask for it.*
+- **Groups are invisible in the UI.** The engine has them fully — `catalog.set_group`, a write tool
+  the copilot can call, and `agent/context.py` renders them into the L1 brief so a group genuinely
+  changes what the copilot sees. The app shows none of it: you cannot see a group, make one, or
+  assign to one, and if the copilot creates one during indexing the only way to know is to open
+  `project.yaml`. The read side is nearly free (they are already in `APP.catalog["groups"]`); the
+  real question is whether the left pane nests sources under group headings (cleaner, bigger
+  restructure of `artifacts.py`) or lists groups as a separate section (quick, slightly redundant).
+  Membership editing needs multi-select, the fiddliest widget in the app.
+- **The graph does not fit-to-content.** Zoom is built, but on a project too wide for the pane you
+  zoom out by feel. That wants the layout's own dimensions, which `graph.Layout` already carries, so
+  it is cheap when a project is big enough to ask for it.
 - **Zoom does not change what a card shows.** At 40% a step card is an unreadable rectangle. A
   graph that dropped detail as it zoomed out would read better, but it is also the shape of thing
   that quietly starts ranking what survives — so it needs the "colour and prominence communicate
@@ -349,151 +238,79 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
   catalog entry and clicking a model header opens its spec; the compiled file is only reachable from
   the left panel. Probably a second affordance on the card rather than a different click.
 - **The run report's table preview cannot be opened.** Found 2026-07-28 by driving the app in a
-  browser (the first time this widget has been). Clicking the `preview · N rows × M columns`
-  expansion bubbles up to the step block's `on("click")`, which calls `_select_step` and re-renders
-  the report — so the preview collapses as fast as it opens. **Pre-existing**, not the migration:
-  `main` has `_table(result.frame)` and `block.on("click", …)` in exactly the same arrangement. The
-  fix is to stop the expansion's click propagating.
-- ~~**The add-data screen said nothing while it worked**~~ — *fixed 2026-07-28. Profiling reports
-  per file ("Profiling VBPPRED_EVENTS — 7 of 20"), the content scrolls so the primary action stays
-  on screen at any window height, and the interpretation turn is deferred to Continue so it runs
-  where the Indexing tab can show it. It used to fire on a screen with no transcript: you paid for
-  a turn and watched a blank page.*
-- **The left pane can only see specs in `specs/`, and nothing makes the agent write there.**
-  `ui/engine.specs_in()` globs `<root>/specs/*.yaml`, non-recursively. The path is the agent's
-  choice — `record_step` takes whatever it is given, and `specs/<name>.yaml` is a *hint* in prompt
-  text, not a constraint. A spec written to `phq.yaml` or `output/spec.yaml` therefore exists, runs,
+  browser. Clicking the `preview · N rows × M columns` expansion bubbles up to the step block's
+  `on("click")`, which calls `_select_step` and re-renders the report — so the preview collapses as
+  fast as it opens. The fix is to stop the expansion's click propagating.
+- **The left pane can only see specs under `specs/`, and nothing makes the agent write there.**
+  The path is the agent's choice — `record_step` takes whatever it is given, and `specs/<name>.yaml`
+  is a *hint* in prompt text, not a constraint. A spec written to `phq.yaml` therefore exists, runs,
   and is invisible in the app, which reads as "it didn't create one". Two candidate fixes and they
   are not equivalent: glob the project recursively (the pane shows what is there), or make
-  `record_step` refuse a path outside `specs/` (the tree stays predictable, which is what
-  `BACKLOG`'s "generated data has nowhere to live" item also wants). Prefer the second.
-- **A selection still rebuilds a whole pane to move one highlight.** Fixed the visible half of this
-  on 2026-08-02 — the scroll position survives a rebuild (`assets/scroll.js`) and the middle pane
-  draws in one pass so a click no longer paints a blank frame — but the rebuild itself is still
-  there: clicking a row in the left panel discards and re-creates all of it so one `--selected`
-  class can move, and clicking a step card re-draws the graph as well as the report. The honest fix
-  is to repaint the affected rows in place, as `transcript._pick` already does for the answer
-  options. What makes it awkward here is that `ui.refreshable` gives no handle on the elements it
-  built, and a module-level registry of them would be shared by two tabs on one project — which
-  `state.py` says is the intended case. It costs a DOM patch per click today, not a frame.
+  `record_step` refuse a path outside `specs/` (the tree stays predictable, which is what "generated
+  data has nowhere to live" also wants). **Prefer the second.**
+- **A selection still rebuilds a whole pane to move one highlight.** Fixed the visible half on
+  2026-08-02 — the scroll position survives a rebuild (`assets/scroll.js`) and the middle pane draws
+  in one pass so a click no longer paints a blank frame — but the rebuild itself is still there:
+  clicking a row in the left panel discards and re-creates all of it so one `--selected` class can
+  move. The honest fix is to repaint the affected rows in place, as `transcript._pick` already does.
+  What makes it awkward is that `ui.refreshable` gives no handle on the elements it built, and a
+  module-level registry would be shared by two tabs on one project — which `state.py` says is the
+  intended case. It costs a DOM patch per click today, not a frame.
+- **A source's catalog entry replaces the workflow pane** while you read it, rather than sitting
+  somewhere the graph stays visible. It works and is discoverable ("Back to workflow"), but the
+  middle pane is now two things.
+- **A denied write leaves no note in the spec.** The transcript records it; nothing durable does.
+- **Drag-and-drop is unverified.** The picker and the "add by path" field are what got tested.
 - **The add-data copy is derived from the loader; nothing else is.** `screens._formats()` reads
   `supported_suffixes()`, so registering a format updates the screen with no edit. Worth doing the
-  same wherever else a format is named in prose — `VISION.md` had six.
+  same wherever else a format is named in prose.
 - **`tests/test_ui.py` renders nothing.** It covers state, badges, decisions and the folder chooser
   — and not one component that draws a table. That is why the preview bug above survived, and why
   the DuckDB migration's UI changes had to be checked by driving a browser by hand. A handful of
-  tests that call `components.table_preview` and `workflow._table` with a real `Table` would have
-  caught both.
-
-## Interface — the surface
-
-- ~~**The three-panel app**~~ — **V0 shipped 2026-07-26** (`portia/ui/`, `python -m portia.ui`).
-  Drives a turn, catches every question and write confirmation, and the no-terminal audit in
-  `VISION.md` passes end to end. What V0 left behind, in rough order of felt need:
-  - **A source's catalog entry replaces the workflow pane** while you read it, rather than sitting
-    somewhere the graph stays visible. It works and it is discoverable ("Back to workflow"), but
-    the middle pane is now two things.
-  - ~~**The graph is a fixed grid**~~ — *drag-to-pan and a dot grid landed 2026-07-27. Still no
-    zoom, no collapsing a long chain, and nodes are a uniform size that cannot be moved (deliberate:
-    the layout is the recorded sequence of decisions).*
-  - **A denied write leaves no note in the spec.** The transcript records it; nothing durable does.
-  - ~~**Nothing is editable**~~ — *fixed 2026-07-27: the brief is editable from the toolbar, and a
-    source's summary and roles are editable in place or correctable by asking the copilot
-    (`tasks/reinterpret.md`). Both write through `catalog.set_interpretation`, which touches
-    judgment and never a measured fact.*
-  - **Drag-and-drop is unverified.** The picker and the "add by path" field are what got tested.
-  - **Groups are invisible in the UI.** The engine has them fully — `catalog.set_group`, a write
-    tool the copilot can call, and `agent/context.py` renders them into the L1 brief so a group
-    genuinely changes what the copilot sees. The app shows none of it: you cannot see a group, make
-    one, or assign to one, and if the copilot creates one during indexing the only way to know is to
-    open `project.yaml`. The read side is nearly free (they are already in `APP.catalog["groups"]`);
-    the real question is whether the left pane nests sources under group headings (cleaner, bigger
-    restructure of `artifacts.py`) or lists groups as a separate section (quick, slightly redundant).
-    Membership editing needs multi-select, the fiddliest widget in the app.
-  - **The source preview loads the whole file to show 15 rows.** Fine today, a straight bug at
-    multi-GB — fixed by the DuckDB migration, listed here so it is not lost if that slips.
-- ~~**A copilot turn still disappears when the window does.**~~ — *closed in three parts: a **spec
-  run** saves as markdown 2026-07-27 (`Save report` → `runs/*.md`); the **turn** is written
-  2026-07-29 to `.portia/runs/*.jsonl` by `portia/runlog.py`, teed from `ui/turn`; and the same day
-  the left pane grew a **Turns** section that replays one into the middle pane. Two artifacts under
-  one word "run" got two headings rather than one merged list — a run executed a spec, a turn
-  decided what the spec should say. The replay reuses the transcript's own renderers, so a past
-  turn reads like the live one; what it cannot do is answer, since the questions are already
-  answered.*
-- **A conversation that stays open.** `session.run` sends one prompt, drains the response and closes
-  the client, so there is no multi-turn — no "actually, redo that as an inner join" after a turn
-  ends. The SDK's `ClaudeSDKClient` supports staying open; this is a portia limitation, not an SDK
-  one. **Not a prerequisite for the UI** — a turn is a complete unit of work, and V0 offers a fresh
-  turn rather than a fake conversation. The first thing to build *after* V0, once the boundary has
-  been felt for real.
-- ~~**Tool results are missing from the event stream.**~~ — *fixed 2026-07-26 alongside the app:
-  `events.TOOL_RESULT`, emitted from the `UserMessage` carrying `ToolResultBlock`s. The app expands
-  them inline; **`cli/chat.py` still ignores the kind**, deliberately, so terminal transcripts stay
-  comparable across the runs already scored against them. Revisit when the run log lands.*
-  **Revisited 2026-07-29 and the answer was to keep it:** the log stores tool results and
-  `cli.runs show` renders them, so the evidence is there to read without changing what a live run
-  prints. Logging and rendering are different jobs; only the second had a reason to stay still.
+  tests calling `components.table_preview` and `workflow._table` with a real `Table` would catch
+  both.
 
 ## Scale — data tiers
 
-- ~~**DuckDB tier**~~ — *shipped 2026-07-28, `docs/DUCKDB_MIGRATION.md`. The engine is DuckDB
-  throughout. Measured on real PHQ data: 4.82 GB across three tables indexes in 32 s, a 50M x 3M
-  join is diagnosed in 3.8 s, and peak memory is bounded by the largest table rather than the total.
-  Two of the three traps the spec named turned out to be wrong; §6.1 and §13 are the record.*
-- **A profile's memory is bounded by cardinality, not by the store** — the one part of the scale
-  promise that did not land. Exact `count(DISTINCT)`, exact quantiles and the modal-value group-by
-  are all O(n) or O(distinct), so peak RSS is still ~2.2x the largest file. Approximating the
-  quantiles is safe and 4x cheaper; approximating `count(DISTINCT)` is **not**, because
-  `possible_key` and `constant` are equality tests against it and HyperLogLog came back 13.6% low on
-  a 6M-row key. The interesting sub-problem: a cheap *exact* answer to the only question
-  `possible_key` asks — `count(DISTINCT c) = count(*)` — which does not need the count itself.
-- **Ingesting Parquet inflates it ~2.3x on disk, which undoes much of converting.** Measured
-  2026-07-28: a 266 MB ZSTD Parquet extract (14.4M rows) becomes 602 MB in the store, and a real
-  project of 6.2 GB of Parquet produced a **19.2 GB** `store.duckdb`. DuckDB's native format
-  compresses, but not as hard as Parquet+ZSTD. The ingest decision (`DUCKDB_MIGRATION.md` §3) was
-  argued on CSV, where ingest is both faster *and* smaller; for Parquet only the first half holds.
-  Worth revisiting: a Parquet source is already columnar and already typed, so the read-speed
-  argument is weak, and the sandbox argument (§6.1) is the only one left — which a view over the
-  file would satisfy just as well if the hatch stopped needing the store to be the only namespace.
-- **`store.connect` sets no `memory_limit`, so DuckDB helps itself to 75% of RAM.** A 2 GB limit did
-  the same work in the same wall time at 5.0 GB peak instead of 6.8, because DuckDB spilled rather
-  than failed. A conservative default looks close to free — but 2 GB was ample for that workload and
-  might not be for a large sort. Decide against PHQ data.
-- **SQL steps are the one memory-bound op.** The escape hatch materialises its declared inputs,
+- **A profile's memory is bounded by cardinality** — the one part of the scale promise that did not
+  land (`DUCKDB_MIGRATION.md` §13). Exact `count(DISTINCT)`, exact quantiles and the modal-value
+  group-by are all O(n) or O(distinct). Approximating the quantiles is safe and 4× cheaper;
+  approximating `count(DISTINCT)` is **not**, because `possible_key` and `constant` are equality
+  tests against it and HyperLogLog came back 13.6% low on a 6M-row key. The interesting sub-problem:
+  a cheap *exact* answer to the only question `possible_key` asks — `count(DISTINCT c) = count(*)` —
+  which does not need the count itself.
+- **`core.io.connect()` sets no `memory_limit`, so DuckDB helps itself to 75% of RAM.** A 2 GB limit
+  did the same work in the same wall time at 5.0 GB peak instead of 6.8, because DuckDB spilled
+  rather than failed. A conservative default looks close to free — but 2 GB was ample for that
+  workload and might not be for a large sort. Decide against PHQ data.
+- **SQL steps are the one memory-bound op.** The escape hatch materializes its declared inputs,
   because that isolation is what makes the sandbox independent of reading the query correctly
-  (§6.1). Making it lazy needs step outputs in the store *and* a parse-tree check on table
-  references to replace what isolation currently gives for free.
+  (`DUCKDB_MIGRATION.md` §6.1). Making it lazy needs a parse-tree check on table references to
+  replace what isolation currently gives for free.
 - **A referentially-consistent subset extractor.** Slicing every table to rows reachable from a
   chosen set of ids preserves schemas, key overlap, spelling mismatches and fan-out. Naive
   per-table sampling does **not**: independently sampled tables stop sharing keys and every join
   looks empty. Scale is no longer the reason to want it — **repeatability is**, and `EVALUATION.md`
-  has seven anecdotes and no re-runnable fixture.
+  has eight anecdotes and no re-runnable fixture.
 - **Snowflake tier** via the Snowflake MCP server — push compute to the warehouse, pull small
   results. `core.table.Table` is the seam: a name, a query and a connection is not a DuckDB-shaped
-  idea, which was the point of building it that way.
+  idea, which was the point of building it that way. The product vision for it is in `VISION.md`.
 
 ## Core / infra
 
-- **The import workflow** (`PIPELINE.md` §2.7) — indexing is being restricted to files already
-  inside the working directory, so bringing outside data in needs its own command and its own UI
-  affordance: the user picks where in the repo it lands, portia states what it is about to copy and
-  to where, copies it, then indexes. Part of the pipeline overhaul, but listed here because it is the
-  one piece of it that is a **new** surface rather than a change to an existing one.
 - **README says nothing about auth — a decision awaiting the user, not an oversight.** `PLAN.md`
   → "Auth posture" settles what portia *does* (no auth code, ever) but not what the README
   *claims*. Naming the API key as the supported path is the safe posture; saying nothing is also
   neutral and is where it stands today. It is product positioning on the exact point the user
   cares about, so it is theirs to call — **don't quietly write it either way**. One line, whichever
   it is.
-- ~~**More loaders — Parquet**~~ — *shipped 2026-07-28. `core/io._FORMATS` now registers a reader,
-  its options and how to write the format back, so a format you can load but not save can't happen.
-  Next one is genuinely one entry.*
 - **`uv`'s cache prunes under disk pressure and takes the venv's dev tools with it.** Hit three
   times on 2026-07-28 while real data filled the disk: `pytest`, `ruff`, `mypy` and `pre-commit`
   are hardlinks into `~/.cache/uv`, so they vanish and every command fails with
   `No module named pytest`. Fix is `uv pip install -e ".[dev]"`. Worth a line in the README if it
   bites anyone else.
-- **CI** — run the hooks + tests on each PR. *Declined for now (2026-07); revisit if collaborators join.*
+- **CI** — run the hooks + tests on each PR. *Declined for now (2026-07); revisit if collaborators
+  join.*
 
 ## Validation & product (from the brief §9)
 
@@ -501,3 +318,89 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
   actual work. Does the frontier-agent baseline degrade at real scale? Nothing matters more.
 - **The five conversations** — describe the tool to five DS/AI-engineers; ask what they do today
   instead. "I'd use this" from the founder is necessary, not sufficient.
+
+---
+
+## Shipped
+
+*One line each. The code is the description; these exist so an item isn't re-proposed, and so the
+odd finding worth carrying forward isn't lost with it.*
+
+**Engine**
+
+- **The escape hatch — DuckDB SQL** — 2026-07-26, `ops/sql.py`. `ops = {join, normalize, sql}`.
+  Built by hand it produces the hotel answer key exactly (14 rows, 136,240, zero inflation) — *by
+  construction, not by a copilot.*
+- **Nothing can aggregate** — closed by the hatch, same day.
+- **The verification loop** — 2026-07-26, `checks/outcome.py` + `record_step` executing before it
+  writes. `no_matches` needed no special case: it surfaces as `empty_output` or
+  `source_did_not_contribute`, derived from the output rather than the op's flags.
+- **`expect` vocabulary is hand-maintained** — fixed: each op declares `PROVENANCE_KEYS` beside the
+  code that emits them, and its tests assert the declaration still matches a real run.
+- **`expect` values aren't shape-checked, only their keys** — fixed: `record_step` compares each
+  prediction's kind against the value the step just reported. No acknowledgement for this one —
+  unlike a zero, a wrong-typed prediction is never legitimate.
+- **A partial join failure is invisible to a zero-only blocking rule** — *answered with evidence
+  rather than a flag.* Catching it with a rule needs a threshold, i.e. judgment. It needs no rule:
+  now that `join_findings` reaches a step's output, the same call returns the unmatched row and the
+  fan-out example before anything is written. "Invest in richer observations, not a decision layer",
+  demonstrated. Whether the agent *looks* is a prompt question now, not a structural one.
+- **DuckDB tier** — 2026-07-28, `DUCKDB_MIGRATION.md`. Real PHQ data: 4.82 GB indexes in 32 s, a
+  50M × 3M join is diagnosed in 3.8 s, peak memory bounded by the largest table. Two of the three
+  traps the spec named turned out wrong; §6.1 and §13 are the record.
+- **More loaders — Parquet** — 2026-07-28. `core/io._FORMATS` registers a reader, its options **and**
+  how to write the format back, so a format you can load but not save can't happen.
+- **Workflow chaining across specs** — designed 2026-07-30, shipped 2026-07-31 (`PIPELINE.md`). A
+  spec references another's output by plain name; portia derives the run order.
+- **`write_outputs` is all-or-nothing** — one file per model 2026-07-31; finished 2026-08-02, when
+  the app turned out to write only the *open* model over the top of the last one.
+- **`handlers.profile_source` re-reads the file rather than the store** — moot: the store was
+  removed 2026-07-31. *Worth keeping the finding that led there: it was written at index time and
+  read by almost nothing. A fast copy nobody reads is not a cache.*
+- **Ingesting Parquet inflates it ~2.3× on disk** — moot with the store, but the measurement stands
+  and is why parquet-in-the-repo is the answer if reads get slow: 6.2 GB of Parquet produced a
+  **19.2 GB** `store.duckdb`. DuckDB's native format compresses, but not as hard as Parquet+ZSTD.
+
+**Agent**
+
+- **The copilot loop** — `portia/agent/`: in-process MCP server, `AskUserQuestion` routed to the
+  human, event stream, chat CLI.
+- **Context flow** — L0+L1 composed into the system prompt, the L2/L3 split, groups wired end to
+  end. **Shipped but NOT validated** — the demo that appeared to prove it used a brief that stated
+  the answer outright (`EVALUATION.md` → "A retracted result"). The plumbing is right; the evidence
+  was not.
+- **Pro-auth verification** — 2026-07-25: the SDK drives a bundled Claude Code binary, so it
+  authenticates off the local login and meters against the **subscription**. `PLAN.md` → "Auth
+  posture" for what portia claims about it; the posture is unchanged by the good news.
+- **Run log + the metrics that need no labels** — 2026-07-29, `portia/runlog.py` +
+  `python -m portia.cli.runs`. Two surprises in `EVALUATION.md` → "The run log".
+- **`copilot.md` told the model something false about itself** — "You never see raw rows." It does:
+  `join_findings` returns up to 12 complete rows. Fixed 2026-07-31 by naming the tool and saying
+  why. *The kind of thing to look for again: the code was right and the prompt was wrong.*
+- **One tidy home for every injected instruction** — every tool description and task prompt now
+  lives under `agent/prompts/`, enforced by `tests/test_agent_prompts.py`. One straggler remains
+  (see `ask.py:59` above).
+- **Prompt work the pipeline overhaul required** — `record_step.md` teaches new-spec-vs-new-step and
+  the `layer` field; `copilot.md` covers proposing the project's shape.
+
+**Interface**
+
+- **The three-panel app** — V0 2026-07-26, `portia/ui/`. Drives a turn, catches every question and
+  write confirmation; the no-terminal audit in `VISION.md` passes end to end.
+- **Tool results are missing from the event stream** — fixed 2026-07-26 (`events.TOOL_RESULT`).
+  `cli/chat.py` still ignores the kind **deliberately**, so terminal transcripts stay comparable
+  across runs already scored; the log stores them and `cli.runs show` renders them. Logging and
+  rendering are different jobs; only the second had a reason to stay still.
+- **Nothing is editable** — 2026-07-27: brief editable from the toolbar, a source's summary and
+  roles editable in place or correctable by asking the copilot. Both write through
+  `catalog.set_interpretation`, which touches judgment and never a measured fact.
+- **The graph is a fixed grid** — pan and a dot grid 2026-07-27; zoom 2026-08-01 (pinch,
+  two-finger, buttons, anchored at the pointer).
+- **The add-data screen said nothing while it worked** — fixed 2026-07-28. It used to fire the
+  interpret turn on a screen with no transcript: you paid for a turn and watched a blank page.
+- **A copilot turn disappears when the window does** — closed in three parts: run reports as
+  markdown (2026-07-27), the turn as JSONL (2026-07-29), and a **Turns** section replaying it.
+- **The import flow has no surface** — built 2026-08-01. One destination field governing both
+  routes, a plan listing every `from → to` pair, nothing written until confirmed.
+- **The source preview loads the whole file to show 15 rows** — fixed by the DuckDB migration.
+- **Semantic interpretation** — `catalog.set_interpretation` + the agent's `interpret` flow.
