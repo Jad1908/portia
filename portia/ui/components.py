@@ -142,6 +142,26 @@ def segmented(options, current, on_pick: Callable[[str], Any]) -> None:
                 b.classes("seg-active")
 
 
+def model_effort(app, on_effort: Callable[[str], Any]) -> None:
+    """What a turn will spend: the model, and the reasoning effort.
+
+    Picked in three places — the goal box, the add-data screen, and Settings —
+    and it is **one setting in all three**, bound to the same two fields. Three
+    hand-rolled copies of the pair is how they stop agreeing: an option added to
+    one list and not the others, or a select that writes a field the turn never
+    reads. The app is passed in rather than imported so this stays a control
+    rather than a thing that knows about the open project.
+    """
+    from portia.agent.session import DEFAULT_MODEL, EFFORTS, MODELS
+
+    app.model = app.model or DEFAULT_MODEL
+    with ui.element("div").classes("row-gap-sm"):
+        ui.select(list(MODELS), value=app.model).props(
+            "borderless dense options-dense new-value-mode=add-unique use-input"
+        ).classes("p-field p-field-mono").bind_value(app, "model")
+    segmented(EFFORTS, app.effort, on_effort)
+
+
 def chip(value: str) -> ui.label:
     """`type-chip` — a source's or step's kind (`csv`, `join`, `normalize`, `sql`)."""
     return ui.label(value).classes("type-chip")

@@ -514,8 +514,6 @@ def _interpret_toggle() -> None:
     bound state — picking here is picking for the copilot too, which is why they
     are not a second setting.
     """
-    from portia.agent.session import DEFAULT_MODEL, EFFORTS, MODELS
-
     with ui.element("div").classes("stack-xs"):
         (
             ui.switch("Have the copilot read what each source is")
@@ -526,12 +524,7 @@ def _interpret_toggle() -> None:
             .on_value_change(_refresh_shell)
         )
         if APP.interpret:
-            APP.model = APP.model or DEFAULT_MODEL
-            with ui.element("div").classes("row-gap-sm"):
-                ui.select(list(MODELS), value=APP.model).props(
-                    "borderless dense options-dense new-value-mode=add-unique use-input"
-                ).classes("p-field p-field-mono").bind_value(APP, "model")
-            c.segmented(EFFORTS, APP.effort, _set_indexing_effort)
+            c.model_effort(APP, _set_indexing_effort)
         c.caption(_INTERPRET_COST)
 
 

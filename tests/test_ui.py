@@ -606,3 +606,83 @@ def test_the_window_and_the_terminal_plan_the_same_import(project):
     assert engine.plan_import(str(outside / "orders.csv"), "data", app) == plan(
         sources, app.root / "data", app.root
     )
+
+
+# --- settings: one place, and no second setting ------------------------------
+
+
+def test_the_theme_offers_all_three_modes_by_name():
+    """The cycling toolbar button showed the mode it was *in*, which cannot
+    distinguish "dark" from "auto, and it is night". Settings names all three."""
+    from portia.ui import theme
+
+    assert set(theme.MODES) == set(theme.MODE_LABEL)
+    assert [theme.MODE_LABEL[m] for m in theme.MODES] == ["auto", "light", "dark"]
+    for mode in theme.MODES:
+        assert theme.MODE_VALUE[theme.MODE_LABEL[mode]] is mode
+
+
+def test_the_model_and_effort_are_one_setting_in_every_place_they_are_picked():
+    """Three hand-rolled copies of the pair is how they stop agreeing — an option
+    added to one list and not the others, or a select writing a field the turn
+    never reads. One component, bound to the two fields a turn is started with."""
+    import inspect
+
+    from portia.ui import screens, settings, transcript
+
+    for module in (settings, transcript, screens):
+        source = inspect.getsource(module)
+        assert "c.model_effort(APP" in source, f"{module.__name__} rolls its own"
+        assert "MODELS" not in source, f"{module.__name__} still builds a model list"
+
+
+def test_every_setting_binds_a_field_the_rest_of_the_app_actually_reads():
+    """A second place to change a setting, never a second setting.
+
+    A typo'd binding is a control that looks live, writes an attribute nothing
+    reads, and silently does nothing — which is the whole failure mode a
+    settings panel invites.
+    """
+    import dataclasses
+    import inspect
+    import re
+
+    from portia.ui import settings
+
+    bound = re.findall(r'\.bind_value\(\s*APP,\s*"([a-z_]+)"', inspect.getsource(settings))
+    fields = {f.name for f in dataclasses.fields(state.App)}
+
+    assert bound, "the panel binds nothing at all"
+    assert set(bound) <= fields, f"settings writes what nothing reads: {set(bound) - fields}"
+
+
+def test_switching_projects_refuses_while_a_turn_is_running(monkeypatch):
+    """A switch mid-turn leaves the copilot writing into a directory the window
+    has stopped looking at."""
+    from portia.ui import settings
+    from portia.ui.state import APP
+
+    APP.streams[state.CHAT].turn = state.Turn(prompt="g", model="m", effort="low")
+    said = []
+    monkeypatch.setattr(settings.ui, "notify", said.append)
+    monkeypatch.setattr(settings, "_close", lambda: None)
+    APP.opened = True
+
+    settings._switch_project()
+
+    assert APP.opened is True, "still in the project"
+    assert said == [settings.SWITCH_BUSY]
+    APP.streams[state.CHAT].turn = None
+
+
+def test_the_toolbar_no_longer_carries_a_preference():
+    """Theme, the brief and the project switch were three buttons across the top
+    of every screen. A toolbar says where you are and acts on what is in front of
+    you; none of those three is either."""
+    import inspect
+
+    from portia.ui import app as app_module
+
+    source = inspect.getsource(app_module)
+    for gone in ('c.button("Brief"', "_cycle_theme", "MODE_LABEL", "_switch_project"):
+        assert gone not in source, f"{gone} is back in the toolbar"

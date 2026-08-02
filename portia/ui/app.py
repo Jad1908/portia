@@ -18,25 +18,21 @@ from pathlib import Path
 
 from nicegui import ui
 
-from portia.ui import artifacts, engine, screens, theme, transcript, workflow
+from portia.ui import artifacts, engine, screens, settings, theme, transcript, workflow
 from portia.ui import components as c
 from portia.ui.state import APP
 
 TITLE = "portia"
 
-#: The page's light/dark control. One open project, one window's worth of state —
-#: see `state.py` for why this app is a singleton rather than per-tab.
-_DARK: ui.dark_mode | None = None
-
 
 @ui.page("/")
 def page() -> None:
-    global _DARK
-    _DARK = theme.apply()
+    theme.apply()
     ui.page_title(TITLE)
     # At page level, deliberately: a dialog built inside a refreshable is deleted
     # by the first refresh (see `screens.build_add_dialog`).
     screens.build_add_dialog()
+    settings.build_dialog()
     # `DESIGN.md` → Width behaviour, which cannot be done in CSS once the panes
     # are inside splitters: a splitter sets an inline pixel width on its panel, so
     # restyling the pane inside changes nothing about the space reserved beside it.
@@ -178,29 +174,19 @@ def toolbar() -> None:
 
 
 def _project_label() -> None:
-    """The session's name, and the way out of it.
+    """The session's name. A label, and only a label.
 
     The name of the open directory, and nothing else — the project brief is
     load-bearing but it is not chrome, and a paragraph of prose across the top of
     every screen is not what a toolbar is for.
 
-    It is also the only route back to the project picker, so it is a button and
-    says so. Disabled mid-turn: switching would leave the copilot writing into a
-    directory the window has stopped looking at.
+    **It used to be the exit**, and that was the problem: the way to change
+    projects was to notice that the thing telling you where you were could be
+    clicked. Where you are and how to leave are two different statements, and the
+    second one lives in Settings now, spelled out.
     """
     theme.logo(small=True)
-    label = c.button(
-        APP.root.name or str(APP.root),
-        _switch_project,
-        icon="folder_open",
-        enabled=not APP.busy,
-    )
-    label.tooltip(_SWITCH_BUSY if APP.busy else f"{APP.root} — click to open another project")
-
-
-def _switch_project() -> None:
-    APP.opened = False
-    shell.refresh()
+    ui.label(APP.root.name or str(APP.root)).classes("p-session-name").tooltip(str(APP.root))
 
 
 def _run_controls() -> None:
@@ -248,8 +234,7 @@ def _view_controls() -> None:
     """Both panes are collapsible; the workflow pane and Run never are."""
     c.button("Files", _toggle_files, icon="folder", micro=True)
     c.button("Transcript", _toggle_transcript, icon="forum", micro=True)
-    mode = _DARK.value if _DARK else None
-    c.button(theme.MODE_LABEL[mode], _cycle_theme, icon=theme.MODE_ICON[mode], micro=True)
+    c.button("", settings.open_dialog, icon="settings", micro=True).tooltip(_SETTINGS_TIP)
 
 
 # --- actions ----------------------------------------------------------------
@@ -311,14 +296,7 @@ def _toggle_files() -> None:
     shell.refresh()
 
 
-def _cycle_theme() -> None:
-    if _DARK is None:
-        return
-    _DARK.value = theme.next_mode(_DARK.value)
-    toolbar.refresh()
-
-
-_SWITCH_BUSY = "Can't switch projects while a turn is running."
+_SETTINGS_TIP = "Theme, the project, what a turn spends, and where data lands."
 _RUN_TIP = (
     "Run {name} and every model it reads, then write their .sql. "
     "A table isn't built until its inputs are.\n{path}"
