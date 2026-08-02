@@ -855,3 +855,79 @@ def test_the_settings_tabs_reuse_the_transcripts_tab_vocabulary():
         source = inspect.getsource(module)
         assert 'classes("pane-tabs")' in source
         assert "pane-tab--active" in source
+
+
+# --- chrome that got out of the way ------------------------------------------
+
+
+def test_a_pane_holds_on_below_the_width_it_used_to_close_at():
+    """The floor doubles as the close threshold, so a generous floor reads as a
+    pane that gives up under a drag that meant "make this narrower". Both are
+    still real floors — measured in a browser at 180px (left) and 290px (right),
+    where the old 200/330 would have closed them."""
+    from portia.ui import app as app_module
+
+    assert app_module.FILES_LIMITS[0] < 200
+    assert app_module.TRANSCRIPT_LIMITS[0] < 330
+    # ...but a floor of nothing is not a floor: below these the pane cannot show
+    # a file name at the tree's indent, or the question form's option rows.
+    assert app_module.FILES_LIMITS[0] >= 120
+    assert app_module.TRANSCRIPT_LIMITS[0] >= 240
+
+
+def test_the_css_backstop_agrees_with_the_floor_the_splitter_enforces():
+    """Two numbers for one rule: the pane's `min-width` holds it up if a drag
+    ever gets past the splitter, so a mismatch renders a pane wider than the
+    panel reserved for it — which is how the left pane once ended up drawn
+    underneath the transcript."""
+    import re
+
+    from portia.ui import app as app_module
+    from portia.ui import theme
+
+    css = theme.CSS.read_text()
+
+    def floor(selector: str) -> int:
+        # Every block naming this selector, not the first — the three panes share
+        # a block that sets no width, and it comes first in the file.
+        for block in re.findall(rf"^{re.escape(selector)} \{{([^}}]*)\}}", css, re.MULTILINE):
+            found = re.search(r"min-width: (\d+)px", block)
+            if found:
+                return int(found.group(1))
+        raise AssertionError(f"{selector} declares no min-width")
+
+    assert floor(".p-pane-left") == app_module.FILES_LIMITS[0]
+    assert floor(".p-pane-right") == app_module.TRANSCRIPT_LIMITS[0]
+    assert floor(".p-pane-mid") == app_module.WORKFLOW_MIN
+
+
+def test_run_and_build_carry_their_word_and_the_two_saves_do_not():
+    """The pair that executes something is the pair worth naming on screen. Four
+    labelled buttons is the row that made this a toolbar problem in the first
+    place."""
+    import inspect
+    import re
+
+    from portia.ui import app as app_module
+
+    # Collapsed, because the formatter wraps a long call across lines and this is
+    # a statement about the arguments, not about where they sit.
+    source = re.sub(r"\s+", " ", inspect.getsource(app_module.run_controls.func))
+
+    assert 'c.button( "Run", _run' in source or 'c.button("Run", _run' in source
+    assert 'c.button("Build", _build' in source
+    assert source.count("split=True") == 2, "exactly the two that execute something"
+    assert 'c.button("", _write' in source and 'c.button("", _save_report' in source
+
+
+def test_a_split_button_is_the_only_one_that_gets_a_rule_through_it():
+    """Most icon-plus-label buttons are ordinary buttons that happen to have an
+    icon; a rule through all of them would be decoration."""
+    with ui.element("div"):
+        split = c.button("Run", icon="play_arrow", split=True)
+        plain = c.button("Add data", icon="add")
+        icon_only = c.button("", icon="add", split=True)
+
+    assert "btn-split" in split.classes
+    assert "btn-split" not in plain.classes
+    assert "btn-split" not in icon_only.classes, "an icon with no label has nothing to rule off"

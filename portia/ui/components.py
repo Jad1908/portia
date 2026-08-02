@@ -110,6 +110,7 @@ def button(
     kind: str = "tertiary",
     icon: str | None = None,
     micro: bool = False,
+    split: bool = False,
     enabled: bool = True,
 ) -> ui.button:
     """One button. ``kind`` is primary | secondary | tertiary.
@@ -121,10 +122,18 @@ def button(
     than a text button's asymmetric one. That is a statement of fact about the
     arguments rather than a flag to remember: a caller that passes both gets a
     labelled button, and one that passes only an icon owes it a tooltip.
+
+    ``split`` rules a hairline between the icon and the word, which reads as one
+    control doing one thing rather than a glyph that happens to sit beside some
+    text. It is opt-in rather than automatic for every icon-plus-label button:
+    most of those are ordinary buttons that merely have an icon, and a rule
+    through all of them would be decoration.
     """
     classes = f"btn btn-{kind}" + (" btn-micro" if micro else "")
     if icon and not label:
         classes += " btn-icon"
+    elif split:
+        classes += " btn-split"
     # color=None so Quasar doesn't add `bg-primary`: which fill a button gets is
     # a portia decision (there is at most one accent fill per view), not a
     # framework default.

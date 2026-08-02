@@ -70,8 +70,15 @@ def shell() -> None:
 #: dragged down to a few characters wide. These minimums are the width at which
 #: each pane is still worth having — and therefore the point at which dragging
 #: further **closes** it, which is how you get rid of one (`_splitter`).
-FILES_WIDTH, FILES_LIMITS = 260, (200, 520)
-TRANSCRIPT_WIDTH, TRANSCRIPT_LIMITS = 400, (330, 780)
+#:
+#: **Lowered 2026-08-02, because the floor doubles as the close threshold and
+#: they were closing under a drag that meant "make this narrower".** 200 and 330
+#: were written when the only way to close a pane was a toolbar toggle, so being
+#: generous cost nothing; once the floor became the gesture, a generous floor
+#: reads as a pane that gives up. Both are still real floors — 150 holds a file
+#: name at the tree's indent, and 260 holds the `question-form`'s option rows.
+FILES_WIDTH, FILES_LIMITS = 260, (150, 520)
+TRANSCRIPT_WIDTH, TRANSCRIPT_LIMITS = 400, (260, 780)
 
 #: The width below which the workflow pane stops being worth having. It is the
 #: one pane that never gives way (`DESIGN.md` → Width behaviour), so this is the
@@ -273,6 +280,14 @@ def run_controls() -> None:
     server (`_room_beside_files`), so chrome above the panes cannot know where
     the middle one ends. Drawn inside it, they track it for free.
 
+    **Run and Build carry their word; the two saves do not.** The pair that
+    *executes* something is the pair worth naming on screen, so each is an icon
+    ruled off from its label — one control doing one thing, not a glyph beside
+    some text. Write outputs and Save report stay square icons: they are the
+    quiet half, they are only ever pressed after one of the other two, and four
+    labelled buttons is the row that made this a toolbar problem in the first
+    place.
+
     **Each says what it is on hover and nothing more.** The name is the whole
     tooltip: an icon needs to say which verb it is, and a paragraph explaining
     the verb is a paragraph nobody reads on a hover. What the actions actually do
@@ -280,9 +295,11 @@ def run_controls() -> None:
     """
     with ui.element("div").classes("p-actions"):
         kind = "primary" if APP.spec_has_steps and not APP.busy else "tertiary"
-        run = c.button("", _run, kind=kind, icon="play_arrow", enabled=APP.spec_has_steps)
+        run = c.button(
+            "Run", _run, kind=kind, icon="play_arrow", split=True, enabled=APP.spec_has_steps
+        )
         run.tooltip(RUN_TIP)
-        build = c.button("", _build, icon="construction", enabled=not APP.busy)
+        build = c.button("Build", _build, icon="construction", split=True, enabled=not APP.busy)
         build.tooltip(BUILD_TIP)
         # Run and Build write the pipeline, never the data — these two are how a
         # *result* becomes durable, and both are things you press rather than

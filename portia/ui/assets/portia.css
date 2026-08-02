@@ -248,13 +248,17 @@ html body {
   background: var(--canvas);
 }
 
+/* Thin on purpose. It holds the mark, the session name and the settings gear —
+ * everything that used to make it worth 48px moved onto the pane it acts on or
+ * into the settings panel, so the bar should cost the panes as little height as
+ * it can while still reading as a bar. */
 .p-toolbar {
   display: flex;
   align-items: center;
-  gap: var(--sp-md);
-  height: 48px;
-  flex: 0 0 48px;
-  padding: 0 var(--sp-lg);
+  gap: var(--sp-sm);
+  height: 32px;
+  flex: 0 0 32px;
+  padding: 0 var(--sp-md);
   background: var(--canvas);
   border-bottom: 1px solid var(--hairline);
   overflow-x: auto;
@@ -303,7 +307,7 @@ html body {
  * renders narrower than the width at which it stops being readable. */
 .p-pane-left {
   background: var(--canvas);
-  min-width: 200px;
+  min-width: 150px;
 }
 
 .p-pane-mid {
@@ -313,7 +317,7 @@ html body {
 
 .p-pane-right {
   background: var(--surface);
-  min-width: 330px;
+  min-width: 260px;
 }
 
 /* The four run actions, on the pane they act on. Right-aligned to the middle
@@ -328,10 +332,27 @@ html body {
   justify-content: flex-end;
   gap: var(--sp-sm);
   flex: 0 0 auto;
-  min-height: 40px;
-  padding: var(--sp-sm) var(--sp-md);
+  padding: var(--sp-xs) var(--sp-md);
   background: var(--surface);
   border-bottom: 1px solid var(--hairline);
+}
+
+/* Shorter than a form button. These sit on top of the pane you are reading, so
+ * every pixel they take is a pixel of graph or report — and they are pressed a
+ * handful of times a session, not typed into. */
+.p-actions .btn.q-btn {
+  min-height: 26px;
+  padding: 2px var(--sp-sm);
+}
+.p-actions .btn.q-btn .q-btn__content {
+  font-size: 12px;
+}
+.p-actions .btn.q-btn .q-icon {
+  font-size: 15px;
+}
+.p-actions .btn.q-btn.btn-icon {
+  min-width: 26px;
+  padding: 2px;
 }
 
 /* A pane and the rail beside it, inside a splitter panel. Distinct from
@@ -536,6 +557,16 @@ html body {
   gap: 0;
 }
 
+/* An icon ruled off from its word. The rule is `currentColor` rather than a
+ * hairline token because this variant appears on both fills — the accent one
+ * where the foreground is white, and the tertiary one where it is ink — and a
+ * fixed border colour would be invisible on one of them. */
+.btn.q-btn.btn-split .q-btn__content > .q-icon:first-child {
+  padding-right: var(--sp-sm);
+  margin-right: var(--sp-sm);
+  border-right: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+}
+
 /* ── inputs (Quasar chrome, flattened to hairlines) ───────────────────────── */
 
 .p-field .q-field__control {
@@ -727,9 +758,10 @@ html body {
   flex: 0 0 auto;
   object-fit: contain;
 }
+/* Sized to the thin toolbar it sits in, not the other way round. */
 .p-logo-sm {
-  width: 40px;
-  height: 40px;
+  width: 22px;
+  height: 22px;
   flex: 0 0 auto;
   object-fit: contain;
 }
