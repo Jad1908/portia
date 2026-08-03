@@ -329,18 +329,25 @@ These exist so a test run never needs a terminal (`VISION.md` → "The no-termin
 
 - **It is a floating panel, not a page.** `add-data-card` — `{colors.surface}`, `{rounded.lg}`,
   1px `{colors.hairline}`, **one soft shadow** (the transient-overlay exception, and the only place
-  on this surface it applies), 560px wide, capped at `min(680px, 100vh - 96px)` so it always floats
-  clear of the window edges. **The same card in both places it appears**: centred on the canvas as
+  on this surface it applies), **880px wide** and capped at `min(680px, 100vh - 96px)` so it always
+  floats clear of the window edges — a landscape rectangle, not a column. **The same card in both places it appears**: centred on the canvas as
   the first-run screen, and inside `ui.dialog` when reopened from the left pane — because it is the
   same thing, a transient surface you finish and leave. Laid out as a full-height column it read as
   a web page, and the reserve is generous on purpose: at `100vh - 64px` it came out 736px of an
   800px window, technically capped and still reading as a page with a hairline round it.
 - **Three regions, and only the middle one scrolls.** `add-data-head` (title + the line under it,
-  `{spacing.lg}`, hairline below) · `add-data-body` (`flex: 1`, `overflow-y: auto`) ·
+  `{spacing.lg}`, hairline below) · `add-data-body` (`flex: 1`, `overflow-y: auto`, **two columns**)
+  ·
   `add-data-actions` (hairline above, the CTA and its caption). What you are doing stays at the top
   and what finishes it stays at the bottom however long the file list gets — a primary action below
   the fold is one that looks like it did nothing when you press it. The footer's own top border is
   the divider; a `rule` inside it is two lines a pixel apart.
+- **The body is `repeat(auto-fit, minmax(340px, 1fr))`** — the question you are almost always
+  answering on the left, the one you usually are not (import, and what a turn costs) on the right,
+  falling to one column when the card cannot hold two. `auto-fit` rather than a media query: the
+  card's width is already capped against the viewport, so what decides one column or two is how
+  much room *this element* ended up with, not how wide the window is. A wide panel laid out as one
+  stacked column is a wide panel that reads as a narrow one with empty space beside it.
 - **Two sections inside the body, and each is a card.** `add-section` — 1px `{colors.hairline}`, `{rounded.lg}`,
   fill `{colors.surface}`, `{spacing.lg}` padding — holds *Data in this repo*, then *Import external
   data* as a `p-expansion` **folded by default**. portia plugs into a repo that already holds its

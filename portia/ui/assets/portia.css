@@ -734,7 +734,11 @@ html body {
  * on everything persistent. */
 .add-data-card {
   width: 100%;
-  max-width: 560px;
+  /* Wide. The panel holds two side-by-side questions and a list of repo-relative
+   * paths, and at 560px it was a tall column of things wrapping — a shape that
+   * made a short form feel long. Falls back to the viewport on a narrow window
+   * rather than overflowing it. */
+  max-width: min(880px, calc(100vw - 2 * var(--sp-xxl)));
   /* Bounded, so it always floats clear of the top and bottom edges. Content
    * beyond that scrolls inside; the card never grows to meet it.
    *
@@ -756,6 +760,16 @@ body.body--dark .add-data-card {
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
 }
 
+/* Quasar's minimized dialog caps its child at 560px, which is why the panel
+ * used to carry an inline width. `div.add-data-card` out-specifies that rule
+ * without an `!important`, so the card's own width now holds in the dialog
+ * exactly as it does on the canvas — one width, declared once, in the file
+ * that owns the look. */
+.q-dialog__inner > div.add-data-card,
+.q-dialog__inner--minimized > div.add-data-card {
+  max-width: min(880px, 92vw);
+}
+
 /* What you are doing. Pinned, so it survives a long list. */
 .add-data-head {
   flex: 0 0 auto;
@@ -766,15 +780,31 @@ body.body--dark .add-data-card {
   border-bottom: 1px solid var(--hairline);
 }
 
-/* The only region that scrolls. */
+/* The only region that scrolls, and the one that uses the width.
+ *
+ * `auto-fit` rather than a media query: the card's own width is already capped
+ * against the viewport, so what decides one column or two is how much room the
+ * card ended up with — which is a question about this element, not about the
+ * window. Two columns whenever 340px each will fit, one below that. */
 .add-data-body {
   flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  align-items: start;
   gap: var(--sp-lg);
   min-height: 0;
   overflow-y: auto;
   padding: var(--sp-lg);
+}
+.add-data-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-lg);
+  min-width: 0;
+}
+/* Indexing is about the whole panel, not about one of its columns. */
+.add-data-progress {
+  grid-column: 1 / -1;
 }
 
 /* What finishes it. Pinned for the same reason the head is: a primary action

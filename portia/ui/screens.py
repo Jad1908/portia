@@ -278,10 +278,17 @@ def panel(*, in_dialog: bool = False) -> None:
         ui.label("Add data").classes("t-heading-md")
         ui.label(ADD_WHY.format(formats=_formats())).classes("add-data-sub")
     with ui.element("div").classes("add-data-body"):
-        _in_repo()
-        _from_outside()
-        _interpret_toggle()
-        _progress()
+        # Two columns where there is room for two: the question you are almost
+        # always answering on the left, the one you are usually not on the right.
+        # A wide panel laid out as one stacked column is a wide panel that reads
+        # as a narrow one with empty space beside it.
+        with ui.element("div").classes("add-data-col"):
+            _in_repo()
+        with ui.element("div").classes("add-data-col"):
+            _from_outside()
+            _interpret_toggle()
+        with ui.element("div").classes("add-data-progress"):
+            _progress()
     with ui.element("div").classes("add-data-actions"):
         # No rule: the region's own top border is the divider, and two lines a
         # pixel apart is what a rule inside a bordered footer looks like.
@@ -942,8 +949,11 @@ async def _interpret_pending() -> None:
 
 # --- the same surface, as a dialog ------------------------------------------
 
-#: Quasar sizes a dialog to its content, and a folder list has no natural width —
-#: without this it collapses to a few hundred pixels of nothing.
+#: The settings panel's width. Quasar sizes a dialog to its content, and a panel
+#: of controls has no natural width — without this it collapses to a few hundred
+#: pixels of nothing. **The add-data panel no longer uses it**: that one is a
+#: card with its own width in `portia.css`, which is where a width belongs; this
+#: survives because `settings.py` still has the problem it was written for.
 DIALOG_WIDTH = "width:560px;max-width:92vw"
 
 #: The add-data dialog for this page. Built once, at page level.
@@ -970,7 +980,9 @@ def build_add_dialog() -> None:
         # bounded height with its own scroll; the screen having been a full-page
         # column was the odd one out, and giving them one class is what stops the
         # two surfaces drifting apart the next time either is touched.
-        with ui.element("div").classes("add-data-card").style(DIALOG_WIDTH):
+        # No inline width: `add-data-card` sizes itself in both places it appears,
+        # and `portia.css` out-specifies Quasar's 560px cap on a dialog's child.
+        with ui.element("div").classes("add-data-card"):
             panel(in_dialog=True)
     _ADD_DIALOG = dialog
 
