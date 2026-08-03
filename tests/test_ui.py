@@ -248,10 +248,12 @@ def test_the_way_out_of_add_data_says_whether_it_spends_money():
         assert "reads" not in screens._action_note(0)
 
 
-def test_the_index_button_says_what_it_will_copy_and_what_it_will_profile(tmp_path):
-    """One button now does both halves, so it has to account for both — a button
-    that copies three files under a label that only mentions profiling is the
-    kind of quiet write this project refuses everywhere else."""
+def test_the_breakdown_partitions_the_button_and_does_not_double_count(tmp_path):
+    """An imported file is profiled like every other one. Splitting the line into
+    "copies 1" and "profiles 22" made two numbers that looked like they should
+    sum to the button's 23 when 23 is what gets profiled — the copy is something
+    one of them additionally needed, not a separate job. The parts say where each
+    file came *from*, which is a real partition."""
     from portia.ui import screens
     from portia.ui.state import App
 
@@ -263,8 +265,21 @@ def test_the_index_button_says_what_it_will_copy_and_what_it_will_profile(tmp_pa
     with _as_app(screens, app):
         note = screens._action_note(2)
 
-    assert "copies 1 file into data/" in note
-    assert "profiles 1 file" in note
+    assert "Profiles 2 files" in note, note
+    assert "1 copied in to data/" in note and "1 already in the repo" in note
+
+
+def test_the_breakdown_is_only_the_repo_when_nothing_is_being_imported(tmp_path):
+    from portia.ui import screens
+    from portia.ui.state import App
+
+    app = App(root=tmp_path, catalog={"data_dir": "data"})
+
+    with _as_app(screens, app):
+        note = screens._action_note(4)
+
+    assert "Profiles 4 files" in note and "4 already in the repo" in note
+    assert "copied in" not in note
 
 
 def _as_app(module, app):

@@ -822,19 +822,29 @@ def _leave_label(in_dialog: bool) -> str:
 def _action_note(outstanding: int) -> str:
     """What the button is about to do, or what the last one did.
 
-    It says whether a model turn is coming, because the turn is deferred to the
-    workspace and a cost you pay after leaving a screen is a cost that screen
+    **The breakdown partitions the button's count; it does not describe two
+    separate jobs.** An imported file is profiled like every other, so splitting
+    the line into "copies 1" and "profiles 22" made the two numbers look like
+    they should add up to the button's 23 when in fact 23 files are profiled and
+    one of them also had to be copied first. The parts say where each file came
+    *from* — outside the repo, or already in it — which is a real partition and
+    sums to the total the button names.
+
+    It also says whether a model turn is coming, because the turn is deferred to
+    the workspace and a cost you pay after leaving a screen is a cost that screen
     still has to name.
     """
     if outstanding:
         planned = len(APP.import_plan)
+        here = outstanding - planned
         parts = []
+        # Bare numbers in the parts: the lead already says "files", and repeating
+        # the unit in each part reads as three separate counts of three things.
         if planned:
-            parts.append(
-                COPY_PART.format(n=c.count(planned, "file"), where=APP.import_dir(DATA_DIR))
-            )
-        parts.append(PROFILE_PART.format(n=c.count(len(_ticked()), "file")))
-        return " · ".join(parts)
+            parts.append(COPY_PART.format(n=planned, where=APP.import_dir(DATA_DIR)))
+        if here:
+            parts.append(ALREADY_HERE.format(n=here))
+        return PROFILE_ALL.format(n=c.count(outstanding, "file"), parts=" · ".join(parts))
     if APP.sources and APP.interpret and APP.pending_interpret:
         return READS_NEXT.format(n=c.count(len(APP.pending_interpret), "source"))
     if APP.indexed is not None:
@@ -1088,8 +1098,9 @@ NO_CHOOSER = (
     "Copy the files into the repo yourself, then pick the folder above."
 )
 INTERPRET_COST = "Profiling is free and always happens. This costs a model turn."
-COPY_PART = "copies {n} into {where}/"
-PROFILE_PART = "profiles {n}"
+COPY_PART = "{n} copied in to {where}/"
+ALREADY_HERE = "{n} already in the repo"
+PROFILE_ALL = "Profiles {n} — {parts}"
 PROFILED = "Profiled {n}. Everything here is indexed."
 READS_NEXT = "the copilot reads {n} once the workspace is open"
 ADD_MORE_LATER = "you can add more later from the left pane"
