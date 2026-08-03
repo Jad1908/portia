@@ -1151,6 +1151,28 @@ def test_a_file_already_profiled_arrives_unticked(tmp_path):
     assert ticked == ["new.csv"]
 
 
+def test_an_already_indexed_file_cannot_be_ticked_back_on(tmp_path):
+    """The screen does not offer re-indexing at all, so nothing it offers — not
+    "All", not a stale exclusion set — can put a catalogued file back in the
+    button's count. Re-indexing one source stays available on that source."""
+    from portia.ui import screens
+    from portia.ui.state import App
+
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "orders.csv").write_text("a\n1\n")
+    (tmp_path / "data" / "new.csv").write_text("a\n1\n")
+    app = App(
+        root=tmp_path,
+        catalog={"data_dir": "data", "sources": {"orders": {"source": "data/orders.csv"}}},
+    )
+
+    with _as_app(screens, app):
+        app.tick_all({"data/orders.csv", "data/new.csv"}, True)  # what "All" does
+        ticked = [p.name for p in screens._ticked()]
+
+    assert ticked == ["new.csv"]
+
+
 def test_unticking_survives_the_list_being_rebuilt(tmp_path):
     """The state is a set of *exclusions* precisely so that it does: a file
     imported into the middle of the folder must not re-tick the one you cleared."""

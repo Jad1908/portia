@@ -418,10 +418,12 @@ def _chosen_folder() -> None:
     left behind — and a list that arrives empty would make the ordinary case
     thirty clicks.
 
-    A file already in the catalog arrives un-ticked and says so. Re-profiling is
-    idempotent (`catalog` → the update rule preserves prose and roles), so it is
-    not *wrong* to run it again; it is a minute of work on real extracts that
-    nobody asked for.
+    A file already in the catalog is **not offered at all** — greyed, un-tickable,
+    and saying it is done. Re-profiling is idempotent (`catalog` → the update rule
+    preserves prose and roles), so it is not *wrong* to run it again; it is a
+    minute of work on real extracts that nobody asked for, and a tickable box is
+    this screen suggesting you spend it. Re-indexing one file stays available
+    where it belongs — on that source, in the workflow pane.
     """
     files = engine.data_files_in(APP, APP.data_dir)
     with ui.element("div").classes("chosen-folder"):
@@ -433,35 +435,39 @@ def _chosen_folder() -> None:
     if not files:
         c.empty_note(NOTHING_HERE.format(formats=_formats()))
         return
-    with ui.element("div").classes("pick-head"):
-        ui.label(PICK_WHICH).classes("pick-head-label")
-        c.button("All", lambda: _tick_all(files, True), micro=True)
-        c.button("None", lambda: _tick_all(files, False), micro=True)
     indexed = _indexed_paths()
+    todo = [p for p in files if _rel(p).as_posix() not in indexed]
+    with ui.element("div").classes("pick-head"):
+        ui.label(PICK_WHICH if todo else ALL_DONE).classes("pick-head-label")
+        if todo:
+            c.button("All", lambda: _tick_all(todo, True), micro=True)
+            c.button("None", lambda: _tick_all(todo, False), micro=True)
     with ui.element("div").classes("pick-list"):
         for path in files:
             _pick_row(path, indexed)
 
 
 def _pick_row(path: Path, indexed: set[str]) -> None:
-    """One file to profile or skip.
+    """One file to profile, or one already done.
 
     **The path is the checkbox's own label**, so the whole row is one hit target
     rather than a 15px box beside some text you cannot click. That is also why it
     is not a row-with-a-click-handler: the handler and the box would both fire on
     the box and cancel each other out.
+
+    An already-indexed file keeps its place in the list — it is still part of
+    "what is under this folder" — but its box is disabled, so the row states a
+    fact instead of offering an action.
     """
     rel = _rel(path).as_posix()
-    with ui.element("div").classes("pick-row"):
-        (
-            ui.checkbox(
-                rel, value=rel not in APP.unpicked, on_change=lambda e, r=rel: _tick(r, e.value)
-            )
-            .classes("p-check")
-            .props("dense")
-        )
-        if rel in indexed:
+    done = rel in indexed
+    with ui.element("div").classes("pick-row pick-row--done" if done else "pick-row"):
+        box = ui.checkbox(rel, value=not done and rel not in APP.unpicked).classes("p-check")
+        box.props("dense disable" if done else "dense")
+        if done:
             ui.label(INDEXED_NOTE).classes("pick-row-note")
+        else:
+            box.on_value_change(lambda e, r=rel: _tick(r, e.value))
 
 
 def _indexed_paths() -> set[str]:
@@ -471,12 +477,18 @@ def _indexed_paths() -> set[str]:
 
 def _ticked() -> list[Path]:
     """The files this screen would profile — what is under the folder, less what
-    was un-ticked. Recomputed from disk rather than remembered, so a file
-    imported into the middle of the folder is included without a second click."""
+    was un-ticked and less what is already in the catalog.
+
+    Recomputed from disk rather than remembered, so a file imported into the
+    middle of the folder is included without a second click. Already-indexed
+    files are excluded *here* as well as being un-tickable in the list, so the
+    button's count can never disagree with what the rows offer.
+    """
     if not APP.data_dir:
         return []
     files = engine.data_files_in(APP, APP.data_dir)
-    return [p for p in files if _rel(p).as_posix() not in APP.unpicked]
+    skip = APP.unpicked | _indexed_paths()
+    return [p for p in files if _rel(p).as_posix() not in skip]
 
 
 def _tick(rel: str, on: bool) -> None:
@@ -793,7 +805,7 @@ def _actions(*, in_dialog: bool = False) -> None:
                 f"Index {c.count(outstanding, 'file')}",
                 lambda: _index_now(in_dialog=in_dialog),
                 kind="primary",
-                icon="bolt",
+                icon=c.INDEX_ICON,
             )
             if APP.sources or in_dialog:
                 c.button(_leave_label(in_dialog), lambda: _leave(in_dialog), kind="secondary")
@@ -1080,10 +1092,11 @@ IN_REPO_HEADING = "Data in this repo"
 IN_REPO_WHY = "Which folder holds this project's data? Open a folder to look inside it."
 NO_SUBFOLDERS = "No folders below this one hold data portia can read."
 PICK_WHICH = "Profile these files"
+ALL_DONE = "Everything here is already indexed"
 PROJECT_ROOT = "the project root"
 USE_ROOT = "Use the whole repo"
 CHOSEN_NOTE = "this project's data"
-INDEXED_NOTE = "indexed"
+INDEXED_NOTE = "already indexed"
 PICKER_HINT = "Nothing readable here yet — open a folder, or import data below."
 PICKER_COUNT = "{files} under {where}, at any depth."
 NOTHING_HERE = "Nothing portia can read here. Open a folder, or import data below."

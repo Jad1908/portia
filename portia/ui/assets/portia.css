@@ -1125,7 +1125,7 @@ body.body--dark .add-data-card {
   gap: var(--sp-sm);
   min-width: 0;
   min-height: 34px;
-  padding: 0 var(--sp-md);
+  padding: var(--sp-xs) var(--sp-md);
   border-bottom: 1px solid var(--hairline-soft);
 }
 .pick-row:last-child {
@@ -1134,15 +1134,27 @@ body.body--dark .add-data-card {
 .pick-row:hover {
   background: var(--surface-card);
 }
+/* Already in the catalog: a statement, not an offer. Recessed rather than
+ * hidden — it is still part of "what is under this folder". */
+.pick-row--done .q-checkbox__label {
+  color: var(--mute);
+}
 .pick-row-note {
   font-size: 11px;
   letter-spacing: 0.2px;
   color: var(--mute);
   flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 /* The path is the checkbox's own label, so the whole row is one hit target
- * rather than a 15px box beside some text you cannot click. */
+ * rather than a 15px box beside some text you cannot click.
+ *
+ * **The label wraps, and the row grows.** A real extract's path is long enough
+ * to run past the note beside it, and a nowrap label neither shrinks nor pushes:
+ * it overprints. Truncating would take the tail, which on
+ * `VBP_PREDICT_OUTPUT_EVENT_DETAILS_DUPLICATES.parquet` is the whole of what
+ * tells one file from the next. */
 .p-check {
   flex: 1 1 auto;
   min-width: 0;
@@ -1159,6 +1171,8 @@ body.body--dark .add-data-card {
   font-size: 12px;
   color: var(--body);
   padding-left: var(--sp-xs);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 /* ── importing, folded ────────────────────────────────────────────────────── */

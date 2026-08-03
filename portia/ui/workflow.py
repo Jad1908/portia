@@ -909,7 +909,7 @@ def _unindexed_inspector(rel: str) -> None:
             c.empty_note("that file is gone")
             return
         c.text(_UNINDEXED_WHY, color="c-body")
-        c.button("Index it", partial(_index, path), kind="primary", icon="bolt")
+        c.button("Index it", partial(_index, path), kind="primary", icon=c.INDEX_ICON)
         c.caption(_INDEX_SCOPE)
         c.rule()
         c.table_preview(engine.read_table(path))
