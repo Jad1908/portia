@@ -346,3 +346,22 @@ def test_setting_the_data_folder_does_not_disturb_the_indexed_sources(tmp_path, 
     entry = load_catalog(d)["sources"]["orders"]
     assert entry["source"] == "data/orders.csv"
     assert (tmp_path / "data" / "orders.csv").exists()
+
+
+def test_an_untouched_file_does_not_go_stale_on_the_clock(tmp_path, monkeypatch):
+    """`indexed` records *when we looked* beside the file's own facts, and for a
+    while `is_stale` compared that too — so a source went stale one second after
+    it was indexed, with an identical size and an identical mtime.
+
+    Nothing user-facing read it yet, which is why it survived; the tests hid it
+    because each finished inside the same wall-clock second as its own index.
+    """
+    monkeypatch.chdir(tmp_path)
+    csv = _write_source(tmp_path)
+    d = tmp_path / ".portia"
+    entry = yaml.safe_load(index_source(csv, portia_dir=d).read_text())
+
+    # The one thing that moves without the file moving.
+    entry["indexed"]["at"] = "1999-01-01T00:00:00+00:00"
+
+    assert not is_stale(entry, portia_dir=d)

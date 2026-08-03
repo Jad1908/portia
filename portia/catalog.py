@@ -309,12 +309,25 @@ def _source_entry(
     }
 
 
+#: What :func:`is_stale` compares — facts about the **file**, and only those.
+#:
+#: ``at`` is recorded beside them and is deliberately not here. It is when portia
+#: last *looked*, which changes every second and says nothing about whether the
+#: file did. Comparing it (as this did until 2026-08-03) made every source read
+#: as stale one second after it was indexed, with an identical size and an
+#: identical mtime. The tests hid it because each one usually finished inside the
+#: same wall-clock second as the index it was checking; they started failing, one
+#: at random per run, the moment profiling got fast enough to move that boundary.
+STALENESS_FACTS = ("size", "mtime")
+
+
 def is_stale(entry: dict, *, portia_dir: str | Path = DEFAULT_DIR) -> bool:
     """Whether this source's file has changed since it was indexed.
 
-    Compares the recorded size and mtime against the file now. Says nothing about
-    what to *do* about it — re-indexing refreshes facts and preserves prose and
-    roles, exactly as it always has (the update rule above).
+    Compares the recorded size and mtime against the file now — see
+    :data:`STALENESS_FACTS` for what is deliberately not compared. Says nothing
+    about what to *do* about it — re-indexing refreshes facts and preserves prose
+    and roles, exactly as it always has (the update rule above).
 
     A source whose file has been moved or deleted counts as stale: the catalog's
     claims are no longer backed by anything on disk, and that is worth saying out
@@ -327,7 +340,7 @@ def is_stale(entry: dict, *, portia_dir: str | Path = DEFAULT_DIR) -> bool:
     if not target.exists():
         return True
     now = file_facts(target)
-    return any(indexed.get(k) != now[k] for k in now)
+    return any(indexed.get(k) != now[k] for k in STALENESS_FACTS)
 
 
 def file_facts(path: str | Path) -> dict:
