@@ -245,6 +245,11 @@ class App:
     asking: str | None = None
     #: The source whose removal is waiting on a confirmation.
     removing: str | None = None
+    #: The source whose full column list is unfolded, if any. Thirty columns is
+    #: the normal case for a real extract, and a source inspector that opens on a
+    #: screenful of them buries the prose read and the actions under it. One name
+    #: rather than a set: there is one inspector, showing one source.
+    columns_open: str | None = None
     #: Whether the operator chose to get on with it without adding data yet.
     skipped_sources: bool = False
     #: Which folder the add-data picker is looking inside, repo-relative. Where

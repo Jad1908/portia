@@ -552,6 +552,49 @@ def test_a_scroll_region_states_its_key_in_the_dom():
     assert "p-scroll" in area.classes and "p-pad" in area.classes
 
 
+def test_an_unread_source_says_so_instead_of_showing_the_auto_draft():
+    """`catalog._auto_summary` restates the profile so the YAML is never empty.
+    In the prose slot it reads as a *read* of the data — prose, saying true
+    things — when what it actually means is that nobody has looked yet."""
+    from portia.ui import workflow
+    from portia.ui.state import App
+
+    entry = {"summary": f"3 rows, 2 columns. {catalog.AUTO_DRAFT_MARKER} — edit freely.)"}
+
+    with _as_app(workflow, App()), ui.element("div") as slot:
+        workflow._summary(entry)
+
+    drawn = " ".join(str(getattr(e, "text", "")) for e in slot.descendants())
+    assert catalog.AUTO_DRAFT_MARKER not in drawn
+    assert workflow._NOT_READ in drawn
+
+
+def test_a_wide_source_folds_its_columns_until_asked():
+    """Thirty columns is the normal case, and the rows, the actions and the
+    preview all sit below them. Nothing is hidden without the count saying so."""
+    from portia.ui import workflow
+    from portia.ui.state import App
+
+    columns = [{"name": f"c{i}"} for i in range(30)]
+    app = App()
+
+    with _as_app(workflow, app):
+        assert len(workflow._shown_columns("orders", columns)) == workflow.COLUMNS_FOLDED
+        app.columns_open = "orders"
+        assert workflow._shown_columns("orders", columns) == columns
+        assert len(workflow._shown_columns("customers", columns)) == workflow.COLUMNS_FOLDED
+
+
+def test_a_narrow_source_is_never_folded():
+    from portia.ui import workflow
+    from portia.ui.state import App
+
+    columns = [{"name": f"c{i}"} for i in range(workflow.COLUMNS_FOLDED)]
+
+    with _as_app(workflow, App()):
+        assert workflow._shown_columns("orders", columns) == columns
+
+
 def test_two_artifacts_in_one_pane_do_not_share_a_scroll_key():
     """Otherwise opening the second saved run drops you at the first one's offset."""
     from portia.ui import workflow

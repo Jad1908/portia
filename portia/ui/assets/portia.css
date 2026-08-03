@@ -1667,6 +1667,28 @@ body.body--dark .step-card {
   white-space: nowrap;
 }
 
+/* The rest of the columns, one click away. Outside `.column-list` so the list's
+ * rounded border still closes under the last row it is showing. */
+.column-more {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  padding-top: var(--sp-xs);
+}
+
+/* Nobody has read this source yet, said as a state rather than left to be
+ * inferred from prose that only restates the profile. */
+.not-read {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-sm);
+}
+.not-read-icon {
+  font-size: 18px;
+  color: var(--mute);
+  flex: 0 0 auto;
+}
+
 /* the words, once, at the top — the icons below are what the eye tracks */
 .column-head {
   position: sticky;
