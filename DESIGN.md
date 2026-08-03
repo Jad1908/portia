@@ -390,6 +390,10 @@ These exist so a test run never needs a terminal (`VISION.md` → "The no-termin
   *Close*, and takes no accent at all.
 - Once a project has sources this shrinks to a row-height affordance at the foot of the left pane,
   which opens the same panel as a dialog.
+- **The import section is one button.** The chooser plans on return, so the typed path field and
+  the *Plan import* beside it were two controls for one act — and a placeholder that had to explain
+  glob syntax to justify the field's existence. Removed 2026-08-03. Where there is no native
+  chooser the section says so rather than rendering three controls that cannot do anything.
 - **The dashed drop box is gone.** It was a third route into the project doing the same job as the
   picker and the importer, and the only one that streamed bytes through the browser — so the only
   one that could refuse a file for a reason portia could not explain, and the only one where the
@@ -808,7 +812,7 @@ the component that drew a layer inside a flat section has nothing left to draw.
   a transform on the content and the grid's `background-position` together. Worth remembering as a
   shape of bug — the feature was present, reviewed, and had never worked.
 - ~~**First-run chrome is specced but unbuilt**~~ — *built: `project-open`, `project-context`, `add-data`, `index-progress`. The context panel is still a text box with guidance beneath it, and it still deserves more than that.*
-- ~~**Drag-and-drop file handling is unverified**~~ — *removed 2026-08-02 rather than verified. It stayed unverified for a week while two other routes into the project were exercised on every run, which is its own answer: the browser upload was a third way to do what the folder picker and the importer already did, and the only one whose failures portia could not explain. `add-data` is the picker plus a path-or-glob field now.*
+- ~~**Drag-and-drop file handling is unverified**~~ — *removed 2026-08-02 rather than verified. It stayed unverified for a week while two other routes into the project were exercised on every run, which is its own answer: the browser upload was a third way to do what the folder picker and the importer already did, and the only one whose failures portia could not explain. `add-data` is the folder picker plus a native file chooser now.*
 - **Teal pill contrast on dark** — white on `#0D9488` sits just under 4.5:1 for 13px text; verify on device and darken toward `#0C7D72` if it reads weak. *Unmeasured.*
 - **No syntax highlighting** in V0 code blocks. If SQL steps get long, revisit.
 - **The accent hue is decided: deep teal**, shared with the sibling project. Not a gap — a choice.

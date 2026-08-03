@@ -24,11 +24,11 @@ portia plugs into a repo that **already holds the data** (`docs/PIPELINE.md`
    on the left pane draws un-indexed data files under that folder and nowhere
    else. Its files arrive **all ticked**, because "this folder is my data" is a
    statement about the folder; un-ticking is for the exceptions.
-2. **Import external data**, folded away until it is wanted. Finder, or a typed
-   path or glob for a machine with no chooser. Its destination defaults to the
-   folder chosen in (1), and to ``data/`` if nothing was chosen, because a file
-   arriving somewhere other than where the rest of the data lives is a folder
-   layout nobody asked for.
+2. **Import external data**, folded away until it is wanted. One button: the
+   native chooser, which plans on return. Its destination defaults to the folder
+   chosen in (1), and to ``data/`` if nothing was chosen, because a file arriving
+   somewhere other than where the rest of the data lives is a folder layout
+   nobody asked for.
 
 Both at once is the ordinary case, not an edge one: a repo with a `data/` folder
 and one extract still sitting in `~/Downloads`.
@@ -44,7 +44,7 @@ never a move.
 **One button does the work, and it says what the work is.** Both routes converge
 on a single *Index* — copy what was planned, then profile every ticked file —
 because two buttons each half-doing it is what this screen was before, and the
-one that read "Plan import" did not index while the one that read "Continue" did.
+one that planned an import did not index while the one that read "Continue" did.
 When it finishes, the primary action **becomes the way into the workspace**, and
 not before: a CTA offered beside unfinished work is a skip button wearing a
 different word.
@@ -595,26 +595,28 @@ def _import_body() -> None:
 
 
 def _import_field() -> None:
-    """Choose it, then see the plan. Nothing is copied here.
+    """One button: choose the files, and the plan appears. Nothing is copied here.
 
     `PIPELINE.md` §2.7 makes bringing outside data in a deliberate step — you
     choose where it lands, portia states exactly what it is about to copy and to
-    where, and only then does it copy. This half is the choosing; `_import_plan`
-    is the stating and the Index button is the doing.
+    where, and only then does it copy. This is the choosing; `_import_plan` is
+    the stating and the Index button is the doing.
 
-    The typed field is not a fallback nobody uses: the chooser is the OS's and
-    exists on macOS only, and a directory or a glob is a thing a chooser cannot
-    say at all.
+    **The typed path field and its *Plan import* button are gone** (2026-08-03).
+    They were two controls for one act: the chooser already planned on return, so
+    the button existed only to commit whatever was in the box, and the box only
+    existed to feed the button. What it cost was a section with three controls in
+    a row where the honest shape is one — and a field whose placeholder had to
+    explain a glob syntax to justify itself.
+
+    The field was also the way in on a machine with no native chooser, so that
+    case now says so rather than showing a section that cannot do anything.
     """
+    if not engine.can_browse():
+        c.empty_note(NO_CHOOSER)
+        return
     with ui.element("div").classes("row-gap-sm w-full"):
-        if engine.can_browse():
-            c.button("Browse…", _choose_to_import, icon="folder_open", micro=True)
-        path = (
-            ui.input(placeholder=PATH_PLACEHOLDER)
-            .classes("p-field p-field-mono flex-1")
-            .props("borderless")
-        )
-        c.button("Plan import", lambda: _plan_import(path.value), micro=True)
+        c.button("Choose files…", _choose_to_import, icon="folder_open")
 
 
 def _import_destination() -> None:
@@ -688,26 +690,28 @@ def _rel(path: Path) -> Path:
 
 
 async def _choose_to_import() -> None:
+    """The chooser, and then the plan. A cancelled dialog is an answer of "no".
+
+    `browse_for_files` comes back empty on cancel as well as on no-chooser, and
+    neither is a thing to report — planning nothing and saying so would turn
+    closing a dialog into an error message.
+    """
     chosen = await engine.browse_for_files()
     if chosen:
-        _plan_import("\n".join(str(p) for p in chosen))
+        _plan_import(chosen)
 
 
-def _plan_import(raw: str) -> None:
+def _plan_import(paths: list[Path]) -> None:
     """Work out the plan and show it. Writes nothing."""
     APP.import_plan, APP.import_error = [], ""
-    targets = [line.strip() for line in (raw or "").splitlines() if line.strip()]
-    if not targets:
-        APP.import_error = NOTHING_CHOSEN
+    try:
+        pairs = []
+        for path in paths:
+            pairs += engine.plan_import(str(path), APP.import_dir(DATA_DIR), APP)
+    except ValueError as exc:
+        APP.import_error = str(exc)
     else:
-        try:
-            pairs = []
-            for target in targets:
-                pairs += engine.plan_import(target, APP.import_dir(DATA_DIR), APP)
-        except ValueError as exc:
-            APP.import_error = str(exc)
-        else:
-            APP.import_plan = pairs
+        APP.import_plan = pairs
     APP.indexed = None
     _import_plan.refresh()
     _actions.refresh()
@@ -1074,13 +1078,15 @@ PICKER_HINT = "Nothing readable here yet — open a folder, or import data below
 PICKER_COUNT = "{files} under {where}, at any depth."
 NOTHING_HERE = "Nothing portia can read here. Open a folder, or import data below."
 IMPORT_HEADING = "Import external data"
-IMPORT_WHY = "A file, a folder or a glob from anywhere on disk. It is copied in, never moved."
+IMPORT_WHY = "Data files from anywhere on disk. They are copied into the repo, never moved."
 DESTINATION_DEFAULT = "Put it in {where}"
 DESTINATION_SCOPE = "inside the project — data lives in the repo"
-PATH_PLACEHOLDER = "a file, directory or glob anywhere on disk"
 PLAN_HEADING = "About to copy {n}:"
 IMPORT_COPY_ONLY = "A copy. The originals are not moved, deleted or changed."
-NOTHING_CHOSEN = "Nothing chosen yet — pick some files, or type a path."
+NO_CHOOSER = (
+    "Importing needs the system file chooser, which this machine does not have. "
+    "Copy the files into the repo yourself, then pick the folder above."
+)
 INTERPRET_COST = "Profiling is free and always happens. This costs a model turn."
 COPY_PART = "copies {n} into {where}/"
 PROFILE_PART = "profiles {n}"

@@ -276,9 +276,9 @@ All four, plus one thing the pass turned up.
   what to do. Drift-coloured, never blocking — nothing is broken, the file is simply
   describing an older version of the decision record.
 - **Build is in the toolbar**, and Run writes SQL too (see below).
-- **The import flow is built** (§2.7). One destination field governs both routes — a
-  browser drop and an import from disk — because where a file lands should not depend on
-  how it arrived. Choosing files (natively, or by path/glob) produces a **plan**: every
+- **The import flow is built** (§2.7). *Simplified 2026-08-03: the browser drop and the
+  typed path/glob are both gone, so what is left is the native chooser and one
+  destination.* Choosing files produces a **plan**: every
   `from → to` pair listed in full, not summarised, because "3 files into data/" describes
   a plan and the list *is* one. Nothing is written until you confirm. `cli.import_data.plan`
   is the same function the terminal calls, so the two cannot disagree about where a file

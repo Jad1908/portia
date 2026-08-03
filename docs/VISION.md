@@ -250,10 +250,13 @@ because portia plugs into a repo that **already holds its data** (`PIPELINE.md` 
    folder and nowhere else. Its files arrive **all ticked** — "this folder is my data" is a
    statement about the folder, and un-ticking is for the exception. A file already profiled arrives
    un-ticked and says so.
-2. **Import external data**, folded away until wanted: the native chooser, or a path or glob typed
-   for a machine without one. Its destination defaults to the folder chosen in (1), and to `data/`
+2. **Import external data**, folded away until wanted: **one button**, the native chooser, which
+   produces the plan on return. Its destination defaults to the folder chosen in (1), and to `data/`
    if none was, because a file arriving somewhere other than where the rest of the data lives is a
-   folder layout nobody asked for.
+   folder layout nobody asked for. *A typed path-or-glob field and a separate "Plan import" shipped
+   beside it and were removed on 2026-08-03 — two controls for one act, since the chooser already
+   planned on return. A machine with no native chooser now says so instead of showing a section it
+   cannot use.*
 
 Both at once is ordinary, not an edge case: a repo with a `data/` folder and one extract still in
 `~/Downloads`. **One button does both** — copy what was planned, then profile everything ticked —

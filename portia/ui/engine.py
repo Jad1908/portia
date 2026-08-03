@@ -339,11 +339,6 @@ def _copy_all(pairs: list[tuple[Path, Path]]) -> list[Path]:
     return copied
 
 
-def resolve_data(target: str) -> list[Path]:
-    """What a path, directory or glob typed into the app points at."""
-    return find_data_files(target)
-
-
 async def index(paths: list[Path], app: App, *, on_progress=None) -> list[str]:
     """Profile each file into the catalog. Deterministic, free, always happens.
 
