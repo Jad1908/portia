@@ -228,3 +228,67 @@ accept that it is O(cardinality); approximate the purely descriptive numbers and
 evidence dict.
 
 **Until that is settled, profiling remains bounded by cardinality, not by file size.**
+
+## 14. A profile is one scan **plus two queries per column**, and on a CSV that was the whole cost
+
+*Added 2026-08-03, found by using the app rather than by reading it.*
+
+§13 measured memory and left an impression about time that was wrong for one shape of file.
+`_stat_exprs` gets every scalar statistic in a single pass — that part is exactly what it claims.
+But `_table_samples` and `_table_top` each need **their own query, per column**, and a `Table` over
+a CSV has `read_csv(...)` as its query. So every one of those queries re-parses the entire file.
+
+Measured on a real extract — 40 MB, 34,214 rows, **191 columns**:
+
+| | time |
+|---|---|
+| as CSV, per-column re-parse | **108.00 s** |
+| the same rows and columns as Parquet | **1.57 s** |
+| as CSV, parsed once first | **2.02 s** |
+
+**69× between the formats, for identical data and identical answers.** In the project this was found
+in — 6.1 GB, 285 M rows, 23 files — that one CSV was **43% of the total indexing time and 0.01% of
+the rows**. The per-column queries were never expensive; the parse behind each of them was.
+
+`core.io.Format.rescans` now records which readers re-read their file (text does, columnar does
+not), and `profile_path` parses a re-scanning source once into a temp table before profiling it.
+Parquet is untouched and stays lazy. **The profiles are byte-for-byte identical** — asserted in
+`tests/test_profiling.py`, because a speedup that moves a measured number is not a speedup.
+
+**Memory went down, which was not the expectation.** Back to back on the same machine, same file:
+
+| | time | peak RSS |
+|---|---|---|
+| per-column re-parse | 324 s | **5647 MB** |
+| parsed once | 11 s | **2578 MB** |
+
+(Both inflated by a loaded machine — the quiet-run figures are the 108.00 s / 2.02 s above. The
+ratio held; the memory pair was measured in one sitting and is comparable.) Holding one parsed copy
+costs less than re-running the parse 191 times, because each of those was buffering too. The
+materialised table is bounded by the file and DuckDB spills it past `memory_limit` rather than
+failing, so the worst case is disk rather than an OOM.
+
+**This does not settle §13's question**, which is about memory scaling with *cardinality* and about
+exact-vs-approximate. It removes a constant factor that had nothing to do with it.
+
+## 15. `is_stale` compared the clock
+
+*Added 2026-08-03. Found because §14 made the tests fast enough to expose it.*
+
+`file_facts` records `size`, `mtime` and `at` — the last being *when portia looked*, which is
+provenance rather than a fact about the file. `is_stale` compared **all three**, so a source went
+stale one second after it was indexed, with an identical size and an identical mtime:
+
+```
+indexed: {'size': 8, 'mtime': 1785767098.40758, 'at': '...T16:24:58+02:00'}   stale? False
+1.1s later, file untouched                        'at': '...T16:24:59+02:00'   stale? True
+```
+
+Nothing user-facing read it yet — the left pane's staleness is `pipeline.stale_models`, which is a
+different check — so it had never been seen. The tests hid it because each one finished inside the
+same wall-clock second as the index it was checking; they began failing, **one at random per run**,
+as soon as profiling got fast enough to move that boundary. `STALENESS_FACTS` now names the two the
+comparison is about, with `at` deliberately outside it.
+
+Worth keeping as a shape: the bug was not in the code that changed, and the change did not cause it.
+It removed the timing that was hiding it.

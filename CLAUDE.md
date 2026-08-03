@@ -16,11 +16,12 @@ stack, and product vision. Read them every session, before proposing changes or 
   to pixels.
 - `docs/brief.md` — the original working brief (foundational context)
 - `docs/DUCKDB_MIGRATION.md` — **the scale tier**, shipped 2026-07-28, compacted 2026-08-02 to what
-  the code cannot say about itself. The part worth your time is **§6.1 and §13, where measurement
-  contradicted the plan**: the specced sandbox turned out to be impossible, and a profile's memory
-  still scales with cardinality because `possible_key` needs an exact `count(DISTINCT)`. Required
-  reading before touching `checks/`, `ops/`, `core/io.py`, or anything that looks like a performance
-  fix. **§3 was reversed on 2026-07-31** — the ingested store is gone — and it is kept, with the
+  the code cannot say about itself. The part worth your time is **§6.1, §13 and §14, where
+  measurement contradicted the plan**: the specced sandbox turned out to be impossible, a profile's
+  memory still scales with cardinality because `possible_key` needs an exact `count(DISTINCT)`, and
+  a profile turned out to be *one scan plus two queries per column* — which on a CSV meant one full
+  parse per column, and 69× between the same data as CSV and as Parquet. Required reading before
+  touching `checks/`, `ops/`, `core/io.py`, or anything that looks like a performance fix. **§3 was reversed on 2026-07-31** — the ingested store is gone — and it is kept, with the
   reasoning that failed, because it is the clearest example in this repo of an argument that read
   well and did not survive contact with how the code was actually used. *Section numbers are load-
   bearing: a dozen comments in `portia/` and `tests/` cite them.*
