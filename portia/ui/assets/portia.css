@@ -720,29 +720,75 @@ html body {
   max-width: 100%;
 }
 
-/* Add data: the content scrolls, the actions stay put.
+/* Add data: a floating panel, not a page.
  *
- * With twenty files added this column was 755px tall in a 727px window — the
- * heading clipped off the top and the button that takes you to the project fell
- * off the bottom, which reads as "nothing happened". Capping the column at the
- * viewport and letting only the body scroll means the primary action is on
- * screen no matter how much has been added. */
-.add-data {
-  max-height: 100vh;
+ * It is the same card in both places it appears — centred on the canvas as the
+ * first-run screen, and inside `ui.dialog` when reopened from the left pane —
+ * because it is the same thing: a transient surface you finish and leave. As a
+ * full-height column it read as a web page, and the longer the file list grew
+ * the more it read as one, with the heading and the button drifting to opposite
+ * ends of the window.
+ *
+ * One soft shadow, which is the exception `DESIGN.md` allows for transient
+ * overlays and nowhere else — the hairline and the surface ladder do this work
+ * on everything persistent. */
+.add-data-card {
+  width: 100%;
+  max-width: 560px;
+  /* Bounded, so it always floats clear of the top and bottom edges. Content
+   * beyond that scrolls inside; the card never grows to meet it.
+   *
+   * The reserve is deliberately generous. At `100vh - 64px` on a 800px window
+   * the card came out 736px — capped, technically floating, and reading as a
+   * page with a hairline round it. A panel has to be visibly smaller than the
+   * window it is over or it is not a panel. */
+  max-height: min(680px, calc(100vh - 96px));
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
 }
+body.body--dark .add-data-card {
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+/* What you are doing. Pinned, so it survives a long list. */
+.add-data-head {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+  padding: var(--sp-lg);
+  border-bottom: 1px solid var(--hairline);
+}
+
+/* The only region that scrolls. */
 .add-data-body {
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   gap: var(--sp-lg);
   min-height: 0;
   overflow-y: auto;
+  padding: var(--sp-lg);
 }
+
+/* What finishes it. Pinned for the same reason the head is: a primary action
+ * below the fold is one that looks like it did nothing when you press it. The
+ * region's own top border is the divider — a rule inside a bordered footer is
+ * two lines a pixel apart. */
 .add-data-actions {
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  gap: var(--sp-lg);
-  flex: 0 0 auto;
+  gap: var(--sp-sm);
+  padding: var(--sp-lg);
+  border-top: 1px solid var(--hairline);
+  background: var(--surface);
 }
 
 /* Indexing says what it is doing. A spinner on its own is the thing this
@@ -823,11 +869,6 @@ html body {
  * and reads as indented text here. What says "you can click this" is a chevron,
  * a hairline between rows, and a hit target the height of a control. */
 
-.add-data-head {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-xs);
-}
 /* Body size, not caption: it is the one sentence explaining the screen, and at
  * 11px it sat below the section hints it is meant to introduce. */
 .add-data-sub {

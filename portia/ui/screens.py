@@ -246,15 +246,16 @@ def _save_context(text: str) -> None:
 
 
 def add_data() -> None:
-    """The screen: a heading, both routes, and the action pinned to the bottom.
+    """The screen: a floating panel on the canvas, not a page.
 
-    The column scrolls its *content* and pins the actions. With thirty files
-    listed the whole thing used to be taller than the window: the heading was
-    clipped off the top and the button that takes you to the project fell off the
-    bottom, which reads as "nothing happened".
+    It is a **card of bounded height**, centred, with its own scroll — the same
+    shape as the dialog it doubles as, because it is the same thing: a transient
+    surface you are meant to finish and leave. Laid out as a full-height column
+    it read as a web page, and the taller the file list got the more it read as
+    one, with the heading and the button drifting to opposite ends of the window.
     """
     with ui.element("div").classes("p-centered"):
-        with ui.element("div").classes("p-centered-column add-data"):
+        with ui.element("div").classes("add-data-card"):
             panel()
 
 
@@ -267,17 +268,23 @@ def panel(*, in_dialog: bool = False) -> None:
     dialog the workspace is already behind you and it just closes. The two used
     to be separately-assembled stacks of the same four components, which is how
     the dialog ended up without the destination field for a week.
+
+    **Three regions, and only the middle one scrolls.** What you are doing stays
+    at the top and what finishes it stays at the bottom, however long the file
+    list gets — a panel where the primary action is somewhere below the fold is a
+    panel that looks like it did nothing when you press it.
     """
+    with ui.element("div").classes("add-data-head"):
+        ui.label("Add data").classes("t-heading-md")
+        ui.label(ADD_WHY.format(formats=_formats())).classes("add-data-sub")
     with ui.element("div").classes("add-data-body"):
-        with ui.element("div").classes("add-data-head"):
-            ui.label("Add data").classes("t-heading-md")
-            ui.label(ADD_WHY.format(formats=_formats())).classes("add-data-sub")
         _in_repo()
         _from_outside()
         _interpret_toggle()
         _progress()
     with ui.element("div").classes("add-data-actions"):
-        c.rule()
+        # No rule: the region's own top border is the divider, and two lines a
+        # pixel apart is what a rule inside a bordered footer looks like.
         _actions(in_dialog=in_dialog)
 
 
@@ -959,7 +966,11 @@ def build_add_dialog() -> None:
     # until a rAF fires, so a throttled tab shows an open dialog with nothing in
     # it — and a quiet developer surface has no use for a popping overlay anyway.
     with ui.dialog().props("transition-duration=0") as dialog:
-        with ui.element("div").classes("write-confirm add-data").style(DIALOG_WIDTH):
+        # The same card the screen draws. It was already a floating panel of
+        # bounded height with its own scroll; the screen having been a full-page
+        # column was the odd one out, and giving them one class is what stops the
+        # two surfaces drifting apart the next time either is touched.
+        with ui.element("div").classes("add-data-card").style(DIALOG_WIDTH):
             panel(in_dialog=True)
     _ADD_DIALOG = dialog
 
