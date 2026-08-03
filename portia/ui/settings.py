@@ -47,7 +47,9 @@ NO_DATA_DIR = "not set — the whole repo"
 DATA_DIR_SCOPE = "what the left pane draws as data, and where an import lands"
 INTERPRET_COST = "Profiling is free and always happens. Reading them costs a model turn."
 SPEND_NOTE = "What a turn costs is the model and the effort, and nothing else."
-BRIEF_WHY = "What makes a column's meaning decidable. It opens in the middle pane."
+BRIEF_WHY = (
+    "The project in a few sentences: the goal, the modelling, the data. Opens in the middle pane."
+)
 NO_PANEL = "The settings panel didn't load — reload the page."
 STALE_PANEL = "Settings may be showing stale values ({why}) — reload the page to be sure."
 

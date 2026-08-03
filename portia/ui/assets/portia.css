@@ -720,6 +720,16 @@ html body {
   max-width: 100%;
 }
 
+/* A worked brief, set apart from the shape lines above it: those are
+ * instructions, this is a specimen, and a fifth bullet in the same voice would
+ * read as a fifth instruction. Indented behind a rule, the way a quotation is. */
+.context-example {
+  margin-top: var(--sp-sm);
+  padding-left: var(--sp-md);
+  border-left: 2px solid var(--hairline-strong);
+  line-height: 1.55;
+}
+
 /* Add data: a floating panel, not a page.
  *
  * It is the same card in both places it appears — centred on the canvas as the

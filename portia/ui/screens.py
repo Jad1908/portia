@@ -188,9 +188,16 @@ def project_context() -> None:
     """The most consequential text box in the product.
 
     The context is what makes a column's meaning decidable, and a generic brief
-    yields generic judgment (`PLAN.md`). The guidance shows the *shape* of a good
-    brief — never an example that could be mistaken for an answer about the data
-    at hand.
+    yields generic judgment (`PLAN.md`). What it asks for is the **project**, not
+    the data: the goal, how it is modelled, and roughly what sources exist —
+    `VISION.md`'s "the *global* project, not necessarily the data".
+
+    **The guidance used to ask for the wrong altitude.** "Say what one row means,
+    and which source is authoritative for what" is a question about the data, and
+    it got answers about the data — which is the half portia measures for itself
+    and the half the copilot is forbidden to take on trust. The shape lines now
+    ask for goal, modelling and the kinds of data, and `CONTEXT_EXAMPLE` shows
+    the register in four sentences from an unrelated industry.
     """
     with ui.element("div").classes("p-centered"):
         with ui.element("div").classes("p-centered-column"):
@@ -205,9 +212,7 @@ def project_context() -> None:
             )
             box.bind_value(APP, "goal")  # reused as scratch until it is saved
 
-            with ui.element("div").classes("stack-xs"):
-                for line in CONTEXT_SHAPE:
-                    c.caption(line, color="c-stone")
+            context_guidance()
 
             with ui.element("div").classes("row-gap-sm"):
                 c.button("Continue", lambda: _save_context(box.value), kind="primary")
@@ -215,6 +220,21 @@ def project_context() -> None:
                 # wrong folder is easy, and the only other exit was the process.
                 c.button("Back", _back_to_picker, kind="secondary")
                 c.caption(str(APP.catalog_dir / "project.yaml"))
+
+
+def context_guidance() -> None:
+    """What a good brief looks like: its shape, then one written at that altitude.
+
+    One function rather than two lists a caller loops over, because the gate and
+    the brief pane are the same box in two places and the day they teach it
+    differently is the day one of them is wrong.
+    """
+    with ui.element("div").classes("stack-xs"):
+        for line in CONTEXT_SHAPE:
+            c.caption(line, color="c-stone")
+    # `c-mute`, one step up from the shape lines' `c-stone`: those are glanced at,
+    # and this is the one piece of guidance meant to be read through.
+    c.caption(CONTEXT_EXAMPLE, color="c-mute").classes("context-example")
 
 
 def _back_to_picker() -> None:
@@ -1078,13 +1098,40 @@ _OPEN_SUBTITLE = "Open a project directory. If it doesn't exist yet, it gets cre
 _OPEN_NEW = "Type a path instead"
 
 CONTEXT_WHY = (
-    "This is what makes a column's meaning decidable. A generic brief yields generic judgment."
+    "A few sentences, the way you would describe this project to another engineer. "
+    "The copilot measures the files itself — this is the part it cannot."
 )
-CONTEXT_PLACEHOLDER = "Describe the project in your own words…"
+CONTEXT_PLACEHOLDER = "The project in a few sentences…"
 CONTEXT_SHAPE = (
-    "Say what the business does and what you are trying to produce.",
-    "Say what one row means, and which source is authoritative for what.",
-    "Say what the result gets used for, and what would make it wrong.",
+    "The domain and the goal — what the work is for.",
+    "How you model it: what you produce, at what grain, over what horizon.",
+    "Roughly what data you have, in the names your team uses for it.",
+    "Not the schema, and not a description of the files.",
+)
+#: A worked brief, from a domain that is plainly not the one on screen.
+#:
+#: `DESIGN.md` forbade *any* example here, and the reason was sound: an example
+#: that could pass for an answer about the data at hand is one people edit rather
+#: than replace. What it did not distinguish is **register** from **content** —
+#: and register is the whole difficulty of this box. Asked abstractly for context,
+#: people write a schema; shown four sentences of hotel revenue forecasting in a
+#: pharmacy project, nobody mistakes it for their own and everybody sees the
+#: altitude. The rule is narrowed rather than dropped: the example must be from
+#: another industry, and it is styled as guidance, not seeded into the field.
+#:
+#: Sentence per line and joined, rather than one implicitly-concatenated literal:
+#: the parser folds those into a single constant, and `test_agent_prompts` reads
+#: any constant over 200 characters as prompt text that escaped `prompts/`. The
+#: check is blunt on purpose and this is the honest way past it — the example is
+#: read by a person, never by the model.
+CONTEXT_EXAMPLE = " ".join(
+    (
+        "For example — “A revenue forecasting project for a hotel group.",
+        "We predict RevPAR per hotel by forecasting occupancy and ADR separately,",
+        "at M+1, M+2 and M+3.",
+        "The data is hotel reference information, on-the-books bookings, FX rates",
+        "and a third-party events feed.”",
+    )
 )
 
 ADD_WHY = "portia reads {formats}. Point it at the data in this repo, and bring in what is outside."

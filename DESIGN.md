@@ -319,9 +319,19 @@ These exist so a test run never needs a terminal (`VISION.md` → "The no-termin
 - Same centered column. This is **the most consequential text box in the product** — the context is
   what makes a column's meaning decidable, and a generic brief yields generic judgment
   (`PLAN.md`). Design it like it matters: `{typography.heading-md}` prompt, a `body-editor` at
-  min-height ~180px, and placeholder guidance in `{colors.stone}` showing the *shape* of a good
-  brief (domain, goal, what a row means to the business) — **never an example that could be
-  mistaken for an answer about the data at hand**.
+  min-height ~180px, and guidance in `{colors.stone}` showing the *shape* of a good brief —
+  **domain and goal · how it is modelled (what you produce, at what grain, over what horizon) ·
+  roughly what data exists**, and explicitly *not* the schema.
+- **The altitude is the whole difficulty of this box, so it also shows one worked example**
+  *(2026-08-03)*. It asked for "what a row means to the business" and got briefs about rows —
+  the half portia measures for itself. This reverses "never an example" by **narrowing** it rather
+  than dropping it: the danger was an example that could pass for an answer about the data at hand,
+  which is a statement about *content*. Four sentences of hotel revenue forecasting in a pharmacy
+  project cannot be mistaken for the user's own, and it is the only thing that reliably teaches the
+  register. It is styled as a quotation beside the shape lines and **never seeded into the field**,
+  where it would be edited instead of replaced. `{colors.mute}` rather than the shape lines'
+  `{colors.stone}`: they are glanced at, and it is the one piece of guidance meant to be read
+  through.
 - `button-primary` "Continue" disabled until non-empty. **No skip, no dismiss, no "later".** It is
   the one gate in the app.
 

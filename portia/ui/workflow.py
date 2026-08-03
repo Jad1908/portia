@@ -1007,9 +1007,7 @@ def _brief_inspector() -> None:
             .props("borderless")
             .style("min-height:220px")
         )
-        with ui.element("div").classes("stack-xs"):
-            for line in screens.CONTEXT_SHAPE:
-                c.caption(line, color="c-stone")
+        screens.context_guidance()
         with ui.element("div").classes("row-gap-sm"):
             c.button("Save", lambda: _save_brief(box.value), kind="primary")
             c.button("Cancel", _back, kind="secondary")
