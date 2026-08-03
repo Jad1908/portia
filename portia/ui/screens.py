@@ -269,8 +269,9 @@ def panel(*, in_dialog: bool = False) -> None:
     the dialog ended up without the destination field for a week.
     """
     with ui.element("div").classes("add-data-body"):
-        ui.label("Add data").classes("t-heading-md")
-        c.text(ADD_WHY.format(formats=_formats()), color="c-mute")
+        with ui.element("div").classes("add-data-head"):
+            ui.label("Add data").classes("t-heading-md")
+            ui.label(ADD_WHY.format(formats=_formats())).classes("add-data-sub")
         _in_repo()
         _from_outside()
         _interpret_toggle()
@@ -294,13 +295,26 @@ def _in_repo() -> None:
     portia plugs into a project that already holds its data (`PIPELINE.md` §2.7),
     so the common case is that nothing needs importing at all and this section is
     the whole screen.
+
+    **A titled card, not a caption over a stack.** The screen asks two unrelated
+    questions and the only thing separating them used to be an 11px uppercase
+    label — `p-section-header`, which is a *pane* label and far too quiet to
+    divide a form. Each route is a bordered section with a real heading and a
+    line saying what it is for.
     """
     with ui.element("div").classes("add-section"):
-        c.section_header(IN_REPO_HEADING)
+        _section_head(IN_REPO_HEADING, IN_REPO_WHY)
         if APP.data_dir and not APP.repicking:
             _chosen_folder()
         else:
             _picker()
+
+
+def _section_head(title: str, hint: str) -> None:
+    """A section's title and the one line saying what it is for."""
+    with ui.element("div").classes("add-section-head"):
+        ui.label(title).classes("add-section-title")
+        ui.label(hint).classes("add-section-hint")
 
 
 def _picker() -> None:
@@ -316,21 +330,26 @@ def _picker() -> None:
     resolve in one look, and the count is what resolves it — it is a number of
     files, not a measurement of anything in them, so it ranks nothing
     (`DESIGN.md`).
+
+    **It draws its own rows rather than reusing `artifact-row`.** That component
+    is tuned for the 260px left pane — 12px mono, no border, hover as its only
+    affordance, indent guides for a tree. Dropped into a 560px form it read as
+    text that happened to be indented, and nothing on it said it could be
+    clicked. These rows are a bordered list with a trailing chevron: the chevron
+    is what says *this goes somewhere*.
     """
-    _crumbs()
-    choices = engine.folder_choices(APP, APP.browse_at)
+    with ui.element("div").classes("picker"):
+        _crumbs()
+        choices = engine.folder_choices(APP, APP.browse_at)
+        for choice in choices:
+            _folder_row(choice)
+        if not choices:
+            with ui.element("div").classes("picker-empty"):
+                c.caption(NO_SUBFOLDERS)
     here = len(engine.data_files_in(APP, APP.browse_at))
-    if not choices and not here:
+    if not here and not engine.folder_choices(APP, APP.browse_at):
         c.empty_note(NOTHING_HERE.format(formats=_formats()))
-    for choice in choices:
-        c.artifact_row(
-            name=choice.name,
-            icon="folder",
-            meta=c.count(choice.files, "file"),
-            caret="chevron_right",
-            on_click=lambda rel=choice.rel: _browse_to(rel),
-        )
-    with ui.element("div").classes("row-gap-sm"):
+    with ui.element("div").classes("add-section-actions"):
         c.button(
             _use_label(),
             lambda: _choose_folder(APP.browse_at),
@@ -344,17 +363,37 @@ def _picker() -> None:
     c.caption(_here_note(here))
 
 
+def _folder_row(choice) -> None:
+    """One folder you can open: name, how much data is under it, and a chevron."""
+    row = ui.element("div").classes("picker-row")
+    with row:
+        ui.icon("folder").classes("picker-row-icon")
+        ui.label(choice.name).classes("picker-row-name")
+        ui.label(c.count(choice.files, "file")).classes("picker-row-meta")
+        ui.icon("chevron_right").classes("picker-row-go")
+    row.on("click", lambda rel=choice.rel: _browse_to(rel))
+
+
 def _crumbs() -> None:
     """The way back up, as the path you came down.
 
     A back button would only undo one step; the trail says where you are, which
     on a screen whose whole job is "which folder" is the more useful of the two.
+
+    The folder you are *in* is not a link. It was a button like the rest, which
+    offered you a trip to where you already were and made the trail read as a row
+    of chips rather than as a path.
     """
+    trail = engine.crumbs(APP, APP.browse_at)
     with ui.element("div").classes("picker-crumbs"):
-        for i, (rel, name) in enumerate(engine.crumbs(APP, APP.browse_at)):
+        for i, (rel, name) in enumerate(trail):
             if i:
-                ui.label("/").classes("picker-sep")
-            c.button(name, lambda r=rel: _browse_to(r), micro=True)
+                ui.icon("chevron_right").classes("crumb-sep")
+            if i == len(trail) - 1:
+                ui.label(name).classes("crumb crumb--current")
+                continue
+            crumb = ui.label(name).classes("crumb")
+            crumb.on("click", lambda r=rel: _browse_to(r))
 
 
 def _chosen_folder() -> None:
@@ -371,38 +410,44 @@ def _chosen_folder() -> None:
     nobody asked for.
     """
     files = engine.data_files_in(APP, APP.data_dir)
-    c.artifact_row(
-        name=_folder_label(APP.data_dir),
-        icon="folder",
-        meta=c.count(len(files), "file"),
-        note=CHOSEN_NOTE,
-    )
-    with ui.element("div").classes("row-gap-sm"):
-        c.button("Change folder…", _repick, kind="secondary", micro=True)
-        if files:
-            c.button("All", lambda: _tick_all(files, True), micro=True)
-            c.button("None", lambda: _tick_all(files, False), micro=True)
+    with ui.element("div").classes("chosen-folder"):
+        ui.icon("folder").classes("chosen-folder-icon")
+        with ui.element("div").classes("chosen-folder-body"):
+            ui.label(_folder_label(APP.data_dir)).classes("chosen-folder-name")
+            ui.label(c.count(len(files), "file")).classes("chosen-folder-meta")
+        c.button("Change…", _repick, kind="secondary", micro=True)
     if not files:
         c.empty_note(NOTHING_HERE.format(formats=_formats()))
         return
+    with ui.element("div").classes("pick-head"):
+        ui.label(PICK_WHICH).classes("pick-head-label")
+        c.button("All", lambda: _tick_all(files, True), micro=True)
+        c.button("None", lambda: _tick_all(files, False), micro=True)
     indexed = _indexed_paths()
-    with ui.element("div").classes("added-list"):
+    with ui.element("div").classes("pick-list"):
         for path in files:
             _pick_row(path, indexed)
 
 
 def _pick_row(path: Path, indexed: set[str]) -> None:
+    """One file to profile or skip.
+
+    **The path is the checkbox's own label**, so the whole row is one hit target
+    rather than a 15px box beside some text you cannot click. That is also why it
+    is not a row-with-a-click-handler: the handler and the box would both fire on
+    the box and cancel each other out.
+    """
     rel = _rel(path).as_posix()
-    with ui.element("div").classes("added-row pick-row"):
+    with ui.element("div").classes("pick-row"):
         (
-            ui.checkbox(value=rel not in APP.unpicked, on_change=lambda e, r=rel: _tick(r, e.value))
+            ui.checkbox(
+                rel, value=rel not in APP.unpicked, on_change=lambda e, r=rel: _tick(r, e.value)
+            )
             .classes("p-check")
             .props("dense")
         )
-        c.mono(rel, small=True)
-        ui.element("div").classes("flex-1")
         if rel in indexed:
-            c.caption(INDEXED_NOTE)
+            ui.label(INDEXED_NOTE).classes("pick-row-note")
 
 
 def _indexed_paths() -> set[str]:
@@ -513,16 +558,23 @@ def _from_outside() -> None:
     importer to get to the button. It is a disclosure rather than a separate
     screen because both routes feed one index, and having imported a file you
     still want to see it land in the list above.
+
+    **The header is the same size and weight as the section above it**, so folded
+    it reads as the second of two sections rather than as a stray line of text.
+    It carries `add-section-toggle`, which is what moves the caret next to the
+    title: `c.collapsed`'s default puts it at the far right, which is right for a
+    tool result in a 400px transcript and, across a 560px form, left the caret
+    and the word it belongs to half a screen apart.
     """
-    with ui.element("div").classes("add-section"):
-        exp = c.collapsed(IMPORT_HEADING, _import_body)
+    with ui.element("div").classes("add-section add-section--folding"):
+        exp = c.collapsed(IMPORT_HEADING, _import_body).classes("add-section-toggle")
         exp.value = APP.import_open
         exp.on_value_change(lambda e: setattr(APP, "import_open", bool(e.value)))
 
 
 def _import_body() -> None:
-    with ui.element("div").classes("stack-md w-full"):
-        c.caption(IMPORT_WHY)
+    with ui.element("div").classes("import-body"):
+        ui.label(IMPORT_WHY).classes("add-section-hint")
         _import_field()
         _import_destination()
         _import_plan()
@@ -665,7 +717,7 @@ def _interpret_toggle() -> None:
     bound state — picking here is picking for the copilot too, which is why they
     are not a second setting.
     """
-    with ui.element("div").classes("stack-xs"):
+    with ui.element("div").classes("add-section add-section--cost"):
         (
             ui.switch("Have the copilot read what each source is")
             .classes("p-toggle")
@@ -675,8 +727,9 @@ def _interpret_toggle() -> None:
             .on_value_change(_refresh)
         )
         if APP.interpret:
-            c.model_effort(APP, _set_indexing_effort)
-        c.caption(INTERPRET_COST)
+            with ui.element("div").classes("cost-controls"):
+                c.model_effort(APP, _set_indexing_effort)
+        ui.label(INTERPRET_COST).classes("add-section-hint")
 
 
 def _set_indexing_effort(effort: str) -> None:
@@ -987,11 +1040,14 @@ CONTEXT_SHAPE = (
 
 ADD_WHY = "portia reads {formats}. Point it at the data in this repo, and bring in what is outside."
 IN_REPO_HEADING = "Data in this repo"
+IN_REPO_WHY = "Which folder holds this project's data? Open a folder to look inside it."
+NO_SUBFOLDERS = "No folders below this one hold data portia can read."
+PICK_WHICH = "Profile these files"
 PROJECT_ROOT = "the project root"
 USE_ROOT = "Use the whole repo"
 CHOSEN_NOTE = "this project's data"
 INDEXED_NOTE = "indexed"
-PICKER_HINT = "Open a folder to look inside it."
+PICKER_HINT = "Nothing readable here yet — open a folder, or import data below."
 PICKER_COUNT = "{files} under {where}, at any depth."
 NOTHING_HERE = "Nothing portia can read here. Open a folder, or import data below."
 IMPORT_HEADING = "Import external data"

@@ -326,16 +326,40 @@ These exist so a test run never needs a terminal (`VISION.md` → "The no-termin
   the one gate in the app.
 
 **`add-data`** — adding data *(replaced `source-dropzone`, 2026-08-02)*
-- **Two sections, in the order they are likely.** *Data in this repo* — an in-page folder browser
-  rooted at the project — then *Import external data*, a `p-expansion` **folded by default**.
-  portia plugs into a repo that already holds its data (`PIPELINE.md` §2.7), so the second is the
-  exception and should not be read past to reach the first.
-- **No new row types.** A folder in the picker is an `artifact-row` with a `chevron_right` caret
-  and a file count as its `meta`; a file in the list is an `added-row` with a checkbox. The count
-  is a **number of files**, not a measurement of anything in them — it ranks nothing, and it is
-  what makes "which of these six folders is the data" answerable in one look.
-- The **path trail** (`picker-crumbs`) is buttons, every crumb somewhere you can go, including the
-  project root. A back button would only undo one step.
+
+- **Two sections, and each is a card.** `add-section` — 1px `{colors.hairline}`, `{rounded.lg}`,
+  fill `{colors.surface}`, `{spacing.lg}` padding — holds *Data in this repo*, then *Import external
+  data* as a `p-expansion` **folded by default**. portia plugs into a repo that already holds its
+  data (`PIPELINE.md` §2.7), so the second is the exception and should not be read past to reach
+  the first. A third, quieter card with no title holds the interpret toggle and what it costs.
+- **A section title is `{typography.heading-sm}` with a `{typography.body-md}` line under it in
+  `{colors.mute}`.** *Not* `p-section-header` — that is 11px uppercase built for the left pane, and
+  a form divided by one is a caption above a stack. This was the single biggest thing wrong with
+  the first build of this screen.
+- **`picker`** — the folder browser. A bordered list on `{colors.surface-elevated}`: a
+  `picker-crumbs` bar on top, then one `picker-row` per folder — 40px, folder icon, name in
+  `{typography.mono}` at 13px, the file count in `{typography.caption}` `{colors.mute}`, and a
+  **trailing `chevron_right`**. The chevron is what says *this goes somewhere*; it takes
+  `{colors.accent-text}` on hover, and the row takes `{colors.surface-card}`.
+  - **It does not reuse `artifact-row`.** That component is 12px mono with hover as its only
+    affordance and indent guides for a tree — right in a 260px pane, and in a 560px form it reads
+    as text that happens to be indented. Two components, because they are answering two questions.
+  - The crumb you are **in** is not a link. It was one, which offered a trip to where you already
+    stood and turned the trail into a row of chips.
+  - The count is a **number of files** and never sized or coloured by how large it is.
+- **`chosen-folder`** — the folder once picked. One row on `{colors.accent-soft}`: folder icon in
+  `{colors.accent-text}`, the path in mono, the count under it, **Change…** at the right. It is the
+  one place on this screen the accent wash appears, and it is the selected-state job the accent is
+  already allowed (DESIGN.md → the accent's three jobs).
+- **`pick-list` / `pick-row`** — which files to profile. **The path is the checkbox's own label**,
+  so the whole 34px row is one hit target rather than a 15px box beside text you cannot click. A
+  file already profiled carries `indexed` in `{typography.caption}` and arrives unticked.
+- **The folding section's header is a section title too** — same 15px/500, 52px tall, whole row
+  clickable — with the caret **moved in front of the label** by `order: -1` on Quasar's side
+  section. Its default trailing position is right for a tool result in a 400px transcript and put
+  the caret half a screen from its own word here. Note it must be selected as
+  `.add-section-toggle.p-expansion`: `p-expansion`'s own 11px/24px rule has equal specificity and
+  sits later in the file, so class order alone loses.
 - An **interpret toggle** sits below both, on by default, labelled with its cost in
   `{colors.mute}` `{typography.caption}` — profiling is free, interpretation is a model turn, and
   the UI must not blur the two.
