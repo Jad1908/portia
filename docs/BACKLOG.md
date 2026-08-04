@@ -70,10 +70,10 @@ validation. See `CLAUDE.md` for what already exists.
   watched. Things to watch for in a run log: how often `sql` is chosen over `join`/`normalize`
   where those would have fit (a signal the hatch is too *easy*), and whether the SQL steps cluster
   around one operation.
-  - **No model has reached for the hatch yet.** Run 7: Haiku made **zero** `sql` calls and shipped
-    the same 3.85%-inflated table. So the promotion evidence above has nothing in it, and the first
-    thing to learn is not which op to promote but **whether the hatch is discoverable at all.**
-    Watch this on the next capable-model run before drawing anything from op ratios.
+  - **No model has reached for the hatch yet** in any run to date, so the promotion evidence above
+    has nothing in it. The first thing to learn is not which op to promote but **whether the hatch
+    is discoverable at all** — and no run so far was designed to answer that, since none of them
+    varied the description it is discovered through. Watch it on the next run that does.
 - **A SQL step's provenance is thin, and might be earned back.** `join` reports what it dropped
   from each side because it knows what a key is; `sql` reports only shape (`result_rows`,
   `columns`). `checks.outcome` still measures the produced table, so the blocking gate is intact —
@@ -118,34 +118,31 @@ to re-read before prompt work.*
 - **The prompt still prices profiling as expensive, and DuckDB made it nearly free.**
   `prompts/tools/profile_source.md` says *"Expensive — the detailed rung"* and *"Not for browsing"*;
   `copilot.md` says *"Climbing costs tokens, so don't browse."* Both were written against a pandas
-  engine that read a whole file to profile it. Post-migration a profile is a DuckDB aggregate —
-  Run 8 measured two candidate joins over 100M rows in **0.02 s each**, after the model had declined
-  to measure them and asked permission instead. What is still costly is the **tokens of the returned
-  evidence**, not the work, and the prompt conflates the two. Separate them: keep "don't dump twenty
-  profiles into context", drop the language that reads as "this call is expensive". **Cheap to try,
-  with a clean before/after against Run 8** — the same shape of experiment as the `prompts.tool()`
-  one below, and these two must not be run in the same session or neither result means anything.
+  engine that read a whole file to profile it. Post-migration a profile is a DuckDB aggregate, and
+  two candidate joins over 100M rows measure in **0.02 s each**. What is still costly is the
+  **tokens of the returned evidence**, not the work, and the prompt conflates the two. Separate
+  them: keep "don't dump twenty profiles into context", drop the language that reads as "this call
+  is expensive". The premise is a measurement, so this is worth doing regardless of what any run
+  showed.
 - **Tool descriptions reach the model as one unbroken line.** `prompts.tool()` does
   `" ".join(text.split())`, which correctly unwraps the source file's hard wrapping but also
   destroys headings, blank lines and list structure. `record_step.md` is **6,038 characters with
   zero newlines** — the `## 'sql'` heading runs into its body, the JSON example is flattened. Fix:
   unwrap *within* a paragraph, preserve blank lines and line starts. Small, but it changes every
-  prompt the model reads, so it wants its own branch and a before/after against **Run 7**, where a
-  whole section of that description appears to have been ignored. *Suspected contributor, not a
-  proven cause.*
-- **A grain claim can be widened until it passes — the loop's open hole.** Run 3 was refused on
-  `grain: [booking_id]`, then recorded `grain: [booking_id, event_name]` and passed: `event_name`
-  is the column the fan-out varies over, so the claim is a tautology. It didn't override the gate,
-  it dissolved it — the same move as rewriting `expect`, on the one field the agent authors.
+  prompt the model reads, so it wants its own branch.
+- **A grain claim can be widened until it passes — the loop's open hole.** A spec refused on
+  `grain: [booking_id]` can record `grain: [booking_id, event_name]` and pass, because `event_name`
+  is the column the fan-out varies over, so the claim is a tautology. That doesn't override the
+  gate, it dissolves it — the same move as rewriting `expect`, on the one field the agent authors.
   Candidate fix, claim-free so it can't be dissolved: **row conservation.** A left join whose output
   exceeds its left input multiplied rows; an inner join can only shrink. Binary, no tunable number,
   independent of anything the agent says. **Open design call:** a strict inequality is not literally
   a zero, so admitting it stretches the "only zeros block" rule — but it needs no threshold, which
   is what that rule is actually protecting. Decide before building.
 - **Grain examples should carry the row, not just the key.** Given only
-  `{"booking_id": "B0009", "n_rows": 2}`, Run 3 invented the city and both event names in its
-  summary. Anything it can't measure it will estimate (`handlers.profile_source`'s docstring, same
-  lesson). More evidence, not a sterner prompt.
+  `{"booking_id": "B0009", "n_rows": 2}`, there is nothing in the evidence naming the rows that
+  collided — and what the agent can't measure it will estimate (`handlers.profile_source`'s
+  docstring, same lesson). More evidence, not a sterner prompt.
 - **`--dir` never reaches the tools.** `portia_dir` flows into `build_system_prompt` only
   (`agent/session.py:73`). The MCP server runs in-process, so every handler falls back to
   `catalog.DEFAULT_DIR` unless the model spontaneously fills the optional `portia_dir` schema field —

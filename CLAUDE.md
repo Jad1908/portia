@@ -4,8 +4,12 @@
 stack, and product vision. Read them every session, before proposing changes or writing code:
 
 - `docs/PLAN.md` — direction: vision, non-negotiables, build order, **where we are now**
-- `docs/EVALUATION.md` — how we measure the copilot, and its **current honest score**. Read this
-  before trusting any claim that a part of the loop works; it also records a result we retracted.
+- `docs/EVALUATION.md` — how we *would* measure the copilot, and what has actually been measured,
+  which is much less than the file used to imply. **The eight runs in it are pipeline shakedown, not
+  scores** — they held every prompt at its first draft, so they found real defects in portia's code
+  and nothing about the copilot's judgment. Trimmed hard on 2026-08-04 for exactly that reason.
+  Read it before trusting any claim that a part of the loop works, and **do not cite a run as
+  evidence about a model**; it also records a result we retracted, and why.
 - `docs/TECH_STACK.md` — the tech stack and the reasoning behind it
 - `docs/VISION.md` — product vision & UI flows (the three-panel app), incl. the **V0** spec and its
   no-terminal audit. V0 *drives* the copilot rather than viewing it; the file records why the
@@ -34,14 +38,29 @@ stack, and product vision. Read them every session, before proposing changes or 
   `cli/index.py`. **§6 is where the app half landed** — the compiled models are rendered, and the
   three design questions are answered there (a card is a table *or* a step depending on zoom level ·
   Run means this model and everything it reads · layers group and order, never rank).
-- `docs/KNOWLEDGE_GRAPH.md` — **designed 2026-08-04, nothing built.** A queryable graph of how
-  sources relate — measured, not guessed — so the copilot stops proposing joins that match zero keys
-  (Run 8) and stops discarding every overlap it measures. **Neo4j**, and §3.2 records what each
-  rejected option was rejected *for* — NetworkX for the query language, not for scale, which is the
-  argument to not re-run. Columns are nodes (§4.1); five relationship kinds split by facts vs
-  judgment (§4.2). §5.1 keeps a rule we wrote and dropped. **§6 is the part to read before writing
-  code** — above all §6.1, that the graph surfaces edges and never ranks them. **§8 says this is not
-  obviously next**, and why.
+- `docs/KNOWLEDGE_GRAPH.md` — **designed and revised 2026-08-04, nothing built, and it is what's
+  next.** Two halves that only pay off together (§2): **measured relationships** between sources —
+  because nothing in portia holds one and `join_report`'s answer dies with the turn — and
+  **column-level lineage**, which portia's specs already know and no surface can answer.
+  **Neo4j, settled**; §3.2 records what each rejected option was rejected *for* (NetworkX for the
+  query language, not for scale — the argument to not re-run). Source *and* model columns are nodes
+  (§4.1). Six relationship kinds split by facts vs judgment (§4.2), where `DERIVES_FROM` is
+  structural because the spec already says it, and carries `via` + a `step` pointer rather than a
+  vocabulary of transform names. **§4.4 is the one to read twice**: a measured zero means *no shared
+  values*, never *unrelated* — `France` vs `FRA` — so measuring raw values is least reliable exactly
+  where portia is most needed, and the fix is that **the edge carries the reason the agent asked**
+  (samples stay off it; the agent climbs the ladder for those). §4.5 makes a stale measurement
+  detectable off fingerprints portia already computes. **§4.8 defers Entity** — the one node kind
+  with nothing underneath it, and the one whose names diverge because there is no list to read
+  first, unlike Group. **§5.1 is the central mechanism: the agent picks which pairs get measured,
+  during indexing** — not a code prefilter (which §6.5 keeps, with the three reasons it failed) and
+  not a sweep. §5.2 keeps a rule we wrote and dropped. §6.1: the graph surfaces edges and **never
+  ranks** them. §7 lists what is open and what was closed on purpose. §8 keeps a gate we removed and
+  why it did not hold. **§9 is the loop**, and it is the half that decides whether any of this is
+  worth having: the graph sits *before* L2 as a router, not above L4 as a rung · indexing is
+  rewritten and the conversation phase is not · two new tools, not one · and a four-phase order
+  where the read path precedes the agent-writes-measurements path, because at source 23 the agent
+  queries the graph while filling it.
 - `docs/BACKLOG.md` — parking lot of deferred ideas, by stream, with a compact **Shipped** list at
   the bottom. Not required reading; scan it when picking the next thing to build, and **add to it
   whenever we postpone something mid-work.**

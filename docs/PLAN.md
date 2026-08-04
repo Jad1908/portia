@@ -97,34 +97,27 @@ in 3.8 s, and a full spec run over 50M rows takes 27 s. **Peak memory is bounded
 table, not the total**, which is the property that makes ~20 tables workable — with the one
 exception `DUCKDB_MIGRATION.md` §13 records, that a *profile* still scales with cardinality.
 
-**This is not yet a working copilot, and that is the whole of what is left.** Eight runs, all
-failing (`EVALUATION.md`). Each fix closed one escape and revealed the next: the spelling trap is
-dead, the tautology grain is dead, and Run 5 shipped a 3.85%-inflated table by writing `acknowledge`
-without ever asking the user. **Run 6 changed the model rather than the code** — `claude-opus-5` at
-low effort — and in the indexing phase alone raised the revenue outliers nobody had ever asked
-about, predicted the fan-out before joining, and named portia's missing aggregate itself. It never
-reached the gate, so the consent question is open, but the Runs 1–5 failures now read as
-**capability rather than architecture**.
+**The copilot loop runs end to end, and its prompts have never been worked on.** Eight shakedown
+runs exist (`EVALUATION.md`) and they were exactly that — checks that a turn completes, a spec is
+written, the gate fires when it should, the run log captures it. Every one held the prompts at their
+first draft and varied nothing, so they found **real defects in portia's own code** and nothing at
+all about the copilot's judgment. `EVALUATION.md` was trimmed hard on **2026-08-04** to stop them
+being read as a score; the causal arguments that had accumulated around them were never testable and
+are gone.
 
-**Run 8 (2026-07-29) is the first run on real data, and it moved the diagnosis.** 23 PHQ sources,
-4.8 GB, a read-only goal. The model planned a two-path join, headed its own gaps *"Critical Unknowns
-(Need to Measure)"*, **measured none of them**, then asked permission to measure. Both joins it
-proposed match **0 keys**, which two 0.02 s queries established afterwards. **The engine is no
-longer the constraint.** The nearest candidate cause is in our own prompt, which still calls
-profiling *"Expensive… Not for browsing"* from when that described pandas.
-
-Read **`EVALUATION.md`** before building on top of any of it — it separates what the engine can do
-from what the copilot has been shown to do. Nothing since Run 8 has been agent work, so that
-diagnosis is still the current one.
+**So what is left is infrastructure the agent does not yet have**, not tuning what it does with what
+it has. Read `EVALUATION.md` for the defects those runs found, and for the standing rule that shapes
+all of it: ground truth is cheap to *check* and expensive to *write*, so the answer keys are the
+asset.
 
 **Shipped, in the order it happened:**
 
 1. **The escape hatch** (2026-07-26, `ops/sql.py`). The agent declares `inputs` and authors one
    DuckDB `SELECT`, captured verbatim and measured by the same harness as every other op.
    `ops = {join, normalize, sql}`. Built by hand it produces the hotel answer key exactly — 14 rows,
-   revenue 136,240, zero inflation. **No model has yet been watched reaching for it** (Run 7 made
-   zero `sql` calls), so resist promoting `aggregate`/`filter`/`dedupe` into prewritten ops until
-   real runs show which shape is actually reached for (`BACKLOG.md`).
+   revenue 136,240, zero inflation. **No model has yet been watched reaching for it**, so resist
+   promoting `aggregate`/`filter`/`dedupe` into prewritten ops until real runs show which shape is
+   actually reached for (`BACKLOG.md`).
 
 2. **The surface — V0 of the app** (2026-07-26, `portia/ui/`, `python -m portia.ui`). Three panes on
    the engine's event stream. **The bar is met: a full test run with no terminal.** The claim this
@@ -158,26 +151,49 @@ diagnosis is still the current one.
    see specs in subdirectories, and its Run did not resolve cross-spec references — so a spec that
    ran from the CLI failed in the window, which is the one seam `VISION.md` says must never break.
 
-**Next.** Two things, and the first gates the second.
+**Next — the knowledge graph** (`docs/KNOWLEDGE_GRAPH.md`, designed 2026-08-04). The gap it fills is
+structural and visible without any run: **the catalog is one file per source and has no shape for
+what a source *relates to***, and `checks/join.py` measures exactly that relationship and then
+discards it when the turn ends. On top of that, **L1 is exhaustive and pushed into every system
+prompt** — one line per source, fine at 3 and the wrong shape at 50. What you want there is a
+neighbourhood you walk outward from, which is a graph traversal, not a document read.
 
-**The PHQ test — begun 2026-07-29, and it already changed the next question.** 23 sources are
-indexed and interpreted, and the engine held: cardinality is the ceiling as `DUCKDB_MIGRATION.md`
-§13 predicted. The first goal turn is **Run 8**, and it says the constraint has moved from the
-engine to the copilot — it planned a join over 4.8 GB without measuring anything. So the useful
-order is: **fix the prompt's cost signal first (`BACKLOG.md` → Agent), then re-run the same goal**,
-and score it *using* the run log, which is the test that log is still waiting for. A model that
-won't call `profile_source` makes every other finding on this dataset unreadable. Still worth doing
-before reading much into a run: `fan_out` fires on every fact-to-dimension join because it reads
-either side's key multiplicity rather than the result's, which at this scale is how a real warning
-gets learned as noise.
+**And the second half is lineage**, which is the same gap one layer down: a spec records that a
+column was renamed, coerced or computed from three others, and **no surface in portia can answer
+"where did this column come from"**. The two halves are what make each other worth having — measured
+overlap is weakest on raw sources, because unharmonized columns are precisely the ones that don't
+share values yet, and the tables portia *builds* are where the mapping has already happened.
 
-**The consequence of a zero, as a computed fact rendered where the human answers.** Run 5's override
-was taken alone, and the instruction it skipped ("tell the user what a total would be off by") asks
-for a number that is nowhere in the agent's evidence. Compute what a row multiplication does to each
-measure column and put it at the confirmation prompt, so consent is informed whether or not the
-agent cooperates. No capable model has yet been watched reaching a blocking flag.
+**Neo4j, settled** (§3 records what each rejected option was rejected *for*). The build order runs
+cheapest-and-most-certain first: persist `min`/`max` in `catalog._column_facts`, which the profiler
+already computes and the catalog drops · the structural skeleton from catalog + specs, including
+column lineage, which is translation rather than inference · the write hooks on index-a-source and
+save-a-spec · then the measured overlap edges. **Which pairs get measured is settled** (§5.1): the
+agent picks them while it is indexing, the same act in which it already writes a summary and
+proposes groups — not a code prefilter and not a sweep of all ~245,000 pairs. Above all, §6.1: **the
+graph surfaces edges and never ranks them**, and §4.4: a measured zero means *no shared values*, not
+*unrelated* — which is why the edge carries the reason the agent asked for it.
 
-> **A referentially-consistent subset would make both of those cheaper**, by turning a copilot run
+**The loop changes with it, not after it** (§9). The graph sits *before* `describe_source` as a
+router — *which* table should I look at, and where did this column come from — rather than as a
+deeper rung above `join_findings`. **Indexing is the part that gets rewritten**: it becomes "read
+each source, describe it, group it, and say how it relates to what you have already read." The
+conversation phase gains a tool and keeps its shape. Shrinking the exhaustive L1 index to a
+traversal is the payoff and is **last**, on its own, so it is not moving at the same time as
+anything else.
+
+Also still worth doing: `fan_out` fires on every fact-to-dimension join because it reads either
+side's key multiplicity rather than the result's, which at this scale is how a real warning gets
+learned as noise.
+
+**The consequence of a zero, as a computed fact rendered where the human answers.** At the moment
+the gate refuses, `copilot.md` asks the agent to tell the user what a total would be off by — and
+that number is nowhere in its evidence, which holds `n_duplicated_keys` and example keys and no
+measure at all. Compute what a row multiplication does to each measure column and put it at the
+confirmation prompt, so consent is informed whether or not the agent cooperates. **This is the same
+shape as the graph work**: a missing measurement, not a missing instruction.
+
+> **A referentially-consistent subset would make copilot runs cheaper to judge**, by turning one
 > from an anecdote into something re-runnable in seconds and scoreable against an answer key.
 > `DUCKDB_MIGRATION.md` §11 for why naive sampling cannot do it.
 
