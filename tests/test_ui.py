@@ -1298,3 +1298,46 @@ def test_the_whole_repo_as_a_scope_still_draws_every_readable_file(tmp_path):
     names = [n.name for n in engine.project_tree(app)]
 
     assert names == ["data", "notebooks"]
+
+
+# --- the brief: one card, and one line of guidance ---------------------------
+
+
+def test_the_brief_and_add_data_are_the_same_card():
+    """Two first-run surfaces, one panel — `p-panel` and its three regions.
+
+    They were separately-assembled layouts of the same idea, and the brief's was
+    a bare centered column: a heading, a box, and loose text with a raw path
+    under it. Neither screen owns the card, so neither may grow its own.
+    """
+    import inspect
+
+    from portia.ui import screens
+
+    gate = inspect.getsource(screens.project_context)
+    add_data = inspect.getsource(screens.panel.func)  # it is a refreshable
+    for region in ("p-panel", "p-panel-head", "p-panel-body", "p-panel-actions"):
+        assert region in gate and region in add_data, region
+    assert "add-data-card" not in inspect.getsource(screens), "the card is not add-data's any more"
+
+
+def test_the_brief_teaches_its_shape_in_one_line_and_shows_no_example():
+    """The guidance had become the notes that described this screen — four shape
+    lines, a rule about what not to write, and a worked brief from another
+    industry, together longer than the answer they were introducing."""
+    from portia.ui import screens
+
+    assert isinstance(screens.CONTEXT_SHAPE, str), "the shape is one line, not a list of them"
+    assert not hasattr(screens, "CONTEXT_EXAMPLE"), "no example — people edit one instead of it"
+    assert "engineer" not in screens.CONTEXT_WHY, "who else would read it is not the question"
+
+
+def test_a_written_path_shows_its_name_apart_from_its_folders():
+    """`path-row`: the name identifies the file, the folders say where it sits,
+    and `$HOME` is a third of the string that tells the reader nothing."""
+    with ui.element("div"):
+        row = c.path_row(Path.home() / "projects" / "demo" / ".portia" / "project.yaml")
+
+    labels = [el for el in row.descendants() if isinstance(el, ui.label)]
+    assert [el.text for el in labels] == ["~/projects/demo/.portia/", "project.yaml"]
+    assert "path-row-name" in labels[-1].classes
