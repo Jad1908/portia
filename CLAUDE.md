@@ -34,6 +34,14 @@ stack, and product vision. Read them every session, before proposing changes or 
   `cli/index.py`. **§6 is where the app half landed** — the compiled models are rendered, and the
   three design questions are answered there (a card is a table *or* a step depending on zoom level ·
   Run means this model and everything it reads · layers group and order, never rank).
+- `docs/KNOWLEDGE_GRAPH.md` — **designed 2026-08-04, nothing built.** A queryable graph of how
+  sources relate — measured, not guessed — so the copilot stops proposing joins that match zero keys
+  (Run 8) and stops discarding every overlap it measures. **Neo4j**, and §3.2 records what each
+  rejected option was rejected *for* — NetworkX for the query language, not for scale, which is the
+  argument to not re-run. Columns are nodes (§4.1); five relationship kinds split by facts vs
+  judgment (§4.2). §5.1 keeps a rule we wrote and dropped. **§6 is the part to read before writing
+  code** — above all §6.1, that the graph surfaces edges and never ranks them. **§8 says this is not
+  obviously next**, and why.
 - `docs/BACKLOG.md` — parking lot of deferred ideas, by stream, with a compact **Shipped** list at
   the bottom. Not required reading; scan it when picking the next thing to build, and **add to it
   whenever we postpone something mid-work.**
