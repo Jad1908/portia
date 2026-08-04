@@ -188,7 +188,11 @@ adding code, and extend them rather than working around them:
   - `portia/catalog.py` — the **context catalog** (*what the data is*), in `.portia/`: project
     context + groups + per-source metadata (Layer 1 prose `summary`, Layer 2 per-column `role` +
     check facts). The agent's memory. **Update rule: facts refresh, prose/roles are preserved** —
-    corrections are never clobbered (facts vs judgment, applied to updates).
+    corrections are never clobbered (facts vs judgment, applied to updates). **`is_stale` compares
+    facts about the *file* and only those** — `STALENESS_FACTS` is `(size, mtime)`, and the `at`
+    recorded beside them (when portia last *looked*) is deliberately excluded: it moves every second
+    without the file moving, and comparing it made every source read as stale one second after being
+    indexed. Prefer naming that tuple to iterating whatever the record happens to hold.
   - `portia/runlog.py` — the **run log** (*what the copilot did*): one JSONL per turn in
     `.portia/runs/`, one `Event` per line under a header naming model, effort, prompt and portia
     sha. Read with `python -m portia.cli.runs`. **Project-local, with no central store and nothing

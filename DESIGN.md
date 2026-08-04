@@ -383,8 +383,29 @@ These exist so a test run never needs a terminal (`VISION.md` → "The no-termin
   one place on this screen the accent wash appears, and it is the selected-state job the accent is
   already allowed (DESIGN.md → the accent's three jobs).
 - **`pick-list` / `pick-row`** — which files to profile. **The path is the checkbox's own label**,
-  so the whole 34px row is one hit target rather than a 15px box beside text you cannot click. A
-  file already profiled carries `indexed` in `{typography.caption}` and arrives unticked.
+  so the whole 34px row is one hit target rather than a 15px box beside text you cannot click.
+  - **The label wraps, and the row grows with it** *(2026-08-03)*. A real extract's path is long
+    enough to run past the `{typography.caption}` note beside it, and a `nowrap` label neither
+    shrinks nor pushes — it overprints. Truncating is not the fix either: it takes the tail, and on
+    `VBP_PREDICT_OUTPUT_EVENT_DETAILS_DUPLICATES.parquet` the tail is the whole of what tells one
+    file from the next. The note is the thing that stays `nowrap`.
+  - **A file already in the catalog is not an offer** *(2026-08-03)* — `pick-row--done`: the box is
+    disabled, the label recedes to `{colors.mute}`, and the row says `indexed`. It keeps its place
+    in the list because it is still part of *what is under this folder*, but it states a fact
+    instead of proposing an action. Re-profiling is idempotent and therefore not *wrong*; it is a
+    minute of work on a real extract that nobody asked for, and a tickable box is this screen
+    suggesting you spend it. Re-indexing one source stays where it belongs — on that source, in the
+    workflow pane.
+  - **All / None, and the count on the CTA, are scoped to what is outstanding**, so neither can put
+    a finished file back into the number the button names. When nothing is outstanding the header
+    says so in place of the pick prompt, and the two micro-buttons are not drawn: there is nothing
+    left for them to act on.
+- **Indexing has one icon wherever it is offered** — `dns`, a rack of drives, in a single shared
+  constant (`ui/components.INDEX_ICON`) covering this screen and the un-indexed file in the workflow
+  pane. It replaced a lightning bolt, which named the *speed* of an operation that on a real extract
+  takes a minute; what the action produces is a **catalogued** source, so the glyph is storage.
+  `storage` is the other stock database mark and was rejected at button size — three plain bars read
+  as a hamburger menu, and `dns`'s indicator lights do not.
 - **The folding section's header is a section title too** — same 15px/500, 52px tall, whole row
   clickable — with the caret **moved in front of the label** by `order: -1` on Quasar's side
   section. Its default trailing position is right for a tool result in a 400px transcript and put
@@ -398,6 +419,14 @@ These exist so a test run never needs a terminal (`VISION.md` → "The no-termin
   moment there are none it becomes **Open the workspace**. Never both — a CTA offered beside
   unfinished work is a skip button wearing a different word. In the dialog the way out is a
   *Close*, and takes no accent at all.
+- **The caption under it partitions the button's count; it does not list two jobs** *(2026-08-03)*.
+  "Index 23 files" over "copies 1 file into `parquet/` · profiles 22 files" is two numbers that look
+  like they should sum to 23 and don't — and both were true. An imported file is profiled like every
+  other one, so 23 files get profiled and one of them additionally had to be copied first; the old
+  line counted the copy as if it replaced a profile. The parts say where each file came **from** —
+  outside the repo, or already in it — which is a real partition: *"Profiles 23 files — 1 copied in
+  to `parquet/` · 22 already in the repo"*. The parts carry bare numbers, because the lead already
+  said "files" and repeating the unit reads as three separate counts of three things.
 - Once a project has sources this shrinks to a row-height affordance at the foot of the left pane,
   which opens the same panel as a dialog.
 - **The import section is one button.** The chooser plans on return, so the typed path field and
@@ -734,6 +763,19 @@ questions-and-insights UX *is* the product" — and they get the most design att
   identically is one you have to reconstruct from the tool calls. It also keeps the two halves of
   indexing apart: profiling already happened and was free, interpretation is what costs a turn.
 
+**`not-read`** — the source inspector's summary slot, before anybody has written one
+- An icon plus two lines: *"The copilot has not read this source yet"* in `{typography.body-md}`
+  `{colors.ink}`, and a `{typography.caption}` line saying the facts below **are** measured and real
+  — only the meaning is missing. Uncoloured; it is a fact about the catalog, exactly like the
+  **uninterpreted** marker in the tree, and neither is a warning.
+- **It exists because prose in the prose slot reads as a read** *(2026-08-03)*. `catalog._auto_summary`
+  drafts a restatement of the profile ("47 rows, 12 columns. Watch-outs: …") so the YAML is never
+  empty, and this pane printed it where the interpretation goes. On screen that is indistinguishable
+  from someone having looked at the data: it is prose, in the prose slot, saying true things — while
+  what it *actually* says is that nobody has. So the pane says that in words, and leaves the facts
+  the draft restated to the columns table below, where they are measured and labelled as measured.
+  The switch is `catalog.is_interpreted`, so the pane and the tree's marker cannot disagree.
+
 **`column-row`** — one column of a source, in the source inspector
 - **Tracks are content-independent** (fixed px for the short facts, fractions for the text). Every
   row is its own grid, so an `auto` track sizes to that row's content and nothing lines up with the
@@ -744,6 +786,13 @@ questions-and-insights UX *is* the product" — and they get the most design att
   `{colors.hairline}` container.
 - A thirty-column source is the normal case. A labelled line per fact made three columns a
   screenful; nothing is dropped here, it is laid out across rather than down.
+- **The list folds to the first eight** (`workflow.COLUMNS_FOLDED`), because it is not the only
+  thing on the pane *(2026-08-03)*. The row count, the interpretation actions and the preview all
+  sit below it, and a wide extract's column list pushed every one of them off the screen. Eight is
+  chosen so a narrow source is never folded at all and a wide one still shows what its first columns
+  look like before you decide. **Nothing is hidden without saying so**: the count is on the button
+  that opens it (*Show all 34 columns*, with "26 more" beside it), and unfolding is one click. Which
+  source is unfolded is one name on `App`, not a set — there is one inspector, showing one source.
 - The null rate is formatted exactly as `catalog.render_source` formats it for the terminal. The two
   edges must never disagree about a rate.
 
