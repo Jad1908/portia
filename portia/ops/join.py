@@ -17,6 +17,8 @@ than one that filters.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from portia.checks.join import join_report
 from portia.checks.outcome import MERGE_SUFFIXES
 from portia.core.table import Table, quote_ident
@@ -109,10 +111,36 @@ def apply_join(
     return OpResult(table=merged, provenance=provenance, compiled=compiled)
 
 
-def _select_list(
-    left: Table, right: Table, lkeys: list[str], rkeys: list[str], *, shared_names: bool
-) -> str:
-    """The output columns, and what they are called.
+@dataclass(frozen=True)
+class JoinColumn:
+    """One output column of a join, and the input column(s) it reads.
+
+    The naming rule and the lineage are the *same* fact, so they are stated once:
+    a column that gets the ``_x`` suffix got it because both sides had one, and
+    the column that reads both sides is the shared key. Two readers depend on
+    this being one function rather than two implementations — :func:`_select_list`
+    builds the SQL from it, and `portia/knowledge/build.py` reads a model's
+    column lineage off it without running anything.
+    """
+
+    #: What the column is called in the output.
+    name: str
+    #: The left input's column this reads, if it reads one.
+    left: str | None = None
+    #: The right input's column this reads, if it reads one. Set on *both* sides
+    #: only for a shared key, which is coalesced from the two.
+    right: str | None = None
+
+
+def join_columns(
+    left_columns: list[str],
+    right_columns: list[str],
+    lkeys: list[str],
+    rkeys: list[str],
+    *,
+    shared_names: bool,
+) -> list[JoinColumn]:
+    """The output columns of a join, in order, each with where its values come from.
 
     **This function is why `checks.outcome` still works.** Nothing in SQL renames
     a colliding column for you — a join naming ``name`` on both sides either errors
@@ -126,26 +154,42 @@ def _select_list(
     Column order matches what the frozen evidence expects: every left column in
     its original position, then the right's — minus the key, when both sides call
     it the same thing and it therefore appears once.
+
+    ``shared_names`` is the ``keys:`` form, where both sides name the key the same
+    way and the output carries one of it.
     """
     left_suffix, right_suffix = MERGE_SUFFIXES
-    lcols = left.columns
-    right_out = [c for c in right.columns if not (shared_names and c in rkeys)]
-    collisions = set(lcols) & set(right_out)
-
+    right_out = [c for c in right_columns if not (shared_names and c in rkeys)]
+    collisions = set(left_columns) & set(right_out)
     key_of = dict(zip(lkeys, rkeys, strict=True))
-    select = []
-    for col in lcols:
-        q = quote_ident(col)
+
+    columns = []
+    for col in left_columns:
         if shared_names and col in key_of:
             # One key column, taking whichever side has it: a right or outer join
             # leaves the left side null on rows the left didn't have.
-            select.append(f"coalesce(l.{q}, r.{quote_ident(key_of[col])}) AS {q}")
+            columns.append(JoinColumn(col, left=col, right=key_of[col]))
         elif col in collisions:
-            select.append(f"l.{q} AS {quote_ident(col + left_suffix)}")
+            columns.append(JoinColumn(col + left_suffix, left=col))
         else:
-            select.append(f"l.{q} AS {q}")
+            columns.append(JoinColumn(col, left=col))
     for col in right_out:
-        q = quote_ident(col)
-        alias = quote_ident(col + right_suffix) if col in collisions else q
-        select.append(f"r.{q} AS {alias}")
+        name = col + right_suffix if col in collisions else col
+        columns.append(JoinColumn(name, right=col))
+    return columns
+
+
+def _select_list(
+    left: Table, right: Table, lkeys: list[str], rkeys: list[str], *, shared_names: bool
+) -> str:
+    """The SELECT list, written from what :func:`join_columns` already decided."""
+    select = []
+    for out in join_columns(left.columns, right.columns, lkeys, rkeys, shared_names=shared_names):
+        reads = [
+            f"{side}.{quote_ident(col)}"
+            for side, col in (("l", out.left), ("r", out.right))
+            if col is not None
+        ]
+        expr = f"coalesce({', '.join(reads)})" if len(reads) > 1 else reads[0]
+        select.append(f"{expr} AS {quote_ident(out.name)}")
     return ", ".join(select)
