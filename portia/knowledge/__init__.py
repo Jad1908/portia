@@ -23,6 +23,7 @@ restatement of files (§4.2) and costs nothing to compute. The measured half
 built so a rebuild of this half cannot delete them.
 """
 
+from portia.knowledge.build import build_graph
 from portia.knowledge.schema import Edge, Graph, Node
 
-__all__ = ["Edge", "Graph", "Node"]
+__all__ = ["Edge", "Graph", "Node", "build_graph"]

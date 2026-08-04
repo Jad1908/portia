@@ -55,7 +55,7 @@ def join_report(
     Both tables must live on the same connection — a join is between two things
     the database can see at once.
     """
-    lkeys, rkeys = _resolve_keys(on, left_on, right_on)
+    lkeys, rkeys = resolve_keys(on, left_on, right_on)
     _require_columns(left.columns, lkeys, "left")
     _require_columns(right.columns, rkeys, "right")
 
@@ -205,7 +205,15 @@ def _flags(report, *, dropped_left, dropped_right, inner_rows, null_keys, max_fa
     return flags
 
 
-def _resolve_keys(on, left_on, right_on) -> tuple[list[str], list[str]]:
+def resolve_keys(on, left_on, right_on) -> tuple[list[str], list[str]]:
+    """A step's key fields as two equal-length lists — one form, one place.
+
+    ``on`` is the shared-name form (both sides call the key the same thing);
+    ``left_on``/``right_on`` is the form where they don't. Either may be a bare
+    string. Public because it is the only statement of that rule, and the
+    knowledge graph reads a join step's keys off a spec without running it
+    (`portia/knowledge/build.py`).
+    """
     if on is not None:
         keys = [on] if isinstance(on, str) else list(on)
         return keys, keys
@@ -384,7 +392,7 @@ def join_findings(
     right_on: str | list[str] | None = None,
 ) -> dict:
     """:func:`join_findings`, measured in SQL."""
-    lkeys, rkeys = _resolve_keys(on, left_on, right_on)
+    lkeys, rkeys = resolve_keys(on, left_on, right_on)
     report = join_report(left, right, on=on, left_on=left_on, right_on=right_on)
     comparable = report["key_dtype_match"]
 
