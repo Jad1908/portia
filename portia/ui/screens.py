@@ -10,20 +10,56 @@ Three states, in order:
   that doesn't exist yet is *created* — testing means a fresh directory per run,
   so that has to be one action rather than an error followed by a second one.
 - **No context set.** The mandatory brief. No skip, no dismiss, no "later".
-- **No sources.** A drop zone, a destination, and the interpret toggle.
+- **No sources.** Add data — rewritten 2026-08-02, and described below.
 
-**Bringing outside data in is a deliberate step** (`docs/PIPELINE.md` §2.7).
-``index`` only accepts files already inside the repo, so this screen is the way
-one gets in: you choose where it lands, portia states exactly what it is about to
-copy and to where, and only then does it copy. The plan is shown in full rather
-than summarised — "3 files into data/" describes a plan, the list *is* one, and
-the difference is the one time a wrong folder or a name collision is cheap to
-notice. It is a copy, never a move.
+## Add data — two routes, in the order they are likely
+
+portia plugs into a repo that **already holds the data** (`docs/PIPELINE.md`
+§2.7), so the screen asks that question first and the other one second:
+
+1. **Point at the data already here.** An in-page folder browser rooted at the
+   project: sub-folders that have readable data under them, with a count, clicked
+   into until you reach the one that is the data. Choosing it writes ``data_dir``
+   to ``project.yaml`` — a durable project setting, not a one-off — and from then
+   on the left pane draws un-indexed data files under that folder and nowhere
+   else. Its files arrive **all ticked**, because "this folder is my data" is a
+   statement about the folder; un-ticking is for the exceptions.
+2. **Import external data**, folded away until it is wanted. One button: the
+   native chooser, which plans on return. Its destination defaults to the folder
+   chosen in (1), and to ``data/`` if nothing was chosen, because a file arriving
+   somewhere other than where the rest of the data lives is a folder layout
+   nobody asked for.
+
+Both at once is the ordinary case, not an edge one: a repo with a `data/` folder
+and one extract still sitting in `~/Downloads`.
+
+**Bringing outside data in stays a deliberate step.** ``index`` only accepts
+files already inside the repo, so this screen is the way one gets in: you choose
+where it lands, portia states exactly what it is about to copy and to where, and
+only then does it copy. The plan is shown in full rather than summarised — "3
+files into data/" describes a plan, the list *is* one, and the difference is the
+one time a wrong folder or a name collision is cheap to notice. It is a copy,
+never a move.
+
+**One button does the work, and it says what the work is.** Both routes converge
+on a single *Index* — copy what was planned, then profile every ticked file —
+because two buttons each half-doing it is what this screen was before, and the
+one that planned an import did not index while the one that read "Continue" did.
+When it finishes, the primary action **becomes the way into the workspace**, and
+not before: a CTA offered beside unfinished work is a skip button wearing a
+different word.
 
 Indexing is deliberately shown as **two** things, because one is free and one is
 not: profiling is deterministic and always happens, and interpretation is a model
 turn that runs through the ordinary transcript with its own write confirmations.
 Never one merged spinner.
+
+**The browser drop zone is gone** (2026-08-02). It was a third route that did the
+same job as the other two while being the only one that streamed the file through
+the browser — which meant a silent refusal on files the browser dislikes, a red
+triangle on all twenty when one was rejected, and a copy that had already
+happened by the time the plan could have been shown. Every path it served is
+served by the folder picker (already in the repo) or the importer (not yet).
 """
 
 from __future__ import annotations
@@ -152,9 +188,16 @@ def project_context() -> None:
     """The most consequential text box in the product.
 
     The context is what makes a column's meaning decidable, and a generic brief
-    yields generic judgment (`PLAN.md`). The guidance shows the *shape* of a good
-    brief — never an example that could be mistaken for an answer about the data
-    at hand.
+    yields generic judgment (`PLAN.md`). What it asks for is the **project**, not
+    the data: the goal, how it is modelled, and roughly what sources exist —
+    `VISION.md`'s "the *global* project, not necessarily the data".
+
+    **The guidance used to ask for the wrong altitude.** "Say what one row means,
+    and which source is authoritative for what" is a question about the data, and
+    it got answers about the data — which is the half portia measures for itself
+    and the half the copilot is forbidden to take on trust. The shape lines now
+    ask for goal, modelling and the kinds of data, and `CONTEXT_EXAMPLE` shows
+    the register in four sentences from an unrelated industry.
     """
     with ui.element("div").classes("p-centered"):
         with ui.element("div").classes("p-centered-column"):
@@ -169,9 +212,7 @@ def project_context() -> None:
             )
             box.bind_value(APP, "goal")  # reused as scratch until it is saved
 
-            with ui.element("div").classes("stack-xs"):
-                for line in CONTEXT_SHAPE:
-                    c.caption(line, color="c-stone")
+            context_guidance()
 
             with ui.element("div").classes("row-gap-sm"):
                 c.button("Continue", lambda: _save_context(box.value), kind="primary")
@@ -179,6 +220,21 @@ def project_context() -> None:
                 # wrong folder is easy, and the only other exit was the process.
                 c.button("Back", _back_to_picker, kind="secondary")
                 c.caption(str(APP.catalog_dir / "project.yaml"))
+
+
+def context_guidance() -> None:
+    """What a good brief looks like: its shape, then one written at that altitude.
+
+    One function rather than two lists a caller loops over, because the gate and
+    the brief pane are the same box in two places and the day they teach it
+    differently is the day one of them is wrong.
+    """
+    with ui.element("div").classes("stack-xs"):
+        for line in CONTEXT_SHAPE:
+            c.caption(line, color="c-stone")
+    # `c-mute`, one step up from the shape lines' `c-stone`: those are glanced at,
+    # and this is the one piece of guidance meant to be read through.
+    c.caption(CONTEXT_EXAMPLE, color="c-mute").classes("context-example")
 
 
 def _back_to_picker() -> None:
@@ -206,225 +262,435 @@ def _save_context(text: str) -> None:
     app_module.shell.refresh()
 
 
-# --- source-dropzone --------------------------------------------------------
+# --- add data ---------------------------------------------------------------
 
 
-def first_sources() -> None:
-    """Add data, then move on — and the action to move on is always on screen.
+def add_data() -> None:
+    """The screen: a floating panel on the canvas, not a page.
 
-    The column scrolls its *content* and pins the actions to the bottom. With
-    twenty files added the whole thing used to be 755px of column in a 727px
-    window: the heading was clipped off the top and the button that takes you to
-    the project went off the bottom, which reads as "nothing happened".
+    It is a **card of bounded height**, centred, with its own scroll — the same
+    shape as the dialog it doubles as, because it is the same thing: a transient
+    surface you are meant to finish and leave. Laid out as a full-height column
+    it read as a web page, and the taller the file list got the more it read as
+    one, with the heading and the button drifting to opposite ends of the window.
     """
     with ui.element("div").classes("p-centered"):
-        with ui.element("div").classes("p-centered-column add-data"):
-            with ui.element("div").classes("add-data-body"):
-                ui.label("Add data").classes("t-heading-md")
-                c.text(f"Drop {_formats()} in. {_SOURCES_WHY}", color="c-mute")
-                dropzone()
-                _progress()
-                _added_so_far()
-            with ui.element("div").classes("add-data-actions"):
-                c.rule()
-                with ui.element("div").classes("row-gap-sm"):
-                    if APP.sources:
-                        # Leaving is a decision, and it is the one that starts the
-                        # copilot reading — see `_leave_add_data`.
-                        c.button(_continue_label(), _leave_add_data, kind="primary")
-                        c.caption(_continue_hint())
-                    else:
-                        # Unlike the brief, this is not a gate: an empty project is a
-                        # legitimate place to stand, and "Add data" waits in the left pane.
-                        c.button("Skip for now", _skip_sources, kind="secondary")
-                        c.caption(_SKIP_HINT)
-                    c.button("Back", _back_to_picker, kind="secondary")
+        with ui.element("div").classes("add-data-card"):
+            panel()
 
 
 @ui.refreshable
-def _progress() -> None:
-    """What indexing is doing, in words, while it does it.
+def panel(*, in_dialog: bool = False) -> None:
+    """Everything on the add-data surface, in one refreshable.
 
-    Its own refreshable so it can be redrawn between files without rebuilding
-    the drop box underneath it — refreshing the whole screen mid-upload would
-    take the uploader with it.
+    **Both the screen and the dialog draw this**, with `in_dialog` deciding only
+    what the way out is called — from the screen it opens the workspace, from the
+    dialog the workspace is already behind you and it just closes. The two used
+    to be separately-assembled stacks of the same four components, which is how
+    the dialog ended up without the destination field for a week.
+
+    **Three regions, and only the middle one scrolls.** What you are doing stays
+    at the top and what finishes it stays at the bottom, however long the file
+    list gets — a panel where the primary action is somewhere below the fold is a
+    panel that looks like it did nothing when you press it.
     """
-    if not APP.indexing_status:
-        return
-    with ui.element("div").classes("row-gap-sm indexing-status"):
-        ui.spinner(size="sm")
-        c.text(APP.indexing_status, color="c-mute")
-
-
-def _continue_label() -> str:
-    """The CTA says what it will do, including whether it spends money."""
-    return "Continue — and read them" if APP.interpret else "Continue to the project"
-
-
-def _continue_hint() -> str:
-    if APP.interpret:
-        return f"the copilot reads {c.count(len(APP.sources), 'source')} in the next screen"
-    return "you can add more later from the left pane"
-
-
-def _added_so_far() -> None:
-    """What has landed, on the screen that landed it.
-
-    Without this the only feedback was a toast that names twenty files and then
-    goes away. The list is capped and scrolls: it is a receipt, not the pane.
-    """
-    if not APP.sources:
-        return
-    c.section_header(f"Added · {c.count(len(APP.sources), 'source')}")
-    with ui.element("div").classes("added-list"):
-        for name, entry in APP.sources.items():
-            with ui.element("div").classes("added-row"):
-                ui.icon("table_chart").classes("fact-icon")
-                c.mono(name, small=True)
-                c.caption(c.count(len(entry.get("columns") or []), "col"))
-
-
-async def _leave_add_data() -> None:
-    """Go to the project — and start the copilot reading, now that it can be seen.
-
-    The interpretation turn used to fire on this screen, which has no transcript:
-    you paid for a turn and watched a blank page. It runs here instead, after the
-    workspace is up, so it lands in the Indexing tab where it is legible.
-    """
-    from portia.ui import app as app_module
-
-    APP.left_add_data = True
-    app_module.shell.refresh()
-    await _interpret_pending()
-
-
-def _skip_sources() -> None:
-    from portia.ui import app as app_module
-
-    APP.skipped_sources = True
-    app_module.shell.refresh()
-
-
-#: Quasar sizes a dialog to its content, and a drop box has no natural width —
-#: without this it collapses to a few hundred pixels of nothing.
-DIALOG_WIDTH = "width:560px;max-width:92vw"
-
-
-#: The add-data dialog for this page. Built once, at page level.
-_ADD_DIALOG: ui.dialog | None = None
-
-
-def build_add_dialog() -> None:
-    """Create the add-data dialog. **Called once per page, never from a pane.**
-
-    `ui.dialog` parents itself to the client layout and leaves a hidden canary
-    element in whatever slot is current, whose job is to delete the dialog when
-    that slot goes away. Build one inside a `@ui.refreshable` and the canary
-    lives in the refreshable's container — so the first refresh takes the dialog
-    with it and `open()` afterwards silently does nothing. NiceGUI says as much
-    ("create it only once and then reuse it"); this is what that means in
-    practice, and it cost an afternoon of a button that looked wired and wasn't.
-    """
-    global _ADD_DIALOG
-    # No scale-in. Quasar's default animation leaves the panel at `scale(0)`
-    # until a rAF fires, so a throttled tab shows an open dialog with nothing in
-    # it — and a quiet developer surface has no use for a popping overlay anyway.
-    with ui.dialog().props("transition-duration=0") as dialog:
-        with ui.element("div").classes("write-confirm").style(DIALOG_WIDTH):
-            ui.label("Add data").classes("t-heading-md")
-            c.text(f"Drop {_formats()} in. {_SOURCES_WHY}", color="c-mute")
-            dropzone(on_done=dialog.close)
+    with ui.element("div").classes("add-data-head"):
+        ui.label("Add data").classes("t-heading-md")
+        ui.label(ADD_WHY.format(formats=_formats())).classes("add-data-sub")
+    with ui.element("div").classes("add-data-body"):
+        # Two columns where there is room for two: the question you are almost
+        # always answering on the left, the one you are usually not on the right.
+        # A wide panel laid out as one stacked column is a wide panel that reads
+        # as a narrow one with empty space beside it.
+        with ui.element("div").classes("add-data-col"):
+            _in_repo()
+        with ui.element("div").classes("add-data-col"):
+            _from_outside()
+            _interpret_toggle()
+        with ui.element("div").classes("add-data-progress"):
             _progress()
-            with ui.element("div").classes("row-gap-sm"):
-                c.button("Close", dialog.close, kind="secondary")
-    _ADD_DIALOG = dialog
+    with ui.element("div").classes("add-data-actions"):
+        # No rule: the region's own top border is the divider, and two lines a
+        # pixel apart is what a rule inside a bordered footer looks like.
+        _actions(in_dialog=in_dialog)
 
 
-def open_add_dialog() -> None:
-    """Show it. Says so if it isn't there, rather than doing nothing quietly."""
-    _show(_ADD_DIALOG)
+def _refresh() -> None:
+    """Redraw the surface. Both instances; only one of them is ever on screen."""
+    panel.refresh()
 
 
-def _show(dialog: ui.dialog | None) -> None:
-    if dialog is None or dialog.is_deleted:
-        ui.notify(_NO_DIALOG)
+# --- route one: the data already in the repo --------------------------------
+
+
+def _in_repo() -> None:
+    """Which folder in this repo is the data — the first question, always.
+
+    portia plugs into a project that already holds its data (`PIPELINE.md` §2.7),
+    so the common case is that nothing needs importing at all and this section is
+    the whole screen.
+
+    **A titled card, not a caption over a stack.** The screen asks two unrelated
+    questions and the only thing separating them used to be an 11px uppercase
+    label — `p-section-header`, which is a *pane* label and far too quiet to
+    divide a form. Each route is a bordered section with a real heading and a
+    line saying what it is for.
+    """
+    with ui.element("div").classes("add-section"):
+        _section_head(IN_REPO_HEADING, IN_REPO_WHY)
+        if APP.data_dir and not APP.repicking:
+            _chosen_folder()
+        else:
+            _picker()
+
+
+def _section_head(title: str, hint: str) -> None:
+    """A section's title and the one line saying what it is for."""
+    with ui.element("div").classes("add-section-head"):
+        ui.label(title).classes("add-section-title")
+        ui.label(hint).classes("add-section-hint")
+
+
+def _picker() -> None:
+    """An in-page folder browser, rooted at the project and filtered to data.
+
+    **Rooted at the project, and it cannot express anything else** — choosing the
+    data folder is choosing a scope inside the repo, so an outside path is not a
+    wrong answer this control can give. That is the same rule `index` enforces,
+    and it is one error message that never has to be written.
+
+    A folder is offered only if there is readable data somewhere under it, and it
+    carries the count. Six identical folder rows is the shape this screen has to
+    resolve in one look, and the count is what resolves it — it is a number of
+    files, not a measurement of anything in them, so it ranks nothing
+    (`DESIGN.md`).
+
+    **It draws its own rows rather than reusing `artifact-row`.** That component
+    is tuned for the 260px left pane — 12px mono, no border, hover as its only
+    affordance, indent guides for a tree. Dropped into a 560px form it read as
+    text that happened to be indented, and nothing on it said it could be
+    clicked. These rows are a bordered list with a trailing chevron: the chevron
+    is what says *this goes somewhere*.
+    """
+    with ui.element("div").classes("picker"):
+        _crumbs()
+        choices = engine.folder_choices(APP, APP.browse_at)
+        for choice in choices:
+            _folder_row(choice)
+        if not choices:
+            with ui.element("div").classes("picker-empty"):
+                c.caption(NO_SUBFOLDERS)
+    here = len(engine.data_files_in(APP, APP.browse_at))
+    if not here and not engine.folder_choices(APP, APP.browse_at):
+        c.empty_note(NOTHING_HERE.format(formats=_formats()))
+    with ui.element("div").classes("add-section-actions"):
+        c.button(
+            _use_label(),
+            lambda: _choose_folder(APP.browse_at),
+            kind="primary" if here else "tertiary",
+            enabled=bool(here),
+        )
+        if APP.repicking:
+            # Re-picking has to be abandonable, or "change the folder" is a
+            # button that can only ever lose the setting you already had.
+            c.button("Keep " + _folder_label(APP.data_dir), _keep_folder, kind="secondary")
+    c.caption(_here_note(here))
+
+
+def _folder_row(choice) -> None:
+    """One folder you can open: name, how much data is under it, and a chevron."""
+    row = ui.element("div").classes("picker-row")
+    with row:
+        ui.icon("folder").classes("picker-row-icon")
+        ui.label(choice.name).classes("picker-row-name")
+        ui.label(c.count(choice.files, "file")).classes("picker-row-meta")
+        ui.icon("chevron_right").classes("picker-row-go")
+    row.on("click", lambda rel=choice.rel: _browse_to(rel))
+
+
+def _crumbs() -> None:
+    """The way back up, as the path you came down.
+
+    A back button would only undo one step; the trail says where you are, which
+    on a screen whose whole job is "which folder" is the more useful of the two.
+
+    The folder you are *in* is not a link. It was a button like the rest, which
+    offered you a trip to where you already were and made the trail read as a row
+    of chips rather than as a path.
+    """
+    trail = engine.crumbs(APP, APP.browse_at)
+    with ui.element("div").classes("picker-crumbs"):
+        for i, (rel, name) in enumerate(trail):
+            if i:
+                ui.icon("chevron_right").classes("crumb-sep")
+            if i == len(trail) - 1:
+                ui.label(name).classes("crumb crumb--current")
+                continue
+            crumb = ui.label(name).classes("crumb")
+            crumb.on("click", lambda r=rel: _browse_to(r))
+
+
+def _chosen_folder() -> None:
+    """The folder, and every readable file under it, ticked.
+
+    **All ticked, because "this folder is my data" is a statement about the
+    folder.** Un-ticking is for the exception — the fixture, the export someone
+    left behind — and a list that arrives empty would make the ordinary case
+    thirty clicks.
+
+    A file already in the catalog is **not offered at all** — greyed, un-tickable,
+    and saying it is done. Re-profiling is idempotent (`catalog` → the update rule
+    preserves prose and roles), so it is not *wrong* to run it again; it is a
+    minute of work on real extracts that nobody asked for, and a tickable box is
+    this screen suggesting you spend it. Re-indexing one file stays available
+    where it belongs — on that source, in the workflow pane.
+    """
+    files = engine.data_files_in(APP, APP.data_dir)
+    with ui.element("div").classes("chosen-folder"):
+        ui.icon("folder").classes("chosen-folder-icon")
+        with ui.element("div").classes("chosen-folder-body"):
+            ui.label(_folder_label(APP.data_dir)).classes("chosen-folder-name")
+            ui.label(c.count(len(files), "file")).classes("chosen-folder-meta")
+        c.button("Change…", _repick, kind="secondary", micro=True)
+    if not files:
+        c.empty_note(NOTHING_HERE.format(formats=_formats()))
         return
-    dialog.open()
+    indexed = _indexed_paths()
+    todo = [p for p in files if _rel(p).as_posix() not in indexed]
+    with ui.element("div").classes("pick-head"):
+        ui.label(PICK_WHICH if todo else ALL_DONE).classes("pick-head-label")
+        if todo:
+            c.button("All", lambda: _tick_all(todo, True), micro=True)
+            c.button("None", lambda: _tick_all(todo, False), micro=True)
+    with ui.element("div").classes("pick-list"):
+        for path in files:
+            _pick_row(path, indexed)
 
 
-#: Open the file picker from anywhere on the drop box, not only from Quasar's
-#: `+`. A dashed box that says "click to pick" has to be clickable, all of it.
-#: Runs client-side, so a click on the native button isn't handled twice.
-_PICK_ON_CLICK = (
-    "(e) => {{ if (e.target.closest('.q-btn, input')) return; "
-    "getHtmlElement({id}).querySelector('input[type=file]').click(); }}"
-)
+def _pick_row(path: Path, indexed: set[str]) -> None:
+    """One file to profile, or one already done.
 
+    **The path is the checkbox's own label**, so the whole row is one hit target
+    rather than a 15px box beside some text you cannot click. That is also why it
+    is not a row-with-a-click-handler: the handler and the box would both fire on
+    the box and cancel each other out.
 
-def dropzone(*, on_done=None) -> None:
-    with ui.element("div").classes("stack-md w-full"):
-        with ui.element("div").classes("dropzone w-full"):
-            upload = ui.upload(
-                multiple=True,
-                auto_upload=True,
-                on_multi_upload=lambda e: _dropped(e.files, on_done),
-                on_rejected=lambda _: _rejected(),
-                label=_DROP_LABEL,
-            ).props("flat")
-            upload.on("click", js_handler=_PICK_ON_CLICK.format(id=upload.id))
-
-        _destination_field()
-        _import_field(on_done)
-        _import_plan(on_done)
-        _interpret_toggle()
-
-
-def _destination_field() -> None:
-    """Where in the project what you add will land.
-
-    **The one decision §2.7 added, and it belongs to the operator.** Data lives in
-    the repo, and portia's job is to say plainly where it is about to put a copy
-    rather than to pick a folder on your behalf and mention it afterwards. It
-    governs both routes — a browser drop and an import from disk — because "where
-    does this go" should not depend on how the file got here.
+    An already-indexed file keeps its place in the list — it is still part of
+    "what is under this folder" — but its box is disabled, so the row states a
+    fact instead of offering an action.
     """
+    rel = _rel(path).as_posix()
+    done = rel in indexed
+    with ui.element("div").classes("pick-row pick-row--done" if done else "pick-row"):
+        box = ui.checkbox(rel, value=not done and rel not in APP.unpicked).classes("p-check")
+        box.props("dense disable" if done else "dense")
+        if done:
+            ui.label(INDEXED_NOTE).classes("pick-row-note")
+        else:
+            box.on_value_change(lambda e, r=rel: _tick(r, e.value))
+
+
+def _indexed_paths() -> set[str]:
+    """Which files already have a catalog entry, by their recorded path."""
+    return {str(entry.get("source") or "") for entry in APP.sources.values()}
+
+
+def _ticked() -> list[Path]:
+    """The files this screen would profile — what is under the folder, less what
+    was un-ticked and less what is already in the catalog.
+
+    Recomputed from disk rather than remembered, so a file imported into the
+    middle of the folder is included without a second click. Already-indexed
+    files are excluded *here* as well as being un-tickable in the list, so the
+    button's count can never disagree with what the rows offer.
+    """
+    if not APP.data_dir:
+        return []
+    files = engine.data_files_in(APP, APP.data_dir)
+    skip = APP.unpicked | _indexed_paths()
+    return [p for p in files if _rel(p).as_posix() not in skip]
+
+
+def _tick(rel: str, on: bool) -> None:
+    """One checkbox. Only the actions are redrawn — the row already shows itself,
+    and rebuilding the list under the pointer that just clicked it is churn."""
+    APP.tick(rel, on)
+    _actions.refresh()
+
+
+def _tick_all(files: list[Path], on: bool) -> None:
+    APP.tick_all({_rel(p).as_posix() for p in files}, on)
+    _refresh()
+
+
+def _browse_to(rel: str) -> None:
+    APP.browse_at = rel
+    _refresh()
+
+
+def _choose_folder(rel: str) -> None:
+    """Record the data folder — durably, in ``project.yaml``.
+
+    Not a window setting: it decides what the left pane draws as data for every
+    session after this one, and where an import lands by default. It is written
+    where the brief is written, and read in the same diff. `engine.set_data_dir`
+    is what normalises the project root to ``"."`` — see there for why the empty
+    string is a different answer rather than the same one.
+    """
+    engine.set_data_dir(rel, APP)
+    APP.repicking = False
+    APP.indexed = None
+    _seed_ticks()
+    _refresh()
+
+
+def _repick() -> None:
+    APP.repicking = True
+    APP.browse_at = str(Path(APP.data_dir).parent) if "/" in APP.data_dir else ""
+    APP.browse_at = "" if APP.browse_at == "." else APP.browse_at
+    _refresh()
+
+
+def _keep_folder() -> None:
+    APP.repicking = False
+    _refresh()
+
+
+def _seed_ticks() -> None:
+    """Tick everything under the data folder except what is already profiled.
+
+    Called when the folder is chosen and whenever the dialog is reopened — the
+    two moments the list is being looked at fresh. Not on every render: a tick
+    the operator cleared has to survive the next redraw, which is the whole
+    reason the state is a set of *exclusions* rather than a set of selections.
+    """
+    indexed = _indexed_paths()
+    APP.unpicked = frozenset(
+        rel
+        for rel in (_rel(p).as_posix() for p in engine.data_files_in(APP, APP.data_dir))
+        if rel in indexed
+    )
+
+
+def _use_label() -> str:
+    """The button names the folder it would choose, and at the top it says which.
+
+    "Use this folder" at the project root is the one place the phrase is
+    ambiguous — it reads as a default rather than as the decision it is, which
+    is *the data for this project is everything readable in the repo*.
+    """
+    at = APP.browse_at
+    return f"Use {Path(at).name}" if at else USE_ROOT
+
+
+def _folder_label(rel: str) -> str:
+    """A data folder as a path, or the words for the project root."""
+    return f"{rel}/" if rel and rel != "." else PROJECT_ROOT
+
+
+def _here_note(here: int) -> str:
+    if not here:
+        return PICKER_HINT
+    return PICKER_COUNT.format(files=c.count(here, "file"), where=_folder_label(APP.browse_at))
+
+
+# --- route two: data that is not in the repo yet ----------------------------
+
+
+def _from_outside() -> None:
+    """Folded away until it is wanted, because it is the second route in.
+
+    A project whose data is already in the repo should not have to read past an
+    importer to get to the button. It is a disclosure rather than a separate
+    screen because both routes feed one index, and having imported a file you
+    still want to see it land in the list above.
+
+    **The header is the same size and weight as the section above it**, so folded
+    it reads as the second of two sections rather than as a stray line of text.
+    It carries `add-section-toggle`, which is what moves the caret next to the
+    title: `c.collapsed`'s default puts it at the far right, which is right for a
+    tool result in a 400px transcript and, across a 560px form, left the caret
+    and the word it belongs to half a screen apart.
+    """
+    with ui.element("div").classes("add-section add-section--folding"):
+        exp = c.collapsed(IMPORT_HEADING, _import_body).classes("add-section-toggle")
+        exp.value = APP.import_open
+        exp.on_value_change(lambda e: setattr(APP, "import_open", bool(e.value)))
+
+
+def _import_body() -> None:
+    with ui.element("div").classes("import-body"):
+        ui.label(IMPORT_WHY).classes("add-section-hint")
+        _import_field()
+        _import_destination()
+        _import_plan()
+
+
+def _import_field() -> None:
+    """One button: choose the files, and the plan appears. Nothing is copied here.
+
+    `PIPELINE.md` §2.7 makes bringing outside data in a deliberate step — you
+    choose where it lands, portia states exactly what it is about to copy and to
+    where, and only then does it copy. This is the choosing; `_import_plan` is
+    the stating and the Index button is the doing.
+
+    **The typed path field and its *Plan import* button are gone** (2026-08-03).
+    They were two controls for one act: the chooser already planned on return, so
+    the button existed only to commit whatever was in the box, and the box only
+    existed to feed the button. What it cost was a section with three controls in
+    a row where the honest shape is one — and a field whose placeholder had to
+    explain a glob syntax to justify itself.
+
+    The field was also the way in on a machine with no native chooser, so that
+    case now says so rather than showing a section that cannot do anything.
+    """
+    if not engine.can_browse():
+        c.empty_note(NO_CHOOSER)
+        return
     with ui.element("div").classes("row-gap-sm w-full"):
-        c.caption("Destination")
+        c.button("Choose files…", _choose_to_import, icon="folder_open")
+
+
+def _import_destination() -> None:
+    """Where it lands: with the rest of the data, or somewhere you name.
+
+    Defaulting to the folder chosen above is the whole point — an import that
+    lands beside the data is one folder layout, and one that lands in a second
+    place is two. With no folder chosen the default is to create ``data/``,
+    because a file arriving at the project root is not a decision anyone made.
+    """
+    with ui.element("div").classes("stack-xs w-full"):
         (
-            ui.input(placeholder=DATA_DIR)
-            .classes("p-field p-field-mono flex-1")
-            .props("borderless")
-            .bind_value(APP, "import_destination")
+            ui.checkbox(DESTINATION_DEFAULT.format(where=_default_destination()))
+            .classes("p-check")
+            .props("dense")
+            .bind_value(APP, "import_to_data_dir")
+            .on_value_change(_refresh)
         )
-        c.caption(_DESTINATION_SCOPE)
+        if not APP.import_to_data_dir:
+            (
+                ui.input(placeholder=DATA_DIR)
+                .classes("p-field p-field-mono w-full")
+                .props("borderless")
+                .bind_value(APP, "import_destination")
+            )
+        c.caption(DESTINATION_SCOPE)
 
 
-def _import_field(on_done) -> None:
-    """The route for data that is outside the repo: choose it, then see the plan.
-
-    Nothing is copied here. `PIPELINE.md` §2.7 makes bringing outside data in a
-    deliberate step — you choose where it lands, portia states exactly what it is
-    about to copy and to where, and only then does it copy. This half is the
-    choosing; `_import_plan` is the stating.
-    """
-    with ui.element("div").classes("row-gap-sm w-full"):
-        if engine.can_browse():
-            c.button("Choose files…", lambda: _choose_to_import(), icon="folder_open", micro=True)
-        path = (
-            ui.input(placeholder=_PATH_PLACEHOLDER)
-            .classes("p-field p-field-mono flex-1")
-            .props("borderless")
-        )
-        c.button("Plan import", lambda: _plan_import(path.value), micro=True)
+def _default_destination() -> str:
+    """What the checkbox is offering, spelled the way it will appear on disk."""
+    return _folder_label(APP.data_dir) if APP.data_dir and APP.data_dir != "." else f"{DATA_DIR}/"
 
 
 @ui.refreshable
-def _import_plan(on_done=None) -> None:
-    """What is about to be copied, where to, and the two ways out of it.
+def _import_plan() -> None:
+    """What is about to be copied, and where to. Every pair, never a summary.
 
-    Every pair is listed rather than summarised. "3 files into data/" is a
-    description of a plan; this is the plan, and the difference is the one time
-    a name collision or a wrong folder is cheap to notice.
+    "3 files into data/" is a description of a plan; this is the plan, and the
+    difference is the one time a name collision or a wrong folder is cheap to
+    notice. The plan is not acted on here — the Index button below copies it and
+    profiles it in one step, so there is exactly one button on this screen that
+    writes anything.
     """
     if APP.import_error:
         with ui.element("div").classes("write-confirm"):
@@ -434,23 +700,21 @@ def _import_plan(on_done=None) -> None:
     if not APP.import_plan:
         return
     with ui.element("div").classes("write-confirm"):
-        ui.label(_IMPORT_HEADING.format(n=c.count(len(APP.import_plan), "file"))).classes(
+        ui.label(PLAN_HEADING.format(n=c.count(len(APP.import_plan), "file"))).classes(
             "t-body-strong c-ink"
         )
-        c.caption(_IMPORT_COPY_ONLY)
+        c.caption(IMPORT_COPY_ONLY)
         with ui.element("div").classes("added-list"):
             for src, dst in APP.import_plan:
                 with ui.element("div").classes("added-row"):
                     c.mono(str(src), small=True)
                     ui.icon("arrow_forward").classes("fact-icon")
-                    c.mono(str(_relative(dst)), small=True)
-        with ui.element("div").classes("row-gap-sm"):
-            c.button("Copy and index", lambda: _do_import(on_done), kind="primary")
-            c.button("Cancel", _clear_import, kind="secondary")
+                    c.mono(str(_rel(dst)), small=True)
+        c.button("Cancel this import", _clear_import, kind="secondary", micro=True)
 
 
-def _relative(path: Path) -> Path:
-    """A destination as the project sees it — the repo-relative path it will have."""
+def _rel(path: Path) -> Path:
+    """A path as the project sees it — the repo-relative one it will have."""
     try:
         return path.relative_to(APP.root)
     except ValueError:
@@ -458,51 +722,40 @@ def _relative(path: Path) -> Path:
 
 
 async def _choose_to_import() -> None:
+    """The chooser, and then the plan. A cancelled dialog is an answer of "no".
+
+    `browse_for_files` comes back empty on cancel as well as on no-chooser, and
+    neither is a thing to report — planning nothing and saying so would turn
+    closing a dialog into an error message.
+    """
     chosen = await engine.browse_for_files()
     if chosen:
-        _plan_import("\n".join(str(p) for p in chosen))
+        _plan_import(chosen)
 
 
-def _plan_import(raw: str) -> None:
+def _plan_import(paths: list[Path]) -> None:
     """Work out the plan and show it. Writes nothing."""
     APP.import_plan, APP.import_error = [], ""
-    targets = [line.strip() for line in (raw or "").splitlines() if line.strip()]
-    if not targets:
-        APP.import_error = _NOTHING_CHOSEN
-        _import_plan.refresh()
-        return
     try:
         pairs = []
-        for target in targets:
-            pairs += engine.plan_import(target, APP.import_destination, APP)
+        for path in paths:
+            pairs += engine.plan_import(str(path), APP.import_dir(DATA_DIR), APP)
     except ValueError as exc:
         APP.import_error = str(exc)
     else:
         APP.import_plan = pairs
+    APP.indexed = None
     _import_plan.refresh()
+    _actions.refresh()
 
 
 def _clear_import() -> None:
     APP.import_plan, APP.import_error = [], ""
     _import_plan.refresh()
+    _actions.refresh()
 
 
-async def _do_import(on_done) -> None:
-    """Copy what the plan said, then index it. The originals are left alone.
-
-    **The panel is redrawn last, and that is load-bearing.** `_import_plan` builds
-    the button this is the handler for, so refreshing it here deletes the slot the
-    handler is running in — every `ui.notify` after that point raises, and the
-    first version did it before the copy's own notification. The files landed and
-    the indexing never ran, which is worse than either failing alone.
-    """
-    pairs, APP.import_plan = APP.import_plan, []
-    if not pairs:
-        return
-    copied = await engine.import_files(pairs, APP)
-    ui.notify(f"copied {c.count(len(copied), 'file')} into {APP.import_destination}/")
-    await _index_and_interpret(copied, on_done)
-    _import_plan.refresh()
+# --- what it costs ----------------------------------------------------------
 
 
 def _interpret_toggle() -> None:
@@ -514,61 +767,156 @@ def _interpret_toggle() -> None:
     bound state — picking here is picking for the copilot too, which is why they
     are not a second setting.
     """
-    with ui.element("div").classes("stack-xs"):
+    with ui.element("div").classes("add-section add-section--cost"):
         (
             ui.switch("Have the copilot read what each source is")
             .classes("p-toggle")
             .bind_value(APP, "interpret")
             # The model controls appear with the cost they belong to, so turning
             # this off has to take them away rather than leave a dead setting.
-            .on_value_change(_refresh_shell)
+            .on_value_change(_refresh)
         )
         if APP.interpret:
-            c.model_effort(APP, _set_indexing_effort)
-        c.caption(_INTERPRET_COST)
+            with ui.element("div").classes("cost-controls"):
+                c.model_effort(APP, _set_indexing_effort)
+        ui.label(INTERPRET_COST).classes("add-section-hint")
 
 
 def _set_indexing_effort(effort: str) -> None:
     APP.effort = effort
-    _refresh_shell()
+    _refresh()
 
 
-def _refresh_shell() -> None:
-    from portia.ui import app as app_module
+@ui.refreshable
+def _progress() -> None:
+    """What indexing is doing, in words, while it does it.
 
-    app_module.shell.refresh()
-
-
-async def _dropped(files, on_done) -> None:
-    """A browser drop. It lands at the chosen destination, like an import does.
-
-    No plan step: the browser has already handed us the bytes, so there is nothing
-    left to confirm — the copy the operator would be agreeing to has happened. The
-    destination still applies, because where a file goes should not depend on how
-    it arrived.
+    Its own refreshable so it can be redrawn between files without rebuilding the
+    file list underneath it — and profiling thirty real extracts is a minute of a
+    window that would otherwise say nothing at all.
     """
-    paths = []
-    for upload in files:
-        paths.append(await engine.store_upload(upload, APP, APP.import_destination))
-    await _index_and_interpret(paths, on_done)
+    if not APP.indexing_status:
+        return
+    with ui.element("div").classes("row-gap-sm indexing-status"):
+        ui.spinner(size="sm")
+        c.text(APP.indexing_status, color="c-mute")
 
 
-def _rejected() -> None:
-    """A refused file has to say so.
+# --- the one action, and the way out ----------------------------------------
 
-    The browser marks every file in the batch with a red triangle and explains
-    nothing — and because the drop is one request, one refusal reddens all
-    twenty. Whatever the reason, it belongs on screen rather than in a colour.
+
+@ui.refreshable
+def _actions(*, in_dialog: bool = False) -> None:
+    """Index what is outstanding, or — when nothing is — go and use it.
+
+    **One primary at a time**, which is `DESIGN.md`'s one-accent-fill rule doing
+    real work here: while there are files to profile the accent is on profiling
+    them, and the moment there are none it moves to the way out. A screen
+    offering both at once is a screen asking you to guess which one it wanted.
+
+    **The dialog never takes the accent for its way out**, because there it is a
+    Close rather than a destination — the workspace is already behind it, and an
+    accented Close is the accent landing on the one control that does nothing.
     """
-    ui.notify(_UPLOAD_REJECTED)
+    outstanding = len(_ticked()) + len(APP.import_plan)
+    with ui.element("div").classes("row-gap-sm"):
+        if outstanding:
+            c.button(
+                f"Index {c.count(outstanding, 'file')}",
+                lambda: _index_now(in_dialog=in_dialog),
+                kind="primary",
+                icon=c.INDEX_ICON,
+            )
+            if APP.sources or in_dialog:
+                c.button(_leave_label(in_dialog), lambda: _leave(in_dialog), kind="secondary")
+        elif APP.sources and not in_dialog:
+            c.button(
+                _leave_label(in_dialog),
+                lambda: _leave(in_dialog),
+                kind="primary",
+                icon="arrow_forward",
+            )
+        elif in_dialog:
+            c.button(_leave_label(True), lambda: _leave(True), kind="secondary")
+        else:
+            # Not a gate, unlike the brief: an empty project is a legitimate
+            # place to stand, and Add data waits in the left pane.
+            c.button("Skip for now", lambda: _leave(in_dialog), kind="secondary")
+        if not in_dialog:
+            c.button("Back", _back_to_picker, kind="secondary")
+    c.caption(_action_note(outstanding))
 
 
-async def _index_and_interpret(paths: list[Path], on_done) -> None:
+def _leave_label(in_dialog: bool) -> str:
+    return "Close" if in_dialog else "Open the workspace"
+
+
+def _action_note(outstanding: int) -> str:
+    """What the button is about to do, or what the last one did.
+
+    **The breakdown partitions the button's count; it does not describe two
+    separate jobs.** An imported file is profiled like every other, so splitting
+    the line into "copies 1" and "profiles 22" made the two numbers look like
+    they should add up to the button's 23 when in fact 23 files are profiled and
+    one of them also had to be copied first. The parts say where each file came
+    *from* — outside the repo, or already in it — which is a real partition and
+    sums to the total the button names.
+
+    It also says whether a model turn is coming, because the turn is deferred to
+    the workspace and a cost you pay after leaving a screen is a cost that screen
+    still has to name.
+    """
+    if outstanding:
+        planned = len(APP.import_plan)
+        here = outstanding - planned
+        parts = []
+        # Bare numbers in the parts: the lead already says "files", and repeating
+        # the unit in each part reads as three separate counts of three things.
+        if planned:
+            parts.append(COPY_PART.format(n=planned, where=APP.import_dir(DATA_DIR)))
+        if here:
+            parts.append(ALREADY_HERE.format(n=here))
+        return PROFILE_ALL.format(n=c.count(outstanding, "file"), parts=" · ".join(parts))
+    if APP.sources and APP.interpret and APP.pending_interpret:
+        return READS_NEXT.format(n=c.count(len(APP.pending_interpret), "source"))
+    if APP.indexed is not None:
+        return PROFILED.format(n=c.count(APP.indexed, "source"))
+    if APP.sources:
+        return ADD_MORE_LATER
+    return SKIP_HINT
+
+
+async def _index_now(*, in_dialog: bool = False) -> None:
+    """Copy what was planned, then profile everything ticked. One button, in order.
+
+    The copy is first because its results join the profiling — importing three
+    files and then having to tick them in a list that has just rebuilt is the
+    kind of second step this screen was rewritten to remove.
+    """
+    copied: list[Path] = []
+    if APP.import_plan:
+        pairs, APP.import_plan = APP.import_plan, []
+        copied = await engine.import_files(pairs, APP)
+        ui.notify(f"copied {c.count(len(copied), 'file')} into {APP.import_dir(DATA_DIR)}/")
+    # Deduplicated by path: an import into the data folder lands in a place the
+    # ticked list was read from a moment ago, and profiling it twice would be a
+    # minute of work for one entry.
+    seen, paths = set(), []
+    for path in [*_ticked(), *copied]:
+        resolved = path.resolve()
+        if resolved not in seen:
+            seen.add(resolved)
+            paths.append(path)
+    await _index_and_interpret(paths, in_dialog=in_dialog)
+
+
+async def _index_and_interpret(paths: list[Path], *, in_dialog: bool = False) -> None:
     """Profile first — free, deterministic, always. Then, optionally, a turn.
 
-    ``on_done`` is the dialog's close. Its presence is also what tells us where
-    we are: from the dialog the workspace is already open, so the turn can run
-    immediately and be watched; from the add-data screen it waits for Continue.
+    From the **dialog** the workspace is already open, so the interpretation turn
+    can run immediately and be watched. From the **screen** it waits for the way
+    out, because this surface has no transcript and paying for a turn you cannot
+    see is how the first version of this spent money on a blank page.
     """
     from portia.ui import app as app_module
     from portia.ui import artifacts
@@ -596,17 +944,37 @@ async def _index_and_interpret(paths: list[Path], on_done) -> None:
 
     ui.notify(f"profiled {c.count(len(names), 'source')}")
     APP.pending_interpret = [*APP.pending_interpret, *names]
+    APP.indexed = len(names)
+    # Profiled is done: it drops out of the outstanding list, which is what turns
+    # the primary action into the way out. Same rule as an already-indexed file
+    # arriving un-ticked, applied a moment later.
+    APP.unpicked = APP.unpicked | {_rel(p).as_posix() for p in paths}
 
-    from_dialog = on_done is not None
-    if from_dialog:
-        on_done()
-    app_module.shell.refresh()
-    artifacts.pane.refresh()
-
-    # From the dialog the workspace is already on screen, so the turn is visible
-    # and can start now. From the add-data screen it waits for Continue.
-    if from_dialog:
+    if in_dialog:
+        _close_dialog()
+        app_module.shell.refresh()
+        artifacts.pane.refresh()
         await _interpret_pending()
+        return
+    _refresh()
+
+
+async def _leave(in_dialog: bool) -> None:
+    """Out of this surface. From the screen that means into the workspace.
+
+    The interpretation turn fires *here*, after the workspace is up, rather than
+    on this screen: the add-data surface has no transcript, and the first version
+    of this paid for a turn you then watched on a blank page. It lands in the
+    Indexing tab, where it is legible.
+    """
+    from portia.ui import app as app_module
+
+    if in_dialog:
+        _close_dialog()
+        return
+    APP.left_add_data = True
+    app_module.shell.refresh()
+    await _interpret_pending()
 
 
 async def _interpret_pending() -> None:
@@ -623,6 +991,74 @@ async def _interpret_pending() -> None:
         kind=state.INDEXING,
         label=", ".join(names),
     )
+
+
+# --- the same surface, as a dialog ------------------------------------------
+
+#: The settings panel's width. Quasar sizes a dialog to its content, and a panel
+#: of controls has no natural width — without this it collapses to a few hundred
+#: pixels of nothing. **The add-data panel no longer uses it**: that one is a
+#: card with its own width in `portia.css`, which is where a width belongs; this
+#: survives because `settings.py` still has the problem it was written for.
+DIALOG_WIDTH = "width:560px;max-width:92vw"
+
+#: The add-data dialog for this page. Built once, at page level.
+_ADD_DIALOG: ui.dialog | None = None
+
+
+def build_add_dialog() -> None:
+    """Create the add-data dialog. **Called once per page, never from a pane.**
+
+    `ui.dialog` parents itself to the client layout and leaves a hidden canary
+    element in whatever slot is current, whose job is to delete the dialog when
+    that slot goes away. Build one inside a `@ui.refreshable` and the canary
+    lives in the refreshable's container — so the first refresh takes the dialog
+    with it and `open()` afterwards silently does nothing. NiceGUI says as much
+    ("create it only once and then reuse it"); this is what that means in
+    practice, and it cost an afternoon of a button that looked wired and wasn't.
+    """
+    global _ADD_DIALOG
+    # No scale-in. Quasar's default animation leaves the panel at `scale(0)`
+    # until a rAF fires, so a throttled tab shows an open dialog with nothing in
+    # it — and a quiet developer surface has no use for a popping overlay anyway.
+    with ui.dialog().props("transition-duration=0") as dialog:
+        # The same card the screen draws. It was already a floating panel of
+        # bounded height with its own scroll; the screen having been a full-page
+        # column was the odd one out, and giving them one class is what stops the
+        # two surfaces drifting apart the next time either is touched.
+        # No inline width: `add-data-card` sizes itself in both places it appears,
+        # and `portia.css` out-specifies Quasar's 560px cap on a dialog's child.
+        with ui.element("div").classes("add-data-card"):
+            panel(in_dialog=True)
+    _ADD_DIALOG = dialog
+
+
+def open_add_dialog() -> None:
+    """Show it, with the file list read fresh. Says so if it isn't there.
+
+    The ticks are re-seeded on open rather than kept from last time: coming back
+    to this panel is coming back to the question "what is not profiled yet", and
+    a stale set of exclusions would answer a question about the project as it was
+    an hour ago.
+    """
+    if _ADD_DIALOG is None or _ADD_DIALOG.is_deleted:
+        ui.notify(NO_DIALOG)
+        return
+    APP.indexed = None
+    _seed_ticks()
+    try:
+        _refresh()
+    except Exception as exc:  # noqa: BLE001 — never worth a dead add-data panel
+        ui.notify(STALE_PANEL.format(why=type(exc).__name__))
+    _ADD_DIALOG.open()
+
+
+def _close_dialog() -> None:
+    if _ADD_DIALOG is not None and not _ADD_DIALOG.is_deleted:
+        _ADD_DIALOG.close()
+
+
+# --- shared helpers ---------------------------------------------------------
 
 
 def _is_supported(path: Path) -> bool:
@@ -656,30 +1092,78 @@ def _default_model() -> str:
     return DEFAULT_MODEL
 
 
+# --- the words --------------------------------------------------------------
+
 _OPEN_SUBTITLE = "Open a project directory. If it doesn't exist yet, it gets created."
 _OPEN_NEW = "Type a path instead"
 
 CONTEXT_WHY = (
-    "This is what makes a column's meaning decidable. A generic brief yields generic judgment."
+    "A few sentences, the way you would describe this project to another engineer. "
+    "The copilot measures the files itself — this is the part it cannot."
 )
-CONTEXT_PLACEHOLDER = "Describe the project in your own words…"
+CONTEXT_PLACEHOLDER = "The project in a few sentences…"
 CONTEXT_SHAPE = (
-    "Say what the business does and what you are trying to produce.",
-    "Say what one row means, and which source is authoritative for what.",
-    "Say what the result gets used for, and what would make it wrong.",
+    "The domain and the goal — what the work is for.",
+    "How you model it: what you produce, at what grain, over what horizon.",
+    "Roughly what data you have, in the names your team uses for it.",
+    "Not the schema, and not a description of the files.",
 )
-_SOURCES_WHY = "They are copied into the project and profiled straight away."
-_UPLOAD_REJECTED = (
-    'the browser refused those files — add them with "Add from a path already on disk" instead, '
-    "which copies them without sending them through the browser"
+#: A worked brief, from a domain that is plainly not the one on screen.
+#:
+#: `DESIGN.md` forbade *any* example here, and the reason was sound: an example
+#: that could pass for an answer about the data at hand is one people edit rather
+#: than replace. What it did not distinguish is **register** from **content** —
+#: and register is the whole difficulty of this box. Asked abstractly for context,
+#: people write a schema; shown four sentences of hotel revenue forecasting in a
+#: pharmacy project, nobody mistakes it for their own and everybody sees the
+#: altitude. The rule is narrowed rather than dropped: the example must be from
+#: another industry, and it is styled as guidance, not seeded into the field.
+#:
+#: Sentence per line and joined, rather than one implicitly-concatenated literal:
+#: the parser folds those into a single constant, and `test_agent_prompts` reads
+#: any constant over 200 characters as prompt text that escaped `prompts/`. The
+#: check is blunt on purpose and this is the honest way past it — the example is
+#: read by a person, never by the model.
+CONTEXT_EXAMPLE = " ".join(
+    (
+        "For example — “A revenue forecasting project for a hotel group.",
+        "We predict RevPAR per hotel by forecasting occupancy and ADR separately,",
+        "at M+1, M+2 and M+3.",
+        "The data is hotel reference information, on-the-books bookings, FX rates",
+        "and a third-party events feed.”",
+    )
 )
-_CONTINUE_HINT = "you can add more later from the left pane"
-_SKIP_HINT = "you can add data later from the left pane"
-_DROP_LABEL = "Drop files here, or click to pick"
-_PATH_PLACEHOLDER = "a file, directory or glob anywhere on disk"
-_DESTINATION_SCOPE = "inside the project — data lives in the repo"
-_IMPORT_HEADING = "About to copy {n}:"
-_IMPORT_COPY_ONLY = "A copy. The originals are not moved, deleted or changed."
-_NOTHING_CHOSEN = "Nothing chosen yet — pick some files, or type a path."
-_INTERPRET_COST = "Profiling is free and always happens. This costs a model turn."
-_NO_DIALOG = "The add-data panel didn't load — reload the page."
+
+ADD_WHY = "portia reads {formats}. Point it at the data in this repo, and bring in what is outside."
+IN_REPO_HEADING = "Data in this repo"
+IN_REPO_WHY = "Which folder holds this project's data? Open a folder to look inside it."
+NO_SUBFOLDERS = "No folders below this one hold data portia can read."
+PICK_WHICH = "Profile these files"
+ALL_DONE = "Everything here is already indexed"
+PROJECT_ROOT = "the project root"
+USE_ROOT = "Use the whole repo"
+CHOSEN_NOTE = "this project's data"
+INDEXED_NOTE = "already indexed"
+PICKER_HINT = "Nothing readable here yet — open a folder, or import data below."
+PICKER_COUNT = "{files} under {where}, at any depth."
+NOTHING_HERE = "Nothing portia can read here. Open a folder, or import data below."
+IMPORT_HEADING = "Import external data"
+IMPORT_WHY = "Data files from anywhere on disk. They are copied into the repo, never moved."
+DESTINATION_DEFAULT = "Put it in {where}"
+DESTINATION_SCOPE = "inside the project — data lives in the repo"
+PLAN_HEADING = "About to copy {n}:"
+IMPORT_COPY_ONLY = "A copy. The originals are not moved, deleted or changed."
+NO_CHOOSER = (
+    "Importing needs the system file chooser, which this machine does not have. "
+    "Copy the files into the repo yourself, then pick the folder above."
+)
+INTERPRET_COST = "Profiling is free and always happens. This costs a model turn."
+COPY_PART = "{n} copied in to {where}/"
+ALREADY_HERE = "{n} already in the repo"
+PROFILE_ALL = "Profiles {n} — {parts}"
+PROFILED = "Profiled {n}. Everything here is indexed."
+READS_NEXT = "the copilot reads {n} once the workspace is open"
+ADD_MORE_LATER = "you can add more later from the left pane"
+SKIP_HINT = "you can add data later from the left pane"
+NO_DIALOG = "The add-data panel didn't load — reload the page."
+STALE_PANEL = "Add data may be showing stale values ({why}) — reload the page to be sure."

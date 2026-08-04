@@ -27,7 +27,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from portia.core.io import connect, load_table
+from portia.core.io import connect, load_table, rescans
 from portia.core.serialize import round_float, to_jsonable
 from portia.core.table import Table, quote_ident
 
@@ -81,6 +81,12 @@ _DUCKDB_STRINGS = frozenset({"VARCHAR", "CHAR", "BPCHAR", "TEXT", "STRING", "UUI
 _DUCKDB_TEMPORAL = ("DATE", "TIME", "TIMESTAMP", "INTERVAL")
 
 
+#: Where one parse of a re-scanning file is kept, for the length of one profile.
+#: The connection is created and closed by :func:`profile_path`, so the table
+#: dies with it and nothing is left on disk.
+_PARSED_ONCE = "_portia_profile_source"
+
+
 def profile_path(path: str | Path, **load_kwargs: Any) -> dict:
     """Load a data file and profile it, without a project around it.
 
@@ -90,11 +96,40 @@ def profile_path(path: str | Path, **load_kwargs: Any) -> dict:
     """
     con = connect()
     try:
-        prof = profile(load_table(path, con), **load_kwargs)
+        prof = profile(_source(path, con), **load_kwargs)
     finally:
         con.close()
     prof["source"] = str(path)
     return prof
+
+
+def _source(path: str | Path, con: Any) -> Table:
+    """The table to profile: the file itself, or one parse of it.
+
+    **A profile is one scan plus two questions per column.** Every scalar
+    statistic comes from a single pass (:func:`_stat_exprs`), but `_table_samples`
+    and `_table_top` each need their own query, and on a reader that re-parses
+    its file that is a full parse per column.
+
+    Measured on a real 40 MB, 34,214-row, **191-column** CSV: **108 s**, against
+    **1.57 s** for the same rows and columns stored as Parquet — 69×, and 43% of
+    the wall time of indexing a 6.1 GB, 285M-row project that the CSV was 0.01%
+    of. Parsing once first is what closes that gap; the per-column queries were
+    never the expensive part, the parse behind each of them was.
+
+    **Only for formats that re-scan.** Parquet is columnar and its per-column
+    reads are already nearly free, so it stays lazy and is never copied.
+
+    Peak memory *fell* — 5647 MB to 2578 MB on that file — because each of those
+    191 parses was buffering too. The copy is bounded by the file and DuckDB
+    spills it past ``memory_limit`` rather than failing, so the worst case is
+    disk. `DUCKDB_MIGRATION.md` §14.
+    """
+    table = load_table(path, con)
+    if not rescans(path):
+        return table
+    con.execute(f"CREATE TEMP TABLE {_PARSED_ONCE} AS SELECT * FROM ({table.query})")
+    return Table(name=table.name, query=f"SELECT * FROM {_PARSED_ONCE}", con=con)
 
 
 # --- the SQL implementation -------------------------------------------------

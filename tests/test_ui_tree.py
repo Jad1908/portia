@@ -175,3 +175,141 @@ def test_opening_a_nested_folder_sticks_across_a_rebuild():
 
     assert app.folder_open("specs/staging", 1) is True
     assert app.folder_open("specs/other", 1) is False
+
+
+# --- the project's data folder ----------------------------------------------
+
+
+def test_a_readable_file_outside_the_data_folder_is_not_drawn_as_data(tmp_path):
+    """The filter's one remaining way of being wrong at scale: a repo holds CSVs
+    that are not this project's data — a fixture, an export left in a notebook
+    folder — and drawing all of them is what `VISION.md` flags as untested."""
+    _project(tmp_path)
+    (tmp_path / "notebooks").mkdir()
+    (tmp_path / "notebooks" / "scratch.csv").write_text("a\n1\n")
+
+    scoped = [n.name for n in tree.build(tmp_path, {}, READABLE, "data")]
+    unscoped = [n.name for n in tree.build(tmp_path, {}, READABLE)]
+
+    assert scoped == ["data"]
+    assert unscoped == ["data", "notebooks"], "unset still means the whole repo"
+
+
+def test_an_artifact_portia_wrote_is_drawn_wherever_it_lives(tmp_path):
+    """Only the *readable* half of the filter is scoped. `models/*.sql` is not
+    your data, and four rows of the no-terminal audit are reading it here."""
+    _project(tmp_path)
+    known = {
+        "models/staging/stg_orders.sql": (state.MODEL, "models/staging/stg_orders.sql"),
+        "specs/staging/stg_orders.yaml": (state.SPEC, "stg_orders.yaml"),
+    }
+
+    names = [n.name for n in tree.build(tmp_path, known, READABLE, "data")]
+
+    assert names == ["data", "models", "specs"]
+
+
+def test_an_indexed_source_outside_the_data_folder_is_still_drawn(tmp_path):
+    """It has a profile and an interpretation behind it. portia knows it, which
+    is the whole of what the filter's first half asks."""
+    _project(tmp_path)
+    (tmp_path / "extra").mkdir()
+    (tmp_path / "extra" / "legacy.csv").write_text("a\n1\n")
+    known = {"extra/legacy.csv": (state.SOURCE, "legacy")}
+
+    names = [n.name for n in tree.build(tmp_path, known, READABLE, "data")]
+
+    assert names == ["data", "extra"]
+
+
+def test_the_project_root_as_a_data_folder_means_the_whole_repo(tmp_path):
+    """`""` and `"."` are every path, so they are the same answer as unset —
+    collapsed in one place rather than guessed at three call sites."""
+    _project(tmp_path)
+    (tmp_path / "notebooks").mkdir()
+    (tmp_path / "notebooks" / "scratch.csv").write_text("a\n1\n")
+
+    for root in ("", ".", None):
+        names = [n.name for n in tree.build(tmp_path, {}, READABLE, root)]
+        assert names == ["data", "notebooks"], root
+
+
+def test_a_sibling_folder_with_a_shared_prefix_is_not_in_scope(tmp_path):
+    """`data_archive/` is not inside `data/`, and a plain `startswith` says it is."""
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "orders.csv").write_text("a\n1\n")
+    (tmp_path / "data_archive").mkdir()
+    (tmp_path / "data_archive" / "old.csv").write_text("a\n1\n")
+
+    names = [n.name for n in tree.build(tmp_path, {}, READABLE, "data")]
+
+    assert names == ["data"]
+
+
+# --- the folder picker ------------------------------------------------------
+
+
+def test_the_picker_offers_only_folders_that_have_data_under_them(tmp_path):
+    """A folder with nothing portia can read below it is not a place the data
+    is — the same rule that keeps it out of the left pane."""
+    _project(tmp_path)
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "readme.md").write_text("hi\n")
+
+    offered = tree.choices(tmp_path, "", READABLE)
+
+    assert [ch.name for ch in offered] == ["data"]
+
+
+def test_the_count_is_recursive_so_a_wrapper_folder_still_says_it_holds_data(tmp_path):
+    """`raw/` holding nothing but `raw/2024/orders.csv` is still the answer
+    someone is looking for; a direct count would show it as empty."""
+    (tmp_path / "raw" / "2024").mkdir(parents=True)
+    (tmp_path / "raw" / "2024" / "orders.csv").write_text("a\n1\n")
+    (tmp_path / "raw" / "2023").mkdir()
+    (tmp_path / "raw" / "2023" / "orders.csv").write_text("a\n1\n")
+
+    offered = tree.choices(tmp_path, "", READABLE)
+
+    assert [(ch.rel, ch.files) for ch in offered] == [("raw", 2)]
+
+
+def test_the_picker_descends_and_the_trail_says_where_it_is(tmp_path):
+    """A back button undoes one step; the trail is the whole path, which is what
+    a screen whose only question is *which folder* has to show."""
+    (tmp_path / "raw" / "2024").mkdir(parents=True)
+    (tmp_path / "raw" / "2024" / "orders.csv").write_text("a\n1\n")
+
+    inside = tree.choices(tmp_path, "raw", READABLE)
+
+    assert [ch.rel for ch in inside] == ["raw/2024"]
+    assert tree.crumbs("raw/2024") == (("", ""), ("raw", "raw"), ("raw/2024", "2024"))
+    assert tree.crumbs("") == (("", ""),), "the root is a place you can go back to"
+
+
+def test_the_files_a_folder_offers_are_every_readable_one_at_any_depth(tmp_path):
+    """A data folder with a year per sub-folder is the ordinary shape, and asking
+    someone to pick each one is not a scope, it is a chore. `core.io`'s
+    `find_data_files` lists one directory on purpose — a destination is a folder,
+    a scope is a folder and everything under it."""
+    (tmp_path / "data" / "2024").mkdir(parents=True)
+    (tmp_path / "data" / "2024" / "orders.csv").write_text("a\n1\n")
+    (tmp_path / "data" / "customers.parquet").write_text("x")
+    (tmp_path / "data" / "notes.md").write_text("hi\n")
+
+    found = tree.data_files(tmp_path / "data", READABLE)
+
+    assert sorted(p.name for p in found) == ["customers.parquet", "orders.csv"]
+
+
+def test_the_picker_never_walks_into_a_hidden_or_linked_directory(tmp_path):
+    """Same rules as the tree, because it is the same walk — a second walker in
+    the screen would drift from this one the first time either was touched."""
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "orders.csv").write_text("a\n1\n")
+    (tmp_path / ".venv").mkdir()
+    (tmp_path / ".venv" / "sample.csv").write_text("a\n1\n")
+    (tmp_path / "loop").symlink_to(tmp_path)
+
+    assert [ch.name for ch in tree.choices(tmp_path, "", READABLE)] == ["data"]
+    assert len(tree.data_files(tmp_path, READABLE)) == 1

@@ -7,12 +7,15 @@ nowhere else. A toolbar is for saying where you are and for the actions on what
 is in front of you; a preference is neither.
 
 **It holds controls, not behaviour.** Every field here is bound to the same
-``APP`` attribute the surface that spends it reads — ``import_destination`` is
-the one the drop zone uses, ``model`` and ``effort`` are the ones a turn is
-started with — so this is a second *place to change* a setting, never a second
-setting. The one thing that is not a plain control is the project switch, which
-refuses mid-turn: switching would leave the copilot writing into a directory the
-window has stopped looking at.
+``APP`` attribute the surface that spends it reads — ``interpret`` is the one the
+add-data panel spends, ``model`` and ``effort`` are the ones a turn is started
+with — so this is a second *place to change* a setting, never a second setting.
+Two things are not plain controls. The project switch refuses mid-turn:
+switching would leave the copilot writing into a directory the window has stopped
+looking at. And the **data folder is stated, not edited** — picking it is a
+browse through the repo with a count against each folder, and a second picker
+here would be a second opinion about what counts as a data folder, so this tab
+says what it is and hands you to the panel that sets it.
 
 Four **tabs**, in the order they are worth changing: **Project** (where you are
 and what it is about) · **Copilot** (what a turn spends) · **Data** (what
@@ -31,7 +34,7 @@ from __future__ import annotations
 from nicegui import ui
 
 from portia.ui import components as c
-from portia.ui import engine, screens, theme
+from portia.ui import screens, theme
 from portia.ui.state import APP, BRIEF
 
 TITLE = "Settings"
@@ -40,10 +43,13 @@ TITLE = "Settings"
 _DIALOG: ui.dialog | None = None
 
 SWITCH_BUSY = "Can't switch projects while a turn is running."
-DESTINATION_SCOPE = "inside the project — data lives in the repo"
+NO_DATA_DIR = "not set — the whole repo"
+DATA_DIR_SCOPE = "what the left pane draws as data, and where an import lands"
 INTERPRET_COST = "Profiling is free and always happens. Reading them costs a model turn."
 SPEND_NOTE = "What a turn costs is the model and the effort, and nothing else."
-BRIEF_WHY = "What makes a column's meaning decidable. It opens in the middle pane."
+BRIEF_WHY = (
+    "The project in a few sentences: the goal, the modelling, the data. Opens in the middle pane."
+)
 NO_PANEL = "The settings panel didn't load — reload the page."
 STALE_PANEL = "Settings may be showing stale values ({why}) — reload the page to be sure."
 
@@ -147,16 +153,19 @@ def _copilot() -> None:
 
 
 def _data() -> None:
-    """What arrives, and where it lands."""
+    """Which folder is the data, what arrives, and what reading it costs.
+
+    The data folder is **stated here and changed on the add-data panel**, and
+    that is deliberate rather than an omission. Picking it is a browse through
+    the repo with a count against each folder — a control, not a field — and
+    building a second one here would be two pickers that have to agree about
+    what counts as a data folder. So this says what the setting is and hands
+    you to the one place that sets it.
+    """
+    c.caption("Data folder")
+    c.mono(APP.data_dir + "/" if APP.data_dir else NO_DATA_DIR)
+    c.caption(DATA_DIR_SCOPE)
     c.button("Add data…", _add_data, icon="add")
-    c.caption("Destination")
-    (
-        ui.input(placeholder=engine.DATA_DIR)
-        .classes("p-field p-field-mono w-full")
-        .props("borderless")
-        .bind_value(APP, "import_destination")
-    )
-    c.caption(DESTINATION_SCOPE)
     ui.switch("Have the copilot read what each source is").classes("p-toggle").bind_value(
         APP, "interpret"
     )

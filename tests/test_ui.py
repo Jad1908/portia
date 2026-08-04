@@ -234,15 +234,73 @@ def test_the_add_data_copy_is_read_off_the_loader(monkeypatch):
     assert screens._formats() == "CSV, JSON or PARQUET"
 
 
-def test_the_continue_button_says_whether_it_spends_money():
-    """The turn is deferred to this button, so the button has to admit it."""
+def test_the_way_out_of_add_data_says_whether_it_spends_money():
+    """The interpretation turn is deferred to the workspace, so the screen you
+    leave still has to name the cost you are about to pay on the next one."""
     from portia.ui import screens
-    from portia.ui.state import APP
+    from portia.ui.state import App
 
-    APP.interpret = True
-    assert "read" in screens._continue_label()
-    APP.interpret = False
-    assert screens._continue_label() == "Continue to the project"
+    app = App(catalog={"sources": {"orders": {}}}, pending_interpret=["orders"])
+    with _as_app(screens, app):
+        app.interpret = True
+        assert "reads" in screens._action_note(0)
+        app.interpret = False
+        assert "reads" not in screens._action_note(0)
+
+
+def test_the_breakdown_partitions_the_button_and_does_not_double_count(tmp_path):
+    """An imported file is profiled like every other one. Splitting the line into
+    "copies 1" and "profiles 22" made two numbers that looked like they should
+    sum to the button's 23 when 23 is what gets profiled — the copy is something
+    one of them additionally needed, not a separate job. The parts say where each
+    file came *from*, which is a real partition."""
+    from portia.ui import screens
+    from portia.ui.state import App
+
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "orders.csv").write_text("a\n1\n")
+    app = App(root=tmp_path, catalog={"data_dir": "data"})
+    app.import_plan = [(tmp_path / "x.csv", tmp_path / "data" / "x.csv")]
+
+    with _as_app(screens, app):
+        note = screens._action_note(2)
+
+    assert "Profiles 2 files" in note, note
+    assert "1 copied in to data/" in note and "1 already in the repo" in note
+
+
+def test_the_breakdown_is_only_the_repo_when_nothing_is_being_imported(tmp_path):
+    from portia.ui import screens
+    from portia.ui.state import App
+
+    app = App(root=tmp_path, catalog={"data_dir": "data"})
+
+    with _as_app(screens, app):
+        note = screens._action_note(4)
+
+    assert "Profiles 4 files" in note and "4 already in the repo" in note
+    assert "copied in" not in note
+
+
+def _as_app(module, app):
+    """Point a UI module's module-level ``APP`` at a throwaway one.
+
+    The app is a process singleton on purpose (`state.APP`), which is right for
+    the product and awkward for a test that wants two projects. Swapping the
+    module's reference is the smallest honest way in.
+    """
+    import contextlib
+
+    @contextlib.contextmanager
+    def swapped():
+        original = module.APP
+        module.APP = app
+        try:
+            yield app
+        finally:
+            module.APP = original
+
+    return swapped()
 
 
 # --- replaying a logged turn -------------------------------------------------
@@ -492,6 +550,49 @@ def test_a_scroll_region_states_its_key_in_the_dom():
 
     assert area._props["data-scroll-key"] == "artifacts"
     assert "p-scroll" in area.classes and "p-pad" in area.classes
+
+
+def test_an_unread_source_says_so_instead_of_showing_the_auto_draft():
+    """`catalog._auto_summary` restates the profile so the YAML is never empty.
+    In the prose slot it reads as a *read* of the data — prose, saying true
+    things — when what it actually means is that nobody has looked yet."""
+    from portia.ui import workflow
+    from portia.ui.state import App
+
+    entry = {"summary": f"3 rows, 2 columns. {catalog.AUTO_DRAFT_MARKER} — edit freely.)"}
+
+    with _as_app(workflow, App()), ui.element("div") as slot:
+        workflow._summary(entry)
+
+    drawn = " ".join(str(getattr(e, "text", "")) for e in slot.descendants())
+    assert catalog.AUTO_DRAFT_MARKER not in drawn
+    assert workflow._NOT_READ in drawn
+
+
+def test_a_wide_source_folds_its_columns_until_asked():
+    """Thirty columns is the normal case, and the rows, the actions and the
+    preview all sit below them. Nothing is hidden without the count saying so."""
+    from portia.ui import workflow
+    from portia.ui.state import App
+
+    columns = [{"name": f"c{i}"} for i in range(30)]
+    app = App()
+
+    with _as_app(workflow, app):
+        assert len(workflow._shown_columns("orders", columns)) == workflow.COLUMNS_FOLDED
+        app.columns_open = "orders"
+        assert workflow._shown_columns("orders", columns) == columns
+        assert len(workflow._shown_columns("customers", columns)) == workflow.COLUMNS_FOLDED
+
+
+def test_a_narrow_source_is_never_folded():
+    from portia.ui import workflow
+    from portia.ui.state import App
+
+    columns = [{"name": f"c{i}"} for i in range(workflow.COLUMNS_FOLDED)]
+
+    with _as_app(workflow, App()):
+        assert workflow._shown_columns("orders", columns) == columns
 
 
 def test_two_artifacts_in_one_pane_do_not_share_a_scroll_key():
@@ -1005,3 +1106,195 @@ def test_a_folder_looks_the_same_open_or_shut_and_only_the_caret_moves():
     assert "CARET_OPEN if is_open else CARET_SHUT" in source
     # The glyph name as a string, not `APP.folder_open` or the note explaining why.
     assert '"folder_open"' not in inspect.getsource(artifacts)
+
+
+# --- add data: two routes, one index -----------------------------------------
+
+
+def test_an_import_lands_with_the_rest_of_the_data_by_default(tmp_path):
+    """An import that lands beside the data is one folder layout; one that lands
+    in a second place is two, and nobody chose the second."""
+    from portia.ui import engine
+    from portia.ui.state import App
+
+    app = App(root=tmp_path, catalog={"data_dir": "warehouse/raw"})
+
+    assert app.import_dir(engine.DATA_DIR) == "warehouse/raw"
+
+
+def test_with_no_data_folder_chosen_an_import_creates_the_data_directory(tmp_path):
+    """A file arriving at the project root is not a decision anyone made."""
+    from portia.ui import engine
+    from portia.ui.state import App
+
+    app = App(root=tmp_path, catalog={})
+
+    assert app.import_dir(engine.DATA_DIR) == "data"
+
+
+def test_the_project_root_as_a_data_folder_does_not_become_an_import_destination(tmp_path):
+    """ "The whole repo" is a legitimate *scope* and a nonsensical *destination* —
+    it would drop imported files loose at the top of the project."""
+    from portia.ui import engine
+    from portia.ui.state import App
+
+    app = App(root=tmp_path, catalog={"data_dir": "."})
+
+    assert app.import_dir(engine.DATA_DIR) == "data"
+
+
+def test_a_typed_destination_wins_when_the_default_is_turned_off(tmp_path):
+    from portia.ui import engine
+    from portia.ui.state import App
+
+    app = App(root=tmp_path, catalog={"data_dir": "data"})
+    app.import_to_data_dir = False
+    app.import_destination = "vendor/acme"
+
+    assert app.import_dir(engine.DATA_DIR) == "vendor/acme"
+
+
+def test_everything_under_the_chosen_folder_is_ticked_by_default(tmp_path):
+    """ "This folder is my data" is a statement about the folder. Un-ticking is
+    for the exception, and a list that arrived empty would make the ordinary
+    case thirty clicks."""
+    from portia.ui import screens
+    from portia.ui.state import App
+
+    (tmp_path / "data" / "2024").mkdir(parents=True)
+    (tmp_path / "data" / "orders.csv").write_text("a\n1\n")
+    (tmp_path / "data" / "2024" / "events.csv").write_text("a\n1\n")
+    app = App(root=tmp_path, catalog={"data_dir": "data"})
+
+    with _as_app(screens, app):
+        screens._seed_ticks()
+        ticked = sorted(str(p.relative_to(tmp_path)) for p in screens._ticked())
+
+    assert ticked == ["data/2024/events.csv", "data/orders.csv"]
+
+
+def test_a_file_already_profiled_arrives_unticked(tmp_path):
+    """Re-profiling is idempotent, so it is not wrong — it is a minute of work on
+    real extracts that nobody asked for."""
+    from portia.ui import screens
+    from portia.ui.state import App
+
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "orders.csv").write_text("a\n1\n")
+    (tmp_path / "data" / "new.csv").write_text("a\n1\n")
+    app = App(
+        root=tmp_path,
+        catalog={"data_dir": "data", "sources": {"orders": {"source": "data/orders.csv"}}},
+    )
+
+    with _as_app(screens, app):
+        screens._seed_ticks()
+        ticked = [p.name for p in screens._ticked()]
+
+    assert ticked == ["new.csv"]
+
+
+def test_an_already_indexed_file_cannot_be_ticked_back_on(tmp_path):
+    """The screen does not offer re-indexing at all, so nothing it offers — not
+    "All", not a stale exclusion set — can put a catalogued file back in the
+    button's count. Re-indexing one source stays available on that source."""
+    from portia.ui import screens
+    from portia.ui.state import App
+
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "orders.csv").write_text("a\n1\n")
+    (tmp_path / "data" / "new.csv").write_text("a\n1\n")
+    app = App(
+        root=tmp_path,
+        catalog={"data_dir": "data", "sources": {"orders": {"source": "data/orders.csv"}}},
+    )
+
+    with _as_app(screens, app):
+        app.tick_all({"data/orders.csv", "data/new.csv"}, True)  # what "All" does
+        ticked = [p.name for p in screens._ticked()]
+
+    assert ticked == ["new.csv"]
+
+
+def test_unticking_survives_the_list_being_rebuilt(tmp_path):
+    """The state is a set of *exclusions* precisely so that it does: a file
+    imported into the middle of the folder must not re-tick the one you cleared."""
+    from portia.ui import screens
+    from portia.ui.state import App
+
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "orders.csv").write_text("a\n1\n")
+    app = App(root=tmp_path, catalog={"data_dir": "data"})
+
+    with _as_app(screens, app):
+        screens._seed_ticks()
+        app.tick("data/orders.csv", False)
+        (tmp_path / "data" / "arrived.csv").write_text("a\n1\n")
+        ticked = [p.name for p in screens._ticked()]
+
+    assert ticked == ["arrived.csv"]
+
+
+def test_the_screen_offers_exactly_one_accented_action(tmp_path):
+    """`DESIGN.md` allows one solid accent fill per view, and here it does real
+    work: while there are files to profile the accent is on profiling them, and
+    the moment there are none it moves to the way out. Both at once is a screen
+    asking you to guess which one it meant."""
+    import inspect
+
+    from portia.ui import screens
+
+    source = inspect.getsource(screens._actions.func)
+
+    assert source.count('kind="primary"') == 2, "one per branch of the same if/elif"
+    assert "if outstanding:" in source
+    assert "elif APP.sources and not in_dialog:" in source, "and the dialog's Close is not one"
+
+
+def test_no_route_into_the_project_streams_data_through_the_browser():
+    """The drop zone was a third route doing the picker's and the importer's job,
+    and the only one that could refuse a file for reasons portia could not
+    explain. Every path it served is served by one of the other two."""
+    import inspect
+
+    from portia.ui import engine, screens
+
+    for module in (screens, engine):
+        source = inspect.getsource(module)
+        assert "ui.upload" not in source, f"{module.__name__} still uploads"
+        assert "store_upload" not in source, f"{module.__name__} still stores an upload"
+
+
+def test_choosing_the_project_root_is_recorded_as_a_choice_not_as_silence(tmp_path):
+    """`""` and `"."` are the same *scope* and different *answers*: one is "the
+    data is the whole repo" and the other is "nobody has said". Storing the empty
+    string made the button at the top level appear to do nothing — the screen read
+    it back as unset and drew the picker again."""
+    from portia import catalog
+    from portia.ui import engine
+    from portia.ui.state import App
+
+    catalog.init_project("a project", portia_dir=tmp_path / ".portia")
+    app = App(root=tmp_path, portia_dir=str(tmp_path / ".portia"))
+
+    engine.set_data_dir("", app)
+
+    assert app.data_dir == "."
+    assert catalog.load_catalog(tmp_path / ".portia")["data_dir"] == "."
+
+
+def test_the_whole_repo_as_a_scope_still_draws_every_readable_file(tmp_path):
+    """The scope it means is the one it always meant — `tree` collapses `"."` back
+    to "anywhere", so the setting is legible without changing what is drawn."""
+    from portia.ui import engine
+    from portia.ui.state import App
+
+    (tmp_path / "notebooks").mkdir()
+    (tmp_path / "notebooks" / "scratch.csv").write_text("a\n1\n")
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "orders.csv").write_text("a\n1\n")
+
+    app = App(root=tmp_path, catalog={"data_dir": "."})
+    names = [n.name for n in engine.project_tree(app)]
+
+    assert names == ["data", "notebooks"]

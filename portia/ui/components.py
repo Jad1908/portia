@@ -44,6 +44,14 @@ PROSE_FIELDS = ("rationale", "summary", "context")
 #: Never shown: it is plumbing the operator did not choose.
 HIDDEN_FIELDS = ("portia_dir",)
 
+#: Indexing, wherever it is offered — the add-data screen and one un-indexed file
+#: in the workflow pane. A rack of drives, because what the action produces is a
+#: *catalogued* source; the lightning bolt it replaced named the speed of an
+#: operation that on real extracts takes a minute. `storage` is the other stock
+#: database glyph and was rejected at button size: three plain bars read as a
+#: hamburger menu, and `dns`'s indicator lights do not.
+INDEX_ICON = "dns"
+
 _NULL = "·"
 
 

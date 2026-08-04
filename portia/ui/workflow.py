@@ -36,6 +36,7 @@ from typing import Any
 
 from nicegui import ui
 
+from portia import catalog
 from portia.checks.outcome import BLOCKING_FLAGS, describe_contribution, describe_grain
 from portia.core.present import format_rate
 from portia.ui import components as c
@@ -520,8 +521,8 @@ def _source_inspector(name: str) -> None:
         if editing:
             _edit_interpretation(name, entry, columns)
         else:
-            _group("summary", lambda: c.text(entry.get("summary", "")))
-            _group("columns", lambda: _columns(columns))
+            _group("summary", lambda: _summary(entry))
+            _group("columns", lambda: _columns(name, columns))
             _interpretation_actions(name)
         if frame is not None:
             _group("preview", lambda: c.table_preview(frame))
@@ -721,6 +722,11 @@ def _source_table(entry: dict):
 #: words, once, at the top of the list**, and the icon repeats down the rows as
 #: the thing your eye tracks. Icons alone would be a legend nobody was given;
 #: words on every row would be the wall of labels this replaced.
+#: How many column rows the source inspector draws before folding the rest away.
+#: Enough that a narrow source is never folded at all, and that a wide one still
+#: shows what its first columns look like before you decide to open it.
+COLUMNS_FOLDED = 8
+
 COLUMN_HEADINGS = (
     ("table_rows", "column"),
     ("data_object", "type"),
@@ -731,16 +737,70 @@ COLUMN_HEADINGS = (
 )
 
 
-def _columns(columns: list[dict]) -> None:
+def _summary(entry: dict) -> None:
+    """The prose read — or, when nobody has written one, the fact that nobody has.
+
+    `catalog._auto_summary` drafts a restatement of the profile ("47 rows, 12
+    columns. Watch-outs: …") so the YAML is never empty, and this pane used to
+    print it in the summary's place. Read on screen it is indistinguishable from
+    a read of the data: it is prose, in the prose slot, saying true things — and
+    what it is *actually* saying is that no one has looked yet. That is the one
+    thing the operator needs to know here, so it is said in words. The facts it
+    restated are all in the columns table below, measured, where they belong.
+    """
+    if catalog.is_interpreted(entry):
+        c.text(entry.get("summary", ""))
+        return
+    with ui.element("div").classes("not-read"):
+        ui.icon("pending").classes("not-read-icon")
+        with ui.element("div"):
+            ui.label(_NOT_READ).classes("t-body c-ink")
+            c.caption(_NOT_READ_WHY)
+
+
+def _columns(name: str, columns: list[dict]) -> None:
     """A real table: headings once, values aligned under them.
 
     A source with thirty columns is the normal case, and a labelled line per fact
     made three of them a screenful. Every fact the cards showed is still here.
+
+    **Folded to the first few, because this is not the only thing on the pane.**
+    The rows, the actions and the preview all sit below it, and a wide extract's
+    column list pushed every one of them off the screen. Unfolding is one click
+    and the count is on the button, so nothing is hidden without saying so.
     """
+    shown = _shown_columns(name, columns)
     with ui.element("div").classes("column-list"):
         _column_headings()
-        for col in columns:
+        for col in shown:
             _column_row(col)
+    if len(columns) > COLUMNS_FOLDED:
+        _columns_toggle(name, len(columns), len(shown))
+
+
+def _shown_columns(name: str, columns: list[dict]) -> list[dict]:
+    """The first few, unless this source is the one that was unfolded."""
+    return columns if APP.columns_open == name else columns[:COLUMNS_FOLDED]
+
+
+def _columns_toggle(name: str, total: int, shown: int) -> None:
+    open_now = shown >= total
+    label = _COLUMNS_FEWER.format(n=COLUMNS_FOLDED) if open_now else _COLUMNS_ALL.format(n=total)
+    with ui.element("div").classes("column-more"):
+        c.button(
+            label,
+            lambda: _toggle_columns(name),
+            kind="secondary",
+            micro=True,
+            icon="expand_less" if open_now else "expand_more",
+        )
+        if not open_now:
+            c.caption(_COLUMNS_HIDDEN.format(n=total - shown))
+
+
+def _toggle_columns(name: str) -> None:
+    APP.columns_open = None if APP.columns_open == name else name
+    pane.refresh()
 
 
 def _column_headings() -> None:
@@ -909,7 +969,7 @@ def _unindexed_inspector(rel: str) -> None:
             c.empty_note("that file is gone")
             return
         c.text(_UNINDEXED_WHY, color="c-body")
-        c.button("Index it", partial(_index, path), kind="primary", icon="bolt")
+        c.button("Index it", partial(_index, path), kind="primary", icon=c.INDEX_ICON)
         c.caption(_INDEX_SCOPE)
         c.rule()
         c.table_preview(engine.read_table(path))
@@ -947,9 +1007,7 @@ def _brief_inspector() -> None:
             .props("borderless")
             .style("min-height:220px")
         )
-        with ui.element("div").classes("stack-xs"):
-            for line in screens.CONTEXT_SHAPE:
-                c.caption(line, color="c-stone")
+        screens.context_guidance()
         with ui.element("div").classes("row-gap-sm"):
             c.button("Save", lambda: _save_brief(box.value), kind="primary")
             c.button("Cancel", _back, kind="secondary")
@@ -1073,6 +1131,14 @@ _UNINDEXED_WHY = (
     "knows what is in it. Indexing measures it and writes a catalog entry."
 )
 _INDEX_SCOPE = "profiling only — deterministic and free. The copilot reads it on its next turn."
+_NOT_READ = "The copilot has not read this source yet."
+_NOT_READ_WHY = (
+    "It was profiled, so the facts below are measured and real — but no one has written what "
+    "this data means. Ask the copilot, or write the read yourself."
+)
+_COLUMNS_ALL = "Show all {n} columns"
+_COLUMNS_FEWER = "Show the first {n}"
+_COLUMNS_HIDDEN = "{n} more"
 _EDIT_SCOPE = "writes the prose and the roles; the measured facts are untouched"
 _ASK_HEADING = "What did it miss?"
 _ASK_WHY = "It re-reads this source with your note in hand, and asks if the two disagree."

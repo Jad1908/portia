@@ -720,29 +720,115 @@ html body {
   max-width: 100%;
 }
 
-/* Add data: the content scrolls, the actions stay put.
- *
- * With twenty files added this column was 755px tall in a 727px window — the
- * heading clipped off the top and the button that takes you to the project fell
- * off the bottom, which reads as "nothing happened". Capping the column at the
- * viewport and letting only the body scroll means the primary action is on
- * screen no matter how much has been added. */
-.add-data {
-  max-height: 100vh;
-  overflow: hidden;
+/* A worked brief, set apart from the shape lines above it: those are
+ * instructions, this is a specimen, and a fifth bullet in the same voice would
+ * read as a fifth instruction. Indented behind a rule, the way a quotation is. */
+.context-example {
+  margin-top: var(--sp-sm);
+  padding-left: var(--sp-md);
+  border-left: 2px solid var(--hairline-strong);
+  line-height: 1.55;
 }
-.add-data-body {
+
+/* Add data: a floating panel, not a page.
+ *
+ * It is the same card in both places it appears — centred on the canvas as the
+ * first-run screen, and inside `ui.dialog` when reopened from the left pane —
+ * because it is the same thing: a transient surface you finish and leave. As a
+ * full-height column it read as a web page, and the longer the file list grew
+ * the more it read as one, with the heading and the button drifting to opposite
+ * ends of the window.
+ *
+ * One soft shadow, which is the exception `DESIGN.md` allows for transient
+ * overlays and nowhere else — the hairline and the surface ladder do this work
+ * on everything persistent. */
+.add-data-card {
+  width: 100%;
+  /* Wide. The panel holds two side-by-side questions and a list of repo-relative
+   * paths, and at 560px it was a tall column of things wrapping — a shape that
+   * made a short form feel long. Falls back to the viewport on a narrow window
+   * rather than overflowing it. */
+  max-width: min(880px, calc(100vw - 2 * var(--sp-xxl)));
+  /* Bounded, so it always floats clear of the top and bottom edges. Content
+   * beyond that scrolls inside; the card never grows to meet it.
+   *
+   * The reserve is deliberately generous. At `100vh - 64px` on a 800px window
+   * the card came out 736px — capped, technically floating, and reading as a
+   * page with a hairline round it. A panel has to be visibly smaller than the
+   * window it is over or it is not a panel. */
+  max-height: min(680px, calc(100vh - 96px));
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+}
+body.body--dark .add-data-card {
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+/* Quasar's minimized dialog caps its child at 560px, which is why the panel
+ * used to carry an inline width. `div.add-data-card` out-specifies that rule
+ * without an `!important`, so the card's own width now holds in the dialog
+ * exactly as it does on the canvas — one width, declared once, in the file
+ * that owns the look. */
+.q-dialog__inner > div.add-data-card,
+.q-dialog__inner--minimized > div.add-data-card {
+  max-width: min(880px, 92vw);
+}
+
+/* What you are doing. Pinned, so it survives a long list. */
+.add-data-head {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+  padding: var(--sp-lg);
+  border-bottom: 1px solid var(--hairline);
+}
+
+/* The only region that scrolls, and the one that uses the width.
+ *
+ * `auto-fit` rather than a media query: the card's own width is already capped
+ * against the viewport, so what decides one column or two is how much room the
+ * card ended up with — which is a question about this element, not about the
+ * window. Two columns whenever 340px each will fit, one below that. */
+.add-data-body {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  align-items: start;
   gap: var(--sp-lg);
   min-height: 0;
   overflow-y: auto;
+  padding: var(--sp-lg);
 }
-.add-data-actions {
+.add-data-col {
   display: flex;
   flex-direction: column;
   gap: var(--sp-lg);
+  min-width: 0;
+}
+/* Indexing is about the whole panel, not about one of its columns. */
+.add-data-progress {
+  grid-column: 1 / -1;
+}
+
+/* What finishes it. Pinned for the same reason the head is: a primary action
+ * below the fold is one that looks like it did nothing when you press it. The
+ * region's own top border is the divider — a rule inside a bordered footer is
+ * two lines a pixel apart. */
+.add-data-actions {
   flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-sm);
+  padding: var(--sp-lg);
+  border-top: 1px solid var(--hairline);
+  background: var(--surface);
 }
 
 /* Indexing says what it is doing. A spinner on its own is the thing this
@@ -810,58 +896,349 @@ html body {
   padding: var(--sp-xl);
 }
 
-.dropzone .q-uploader {
-  width: 100%;
-  background: var(--surface);
-  border: 1px dashed var(--hairline-strong);
-  border-radius: var(--r-lg);
-  box-shadow: none;
-  /* Quasar caps the uploader and scrolls its file list; this used to say
-   * `max-height: none`, which is fine for three files and wrong for twenty —
-   * the list grew past the screen in both directions and took the Continue
-   * button with it. The cap is back, a little taller than Quasar's default so
-   * a handful of files still show without scrolling. */
-  max-height: 320px;
+/* ── add data ─────────────────────────────────────────────────────────────────
+ *
+ * The screen asks two unrelated questions — *which folder in this repo is the
+ * data* and *is there anything outside it* — and for a day the only thing
+ * dividing them was `p-section-header`, an 11px uppercase label built for the
+ * left pane. At 560px that is not a division, it is a caption above a stack.
+ *
+ * So each route is a **bordered section with a real heading**, and the rows
+ * inside are drawn for a form rather than borrowed from the tree: `artifact-row`
+ * is 12px mono with hover as its only affordance, which is right in a 260px pane
+ * and reads as indented text here. What says "you can click this" is a chevron,
+ * a hairline between rows, and a hit target the height of a control. */
+
+/* Body size, not caption: it is the one sentence explaining the screen, and at
+ * 11px it sat below the section hints it is meant to introduce. */
+.add-data-sub {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--mute);
+}
+
+/* One route, as a card. */
+.add-section {
   display: flex;
   flex-direction: column;
-  /* the whole box is the target, so the whole box says so */
-  cursor: pointer;
+  gap: var(--sp-md);
+  min-width: 0;
+  padding: var(--sp-lg);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  background: var(--surface);
 }
-.dropzone .q-uploader:hover {
-  border-color: var(--accent-primary);
+/* The folding one owns its own padding, on the header row, so the whole row is
+ * the hit target rather than a word inside a padded box. */
+.add-section--folding {
+  padding: 0;
+  gap: 0;
 }
-.dropzone .q-uploader__header {
+/* The cost block is a footnote to both routes rather than a third route, so it
+ * is a section with no title and a quieter fill. */
+.add-section--cost {
+  gap: var(--sp-sm);
   background: transparent;
+}
+
+.add-section-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* `heading-sm` — the same size the app gives an artifact-row title. A section of
+ * a form is not a pane label and must not be set like one. */
+.add-section-title {
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: 0.2px;
+  color: var(--ink);
+}
+.add-section-hint {
+  font-size: 13px;
+  line-height: 1.5;
   color: var(--mute);
-  padding: var(--sp-md) var(--sp-lg);
-  min-height: 88px;
+}
+
+.add-section-actions {
   display: flex;
   align-items: center;
+  gap: var(--sp-sm);
+  flex-wrap: wrap;
 }
-/* Quasar's byte counter, before anything has been dropped. `0.0B / 0.00%` is
- * a measurement of nothing, and this app does not show numbers it can't stand
- * behind. */
-.dropzone .q-uploader__subtitle {
-  display: none;
+
+/* ── the folder picker ─────────────────────────────────────────────────────── */
+
+/* A bordered list, so the rows inside are visibly a set of choices and not a
+ * paragraph that happens to have icons in it. */
+.picker {
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--surface-elevated);
+  overflow: hidden;
 }
-.dropzone .q-uploader__list {
-  background: transparent;
-  color: var(--body);
+
+/* Where you are, as a path. The segment you are *in* is not a link — it was one,
+ * which offered a trip to where you already stood and made the trail read as a
+ * row of chips instead of a path. */
+.picker-crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: var(--sp-sm) var(--sp-md);
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface);
+  min-width: 0;
+}
+.crumb {
   font-family: var(--font-mono);
   font-size: 12px;
-  padding: 0 var(--sp-lg) var(--sp-md);
-  min-height: 0;
-  /* the file list is what scrolls; the header stays put above it */
-  flex: 1 1 auto;
-  overflow-y: auto;
+  color: var(--accent-text);
+  padding: 2px 6px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background-color 120ms ease-out;
 }
-/* The header must not shrink away when the list fills the box. */
-.dropzone .q-uploader__header {
+.crumb:hover {
+  background: var(--accent-soft);
+}
+.crumb--current,
+.crumb--current:hover {
+  color: var(--ink);
+  background: transparent;
+  cursor: default;
+}
+.crumb-sep {
+  font-size: 14px;
+  color: var(--stone);
   flex: 0 0 auto;
 }
 
-/* What has been added so far, on the screen that added it. Capped for the same
- * reason the drop box is: a receipt for twenty files is still a receipt. */
+/* A folder you can open. 40px of row, a trailing chevron that says where it
+ * goes, and a hairline under every row but the last. */
+.picker-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  min-width: 0;
+  min-height: 40px;
+  padding: var(--sp-xs) var(--sp-md);
+  border-bottom: 1px solid var(--hairline-soft);
+  cursor: pointer;
+  transition: background-color 120ms ease-out;
+}
+.picker-row:last-child {
+  border-bottom: none;
+}
+.picker-row:hover {
+  background: var(--surface-card);
+}
+.picker-row-icon {
+  font-size: 16px;
+  color: var(--mute);
+  flex: 0 0 auto;
+}
+.picker-row-name {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--ink);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A count of files. Never sized or coloured by how big it is (`DESIGN.md`). */
+.picker-row-meta {
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: var(--mute);
+  flex: 0 0 auto;
+}
+.picker-row-go {
+  font-size: 16px;
+  color: var(--stone);
+  flex: 0 0 auto;
+}
+.picker-row:hover .picker-row-go {
+  color: var(--accent-text);
+}
+.picker-empty {
+  padding: var(--sp-md);
+}
+
+/* ── the folder once it is chosen ─────────────────────────────────────────── */
+
+.chosen-folder {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  min-width: 0;
+  padding: var(--sp-md);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+}
+.chosen-folder-icon {
+  font-size: 18px;
+  color: var(--accent-text);
+  flex: 0 0 auto;
+}
+.chosen-folder-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.chosen-folder-name {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chosen-folder-meta {
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: var(--mute);
+}
+
+/* ── which files to profile ───────────────────────────────────────────────── */
+
+.pick-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+}
+.pick-head-label {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.1px;
+  color: var(--ink);
+  flex: 1 1 auto;
+}
+
+.pick-list {
+  width: 100%;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--surface-elevated);
+}
+.pick-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  min-width: 0;
+  min-height: 34px;
+  padding: var(--sp-xs) var(--sp-md);
+  border-bottom: 1px solid var(--hairline-soft);
+}
+.pick-row:last-child {
+  border-bottom: none;
+}
+.pick-row:hover {
+  background: var(--surface-card);
+}
+/* Already in the catalog: a statement, not an offer. Recessed rather than
+ * hidden — it is still part of "what is under this folder". */
+.pick-row--done .q-checkbox__label {
+  color: var(--mute);
+}
+.pick-row-note {
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: var(--mute);
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* The path is the checkbox's own label, so the whole row is one hit target
+ * rather than a 15px box beside some text you cannot click.
+ *
+ * **The label wraps, and the row grows.** A real extract's path is long enough
+ * to run past the note beside it, and a nowrap label neither shrinks nor pushes:
+ * it overprints. Truncating would take the tail, which on
+ * `VBP_PREDICT_OUTPUT_EVENT_DETAILS_DUPLICATES.parquet` is the whole of what
+ * tells one file from the next. */
+.p-check {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.p-check .q-checkbox__inner {
+  color: var(--mute);
+  font-size: 30px;
+}
+.p-check .q-checkbox__inner--truthy {
+  color: var(--accent-primary);
+}
+.p-check .q-checkbox__label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--body);
+  padding-left: var(--sp-xs);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ── importing, folded ────────────────────────────────────────────────────── */
+
+/* The header row is the section title, at the section title's size, and the
+ * caret sits next to the word rather than at the far edge of a 560px form.
+ *
+ * **Both class names, deliberately.** `c.collapsed` also carries `p-expansion`,
+ * whose rule sets an 11px, zero-padding, 24px-high row — right for a tool result
+ * in the transcript, and what this looked like for an afternoon. Same
+ * specificity and later in the file, so it won on order alone. Naming both
+ * classes on the one element settles it by specificity instead, which does not
+ * depend on where either block sits. */
+.add-section-toggle.p-expansion .q-expansion-item__container > .q-item {
+  min-height: 0;
+  padding: var(--sp-lg);
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: 0.2px;
+  border-radius: var(--r-lg);
+  transition: background-color 120ms ease-out;
+}
+.add-section-toggle.p-expansion .q-expansion-item__container > .q-item:hover {
+  background: var(--surface-card);
+}
+/* Quasar renders the toggle icon as the row's trailing side section. `order`
+ * moves it in front of the label without reaching into the component. */
+.add-section-toggle.p-expansion .q-item__section--side {
+  order: -1;
+  padding: 0 var(--sp-sm) 0 0;
+  min-width: 0;
+  color: var(--mute);
+}
+.add-section-toggle.p-expansion .q-item__section--side .q-icon {
+  font-size: 20px;
+}
+.import-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-md);
+  padding: 0 var(--sp-lg) var(--sp-lg);
+  min-width: 0;
+}
+
+.cost-controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-sm);
+  align-items: flex-start;
+}
+
+/* A list of files: what a folder holds, or what an import is about to copy.
+ * Capped and scrolling, because thirty files is a list you skim rather than a
+ * list that pushes the button off the bottom of the screen. */
 .added-list {
   width: 100%;
   max-height: 220px;
@@ -1298,6 +1675,28 @@ body.body--dark .step-card {
   font-size: 12px;
   color: var(--ink);
   white-space: nowrap;
+}
+
+/* The rest of the columns, one click away. Outside `.column-list` so the list's
+ * rounded border still closes under the last row it is showing. */
+.column-more {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  padding-top: var(--sp-xs);
+}
+
+/* Nobody has read this source yet, said as a state rather than left to be
+ * inferred from prose that only restates the profile. */
+.not-read {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-sm);
+}
+.not-read-icon {
+  font-size: 18px;
+  color: var(--mute);
+  flex: 0 0 auto;
 }
 
 /* the words, once, at the top — the icons below are what the eye tracks */

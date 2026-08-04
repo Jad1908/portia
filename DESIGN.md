@@ -319,20 +319,95 @@ These exist so a test run never needs a terminal (`VISION.md` → "The no-termin
 - Same centered column. This is **the most consequential text box in the product** — the context is
   what makes a column's meaning decidable, and a generic brief yields generic judgment
   (`PLAN.md`). Design it like it matters: `{typography.heading-md}` prompt, a `body-editor` at
-  min-height ~180px, and placeholder guidance in `{colors.stone}` showing the *shape* of a good
-  brief (domain, goal, what a row means to the business) — **never an example that could be
-  mistaken for an answer about the data at hand**.
+  min-height ~180px, and guidance in `{colors.stone}` showing the *shape* of a good brief —
+  **domain and goal · how it is modelled (what you produce, at what grain, over what horizon) ·
+  roughly what data exists**, and explicitly *not* the schema.
+- **The altitude is the whole difficulty of this box, so it also shows one worked example**
+  *(2026-08-03)*. It asked for "what a row means to the business" and got briefs about rows —
+  the half portia measures for itself. This reverses "never an example" by **narrowing** it rather
+  than dropping it: the danger was an example that could pass for an answer about the data at hand,
+  which is a statement about *content*. Four sentences of hotel revenue forecasting in a pharmacy
+  project cannot be mistaken for the user's own, and it is the only thing that reliably teaches the
+  register. It is styled as a quotation beside the shape lines and **never seeded into the field**,
+  where it would be edited instead of replaced. `{colors.mute}` rather than the shape lines'
+  `{colors.stone}`: they are glanced at, and it is the one piece of guidance meant to be read
+  through.
 - `button-primary` "Continue" disabled until non-empty. **No skip, no dismiss, no "later".** It is
   the one gate in the app.
 
-**`source-dropzone`** — adding data
-- Dashed 1px `{colors.hairline-strong}`, `{rounded.lg}`, fill `{colors.surface}`, padding
-  `{spacing.xl}`. Prompt in `{colors.mute}` `{typography.body-md}`; a `button-tertiary` file picker
-  for people who don't drag.
-- An **interpret toggle** sits beneath it, on by default, labelled with its cost in
+**`add-data`** — adding data *(replaced `source-dropzone`, 2026-08-02)*
+
+- **It is a floating panel, not a page.** `add-data-card` — `{colors.surface}`, `{rounded.lg}`,
+  1px `{colors.hairline}`, **one soft shadow** (the transient-overlay exception, and the only place
+  on this surface it applies), **880px wide** and capped at `min(680px, 100vh - 96px)` so it always
+  floats clear of the window edges — a landscape rectangle, not a column. **The same card in both places it appears**: centred on the canvas as
+  the first-run screen, and inside `ui.dialog` when reopened from the left pane — because it is the
+  same thing, a transient surface you finish and leave. Laid out as a full-height column it read as
+  a web page, and the reserve is generous on purpose: at `100vh - 64px` it came out 736px of an
+  800px window, technically capped and still reading as a page with a hairline round it.
+- **Three regions, and only the middle one scrolls.** `add-data-head` (title + the line under it,
+  `{spacing.lg}`, hairline below) · `add-data-body` (`flex: 1`, `overflow-y: auto`, **two columns**)
+  ·
+  `add-data-actions` (hairline above, the CTA and its caption). What you are doing stays at the top
+  and what finishes it stays at the bottom however long the file list gets — a primary action below
+  the fold is one that looks like it did nothing when you press it. The footer's own top border is
+  the divider; a `rule` inside it is two lines a pixel apart.
+- **The body is `repeat(auto-fit, minmax(340px, 1fr))`** — the question you are almost always
+  answering on the left, the one you usually are not (import, and what a turn costs) on the right,
+  falling to one column when the card cannot hold two. `auto-fit` rather than a media query: the
+  card's width is already capped against the viewport, so what decides one column or two is how
+  much room *this element* ended up with, not how wide the window is. A wide panel laid out as one
+  stacked column is a wide panel that reads as a narrow one with empty space beside it.
+- **Two sections inside the body, and each is a card.** `add-section` — 1px `{colors.hairline}`, `{rounded.lg}`,
+  fill `{colors.surface}`, `{spacing.lg}` padding — holds *Data in this repo*, then *Import external
+  data* as a `p-expansion` **folded by default**. portia plugs into a repo that already holds its
+  data (`PIPELINE.md` §2.7), so the second is the exception and should not be read past to reach
+  the first. A third, quieter card with no title holds the interpret toggle and what it costs.
+- **A section title is `{typography.heading-sm}` with a `{typography.body-md}` line under it in
+  `{colors.mute}`.** *Not* `p-section-header` — that is 11px uppercase built for the left pane, and
+  a form divided by one is a caption above a stack. This was the single biggest thing wrong with
+  the first build of this screen.
+- **`picker`** — the folder browser. A bordered list on `{colors.surface-elevated}`: a
+  `picker-crumbs` bar on top, then one `picker-row` per folder — 40px, folder icon, name in
+  `{typography.mono}` at 13px, the file count in `{typography.caption}` `{colors.mute}`, and a
+  **trailing `chevron_right`**. The chevron is what says *this goes somewhere*; it takes
+  `{colors.accent-text}` on hover, and the row takes `{colors.surface-card}`.
+  - **It does not reuse `artifact-row`.** That component is 12px mono with hover as its only
+    affordance and indent guides for a tree — right in a 260px pane, and in a 560px form it reads
+    as text that happens to be indented. Two components, because they are answering two questions.
+  - The crumb you are **in** is not a link. It was one, which offered a trip to where you already
+    stood and turned the trail into a row of chips.
+  - The count is a **number of files** and never sized or coloured by how large it is.
+- **`chosen-folder`** — the folder once picked. One row on `{colors.accent-soft}`: folder icon in
+  `{colors.accent-text}`, the path in mono, the count under it, **Change…** at the right. It is the
+  one place on this screen the accent wash appears, and it is the selected-state job the accent is
+  already allowed (DESIGN.md → the accent's three jobs).
+- **`pick-list` / `pick-row`** — which files to profile. **The path is the checkbox's own label**,
+  so the whole 34px row is one hit target rather than a 15px box beside text you cannot click. A
+  file already profiled carries `indexed` in `{typography.caption}` and arrives unticked.
+- **The folding section's header is a section title too** — same 15px/500, 52px tall, whole row
+  clickable — with the caret **moved in front of the label** by `order: -1` on Quasar's side
+  section. Its default trailing position is right for a tool result in a 400px transcript and put
+  the caret half a screen from its own word here. Note it must be selected as
+  `.add-section-toggle.p-expansion`: `p-expansion`'s own 11px/24px rule has equal specificity and
+  sits later in the file, so class order alone loses.
+- An **interpret toggle** sits below both, on by default, labelled with its cost in
   `{colors.mute}` `{typography.caption}` — profiling is free, interpretation is a model turn, and
   the UI must not blur the two.
-- Once a project has sources this shrinks to a row-height affordance at the foot of the left pane.
+- **One accent fill, and it moves.** While files are outstanding it is on **Index N files**; the
+  moment there are none it becomes **Open the workspace**. Never both — a CTA offered beside
+  unfinished work is a skip button wearing a different word. In the dialog the way out is a
+  *Close*, and takes no accent at all.
+- Once a project has sources this shrinks to a row-height affordance at the foot of the left pane,
+  which opens the same panel as a dialog.
+- **The import section is one button.** The chooser plans on return, so the typed path field and
+  the *Plan import* beside it were two controls for one act — and a placeholder that had to explain
+  glob syntax to justify the field's existence. Removed 2026-08-03. Where there is no native
+  chooser the section says so rather than rendering three controls that cannot do anything.
+- **The dashed drop box is gone.** It was a third route into the project doing the same job as the
+  picker and the importer, and the only one that streamed bytes through the browser — so the only
+  one that could refuse a file for a reason portia could not explain, and the only one where the
+  copy had already happened by the time a plan could be shown.
 
 **`import-plan`** — what an import is about to copy, and where
 - A `write-confirm` panel: the heading names the count, then one row per `from → to` pair in
@@ -746,8 +821,8 @@ the component that drew a layer inside a flat section has nothing left to draw.
   large enough to pan the nodes slid under a stationary grid. Both gone: `--pan-x`/`--pan-y` drive
   a transform on the content and the grid's `background-position` together. Worth remembering as a
   shape of bug — the feature was present, reviewed, and had never worked.
-- ~~**First-run chrome is specced but unbuilt**~~ — *built: `project-open`, `project-context`, `source-dropzone`, `index-progress`. The context panel is still a text box with guidance beneath it, and it still deserves more than that.*
-- ~~**Drag-and-drop file handling is unverified**~~ — *still unverified. The sanctioned fallback is what shipped and what was tested: the picker, plus an "add by path" field that takes a file, a directory or a glob.*
+- ~~**First-run chrome is specced but unbuilt**~~ — *built: `project-open`, `project-context`, `add-data`, `index-progress`. The context panel is still a text box with guidance beneath it, and it still deserves more than that.*
+- ~~**Drag-and-drop file handling is unverified**~~ — *removed 2026-08-02 rather than verified. It stayed unverified for a week while two other routes into the project were exercised on every run, which is its own answer: the browser upload was a third way to do what the folder picker and the importer already did, and the only one whose failures portia could not explain. `add-data` is the folder picker plus a native file chooser now.*
 - **Teal pill contrast on dark** — white on `#0D9488` sits just under 4.5:1 for 13px text; verify on device and darken toward `#0C7D72` if it reads weak. *Unmeasured.*
 - **No syntax highlighting** in V0 code blocks. If SQL steps get long, revisit.
 - **The accent hue is decided: deep teal**, shared with the sibling project. Not a gap — a choice.

@@ -220,11 +220,22 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
 ## Interface — the app
 
 - **The tree has never been read on a big repo**, which is the case it was chosen for. The filter —
-  a file appears if portia knows it or `core/io` can read it — is what is supposed to carry it, and
-  two things want watching when a real one turns up: whether "top level open, everything else
-  closed" is the right default under a deep `data/`, and whether two hundred rows marked
-  `not indexed` are useful or are noise. Do not add sorting or a search box before looking; both are
-  the kind of thing that starts ranking (`DESIGN.md`).
+  a file appears if portia knows it, or `core/io` can read it *and* it is under `data_dir` — is what
+  is supposed to carry it, and two things want watching when a real one turns up: whether "top level
+  open, everything else closed" is the right default under a deep `data/`, and whether two hundred
+  rows marked `not indexed` are useful or are noise. Do not add sorting or a search box before
+  looking; both are the kind of thing that starts ranking (`DESIGN.md`). *Narrowed 2026-08-02 by
+  `data_dir`, which removes the fixtures-and-notebooks half of the problem and none of the rest.*
+- **The add-data picker lists every readable file under the chosen folder, with no cap.** Thirty is
+  fine and the list scrolls; a data folder with two thousand files would render two thousand rows
+  and four thousand DOM nodes. The honest fix when it turns up is probably to collapse the list by
+  sub-folder rather than to paginate it — the ticks are already stored as a set of *exclusions*, so
+  a folder-level tick is a set operation and not a new model. Not built: no run has needed it.
+- **`data_dir` is one folder, and some projects have two.** `raw/` and `reference/` side by side
+  forces you up to their parent, which pulls in whatever else lives there. A list of folders is the
+  obvious shape and the picker already returns them one at a time; what stopped it was that every
+  surface reading the setting (`tree`, the import destination, Settings) then has to answer "which
+  one" and the import destination has no good answer. Wait for a real project that wants it.
 - **Which folders are open is not persisted**, and neither is a pane you closed. Per session, like
   the canvas's pan and zoom. Cheap to keep in `.portia/` if reopening a project at the top level
   turns out to be annoying — and worth resisting until it is, since it is state to keep true.
@@ -418,6 +429,13 @@ odd finding worth carrying forward isn't lost with it.*
   (`ui/tree.py`). Reverses `DESIGN.md`'s "curated, not a disk tree"; the argument that failed is
   kept there. It also answers `VISION.md`'s last open layout question, left-panel curation: the
   curation is a **filter**, not a layout.
+- **Adding data was three routes and two half-buttons** — rewritten 2026-08-02. The screen now asks
+  *which folder in this repo is the data* first, in an in-page browser, and stores the answer as
+  `data_dir` in `project.yaml` — the first durable project setting after the brief, and what scopes
+  the left pane. Importing outside data is a folded second section defaulting to that folder, and
+  **one** button copies the plan and profiles the ticks. The browser drop zone was removed rather
+  than fixed (`DESIGN.md` → Removed): it duplicated both other routes and was the only one that
+  could refuse a file for a reason portia could not explain.
 - **The chrome was in the wrong places** — the rest of the same overhaul, 2026-08-02, and the theme
   is that a control belongs where the thing it acts on is. Preferences moved out of the toolbar into
   a tabbed `ui/settings.py`; the four run actions moved onto the **middle pane** and became icons

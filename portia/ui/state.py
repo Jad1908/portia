@@ -15,6 +15,7 @@ Two tabs on one project is the intended case, and they share this state.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -244,11 +245,39 @@ class App:
     asking: str | None = None
     #: The source whose removal is waiting on a confirmation.
     removing: str | None = None
+    #: The source whose full column list is unfolded, if any. Thirty columns is
+    #: the normal case for a real extract, and a source inspector that opens on a
+    #: screenful of them buries the prose read and the actions under it. One name
+    #: rather than a set: there is one inspector, showing one source.
+    columns_open: str | None = None
     #: Whether the operator chose to get on with it without adding data yet.
     skipped_sources: bool = False
-    #: Where an import will put what it copies, relative to the project root.
-    #: Data lives in the repo (`docs/PIPELINE.md` §2.7), so this is a place inside
-    #: it, never a way out of it.
+    #: Which folder the add-data picker is looking inside, repo-relative. Where
+    #: you are in a browser, not what you chose — choosing writes ``data_dir`` to
+    #: the catalog, and this is forgotten the moment the screen closes.
+    browse_at: str = ""
+    #: Files under the data folder the operator has **un**-ticked, as repo-relative
+    #: paths. The negative, deliberately: the default is that everything readable
+    #: under the folder you picked is what you meant, and a set of exclusions is
+    #: the only shape in which that default survives the list being rebuilt when
+    #: a file is imported into the middle of it.
+    unpicked: frozenset[str] = frozenset()
+    #: Whether the folder picker is showing again over an already-chosen data
+    #: folder. A mode rather than clearing the setting, so "change the folder"
+    #: can be abandoned — clearing first would make it a button whose only
+    #: possible outcome is losing what you had.
+    repicking: bool = False
+    #: Whether the external-import section is unfolded. Folded by default: it is
+    #: the second route in, and a project whose data is already in the repo should
+    #: not have to read past it.
+    import_open: bool = False
+    #: Whether an import lands in the project's data folder (the default) or in a
+    #: destination typed below. Two fields rather than one sentinel string, so
+    #: "put it with the rest of the data" survives the folder being re-picked.
+    import_to_data_dir: bool = True
+    #: Where an import will put what it copies when the above is off, relative to
+    #: the project root. Data lives in the repo (`docs/PIPELINE.md` §2.7), so this
+    #: is a place inside it, never a way out of it.
     import_destination: str = "data"
     #: The pending import, as ``(from, to)`` pairs — exactly what will be copied
     #: and where. Held so the confirmation shows the real thing rather than a
@@ -265,6 +294,11 @@ class App:
     #: with a transcript to show it in — running it on the add-data screen meant
     #: paying for a turn nobody could see.
     pending_interpret: list[str] = field(default_factory=list)
+    #: How many sources the last indexing run profiled, or ``None`` if none has
+    #: finished on this screen. It is what turns the primary action from "index
+    #: these" into "open the workspace" — the screen has to say the work is done
+    #: before it offers the way out of it, or the CTA reads as a skip.
+    indexed: int | None = None
     #: Whether they have left the add-data screen on purpose.
     #:
     #: Adding data used to move the screen on by itself, the moment the first
@@ -306,6 +340,33 @@ class App:
     @property
     def project_context(self) -> str:
         return (self.catalog.get("project") or "").strip()
+
+    @property
+    def data_dir(self) -> str:
+        """The folder in the repo that holds this project's data, or ``""``.
+
+        Read off the catalog rather than held as a field, for the reason every
+        other catalog value is: it is written to ``project.yaml`` and a second
+        copy in memory is a second answer waiting to disagree with the first.
+        Empty means nobody has said, which reads as the whole repo.
+        """
+        return (self.catalog.get("data_dir") or "").strip()
+
+    def import_dir(self, fallback: str) -> str:
+        """Where an import lands: the data folder, or the destination typed below.
+
+        ``fallback`` is what to use when neither is set — `engine.DATA_DIR`, so
+        an import with nothing chosen anywhere creates ``data/`` rather than
+        landing at the project root.
+
+        **The project root is a scope and not a destination.** ``"."`` is a
+        legitimate answer to "which folder is my data" — the whole repo — and a
+        nonsensical one to "where should this copy land", because it drops
+        imported files loose at the top of the project. So it falls through here.
+        """
+        if self.import_to_data_dir:
+            return self.data_dir if self.data_dir not in ("", ".") else fallback
+        return (self.import_destination or "").strip() or fallback
 
     @property
     def spec_has_steps(self) -> bool:
@@ -373,6 +434,19 @@ class App:
         if rel in self.open_folders:
             return True
         return depth == 0 and rel not in self.closed_folders
+
+    def tick(self, rel: str, on: bool) -> None:
+        """Include or exclude one file from what the add-data screen will profile.
+
+        Recorded as an **exclusion** either way, which is what makes the default
+        survive: "everything under the folder I chose" has to keep meaning that
+        as files arrive, and a set of selections would freeze the answer at the
+        moment the list was last drawn.
+        """
+        self.unpicked = (self.unpicked - {rel}) if on else (self.unpicked | {rel})
+
+    def tick_all(self, rels: Collection[str], on: bool) -> None:
+        self.unpicked = (self.unpicked - set(rels)) if on else (self.unpicked | set(rels))
 
     def toggle_folder(self, rel: str, depth: int) -> None:
         if self.folder_open(rel, depth):

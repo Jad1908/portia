@@ -2,7 +2,8 @@
 
 Sibling of the spec (which records *what we did to it*). Lives in ``.portia/``:
 
-- ``project.yaml`` — the global project context (your words), defined groups
+- ``project.yaml`` — the global project context (your words), the folder inside
+  the repo that holds this project's data (``data_dir``), defined groups
   (``{name, context, sources}`` — sources that belong together, plus the context
   they share), and a registry of indexed sources.
 - ``sources/<name>.yaml`` — per source, two layers:
@@ -94,6 +95,33 @@ def init_project(project_context: str = "", *, portia_dir: str | Path = DEFAULT_
     data = _read(proj) if proj.exists() else {"project": "", "groups": [], "sources": {}}
     if project_context or not proj.exists():
         data["project"] = project_context
+    _write(proj, data)
+    return proj
+
+
+def set_data_dir(rel: str, *, portia_dir: str | Path = DEFAULT_DIR) -> Path:
+    """Record which folder inside the repo holds this project's data.
+
+    **Scope, not location.** portia has always read data wherever it sits in the
+    repo, and it still does — a source is recorded by its own path and nothing
+    here moves or re-homes a file. What this answers is the other question, the
+    one a repo of any size asks immediately: *of everything readable in here,
+    which part is the data for this project?* The window's left pane draws
+    un-indexed data files under this folder and nowhere else, and it is the
+    default destination an import lands in.
+
+    Empty means unset, which is the honest state of a project nobody has told —
+    and it reads as "everything readable in the repo", the behaviour that
+    preceded this field.
+
+    Stored relative to the project root, like every other path portia writes, so
+    the setting survives the project being cloned somewhere else.
+    """
+    d = Path(portia_dir)
+    proj = d / "project.yaml"
+    data = _read(proj) if proj.exists() else {"project": "", "groups": [], "sources": {}}
+    data["data_dir"] = (rel or "").strip().strip("/")
+    d.mkdir(parents=True, exist_ok=True)
     _write(proj, data)
     return proj
 
@@ -248,6 +276,7 @@ def load_catalog(portia_dir: str | Path = DEFAULT_DIR) -> dict:
     }
     return {
         "project": proj.get("project", ""),
+        "data_dir": proj.get("data_dir", ""),
         "groups": proj.get("groups", []),
         "sources": sources,
     }
@@ -280,12 +309,25 @@ def _source_entry(
     }
 
 
+#: What :func:`is_stale` compares — facts about the **file**, and only those.
+#:
+#: ``at`` is recorded beside them and is deliberately not here. It is when portia
+#: last *looked*, which changes every second and says nothing about whether the
+#: file did. Comparing it (as this did until 2026-08-03) made every source read
+#: as stale one second after it was indexed, with an identical size and an
+#: identical mtime. The tests hid it because each one usually finished inside the
+#: same wall-clock second as the index it was checking; they started failing, one
+#: at random per run, the moment profiling got fast enough to move that boundary.
+STALENESS_FACTS = ("size", "mtime")
+
+
 def is_stale(entry: dict, *, portia_dir: str | Path = DEFAULT_DIR) -> bool:
     """Whether this source's file has changed since it was indexed.
 
-    Compares the recorded size and mtime against the file now. Says nothing about
-    what to *do* about it — re-indexing refreshes facts and preserves prose and
-    roles, exactly as it always has (the update rule above).
+    Compares the recorded size and mtime against the file now — see
+    :data:`STALENESS_FACTS` for what is deliberately not compared. Says nothing
+    about what to *do* about it — re-indexing refreshes facts and preserves prose
+    and roles, exactly as it always has (the update rule above).
 
     A source whose file has been moved or deleted counts as stale: the catalog's
     claims are no longer backed by anything on disk, and that is worth saying out
@@ -298,7 +340,7 @@ def is_stale(entry: dict, *, portia_dir: str | Path = DEFAULT_DIR) -> bool:
     if not target.exists():
         return True
     now = file_facts(target)
-    return any(indexed.get(k) != now[k] for k in now)
+    return any(indexed.get(k) != now[k] for k in STALENESS_FACTS)
 
 
 def file_facts(path: str | Path) -> dict:

@@ -86,12 +86,20 @@ class Format:
     needs to write the format back. Registering a format means filling in all of
     it; a format that only fills in the reader is one you can get data into and
     not out of.
+
+    ``rescans`` says whether every query against this reader re-reads the file
+    from the start. A text format has to: ``read_csv`` re-parses all of it to
+    answer a question about one column. Columnar formats do not, which is why a
+    per-column read is nearly free on Parquet and a full parse on CSV — see
+    :func:`portia.checks.profiling.profile_path`, which is where that difference
+    was costing two orders of magnitude.
     """
 
     read_frame: Callable[..., pd.DataFrame]
     sql_reader: str
     sql_options: dict[str, Any] = field(default_factory=dict)
     copy_options: str = ""
+    rescans: bool = False
 
 
 def write_table(table: Table, path: str | Path) -> Path:
@@ -141,6 +149,17 @@ def load_table(path: str | Path, con: Any, *, name: str | None = None) -> Table:
     """
     path = Path(path)
     return Table(name=name or path.stem, query=read_query(path), con=con)
+
+
+def rescans(path: str | Path) -> bool:
+    """Does every query against this file re-read it from the start?
+
+    True for text formats, false for columnar ones. Asked by anything that runs
+    *many* queries over one file and would otherwise pay for the parse each time
+    (`checks.profiling.profile_path`). It lives here because it is a property of
+    the reader, and the readers are registered in one place.
+    """
+    return _format(path).rescans
 
 
 def read_query(path: str | Path, *, absolute: bool = True) -> str:
@@ -259,6 +278,9 @@ _FORMATS: dict[str, Format] = {
         # "missing" looks like, so both tiers agree on a null rate.
         sql_options={"nullstr": list(NA_TOKENS)},
         copy_options="HEADER, DELIMITER ','",
+        # Text: answering a question about one column means parsing every column
+        # of every row again.
+        rescans=True,
     ),
     # Parquet needs no null tokens and no sniffing: it carries its own schema.
     # That is most of why it is worth converting to — the CSV reader's guesses

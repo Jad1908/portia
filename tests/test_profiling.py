@@ -182,3 +182,66 @@ def test_a_column_that_is_entirely_numeric_or_entirely_text_is_not_mixed(table):
     text = table(pd.DataFrame({"a": ["x", "y", "z"]}), "plain_text")
     assert "mixed_types" not in _col(profile(numeric), "a")["flags"]
     assert "mixed_types" not in _col(profile(text), "a")["flags"]
+
+
+# --- parsing a re-scanning file once ----------------------------------------
+
+
+def test_a_csv_is_parsed_once_and_profiles_to_the_same_numbers(tmp_path):
+    """The optimisation is only legitimate if nothing it measures moves.
+
+    A profile is one scan plus *two queries per column* (`_table_samples`,
+    `_table_top`), and on a reader that re-parses its file that is a full parse
+    per column. Measured on a real 191-column 40 MB CSV: 108 s, against 1.57 s
+    for the same rows and columns as Parquet. `profile_path` parses once first —
+    and this pins that the parse is all that changed.
+    """
+    import pandas as pd
+
+    from portia.checks.profiling import profile, profile_path
+    from portia.core.io import connect, load_table
+
+    frame = pd.DataFrame(
+        {
+            "id": range(60),
+            "grp": [f"g{i % 7}" for i in range(60)],
+            "amount": [i * 1.5 for i in range(60)],
+            "empty": [None] * 60,
+        }
+    )
+    path = tmp_path / "wide.csv"
+    frame.to_csv(path, index=False)
+
+    con = connect()
+    try:
+        lazy = profile(load_table(path, con))
+    finally:
+        con.close()
+    parsed_once = profile_path(path)
+    parsed_once.pop("source")
+
+    assert parsed_once == lazy
+
+
+def test_only_a_rescanning_format_is_parsed_up_front():
+    """Parquet is columnar: its per-column reads are already nearly free, so it
+    stays lazy and the file is never copied. Registering that is the format's
+    job, in the one module where a reader is named — so it is a property of the
+    suffix and needs no file to answer."""
+    from portia.core.io import rescans
+
+    assert rescans("anything.csv") is True
+    assert rescans("anything.parquet") is False
+
+
+def test_the_parsed_copy_does_not_outlive_the_profile(tmp_path):
+    """It lives on the connection `profile_path` opens and closes, so nothing is
+    left behind on disk or in a database portia keeps — there isn't one."""
+    import pandas as pd
+
+    from portia.checks.profiling import profile_path
+
+    pd.DataFrame({"a": [1, 2, 3]}).to_csv(tmp_path / "t.csv", index=False)
+    profile_path(tmp_path / "t.csv")
+
+    assert [p.name for p in tmp_path.iterdir()] == ["t.csv"]

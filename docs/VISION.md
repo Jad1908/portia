@@ -240,8 +240,35 @@ the product's premise is most exposed — the context is what makes a column's m
 a generic brief produces generic judgment. Give it room, show the placeholder guidance, and do not
 let it be skipped. Writes `project.yaml` via `catalog.init_project`.
 
-**Project open, no sources.** A drop zone and a file picker. Dropped files are copied into the
-project directory, then **indexed** — which is two distinct things and the UI must show them as
+**Project open, no sources.** *Rewritten 2026-08-02.* Two routes, in the order they are likely,
+because portia plugs into a repo that **already holds its data** (`PIPELINE.md` §2.7):
+
+1. **Point at the data already here** — an in-page folder browser rooted at the project. It offers
+   only sub-folders with readable data under them, each with a file count, and you click down until
+   you reach the one that *is* the data. Choosing it writes **`data_dir` into `project.yaml`**: a
+   durable project setting, and from then on the left pane draws un-indexed data files under that
+   folder and nowhere else. Its files arrive **all ticked** — "this folder is my data" is a
+   statement about the folder, and un-ticking is for the exception. A file already profiled arrives
+   un-ticked and says so.
+2. **Import external data**, folded away until wanted: **one button**, the native chooser, which
+   produces the plan on return. Its destination defaults to the folder chosen in (1), and to `data/`
+   if none was, because a file arriving somewhere other than where the rest of the data lives is a
+   folder layout nobody asked for. *A typed path-or-glob field and a separate "Plan import" shipped
+   beside it and were removed on 2026-08-03 — two controls for one act, since the chooser already
+   planned on return. A machine with no native chooser now says so instead of showing a section it
+   cannot use.*
+
+Both at once is ordinary, not an edge case: a repo with a `data/` folder and one extract still in
+`~/Downloads`. **One button does both** — copy what was planned, then profile everything ticked —
+and when it finishes the primary action *becomes* the way into the workspace. Not before: a CTA
+offered beside unfinished work is a skip button wearing a different word.
+
+**The browser drop zone was removed rather than fixed.** It was a third route doing the same job as
+the other two, and the only one that streamed the file through the browser — so the only one that
+could refuse a file for a reason portia could not explain, and the only one where the copy had
+already happened by the time a plan could have been shown (`DESIGN.md` → Removed).
+
+Adding a source is then **indexed** — which is two distinct things and the UI must show them as
 two, because one is free and one is not:
 
 - **Profiling** (`catalog.index_source`) — deterministic, no model, always happens. Each file
@@ -251,7 +278,9 @@ two, because one is free and one is not:
   other turn: same event stream, same write confirmations on each `set_interpretation`. It is not a
   special case; it is a turn with a different opening prompt (`prompts.task("index_batch", …)`).
 
-Adding a source later is the same affordance, available from the left panel.
+Adding a source later is the same panel, opened as a dialog from the left pane. It re-reads the
+folder on open and re-seeds the ticks, because coming back to it is coming back to the question
+*what is not profiled yet*.
 
 ### Left — files & artifacts
 
@@ -264,6 +293,15 @@ subdirectories and enforces the one-name-per-project rule), or it is a compiled 
 output or a saved run — **or** if `core/io` registers a reader for its suffix, which is how a CSV
 sitting in the repo un-indexed becomes visible instead of invisible. A folder is drawn only if
 something under it survived. A README, a notebook and a stray `.py` are not shown.
+
+**The readable half of that filter is scoped to `data_dir`** (2026-08-02, chosen on the add-data
+screen). A repo of any size holds CSVs that are not this project's data — a fixture, an export left
+in `notebooks/` — and drawing all of them was the filter's one remaining way of being wrong at
+scale, which is exactly the case flagged as untested at the foot of this file. **Only the readable
+half**: a spec, a compiled model, an output, a saved run or an indexed source is drawn wherever it
+lives, because those are portia's artifacts rather than your data, and four rows of the no-terminal
+audit below are reading them here. An unset `data_dir` means the whole repo, which is what every
+project written before the field does.
 
 **Why the sections gave way.** They said what portia knew about and never said where any of it was.
 `specs/staging/stg_orders.yaml` and `models/staging/stg_orders.sql` arrived as two rows carrying one
@@ -360,7 +398,7 @@ regressed** — this is the checklist, not a nice-to-have.
 
 | Terminal today | In V0 |
 |---|---|
-| `mkdir ~/portia-runN` + copy data in | Open-project path field · drop zone |
+| `mkdir ~/portia-runN` + copy data in | Open-project path field · the add-data folder picker |
 | `run <spec>` for an upstream first | Nothing — **Run** does its upstreams, and says which |
 | `index --init "<brief>"` | Mandatory context panel → `catalog.init_project` |
 | `index .` (profiling half) | Automatic on drop → `catalog.index_source` |
@@ -374,7 +412,7 @@ regressed** — this is the checklist, not a nice-to-have.
 | `run --write out` | Same, with an output location — outputs land in the left panel |
 | `build` | **Build** on the workflow pane. Run does the same at one model's scope |
 | `build --check` | The stale badge on the graph header, and a banner on the model itself |
-| `import_data <f> --to <dir>` | Destination field + **Plan import** → every `from → to` pair → **Copy and index** |
+| `import_data <f> --to <dir>` | **Import external data** → chooser or path → every `from → to` pair → **Index** |
 | `cat models/*.sql` | `models/` in the tree; clicking one shows the file as committed |
 | `cat specs/*.yaml` | The graph, and each step's detail |
 | `cat out/*.csv` | `table-preview` |
@@ -443,5 +481,7 @@ are shaped are all open.
   inside a complex repo.~~ *Decided 2026-08-02: **a filter over a real directory tree.** A file is
   drawn if portia knows about it or if `core/io` can read its format; a folder is drawn if
   something under it survived. The flat sections that preceded this are recorded in `DESIGN.md` →
-  Removed, with the argument that failed. **Still open:** whether the filter is enough on a repo
-  with a thousand data files, which is the case it was chosen for and the case it has not seen.*
+  Removed, with the argument that failed. **Narrowed 2026-08-02:** the readable half of the filter
+  is scoped to the project's `data_dir`, so the thousand-data-file repo now draws only the part of
+  it the operator called the data. **Still open:** whether that is enough when the data folder
+  itself holds a thousand files, which is the case it has still not seen.*
