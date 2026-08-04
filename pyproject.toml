@@ -27,6 +27,12 @@ agent = [
 ui = [
     "nicegui>=2.0",
 ]
+# The knowledge graph (docs/KNOWLEDGE_GRAPH.md). Optional on purpose, §6.6: a
+# stopped container must not break the product, so nothing outside
+# `portia/knowledge/store.py` imports the driver.
+graph = [
+    "neo4j>=5.0",
+]
 
 [build-system]
 requires = ["hatchling"]
