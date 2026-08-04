@@ -1,7 +1,41 @@
 # The knowledge graph — design
 
-*Designed 2026-08-04, revised the same day after the design was talked through. Nothing is built yet.
-This document is the whole of the decision, written so a new session can pick it up cold.*
+*Designed 2026-08-04, revised the same day after the design was talked through.
+**Phase A is built** — see the status note below. This document is the whole of the decision,
+written so a new session can pick it up cold.*
+
+> ## Status — phase A shipped, 2026-08-04
+>
+> `portia/knowledge/` (`schema.py` · `build.py` · `store.py`), `python -m portia.cli.knowledge`,
+> a `graph` extra and a `docker-compose.yml`. **The write path only** (§9.4 phase A): sources,
+> models, columns, groups, `READS` and column-level `DERIVES_FROM`, all read off the catalog and
+> the specs. No agent, no tool, no measurement — B, C and D are untouched.
+>
+> **Four things the build settled, which the design did not say:**
+>
+> - **The lineage rank.** §4.2 gives `DERIVES_FROM` a single `via` + `step`, which assumes one hop;
+>   a spec has several. The rule is now: a step that *changes the values* (a `normalize` transform)
+>   outranks one that only *renames* (a join's `_x`/`_y`), which outranks one that merely *carries*
+>   the column, ties to the later step. A first draft scored a shared key's `coalesce(l.k, r.k)` as
+>   a change on both sides, and that was wrong — it picks a value rather than changing one, and
+>   scoring it that way buried the transform that had made the key match in the first place. The
+>   composite shape stays free from the edge count, exactly as §4.2 says.
+> - **The `sql` hatch's cost is now countable.** A model downstream of a `sql` step gets its Model
+>   node and its true `READS` edges and **no** Column nodes, and is named in
+>   `BuildResult.unresolved` with the reason. That dict is the evidence §7 asks for before buying
+>   `sqlglot`.
+> - **A rebuild owns the structural half and nothing else.** Everything written carries the build
+>   that wrote it; stale *structural* edges are deleted, `OVERLAPS` is never touched, and a node
+>   that still carries one survives even after the catalog drops the column. Phase C writes those
+>   edges; phase A had to be unable to take them away, and that was cheaper to honour now than to
+>   retrofit onto a writer that already deletes freely.
+> - **Nothing is hooked into indexing or `record_step` yet**, though §5 names those as the write
+>   moments. Doing it now would make an index depend on a container being up, which is the leak
+>   §6.6 warns about, and nothing reads the graph until phase B.
+>
+> Lineage was checked end to end on a two-spec project: `mart_orders.amount` →
+> `stg_orders.amount` → `data/orders.csv:amount`, with the pointer on each hop. **The Neo4j writer
+> is not yet verified against a live server** — its test skips without one.
 
 *What the revision changed, because it moved the centre of the design: column-level **lineage** is
 now half of what the graph is for (§2, §4.2) and a model's output columns are nodes (§4.1) · **the
@@ -771,7 +805,7 @@ Existing prompts that change: `index_batch.md` and `interpret.md` (the new task)
 
 | Phase | What lands | What it settles | Loop change |
 |---|---|---|---|
-| **A** | Write path: structural edges + `DERIVES_FROM` from catalog and specs. The build command. | Whether the schema is right. Inspectable directly; **no agent involved**. | None |
+| **A** ✅ | Write path: structural edges + `DERIVES_FROM` from catalog and specs. The build command. | Whether the schema is right. Inspectable directly; **no agent involved**. | None |
 | **B** | Read path: one tool, fixed queries. | Whether traversal helps at all. Lineage alone already earns it — *"where did this column come from"* is answerable with zero measurements. | One new tool |
 | **C** | The agent picks pairs during indexing; measurements written with their reasons. | §5.1 and §4.4. | **Indexing is rewritten** |
 | **D** | Shrink L1 from an exhaustive index to traversal. | §1.4. | Yes, and the riskiest |

@@ -205,10 +205,11 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
 - **Role vocabulary** — the agent invents role names per run (`attribute` vs `category`,
   `unused` vs `dropped`). Fine while we learn what roles are useful; revisit once real use shows
   which ones carry weight, and only then consider constraining them.
-- **Broad "how sources interact" model** — likely joins / relationships across sources (the
-  context-aware end goal). Deferred as too early — forge convictions via the UI first.
-- **Groups in use** — `groups` are stored and rendered into the L1 brief, but nothing downstream
-  consumes them.
+- **Broad "how sources interact" model** — *picked back up 2026-08-04 as `KNOWLEDGE_GRAPH.md`,
+  phase A built.* The design is that document; what is left of the item is its phases B–D, tracked
+  under **Knowledge graph** below.
+- **Groups in use** — `groups` are stored and rendered into the L1 brief, and now restated as
+  `Source IN_GROUP Group` in the knowledge graph. Still nothing *reads* them until phase B.
 - **Catalog storage shape** — one-file-per-source now; revisit one-file vs per-group vs harmonized
   once we've used it (kept deliberately un-locked / hand-editable).
 - **Context bundle** — a token-lean projection of the catalog for the agent to consume; and a
@@ -323,6 +324,39 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
   results. `core.table.Table` is the seam: a name, a query and a connection is not a DuckDB-shaped
   idea, which was the point of building it that way. The product vision for it is in `VISION.md`.
 
+## Knowledge graph — `portia/knowledge/`
+
+*Phase A is built (`KNOWLEDGE_GRAPH.md` → Status). These are what it deferred, plus the design's
+own open questions where the code now has something to say about them.*
+
+- **Phases B, C and D** are the design's, not this list's — read §9.4. B is the read tool, C is the
+  agent picking pairs during indexing, D is the L1 shrink. Ordered there, and D is last **on its
+  own** for a reason.
+- **Nothing writes the graph except the build command.** §5 names three write moments — index a
+  source, save a spec, measure a join — and none of them is hooked up. Deliberate: hooking them now
+  would make an index fail when the container is down, which is §6.6's leak, and nothing *reads*
+  the graph until phase B. Revisit with B.
+- **Column lineage through the `sql` hatch** (§4.2, §7). A model downstream of a `sql` step gets no
+  Column nodes and lands in `BuildResult.unresolved`. That dict is the evidence to decide on:
+  if real projects run mostly through the hatch, `sqlglot` earns its place; if they don't, the
+  coarse answer is the right one. **Don't buy the parser before reading the number.**
+- **A build never notices a spec it did not run.** `is_stale` compares a `.sql` to its spec and
+  `catalog.is_stale` compares a file to its record; the graph has both fingerprints on its nodes
+  and nothing yet asks the question. Cheap, and it is what §4.5's "walk forward from a changed file
+  and name the affected model columns" needs.
+- **Composite keys** (§7). The schema knows single-column overlaps only. Nothing in phase A hits
+  this — a composite join key already produces one `DERIVES_FROM` edge per key column — but
+  `OVERLAPS` will.
+- **Orphan nodes are pruned only when they have no relationships at all.** A Column that lost its
+  table but kept a measurement stays, on purpose (§4.5: mark stale, never delete). Nothing marks it
+  yet, so it is currently indistinguishable from a live one.
+- **Drawing it** (§6.9). The store and the picture are separate purchases, and the collision to
+  settle first is that a force-directed layout ranks by connectivity, which `DESIGN.md` forbids.
+  The Neo4j browser is the answer until that has an explicit answer in `DESIGN.md`.
+- **`profiling.py` computes `min`/`max` per column and `catalog._column_facts` drops them**
+  (§6.5). A fact the profiler already paid for, and exactly what the agent needs to judge whether a
+  pair is worth measuring in phase C.
+
 ## Core / infra
 
 - **README says nothing about auth — a decision awaiting the user, not an oversight.** `PLAN.md`
@@ -409,6 +443,15 @@ odd finding worth carrying forward isn't lost with it.*
   (see `ask.py:59` above).
 - **Prompt work the pipeline overhaul required** — `record_step.md` teaches new-spec-vs-new-step and
   the `layer` field; `copilot.md` covers proposing the project's shape.
+
+**Knowledge graph**
+
+- **Phase A — the write path** — 2026-08-04, `portia/knowledge/`. The catalog and the specs read
+  into nodes and edges, column-level `DERIVES_FROM` included, with nothing run and no connection
+  opened. `python -m portia.cli.knowledge` builds and prints it; `--write` needs Neo4j and nothing
+  else does. *The finding worth carrying: lineage came out of `ops.join.join_columns` rather than a
+  second implementation of the `_x`/`_y` rule — the same argument `OpResult.compiled` makes about
+  compilation not being a second rendering of execution.*
 
 **Interface**
 

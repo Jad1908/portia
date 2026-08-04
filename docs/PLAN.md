@@ -151,7 +151,7 @@ asset.
    see specs in subdirectories, and its Run did not resolve cross-spec references — so a spec that
    ran from the CLI failed in the window, which is the one seam `VISION.md` says must never break.
 
-**Next — the knowledge graph** (`docs/KNOWLEDGE_GRAPH.md`, designed 2026-08-04). The gap it fills is
+**In progress — the knowledge graph** (`docs/KNOWLEDGE_GRAPH.md`, designed 2026-08-04, **phase A shipped the same day**). The gap it fills is
 structural and visible without any run: **the catalog is one file per source and has no shape for
 what a source *relates to***, and `checks/join.py` measures exactly that relationship and then
 discards it when the turn ends. On top of that, **L1 is exhaustive and pushed into every system
@@ -173,6 +173,16 @@ agent picks them while it is indexing, the same act in which it already writes a
 proposes groups — not a code prefilter and not a sweep of all ~245,000 pairs. Above all, §6.1: **the
 graph surfaces edges and never ranks them**, and §4.4: a measured zero means *no shared values*, not
 *unrelated* — which is why the edge carries the reason the agent asked for it.
+
+**Where it actually is.** §9.4's phase A is built — `portia/knowledge/`, `python -m
+portia.cli.knowledge`, a `graph` extra and a `docker-compose.yml`. That is the **write path only**:
+sources, models, columns, groups, `READS` and column-level `DERIVES_FROM`, read off the catalog and
+the specs with nothing run and no connection opened. No agent, no tool, no measurement. Building it
+settled the lineage rank (a transform outranks a rename outranks a carry), made the `sql` hatch's
+cost countable rather than guessed, and fixed the rule that a rebuild off the files may delete
+structural edges and **never** a measurement — which phase C depends on and is far cheaper to
+honour now. Phases B (the read tool), C (the agent picking pairs while indexing) and D (the L1
+shrink, last and on its own) are unstarted.
 
 **The loop changes with it, not after it** (§9). The graph sits *before* `describe_source` as a
 router — *which* table should I look at, and where did this column come from — rather than as a

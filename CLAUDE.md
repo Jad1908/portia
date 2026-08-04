@@ -38,8 +38,9 @@ stack, and product vision. Read them every session, before proposing changes or 
   `cli/index.py`. **§6 is where the app half landed** — the compiled models are rendered, and the
   three design questions are answered there (a card is a table *or* a step depending on zoom level ·
   Run means this model and everything it reads · layers group and order, never rank).
-- `docs/KNOWLEDGE_GRAPH.md` — **designed and revised 2026-08-04, nothing built, and it is what's
-  next.** Two halves that only pay off together (§2): **measured relationships** between sources —
+- `docs/KNOWLEDGE_GRAPH.md` — **designed and revised 2026-08-04; phase A of §9.4 is built and
+  B–D are next.** Read the Status note at the top for what shipped and the four things building it
+  settled. Two halves that only pay off together (§2): **measured relationships** between sources —
   because nothing in portia holds one and `join_report`'s answer dies with the turn — and
   **column-level lineage**, which portia's specs already know and no surface can answer.
   **Neo4j, settled**; §3.2 records what each rejected option was rejected *for* (NetworkX for the
@@ -216,6 +217,15 @@ adding code, and extend them rather than working around them:
     context + groups + per-source metadata (Layer 1 prose `summary`, Layer 2 per-column `role` +
     check facts). The agent's memory. **Update rule: facts refresh, prose/roles are preserved** —
     corrections are never clobbered (facts vs judgment, applied to updates).
+  - `portia/knowledge/` — the **knowledge graph** (*what the tables and columns are to each other*),
+    in Neo4j (`docs/KNOWLEDGE_GRAPH.md`). Three modules and the split is the seam: `schema.py` (the
+    closed vocabulary + a `Graph` — imports no driver) · `build.py` (catalog + specs → a `Graph`;
+    **runs nothing and opens no connection**, so column lineage comes off `ops.join.join_columns`
+    rather than a second implementation of the `_x`/`_y` rule) · `store.py` (the only module that
+    knows what Cypher is, behind the `graph` extra). **A rebuild owns the structural half and
+    nothing else** — stale structural edges are deleted, `OVERLAPS` is never touched, because an
+    absent edge has to keep meaning *nobody measured* (§4.4). Built by
+    `python -m portia.cli.knowledge`; nothing writes it automatically yet.
   - `portia/runlog.py` — the **run log** (*what the copilot did*): one JSONL per turn in
     `.portia/runs/`, one `Event` per line under a header naming model, effort, prompt and portia
     sha. Read with `python -m portia.cli.runs`. **Project-local, with no central store and nothing
@@ -306,8 +316,8 @@ adding code, and extend them rather than working around them:
     engine's behalf.
 
 Rule of thumb: **`core` = reused everywhere · `checks` = diagnosis (facts) · `ops` = execution ·
-`spec` + `catalog` + `runlog` = the durable artifacts · `agent` = judgment · `cli` + `ui` = human
-edges.**
+`spec` + `catalog` + `runlog` = the durable artifacts · `knowledge` = what they are to each other ·
+`agent` = judgment · `cli` + `ui` = human edges.**
 Deciding is the agent's job, not a layer. A new file that's none of these probably belongs in one of
 them, not loose in `portia/`.
 
