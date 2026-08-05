@@ -30,6 +30,7 @@ Nothing here computes. Every number on screen came out of `checks`/`ops`/`spec`.
 
 from __future__ import annotations
 
+import asyncio
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -1027,11 +1028,16 @@ def _knowledge_inspector() -> None:
     with ui.element("div").classes("stack-sm p-pad w-full"):
         with ui.element("div").classes("row-between"):
             c.pane_title("Knowledge graph")
-            c.segmented(
-                KNOWLEDGE_VIEWS,
-                KNOWLEDGE_VIEWS[1] if show_columns else KNOWLEDGE_VIEWS[0],
-                _pick_knowledge_view,
-            )
+            with ui.element("div").classes("row-gap-sm"):
+                c.segmented(
+                    KNOWLEDGE_VIEWS,
+                    KNOWLEDGE_VIEWS[1] if show_columns else KNOWLEDGE_VIEWS[0],
+                    _pick_knowledge_view,
+                )
+                # The window must not send anyone to a terminal to see its own
+                # graph (`ui/__init__` — the no-terminal bar). This is the same
+                # `knowledge.sync` that indexing and `record_step` call.
+                c.button("Refresh", _refresh_knowledge, icon="autorenew")
         if data.get("unavailable"):
             # §3.5 — the window has to behave sensibly when the database is down,
             # and sensibly means saying so rather than drawing an empty canvas
@@ -1063,9 +1069,20 @@ def _knowledge_inspector() -> None:
 #: not better ones.
 KNOWLEDGE_VIEWS = ("Tables", "Columns")
 
-KNOWLEDGE_EMPTY = (
-    "Nothing in the graph yet. Index a source, or run python -m portia.cli.knowledge --write."
-)
+KNOWLEDGE_EMPTY = "Nothing in the graph yet. Index a source, or press Refresh."
+
+
+async def _refresh_knowledge() -> None:
+    """Rebuild the structural half from the catalog and the specs, and redraw.
+
+    The same `knowledge.sync` indexing and `record_step` call, reachable from
+    the window — because a pane whose empty state tells you to open a terminal
+    is the bug `ui/__init__` says it is.
+    """
+    problem = await asyncio.to_thread(engine.sync_knowledge, APP)
+    if problem:
+        ui.notify(problem, type="warning")
+    pane.refresh()
 
 
 def _pick_knowledge_view(choice: str) -> None:

@@ -357,6 +357,7 @@ async def index(paths: list[Path], app: App, *, on_progress=None) -> list[str]:
             on_progress(done, len(paths), path.stem)
         names.append(await asyncio.to_thread(_index_one, path, app.portia_dir))
     refresh_catalog(app)
+    await asyncio.to_thread(sync_knowledge, app)
     return names
 
 
@@ -690,6 +691,29 @@ def read_table(path: Path):
 
 
 # --- reloading the spec after the copilot has written to it -----------------
+
+
+def sync_knowledge(app: App) -> str:
+    """Put the project's structural half in the graph — **best effort, always**.
+
+    The window indexes through `catalog.index_source` and used to stop there,
+    so a source added here was in the catalog and absent from the graph until
+    something else happened to refresh it. `cli.index` had done this since the
+    graph shipped; the two edges disagreeing about what portia knows is the seam
+    `docs/VISION.md` says must never break.
+
+    Threaded, because it opens a Neo4j connection. Never fatal: an index that
+    fails because a container is stopped is `KNOWLEDGE_GRAPH.md` §6.6's leak, and
+    the catalog is written either way.
+    """
+    from portia import knowledge
+    from portia.knowledge import store
+
+    try:
+        knowledge.sync(app.root, portia_dir=app.portia_dir)
+    except store.GraphUnavailable as exc:
+        return str(exc)
+    return ""
 
 
 def knowledge_subgraph(*, columns: bool = False) -> dict:
