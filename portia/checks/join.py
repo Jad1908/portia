@@ -383,6 +383,85 @@ def _unmatched_keys(this: Table, keys: list[str], other: Table, other_keys: list
     return [_key_value(row[0] if len(row) == 1 else tuple(row)) for row in rows]
 
 
+# --- one column against one column ------------------------------------------
+
+
+def column_overlap(left: Table, left_column: str, right: Table, right_column: str) -> dict:
+    """Do these two columns share values, and how far — compact enough for many pairs.
+
+    The measurement the knowledge graph's `OVERLAPS` edge carries
+    (`docs/KNOWLEDGE_GRAPH.md` §4.3). It lives here, in the module that already
+    knows how to compare two sets of values at scale, rather than in a second
+    implementation next to the graph: the CTEs, the type-kind rule and the
+    coverage arithmetic are all the same, and two of those drifting apart is how
+    the terminal and the graph end up disagreeing about one number.
+
+    **Deliberately not `join_findings`** (§9.3). That one is heavy by design and
+    returns example rows for a single pair; this returns numbers for a pair the
+    agent is asking about among several. It costs the same single scan-and-group
+    per side either way, so the saving is in what comes back, not in the query.
+
+    **Two coverages, because overlap is not symmetric** (§4.3): 98% of orders'
+    customer ids may exist in customers while only 40% of customers appear in
+    orders. Both are reported and neither is ranked.
+
+    **A zero here means no shared values. It does not mean unrelated** (§4.4) —
+    `France` and `FRA` measure zero and are the same thing after a mapping. That
+    reading is the agent's, which is why the edge carries the reason it asked.
+    """
+    _require_columns(left.columns, [left_column], "left")
+    _require_columns(right.columns, [right_column], "right")
+
+    L = _table_side(left, [left_column])
+    R = _table_side(right, [right_column])
+    comparable = L["kinds"] == R["kinds"]
+
+    exprs = _overlap_exprs()
+    row = left.con.execute(
+        f"{_key_ctes(left, [left_column], right, [right_column], comparable)} "
+        f"SELECT {', '.join(exprs.values())} FROM l FULL OUTER JOIN r ON {_match(1)}"
+    ).fetchone()
+    ov = {name: int(value or 0) for name, value in zip(exprs, row, strict=True)}
+
+    return {
+        "left": _column_side(left, left_column, L),
+        "right": _column_side(right, right_column, R),
+        "n_shared_values": ov["n_shared_keys"],
+        "n_left_only_values": ov["n_left_only_keys"],
+        "n_right_only_values": ov["n_right_only_keys"],
+        # Share of *rows* whose value is present on the other side — the same
+        # definition `join_report` uses, so the two can never disagree.
+        "left_coverage": round_float(ov["matched_left"] / L["n_rows"]) if L["n_rows"] else 0.0,
+        "right_coverage": round_float(ov["matched_right"] / R["n_rows"]) if R["n_rows"] else 0.0,
+        # A false here is why a zero can be meaningless rather than informative:
+        # text against a number never matches, whatever the values say.
+        "comparable_types": comparable,
+    }
+
+
+def _column_side(table: Table, column: str, side: dict) -> dict:
+    return {
+        "table": table.name,
+        "column": column,
+        "n_rows": side["n_rows"],
+        "n_null": side["null_rows"],
+        "n_distinct": side["n_distinct"],
+        "type": side["kinds"][0],
+    }
+
+
+def render_overlap(overlap: dict) -> str:
+    """One measured pair, for a human. Numbers, never a verdict."""
+    left, right = overlap["left"], overlap["right"]
+    return (
+        f"{left['table']}.{left['column']} ↔ {right['table']}.{right['column']}  "
+        f"{overlap['n_shared_values']} shared value(s); "
+        f"{overlap['left_coverage']:.0%} of left rows, "
+        f"{overlap['right_coverage']:.0%} of right rows match"
+        + ("" if overlap["comparable_types"] else "   ⚑ different types, compared as text")
+    )
+
+
 def join_findings(
     left: Table,
     right: Table,
