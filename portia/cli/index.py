@@ -57,6 +57,31 @@ def ensure_project_context(portia_dir: str) -> None:
     print(f"\ncontext saved → {portia_dir}/project.yaml\n")
 
 
+def sync_graph(portia_dir: str) -> None:
+    """Refresh the knowledge graph's structural half — **best effort, always**.
+
+    §5 names indexing as a write moment, and §9.4 needs it: at source 23 the
+    copilot queries the graph to judge which pairs are worth measuring, so the
+    sources it has already read have to be in there by the time it looks.
+
+    It never fails the index. An index that stops because a container is stopped
+    is precisely the leak §6.6 warns about — a design decision escaping into a
+    hard requirement — so a missing database is one printed line and nothing
+    else. The facts are in the catalog either way; the graph is a restatement of
+    them and can be rebuilt with `python -m portia.cli.knowledge --write`.
+    """
+    from portia import knowledge
+    from portia.knowledge import store
+
+    try:
+        result = knowledge.sync(Path(portia_dir).parent, portia_dir=portia_dir)
+    except store.GraphUnavailable as exc:
+        print(f"\nknowledge graph not updated — {exc}")
+        return
+    counts = result.graph.counts()["nodes"]
+    print(f"\nknowledge graph updated — {counts['Source']} sources, {counts['Column']} columns")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Index data into a portia project.")
     parser.add_argument("data", help="a data file, a directory of them, or a glob")
@@ -91,6 +116,8 @@ def main() -> None:
             raise SystemExit(str(exc)) from None
         names.append(written.stem)
         print(f"indexed → {written}")
+
+    sync_graph(args.dir)
 
     if args.no_interpret:
         print("\nfacts only (--no-interpret). Catalog entries:\n")
