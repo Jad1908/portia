@@ -314,8 +314,13 @@ def destination_in(raw: str, app: App) -> Path:
     inside is accepted, and one that points outside is refused by ``plan``. Data
     lives in the repo (`PIPELINE.md` §2.7) and the destination field is not the
     place to make an exception to that.
+
+    **Empty means the project root** (2026-08-06), where it used to mean
+    ``data/``. See `state.App.import_dir` for the reversal and why: a project
+    whose data *is* its root is an ordinary shape, and inventing a folder for it
+    is the surprising answer rather than the safe one.
     """
-    typed = Path((raw or "").strip() or DATA_DIR)
+    typed = Path((raw or "").strip() or ".")
     return typed if typed.is_absolute() else app.root / typed
 
 

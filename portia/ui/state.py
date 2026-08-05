@@ -376,7 +376,14 @@ class App:
         """
         if self.import_to_data_dir:
             return self.data_dir if self.data_dir not in ("", ".") else fallback
-        return (self.import_destination or "").strip() or fallback
+        # **An empty box means the project root** (2026-08-06). It used to fall
+        # through to `data/`, on the reading above that dropping files loose at
+        # the top of a project is not a decision anyone makes deliberately. That
+        # is wrong for the project whose data *is* at its root — a folder of
+        # CSVs opened directly — where `data/` is the surprise and the root is
+        # the obvious answer. The checkbox above is still the default, so the
+        # empty box is now something you have to clear on purpose.
+        return (self.import_destination or "").strip()
 
     @property
     def spec_has_steps(self) -> bool:

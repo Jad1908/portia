@@ -648,13 +648,22 @@ def test_the_destination_is_the_one_the_operator_chose(project):
     assert pairs[0][1] == app.root / "data" / "raw" / "orders.csv"
 
 
-def test_an_empty_destination_falls_back_to_the_data_directory(project):
+def test_an_empty_destination_means_the_project_root(project):
+    """Reversed 2026-08-06. It used to fall through to `data/`, on the reading
+    that files loose at the top of a project are nobody's deliberate choice.
+
+    That is wrong for the project whose data *is* its root — a folder of CSVs
+    opened directly — where inventing `data/` is the surprise. The checkbox
+    above the field is still the default, so an empty box is now something you
+    cleared on purpose.
+    """
     from portia.ui import engine
 
     app, _ = project
 
-    assert engine.destination_in("", app) == app.root / engine.DATA_DIR
-    assert engine.destination_in("   ", app) == app.root / engine.DATA_DIR
+    assert engine.destination_in("", app) == app.root
+    assert engine.destination_in("   ", app) == app.root
+    assert engine.destination_in("raw", app) == app.root / "raw"
 
 
 def test_a_destination_outside_the_project_is_refused(project):
