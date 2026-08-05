@@ -39,9 +39,21 @@ from nicegui import ui
 from portia import catalog
 from portia.checks.outcome import BLOCKING_FLAGS, describe_contribution, describe_grain
 from portia.core.present import format_rate
+from portia.core.serialize import to_json
 from portia.ui import components as c
 from portia.ui import engine, graph, state
-from portia.ui.state import APP, BRIEF, MODEL, OUTPUT, RUN, SOURCE, SPEC, TURN, UNINDEXED
+from portia.ui.state import (
+    APP,
+    BRIEF,
+    KNOWLEDGE,
+    MODEL,
+    OUTPUT,
+    RUN,
+    SOURCE,
+    SPEC,
+    TURN,
+    UNINDEXED,
+)
 
 #: How tall the graph half sits by default, as a percentage. The report half is
 #: the taller of the two — it is where the evidence is (DESIGN.md → Layout).
@@ -80,6 +92,8 @@ def pane() -> None:
         _turn_inspector(name)
     elif kind == BRIEF:
         _brief_inspector()
+    elif kind == KNOWLEDGE:
+        _knowledge_inspector()
     else:
         _workflow()
 
@@ -983,6 +997,91 @@ async def _index(path: Path) -> None:
     artifacts.pane.refresh()
     pane.refresh()
     ui.notify(f"profiled {path.stem}")
+
+
+#: The explorer's own element id, and its height. A fixed height rather than a
+#: flex fill because vis-network measures its container once, on construction,
+#: and a container that is still growing when it does gets a canvas of zero.
+KNOWLEDGE_CANVAS = "portia-knowledge"
+KNOWLEDGE_HEIGHT = "calc(100vh - 220px)"
+
+
+def _knowledge_inspector() -> None:
+    """The knowledge graph, drawn by the library that already does this.
+
+    **It is not the workflow canvas and does not reuse it** (`KNOWLEDGE_GRAPH.md`
+    §6.9). That one lays out a DAG of specs by dependency order; this is a graph
+    explorer over what the data is to itself, where force layout and hairball
+    management are the whole job. The data comes from `engine.knowledge_subgraph`
+    and the drawing from `assets/knowledge.js`, so nothing in here computes and
+    nothing in the browser holds a database password.
+
+    Two views, and the default is the legible one: tables, groups, what reads
+    what, and one edge per pair of tables that share a measured overlap. Columns
+    are a toggle because at a real project they are several hundred nodes — worth
+    seeing, and not worth seeing first.
+    """
+    show_columns = APP.knowledge_columns
+    data = engine.knowledge_subgraph(columns=show_columns)
+
+    with ui.element("div").classes("stack-sm p-pad w-full"):
+        with ui.element("div").classes("row-between"):
+            c.pane_title("Knowledge graph")
+            c.segmented(
+                KNOWLEDGE_VIEWS,
+                KNOWLEDGE_VIEWS[1] if show_columns else KNOWLEDGE_VIEWS[0],
+                _pick_knowledge_view,
+            )
+        if data.get("unavailable"):
+            # §3.5 — the window has to behave sensibly when the database is down,
+            # and sensibly means saying so rather than drawing an empty canvas
+            # that reads as "there is nothing here".
+            c.empty_note(f"The graph is not reachable — {data['unavailable']}")
+            return
+        if not data["nodes"]:
+            c.empty_note(KNOWLEDGE_EMPTY)
+            return
+
+        c.caption(_knowledge_counts(data))
+        # The height goes on the div itself, not on NiceGUI's wrapper: vis-network
+        # measures its container once, on construction, and a container with no
+        # height of its own gets a canvas a few pixels tall.
+        ui.html(
+            f'<div id="{KNOWLEDGE_CANVAS}" class="p-knowledge" '
+            f'style="height:{KNOWLEDGE_HEIGHT}"></div>'
+        )
+        ui.timer(
+            0.05,
+            lambda: ui.run_javascript(
+                f"window.portiaKnowledge.draw({KNOWLEDGE_CANVAS!r}, {to_json(data)})"
+            ),
+            once=True,
+        )
+
+
+#: The two views, in the order they are offered. Not a rank: one is fewer nodes,
+#: not better ones.
+KNOWLEDGE_VIEWS = ("Tables", "Columns")
+
+KNOWLEDGE_EMPTY = (
+    "Nothing in the graph yet. Index a source, or run python -m portia.cli.knowledge --write."
+)
+
+
+def _pick_knowledge_view(choice: str) -> None:
+    APP.knowledge_columns = choice == KNOWLEDGE_VIEWS[1]
+    pane.refresh()
+
+
+def _knowledge_counts(data: dict) -> str:
+    """What is on screen, counted. Kinds in schema order, never by size."""
+    kinds: dict[str, int] = {}
+    for node in data["nodes"]:
+        kinds[node["kind"]] = kinds.get(node["kind"], 0) + 1
+    shown = " · ".join(f"{n} {kind}" for kind, n in kinds.items())
+    edges = f"{len(data['edges'])} edge(s)"
+    cut = "  (truncated)" if data.get("truncated") else ""
+    return f"{shown} · {edges}{cut}"
 
 
 def _brief_inspector() -> None:

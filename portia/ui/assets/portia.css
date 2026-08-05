@@ -2143,3 +2143,13 @@ body.body--dark .step-card {
   flex-direction: column;
   gap: var(--sp-xs);
 }
+
+/* The knowledge explorer's canvas. vis-network draws into it and owns
+   everything inside; all this does is give it a surface and a border that
+   matches the panes around it. */
+.p-knowledge {
+  width: 100%;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}

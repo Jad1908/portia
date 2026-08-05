@@ -37,9 +37,11 @@ from typing import Any
 from portia.knowledge.schema import (
     COLUMN,
     DERIVES_FROM,
+    GROUP,
     HAS_COLUMN,
     IN_GROUP,
     KEY_PROPERTY,
+    MODEL,
     OVERLAPS,
     READS,
     SOURCE,
@@ -318,3 +320,80 @@ def _render_column(answer: dict) -> str:
     for row in answer["overlaps"]:
         lines.append(f"  overlaps {row['table']}.{row['column']}: {row['measured']}")
     return "\n".join(lines)
+
+
+# --- the whole thing, for a picture -----------------------------------------
+
+#: How many nodes a picture may hold before it stops being one. Not the same
+#: number as `MAX_ROWS`, and not for the same reason: that one protects a
+#: **context window**, where fifty edges is noise the agent has to read. This
+#: protects an **eye**, which copes with far more at once and copes with none of
+#: it past a few hundred. Two audiences, two limits, stated separately so
+#: neither gets tuned on the other's behalf.
+MAX_GRAPH_NODES = 600
+
+
+def subgraph(session: Any, *, columns: bool = False) -> dict:
+    """The whole graph as nodes and edges — for drawing, not for reading.
+
+    **The only function here that deliberately returns a lot.** Every other one
+    is shaped by §9.1's rule that a router which returns fifty things has not
+    routed; that rule is about what an *agent* can act on. A picture is read by a
+    person, who is much better at a hundred things at once and much worse at a
+    paragraph of JSON — so the constraint is different and the function is
+    separate rather than the router being loosened.
+
+    ``columns`` off is the legible view: tables, groups, what reads what, and one
+    edge per pair of tables that share a measured overlap. On, it is the full
+    thing including every column and every lineage edge, which at a real project
+    is a hairball and is sometimes exactly what you want to see.
+
+    Nodes and edges come back in portia's own vocabulary — no library's field
+    names — so swapping what draws them is a change in one JavaScript file.
+    """
+    labels = (SOURCE, MODEL, GROUP, COLUMN) if columns else (SOURCE, MODEL, GROUP)
+    nodes = _run(
+        session,
+        f"MATCH (n) WHERE {_any_label('n', labels)} "
+        "RETURN labels(n)[0] AS kind, coalesce(n.name, n.key, n.path) AS label, "
+        "elementId(n) AS id, properties(n) AS properties "
+        f"ORDER BY kind, label LIMIT {MAX_GRAPH_NODES}",
+    )
+    known = {n["id"] for n in nodes}
+    edges = [
+        e
+        for e in _run(
+            session,
+            f"MATCH (a)-[r]->(b) WHERE {_any_label('a', labels)} AND {_any_label('b', labels)} "
+            "RETURN elementId(a) AS `from`, elementId(b) AS `to`, type(r) AS kind, "
+            "properties(r) AS properties",
+        )
+        if e["from"] in known and e["to"] in known
+    ]
+    if not columns:
+        # Table-to-table overlap, **derived** rather than stored. §4.1 rejected a
+        # summary source-to-source edge in the schema because two things would
+        # then state one fact and could disagree — and said to derive it in the
+        # query instead. This is that query, and it is the only place the graph
+        # is redrawn at a coarser grain than it is written.
+        edges += [
+            e
+            for e in _run(
+                session,
+                f"MATCH (a)-[:{HAS_COLUMN}]->(:{COLUMN})-[r:{OVERLAPS}]->"
+                f"(:{COLUMN})<-[:{HAS_COLUMN}]-(b) WHERE a <> b "
+                "RETURN elementId(a) AS `from`, elementId(b) AS `to`, "
+                f"'{OVERLAPS}' AS kind, {{n_measured_pairs: count(r)}} AS properties",
+            )
+            if e["from"] in known and e["to"] in known
+        ]
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "truncated": len(nodes) >= MAX_GRAPH_NODES,
+    }
+
+
+def _any_label(variable: str, labels: tuple[str, ...]) -> str:
+    """``(n:Source OR n:Model OR n:Group)`` — the kinds a picture is drawing."""
+    return "(" + " OR ".join(f"{variable}:{label}" for label in labels) + ")"

@@ -60,7 +60,15 @@ _DARK: ui.dark_mode | None = None
 CANVAS_JS = ASSETS / "canvas.js"
 VIEWPORT_JS = ASSETS / "viewport.js"
 SCROLL_JS = ASSETS / "scroll.js"
-BEHAVIOUR = (CANVAS_JS, VIEWPORT_JS, SCROLL_JS)
+KNOWLEDGE_JS = ASSETS / "knowledge.js"
+BEHAVIOUR = (CANVAS_JS, VIEWPORT_JS, SCROLL_JS, KNOWLEDGE_JS)
+
+#: The graph explorer's renderer — the one third-party script the window loads.
+#: `KNOWLEDGE_GRAPH.md` §6.9: the knowledge graph is not the project canvas, and
+#: force layout, expand-on-click and hairball management are the whole job of a
+#: library that already exists. This is the engine `neovis.js` wraps, used
+#: directly so the database password never has to reach the browser.
+_VIS_NETWORK = "https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"
 
 
 def apply() -> ui.dark_mode:
@@ -68,6 +76,7 @@ def apply() -> ui.dark_mode:
     global _DARK
     ui.add_head_html(_PRECONNECT)
     ui.add_head_html(f'<link rel="stylesheet" href="{_INTER}">')
+    ui.add_head_html(f'<script src="{_VIS_NETWORK}"></script>')
     ui.add_css(CSS)
     for script in BEHAVIOUR:
         ui.add_body_html(f"<script>{script.read_text()}</script>")

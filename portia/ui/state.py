@@ -77,6 +77,12 @@ UNINDEXED = tree.DATA
 #: pinned above it, because it is the most consequential text in the product and
 #: it was previously reachable only from a toolbar button.
 BRIEF = "brief"
+#: The knowledge graph — **not** the project canvas, and pinned rather than in
+#: the tree for the same reason the brief is: it lives in Neo4j, not on disk.
+#: The canvas draws what we specified; this draws what the data is to itself
+#: (`docs/KNOWLEDGE_GRAPH.md` §6.9), so they are two rows, never two modes of
+#: one.
+KNOWLEDGE = "knowledge"
 
 
 @dataclass
@@ -208,6 +214,10 @@ class App:
     outputs: list[Path] = field(default_factory=list)
 
     selection: tuple[str, str] | None = None  # (kind, name) — None = the workflow
+    #: Whether the knowledge explorer is showing columns as well as tables.
+    #: A view, not a preference: it is about what is on screen right now, so it
+    #: lives here rather than in `ui/settings.py`.
+    knowledge_columns: bool = False
     selected_step: str | None = None
     #: Which folders in the left tree the operator has opened, and which they have
     #: shut. Two sets rather than one because the default is neither: **the top

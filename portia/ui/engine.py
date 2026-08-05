@@ -692,6 +692,26 @@ def read_table(path: Path):
 # --- reloading the spec after the copilot has written to it -----------------
 
 
+def knowledge_subgraph(*, columns: bool = False) -> dict:
+    """The knowledge graph, as nodes and edges for the explorer to draw.
+
+    Synchronous, like every other read a pane draws in one pass: this is a
+    handful of Cypher over a few hundred nodes, not a scan of anyone's data.
+
+    A stopped container comes back as ``{"unavailable": ...}`` rather than
+    raising. The window has to behave sensibly when the database is down
+    (`KNOWLEDGE_GRAPH.md` §3.5), and a pane is the surface where "behave
+    sensibly" means *say so and draw nothing else*.
+    """
+    from portia.knowledge import query, store
+
+    try:
+        with store.session() as session:
+            return query.subgraph(session, columns=columns)
+    except store.GraphUnavailable as exc:
+        return {"nodes": [], "edges": [], "unavailable": str(exc)}
+
+
 def reload_spec(app: App) -> None:
     """Re-read the open spec from disk; the copilot may have appended a step.
 
