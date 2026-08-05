@@ -157,7 +157,14 @@ def _add_catalog(graph: Graph, data: dict) -> dict[str, list[str]]:
             SOURCE,
             path,
             name=name,
-            summary=entry.get("summary"),
+            # **Only a real read.** `catalog._auto_summary` drafts a restatement
+            # of the profile so the YAML is never empty, and carrying that into
+            # the graph would put a placeholder in the prose slot where it is
+            # indistinguishable from an interpretation — the same mistake the
+            # source inspector's `not-read` state exists to undo. Absent means
+            # nobody has read this source, which is a fact worth being able to
+            # see. The facts it restated are on the columns, measured.
+            summary=entry.get("summary") if catalog.is_interpreted(entry) else None,
             candidate_keys=entry.get("candidate_keys") or [],
             # The same two numbers, also as one comparable string: a measured
             # edge records what it was taken against, and comparing that in

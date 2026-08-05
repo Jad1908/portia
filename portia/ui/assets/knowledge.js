@@ -34,11 +34,36 @@ window.portiaKnowledge = (function () {
     return node.kind === "Column" ? node.label.split("::").pop() : node.label;
   }
 
+  // Properties that are portia's bookkeeping or are already on the node's own
+  // label, so repeating them in a tooltip is noise.
+  const HIDDEN = ["_build", "name", "key", "table", "path"];
+
+  // A tooltip is a glance, not a document. Long values — a prose summary, an
+  // `asked_because` sentence — are wrapped rather than run off the right edge of
+  // the window, which is what an unwrapped one does.
+  const WRAP_AT = 64;
+
+  function wrap(text) {
+    const words = String(text).split(/\s+/);
+    const lines = [];
+    let line = "";
+    for (const word of words) {
+      if (line && (line + " " + word).length > WRAP_AT) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = line ? line + " " + word : word;
+      }
+    }
+    if (line) lines.push(line);
+    return lines.join("\n    ");
+  }
+
   function tooltip(item) {
-    const lines = [item.kind];
+    const lines = [item.kind + (item.label ? `  ${item.label}` : "")];
     for (const [key, value] of Object.entries(item.properties || {})) {
-      if (key.startsWith("_") || value === null) continue;
-      lines.push(`${key}: ${value}`);
+      if (HIDDEN.includes(key) || value === null || value === "") continue;
+      lines.push(`${key}: ${wrap(value)}`);
     }
     return lines.join("\n");
   }

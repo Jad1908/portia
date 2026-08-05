@@ -82,11 +82,30 @@ def neo4j_session():
     pytest.importorskip("neo4j", reason="the graph extra is not installed")
     if not os.environ.get("NEO4J_PASSWORD"):
         pytest.skip("no NEO4J_PASSWORD — see docker-compose.yml")
+
+    # The **whole process** is redirected, not just this session: the code under
+    # test opens its own connections (`handlers.measure_overlaps`,
+    # `record_step`, `knowledge.sync`) through `store.settings()`, so pointing
+    # only the fixture at the test server would have the test read one database
+    # while the thing it is testing writes another.
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setenv("NEO4J_URI", TEST_URI)
     try:
         driver = store.connect()
     except store.GraphUnavailable as exc:
-        pytest.skip(str(exc))
+        monkeypatch.undo()
+        pytest.skip(f"{exc}  (start it: docker compose up -d neo4j-test)")
     with driver.session(database=store.settings()["database"]) as live:
         live.run("MATCH (n) DETACH DELETE n")
         yield live
     driver.close()
+    monkeypatch.undo()
+
+
+#: The **test** server, which is a different one from the working graph on
+#: purpose. This fixture empties whatever it connects to, so pointing it at the
+#: graph you are using deletes the project you were looking at and leaves fixture
+#: nodes behind — which is how `data/orders.csv` appeared in a project with no
+#: such file. Neo4j Community allows one user database per server, so the
+#: separation has to be a second server (`docker compose up -d neo4j-test`).
+TEST_URI = os.environ.get("NEO4J_TEST_URI", "bolt://localhost:7688")
