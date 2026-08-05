@@ -68,6 +68,26 @@ async def describe_source(args: dict[str, Any]) -> dict[str, Any]:
 
 
 @tool(
+    "graph_lookup",
+    prompts.tool("graph_lookup"),
+    {
+        "type": "object",
+        "properties": {
+            "table": {"type": "string", "description": "Source name, source path, or model name"},
+            "column": {"type": "string", "description": "One column of it, for lineage"},
+        },
+        "required": ["table"],
+    },
+    annotations=_READ_ONLY,
+)
+async def graph_lookup(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return _ok(handlers.graph_lookup(args["table"], column=args.get("column")))
+    except Exception as exc:  # noqa: BLE001
+        return _failed(exc)
+
+
+@tool(
     "profile_source",
     prompts.tool("profile_source"),
     {
@@ -240,7 +260,7 @@ def _dir(args: dict[str, Any]) -> dict[str, str]:
 
 #: Read-only checks — safe to auto-approve. Writes are listed separately so the
 #: session can route them through the permission flow instead.
-READ_TOOLS = [get_context, describe_source, profile_source, join_findings, run_spec]
+READ_TOOLS = [get_context, graph_lookup, describe_source, profile_source, join_findings, run_spec]
 WRITE_TOOLS = [set_interpretation, set_group, record_step]
 
 ALL_TOOLS = [*READ_TOOLS, *WRITE_TOOLS]

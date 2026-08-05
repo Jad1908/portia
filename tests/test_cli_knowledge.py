@@ -73,7 +73,7 @@ def test_a_stopped_database_is_reported_as_one(project, monkeypatch, capsys):
     """§3.5 — the app must behave sensibly when the database is down, and the
     first surface that has to is this one."""
     monkeypatch.setenv("NEO4J_URI", "bolt://localhost:1")
-    with pytest.raises(SystemExit, match="cannot reach Neo4j"):
+    with pytest.raises(SystemExit, match="no Neo4j at"):
         _run(monkeypatch, "--root", str(project), "--write")
 
 
