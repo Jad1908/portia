@@ -195,6 +195,48 @@ def edge_writes(graph: Graph, build: str) -> list[tuple[str, dict]]:
     return writes
 
 
+def measured_writes(edges: list[Edge]) -> list[tuple[str, dict]]:
+    """The measured half, written **without a build stamp** — and that is the point.
+
+    A stamp is what makes something a rebuild's to delete. These cost a query,
+    no file restates them, and §5.2 is explicit that Neo4j is a store rather than
+    a cache: losing a measurement costs time, and losing it *silently* costs the
+    distinction between "we looked and found nothing" and "nobody looked" (§4.4).
+
+    Directed left-to-right, because the edge holds two directional coverages and
+    which is which is carried by nothing else (§4.3).
+    """
+    groups: dict[tuple[str, str, str], list[Edge]] = {}
+    for edge in edges:
+        if edge.kind in STRUCTURAL:
+            raise ValueError(f"{edge.kind} is structural — a rebuild owns it, not a measurement")
+        groups.setdefault((edge.kind, edge.start.label, edge.end.label), []).append(edge)
+
+    writes = []
+    for (kind, start_label, end_label), grouped in groups.items():
+        start_key, end_key = KEY_PROPERTY[start_label], KEY_PROPERTY[end_label]
+        rows = [
+            {"start": e.start.key, "end": e.end.key, "properties": e.properties} for e in grouped
+        ]
+        writes.append(
+            (
+                "UNWIND $rows AS row "
+                f"MATCH (a:{start_label} {{{start_key}: row.start}}) "
+                f"MATCH (b:{end_label} {{{end_key}: row.end}}) "
+                f"MERGE (a)-[r:{kind}]->(b) SET r = row.properties",
+                {"rows": rows},
+            )
+        )
+    return writes
+
+
+def write_measured(edges: list[Edge], session: Any) -> int:
+    """Store measured edges. Returns how many were written."""
+    for statement, params in measured_writes(edges):
+        session.run(statement, **params)
+    return len(edges)
+
+
 def prune_writes(build: str) -> list[tuple[str, dict]]:
     """What this build did not restate, and is therefore no longer true.
 

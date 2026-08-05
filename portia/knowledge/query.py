@@ -225,7 +225,8 @@ def _column_answer(session: Any, found: dict, column: str) -> dict:
                 session,
                 f"{reached}-[r:{OVERLAPS}]-(o:{COLUMN})<-[:{HAS_COLUMN}]-(p) "
                 f"{_LINEAGE_RETURN}, properties(r) AS measured, "
-                "startNode(r).key = c.key AS measured_from_here ORDER BY `table`, column",
+                f"startNode(r).key = c.key AS measured_from_here, {_STALE} "
+                "ORDER BY `table`, column",
                 **args,
             )
         ),
@@ -233,6 +234,35 @@ def _column_answer(session: Any, found: dict, column: str) -> dict:
 
 
 _LINEAGE_RETURN = "RETURN labels(p)[0] AS kind, p.name AS `table`, p.path AS path, o.name AS column"
+
+
+#: Whether a measurement is still backed by the data it was taken from (§4.5),
+#: worked out at **read** time by comparing the fingerprints the edge recorded
+#: against the ones its two tables carry now. Nothing has to re-walk the graph
+#: when a file changes, and nothing has to be invalidated: the edge is **marked,
+#: never deleted**, because a deleted edge is indistinguishable from one nobody
+#: ever measured, which is the ambiguity §4.4 exists to remove.
+#:
+#: The `CASE` is because the edge's two fingerprints are *left* and *right* while
+#: the query's two tables are *this one* and *the other one*, and which is which
+#: depends on the direction the measurement was taken in. `null` when a
+#: fingerprint is missing, which honestly reads as "cannot tell" rather than
+#: "fine".
+def _moved(near: str, far: str) -> str:
+    """Either end no longer matching what it was measured against.
+
+    ``t`` is the table asked about and ``p`` the one on the other end of the
+    edge; ``near``/``far`` say which of the edge's two recorded fingerprints
+    belongs to which of them.
+    """
+    return f"r.{near}_fingerprint <> t.fingerprint OR r.{far}_fingerprint <> p.fingerprint"
+
+
+_STALE = (
+    "CASE WHEN startNode(r).key = c.key "
+    f"THEN {_moved('left', 'right')} "
+    f"ELSE {_moved('right', 'left')} END AS stale"
+)
 
 
 # --- running them -----------------------------------------------------------
