@@ -174,15 +174,16 @@ proposes groups — not a code prefilter and not a sweep of all ~245,000 pairs. 
 graph surfaces edges and never ranks them**, and §4.4: a measured zero means *no shared values*, not
 *unrelated* — which is why the edge carries the reason the agent asked for it.
 
-**Where it actually is.** §9.4's phase A is built — `portia/knowledge/`, `python -m
-portia.cli.knowledge`, a `graph` extra and a `docker-compose.yml`. That is the **write path only**:
-sources, models, columns, groups, `READS` and column-level `DERIVES_FROM`, read off the catalog and
-the specs with nothing run and no connection opened. No agent, no tool, no measurement. Building it
-settled the lineage rank (a transform outranks a rename outranks a carry), made the `sql` hatch's
-cost countable rather than guessed, and fixed the rule that a rebuild off the files may delete
-structural edges and **never** a measurement — which phase C depends on and is far cheaper to
-honour now. Phases B (the read tool), C (the agent picking pairs while indexing) and D (the L1
-shrink, last and on its own) are unstarted.
+**Where it actually is.** §9.4's phases A and B are built and verified against a live Neo4j.
+**A** is the write path — sources, models, columns, groups, `READS` and column-level
+`DERIVES_FROM`, read off the catalog and the specs with nothing run and no connection opened.
+**B** is the read path: `graph_lookup`, fixed queries, one new tool. Between them they settled the
+lineage rank (a transform outranks a rename outranks a carry), made the `sql` hatch's cost
+countable rather than guessed, fixed the rule that a rebuild may delete structural edges and
+**never** a measurement, and answered §7's open question about what a query may return — *a router
+returns tables*, so the fifty-edge answer never gets constructed and nothing has to be truncated to
+avoid it. **Still no measurement anywhere**: phase C is where the agent picks pairs while indexing,
+and D — the L1 shrink — is last and on its own.
 
 **The loop changes with it, not after it** (§9). The graph sits *before* `describe_source` as a
 router — *which* table should I look at, and where did this column come from — rather than as a

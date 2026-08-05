@@ -329,13 +329,12 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
 *Phase A is built (`KNOWLEDGE_GRAPH.md` → Status). These are what it deferred, plus the design's
 own open questions where the code now has something to say about them.*
 
-- **Phases B, C and D** are the design's, not this list's — read §9.4. B is the read tool, C is the
-  agent picking pairs during indexing, D is the L1 shrink. Ordered there, and D is last **on its
-  own** for a reason.
+- **Phases C and D** are the design's, not this list's — read §9.4. C is the agent picking pairs
+  during indexing, D is the L1 shrink. D is last **on its own** for a reason.
 - **Nothing writes the graph except the build command.** §5 names three write moments — index a
-  source, save a spec, measure a join — and none of them is hooked up. Deliberate: hooking them now
-  would make an index fail when the container is down, which is §6.6's leak, and nothing *reads*
-  the graph until phase B. Revisit with B.
+  source, save a spec, measure a join — and none of them is hooked up. Phase C forces the first
+  one, since §5.1 has the agent choosing pairs *while* indexing; whatever it does has to degrade
+  when the container is down rather than failing the index (§6.6).
 - **Column lineage through the `sql` hatch** (§4.2, §7). A model downstream of a `sql` step gets no
   Column nodes and lands in `BuildResult.unresolved`. That dict is the evidence to decide on:
   if real projects run mostly through the hatch, `sqlglot` earns its place; if they don't, the
@@ -446,6 +445,10 @@ odd finding worth carrying forward isn't lost with it.*
 
 **Knowledge graph**
 
+- **Phase B — the read path** — 2026-08-04, `knowledge/query.py` + the `graph_lookup` tool. Fixed
+  queries, taught as a *router* that comes before L2 rather than a rung above L4. *The finding
+  worth carrying: §7's "what may a query return at once" needed no cap — asking about a table
+  returns tables, so the fifty-edge answer is never built.*
 - **Phase A — the write path** — 2026-08-04, `portia/knowledge/`. The catalog and the specs read
   into nodes and edges, column-level `DERIVES_FROM` included, with nothing run and no connection
   opened. `python -m portia.cli.knowledge` builds and prints it; `--write` needs Neo4j and nothing
