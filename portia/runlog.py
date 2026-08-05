@@ -293,7 +293,7 @@ def summary(run: Run) -> dict[str, Any]:
         "refused": len(approvals) - len(allowed),
         "subtype": result.data.get("subtype") if result else None,
         "cost_usd": result.data.get("cost_usd") if result else None,
-        **_tokens(usage),
+        **token_totals(usage),
     }
 
 
@@ -348,7 +348,7 @@ def _clip(text: str, chars: int) -> str:
 INPUT_FIELDS = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
 
 
-def _tokens(usage: dict[str, Any]) -> dict[str, Any]:
+def token_totals(usage: dict[str, Any]) -> dict[str, Any]:
     """What the turn actually sent and received.
 
     The SDK's ``input_tokens`` counts only the *uncached* part, and on a portia
@@ -362,6 +362,11 @@ def _tokens(usage: dict[str, Any]) -> dict[str, Any]:
     So `input_tokens` here is the whole of it, and `cached_tokens` says how much
     of that was read from cache rather than sent fresh. Both are facts; neither
     says whether a run was expensive, which is a judgment that needs a goal.
+
+    **Public because the window shows these live**, at the end of a turn, and a
+    second implementation of "which of the SDK's three input fields count" is
+    how the panel and `cli.runs` end up quoting different numbers for one turn —
+    the disagreement `core/present.py` exists to stop.
     """
     if not usage:
         return {"input_tokens": None, "cached_tokens": None, "output_tokens": None}

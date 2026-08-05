@@ -106,6 +106,10 @@ def _record(event: events.Event, stream: state.Stream, log: runlog.Log) -> None:
     if event.kind == events.RESULT and stream.turn is not None:
         stream.turn.subtype = event.data.get("subtype")
         stream.turn.cost_usd = event.data.get("cost_usd")
+        totals = runlog.token_totals(event.data.get("usage") or {})
+        stream.turn.input_tokens = totals["input_tokens"]
+        stream.turn.cached_tokens = totals["cached_tokens"]
+        stream.turn.output_tokens = totals["output_tokens"]
     stream.rows.append(event)
     if event.kind in _SYNC_ON:
         _sync_artifacts()

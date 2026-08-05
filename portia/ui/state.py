@@ -160,6 +160,13 @@ class Turn:
     running: bool = True
     subtype: str | None = None
     cost_usd: float | None = None
+    #: What the turn sent and received, from `runlog.token_totals` — the same
+    #: arithmetic `cli.runs` prints, so the window and the terminal cannot quote
+    #: two different numbers for one turn. `input_tokens` is the whole input
+    #: including the cached part, which on a portia turn is nearly all of it.
+    input_tokens: int | None = None
+    cached_tokens: int | None = None
+    output_tokens: int | None = None
     error: str | None = None
 
     @property

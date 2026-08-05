@@ -63,6 +63,10 @@ stack, and product vision. Read them every session, before proposing changes or 
   rewritten and the conversation phase is not · two new tools, not one · and a four-phase order
   where the read path precedes the agent-writes-measurements path, because at source 23 the agent
   queries the graph while filling it.
+- `docs/GRAPH_SCHEMA.md` — **the knowledge graph as it actually is**: every label, every property,
+  where each value comes from, and a page of Cypher recipes. The reference to `KNOWLEDGE_GRAPH.md`'s
+  design — read that one for *why*, this one for *what you will find in the browser*.
+  `tests/test_graph_schema_doc.py` fails if `knowledge/schema.py` gains something it does not mention.
 - `docs/BACKLOG.md` — parking lot of deferred ideas, by stream, with a compact **Shipped** list at
   the bottom. Not required reading; scan it when picking the next thing to build, and **add to it
   whenever we postpone something mid-work.**

@@ -490,6 +490,9 @@ def _turn_ended(stream) -> None:
         if turn.error:
             c.text(turn.error, color="c-error")
         c.caption(_ended_line(turn))
+        spend = _spend_line(turn)
+        if spend:
+            c.caption(spend)
         c.caption(_NO_FOLLOW_UP)
         with ui.element("div").classes("row-gap-sm"):
             c.button("New turn", lambda: _new_turn(stream), icon="refresh")
@@ -498,6 +501,28 @@ def _turn_ended(stream) -> None:
 def _ended_line(turn: Any) -> str:
     cost = f" · ~${turn.cost_usd:.4f}" if turn.cost_usd else ""
     return f"turn ended ({turn.subtype or 'stopped'}) · {turn.model}{cost}"
+
+
+def _spend_line(turn: Any) -> str:
+    """What the turn cost, in tokens — a **count**, next to the cost in money.
+
+    The numbers are `runlog.token_totals`', not this panel's, so the window and
+    `cli.runs` cannot disagree about one turn. `in` is the whole input including
+    what came from cache, which on a portia turn is nearly all of it: the L0
+    prompt and the L1 brief go on every request, and the SDK's raw
+    `input_tokens` counts only the part that was not cached — one real run
+    reported 17 for a turn that sent 14,651.
+
+    Reported, never judged. Whether a turn was expensive needs a goal, and this
+    panel has no way to know one.
+    """
+    if turn.input_tokens is None:
+        return ""
+    cached = f" ({c.count(turn.cached_tokens or 0, 'cached')})" if turn.cached_tokens else ""
+    return (
+        f"{c.count(turn.input_tokens, 'token')} in{cached}"
+        f" · {c.count(turn.output_tokens or 0, 'token')} out"
+    )
 
 
 def _new_turn(stream) -> None:

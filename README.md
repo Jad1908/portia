@@ -101,5 +101,6 @@ NEO4J_PASSWORD=portia-dev python -m portia.cli.knowledge --write
 - [Design](DESIGN.md)
 - [The scale tier](docs/DUCKDB_MIGRATION.md) — what the DuckDB engine cost, and what it found
 - [The knowledge graph](docs/KNOWLEDGE_GRAPH.md) — relationships between sources, and column lineage
+- [Graph schema](docs/GRAPH_SCHEMA.md) — every node, edge and property, with Cypher recipes
 - [Backlog](docs/BACKLOG.md)
 - [Brief](docs/brief.md)
