@@ -192,49 +192,52 @@ def project_context() -> None:
     the data: the goal, how it is modelled, and roughly what sources exist —
     `VISION.md`'s "the *global* project, not necessarily the data".
 
-    **The guidance used to ask for the wrong altitude.** "Say what one row means,
-    and which source is authoritative for what" is a question about the data, and
-    it got answers about the data — which is the half portia measures for itself
-    and the half the copilot is forbidden to take on trust. The shape lines now
-    ask for goal, modelling and the kinds of data, and `CONTEXT_EXAMPLE` shows
-    the register in four sentences from an unrelated industry.
+    **The same card as add data** (`p-panel`, in `p-panel--prose` width): the
+    question and the box, and the file it writes pinned in the footer beside the
+    button that writes it. As a bare column on the canvas it was a heading, a
+    text box and four paragraphs of loose text with a raw path trailing under
+    them — a screen with nothing holding it together.
+
+    **It says far less than it used to** (2026-08-04). The guidance had grown
+    into the notes that described this screen while it was being designed: four
+    shape lines, a rule about what not to write, and a four-sentence worked
+    example. That is a briefing about writing a brief, and it dwarfed the box it
+    was meant to introduce. One line of shape survives; the register is taught by
+    the question, which is a short one.
     """
     with ui.element("div").classes("p-centered"):
-        with ui.element("div").classes("p-centered-column"):
-            ui.label("What is this project?").classes("t-heading-md")
-            c.text(CONTEXT_WHY, color="c-mute")
+        with ui.element("div").classes("p-panel p-panel--prose"):
+            with ui.element("div").classes("p-panel-head"):
+                ui.label("What is this project?").classes("t-heading-md")
+                ui.label(CONTEXT_WHY).classes("p-panel-sub")
 
-            box = (
-                ui.textarea(placeholder=CONTEXT_PLACEHOLDER)
-                .classes("p-field p-editor w-full")
-                .props("borderless autofocus")
-                .style("min-height:180px")
-            )
-            box.bind_value(APP, "goal")  # reused as scratch until it is saved
+            with ui.element("div").classes("p-panel-body"):
+                box = (
+                    ui.textarea(placeholder=CONTEXT_PLACEHOLDER)
+                    .classes("p-field p-editor p-editor--tall w-full")
+                    .props("borderless autofocus")
+                )
+                box.bind_value(APP, "goal")  # reused as scratch until it is saved
+                context_guidance()
 
-            context_guidance()
-
-            with ui.element("div").classes("row-gap-sm"):
-                c.button("Continue", lambda: _save_context(box.value), kind="primary")
-                # The gate has no skip, but it must have a way back: choosing the
-                # wrong folder is easy, and the only other exit was the process.
-                c.button("Back", _back_to_picker, kind="secondary")
-                c.caption(str(APP.catalog_dir / "project.yaml"))
+            with ui.element("div").classes("p-panel-actions"):
+                with ui.element("div").classes("row-gap-sm"):
+                    c.button("Continue", lambda: _save_context(box.value), kind="primary")
+                    # The gate has no skip, but it must have a way back: choosing
+                    # the wrong folder is easy, and the only other exit was the
+                    # process.
+                    c.button("Back", _back_to_picker, kind="secondary")
+                c.path_row(APP.catalog_dir / "project.yaml")
 
 
 def context_guidance() -> None:
-    """What a good brief looks like: its shape, then one written at that altitude.
+    """The one line saying what shape a brief takes.
 
-    One function rather than two lists a caller loops over, because the gate and
+    One function rather than a list each caller loops over, because the gate and
     the brief pane are the same box in two places and the day they teach it
     differently is the day one of them is wrong.
     """
-    with ui.element("div").classes("stack-xs"):
-        for line in CONTEXT_SHAPE:
-            c.caption(line, color="c-stone")
-    # `c-mute`, one step up from the shape lines' `c-stone`: those are glanced at,
-    # and this is the one piece of guidance meant to be read through.
-    c.caption(CONTEXT_EXAMPLE, color="c-mute").classes("context-example")
+    c.caption(CONTEXT_SHAPE, color="c-stone")
 
 
 def _back_to_picker() -> None:
@@ -275,7 +278,7 @@ def add_data() -> None:
     one, with the heading and the button drifting to opposite ends of the window.
     """
     with ui.element("div").classes("p-centered"):
-        with ui.element("div").classes("add-data-card"):
+        with ui.element("div").classes("p-panel"):
             panel()
 
 
@@ -294,10 +297,10 @@ def panel(*, in_dialog: bool = False) -> None:
     list gets — a panel where the primary action is somewhere below the fold is a
     panel that looks like it did nothing when you press it.
     """
-    with ui.element("div").classes("add-data-head"):
+    with ui.element("div").classes("p-panel-head"):
         ui.label("Add data").classes("t-heading-md")
-        ui.label(ADD_WHY.format(formats=_formats())).classes("add-data-sub")
-    with ui.element("div").classes("add-data-body"):
+        ui.label(ADD_WHY.format(formats=_formats())).classes("p-panel-sub")
+    with ui.element("div").classes("p-panel-body add-data-body"):
         # Two columns where there is room for two: the question you are almost
         # always answering on the left, the one you are usually not on the right.
         # A wide panel laid out as one stacked column is a wide panel that reads
@@ -309,7 +312,7 @@ def panel(*, in_dialog: bool = False) -> None:
             _interpret_toggle()
         with ui.element("div").classes("add-data-progress"):
             _progress()
-    with ui.element("div").classes("add-data-actions"):
+    with ui.element("div").classes("p-panel-actions"):
         # No rule: the region's own top border is the divider, and two lines a
         # pixel apart is what a rule inside a bordered footer looks like.
         _actions(in_dialog=in_dialog)
@@ -1026,9 +1029,9 @@ def build_add_dialog() -> None:
         # bounded height with its own scroll; the screen having been a full-page
         # column was the odd one out, and giving them one class is what stops the
         # two surfaces drifting apart the next time either is touched.
-        # No inline width: `add-data-card` sizes itself in both places it appears,
+        # No inline width: `p-panel` sizes itself in both places it appears,
         # and `portia.css` out-specifies Quasar's 560px cap on a dialog's child.
-        with ui.element("div").classes("add-data-card"):
+        with ui.element("div").classes("p-panel"):
             panel(in_dialog=True)
     _ADD_DIALOG = dialog
 
@@ -1097,42 +1100,14 @@ def _default_model() -> str:
 _OPEN_SUBTITLE = "Open a project directory. If it doesn't exist yet, it gets created."
 _OPEN_NEW = "Type a path instead"
 
-CONTEXT_WHY = (
-    "A few sentences, the way you would describe this project to another engineer. "
-    "The copilot measures the files itself — this is the part it cannot."
-)
+CONTEXT_WHY = "The copilot measures the files itself — this is the part it cannot."
 CONTEXT_PLACEHOLDER = "The project in a few sentences…"
-CONTEXT_SHAPE = (
-    "The domain and the goal — what the work is for.",
-    "How you model it: what you produce, at what grain, over what horizon.",
-    "Roughly what data you have, in the names your team uses for it.",
-    "Not the schema, and not a description of the files.",
-)
-#: A worked brief, from a domain that is plainly not the one on screen.
-#:
-#: `DESIGN.md` forbade *any* example here, and the reason was sound: an example
-#: that could pass for an answer about the data at hand is one people edit rather
-#: than replace. What it did not distinguish is **register** from **content** —
-#: and register is the whole difficulty of this box. Asked abstractly for context,
-#: people write a schema; shown four sentences of hotel revenue forecasting in a
-#: pharmacy project, nobody mistakes it for their own and everybody sees the
-#: altitude. The rule is narrowed rather than dropped: the example must be from
-#: another industry, and it is styled as guidance, not seeded into the field.
-#:
-#: Sentence per line and joined, rather than one implicitly-concatenated literal:
-#: the parser folds those into a single constant, and `test_agent_prompts` reads
-#: any constant over 200 characters as prompt text that escaped `prompts/`. The
-#: check is blunt on purpose and this is the honest way past it — the example is
-#: read by a person, never by the model.
-CONTEXT_EXAMPLE = " ".join(
-    (
-        "For example — “A revenue forecasting project for a hotel group.",
-        "We predict RevPAR per hotel by forecasting occupancy and ADR separately,",
-        "at M+1, M+2 and M+3.",
-        "The data is hotel reference information, on-the-books bookings, FX rates",
-        "and a third-party events feed.”",
-    )
-)
+#: The shape of a brief, in one line. It was four, plus a worked example from
+#: another industry, and together they were longer than most briefs anyone would
+#: write into the box beneath them — the conceptual notes for this screen painted
+#: back onto it. Altitude is taught by asking a short question about the project
+#: rather than by explaining at length what an answer is not.
+CONTEXT_SHAPE = "The goal, how you model it, and roughly what data you have."
 
 ADD_WHY = "portia reads {formats}. Point it at the data in this repo, and bring in what is outside."
 IN_REPO_HEADING = "Data in this repo"

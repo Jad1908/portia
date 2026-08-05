@@ -222,7 +222,11 @@ adding code, and extend them rather than working around them:
   - `portia/catalog.py` — the **context catalog** (*what the data is*), in `.portia/`: project
     context + groups + per-source metadata (Layer 1 prose `summary`, Layer 2 per-column `role` +
     check facts). The agent's memory. **Update rule: facts refresh, prose/roles are preserved** —
-    corrections are never clobbered (facts vs judgment, applied to updates).
+    corrections are never clobbered (facts vs judgment, applied to updates). **`is_stale` compares
+    facts about the *file* and only those** — `STALENESS_FACTS` is `(size, mtime)`, and the `at`
+    recorded beside them (when portia last *looked*) is deliberately excluded: it moves every second
+    without the file moving, and comparing it made every source read as stale one second after being
+    indexed. Prefer naming that tuple to iterating whatever the record happens to hold.
   - `portia/knowledge/` — the **knowledge graph** (*what the tables and columns are to each other*),
     in Neo4j (`docs/KNOWLEDGE_GRAPH.md`). Four modules and the split is the seam: `schema.py` (the
     closed vocabulary + a `Graph` — imports no driver) · `build.py` (catalog + specs → a `Graph`;

@@ -1119,9 +1119,8 @@ def _brief_inspector() -> None:
         c.text(screens.CONTEXT_WHY, color="c-mute")
         box = (
             ui.textarea(placeholder=screens.CONTEXT_PLACEHOLDER, value=APP.project_context)
-            .classes("p-field p-editor w-full")
+            .classes("p-field p-editor p-editor--tall w-full")
             .props("borderless")
-            .style("min-height:220px")
         )
         screens.context_guidance()
         with ui.element("div").classes("row-gap-sm"):

@@ -55,6 +55,13 @@ not a gadget — a place you actually work.
    describes the **project in a few lines** — the *global* project, not necessarily the data. This
    is **one of the most important parts of the whole product**: it is the context that makes a
    column's meaning decidable, and without it the copilot's judgment is generic.
+   - **What it asks for, made explicit 2026-08-03**: the domain and the goal · how the user models
+     it (what they produce, at what grain, over what horizon) · roughly what data exists, in their
+     team's own names for it. Explicitly **not the schema and not the files** — portia measures
+     those itself, and this is the part it cannot. The screen had drifted to asking *"what does one
+     row mean, and which source is authoritative for what"*, which is a question about the data and
+     duly got answers about the data. The CLI prompt and the copilot's `ask_for_context` say the
+     same thing, so no surface teaches the box differently.
    - **GUI: a mandatory front panel.** The user fills it in before being allowed to do anything
      else in the project. Not a dismissible prompt, not a settings field found later.
    - **CLI: prompted on stdin** the first time a command runs in an uninitialized directory.
@@ -237,8 +244,9 @@ cheap as typing a path that doesn't exist yet.
 **Project open, no context set.** The **mandatory context panel** `VISION.md` has always called
 for: a multi-line field, nothing else reachable until it is filled. This is the one screen where
 the product's premise is most exposed — the context is what makes a column's meaning decidable, and
-a generic brief produces generic judgment. Give it room, show the placeholder guidance, and do not
-let it be skipped. Writes `project.yaml` via `catalog.init_project`.
+a generic brief produces generic judgment. Give it room, show the guidance — the *shape* of a good
+brief plus, since 2026-08-03, one worked example from a plainly unrelated domain — and do not let it
+be skipped. Writes `project.yaml` via `catalog.init_project`.
 
 **Project open, no sources.** *Rewritten 2026-08-02.* Two routes, in the order they are likely,
 because portia plugs into a repo that **already holds its data** (`PIPELINE.md` §2.7):
