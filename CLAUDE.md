@@ -38,9 +38,10 @@ stack, and product vision. Read them every session, before proposing changes or 
   `cli/index.py`. **§6 is where the app half landed** — the compiled models are rendered, and the
   three design questions are answered there (a card is a table *or* a step depending on zoom level ·
   Run means this model and everything it reads · layers group and order, never rank).
-- `docs/KNOWLEDGE_GRAPH.md` — **designed and revised 2026-08-04; phase A of §9.4 is built and
-  B–D are next.** Read the Status note at the top for what shipped and the four things building it
-  settled. Two halves that only pay off together (§2): **measured relationships** between sources —
+- `docs/KNOWLEDGE_GRAPH.md` — **designed, revised and built 2026-08-04; all four phases of §9.4,
+  with D half-taken on purpose.** Read the Status note at the top: it is per phase, and the phase D
+  entry is the one to read, because it records a change *not* made and why — "unproven at 50" is
+  not a measurement. Two halves that only pay off together (§2): **measured relationships** between sources —
   because nothing in portia holds one and `join_report`'s answer dies with the turn — and
   **column-level lineage**, which portia's specs already know and no surface can answer.
   **Neo4j, settled**; §3.2 records what each rejected option was rejected *for* (NetworkX for the
@@ -230,7 +231,14 @@ adding code, and extend them rather than working around them:
     questions) · `store.py` (the only module that knows what Cypher is, behind the `graph` extra).
     **A rebuild owns the structural half and nothing else** — stale structural edges are deleted,
     `OVERLAPS` is never touched, because an absent edge has to keep meaning *nobody measured*
-    (§4.4). Built by `python -m portia.cli.knowledge`; nothing writes it automatically yet.
+    (§4.4). Built by `python -m portia.cli.knowledge`; `cli.index` and `measure_overlaps` refresh
+    it too, both **best-effort** — an index that fails because a container is stopped is §6.6's
+    leak, so a missing database is one printed line.
+    - **`measure.py` is the only measured thing in here** and the one edge kind that costs a
+      query. Its `reason` is required *in code*: a measured zero means *no shared values*, never
+      *unrelated* (`France` vs `FRA`), and the agent's sentence is what stops it reading as a dead
+      end. Staleness is a **read-time** comparison of fingerprints — nothing invalidates anything
+      when a file changes, and an edge is marked, never deleted.
     - **The read path is a router, not a rung** (§9.1). `graph_lookup` answers *which* table and
       *where did this column come from*; every ladder rung answers *tell me more about this one*.
       So it is taught as sitting **before** L2, and asking about a table returns **tables** —

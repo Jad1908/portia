@@ -30,7 +30,24 @@ def test_brief_carries_the_project_prose_and_every_source(project):
 
     assert "Reconciling vendor orders" in brief
     assert "orders" in brief and "customers" in brief
-    assert "candidate keys" in brief
+
+
+def test_the_index_says_what_a_source_is_and_nothing_about_its_shape(project):
+    """Phase D's trim (`KNOWLEDGE_GRAPH.md` §9.4). A column count and a
+    candidate-key list are what `describe_source` and `profile_source` exist to
+    serve, and pushing them into every request paid for them on every turn.
+
+    The name and one sentence stay because together they *are* the routing
+    decision — which source is this question about — and everything else is the
+    answer to a question the agent has not asked yet.
+    """
+    set_interpretation("orders", summary="Vendor order lines.", portia_dir=project)
+    line = next(
+        ln for ln in context.build_brief(project).splitlines() if ln.startswith("- **orders**")
+    )
+
+    assert line == "- **orders** — Vendor order lines."
+    assert "cols" not in line and "candidate keys" not in line
 
 
 def test_brief_stays_one_line_per_source(project):
