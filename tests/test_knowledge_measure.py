@@ -276,3 +276,52 @@ def test_the_graph_is_refreshed_before_a_measurement_attaches_to_it(
         ]
     )
     assert query.lookup(neo4j_session, "stg_orders", "country_name")["overlaps"]
+
+
+def test_recording_a_step_puts_the_new_table_in_the_graph(neo4j_session, project, monkeypatch):
+    """§5's third write moment. A spec written mid-conversation used to be
+    invisible to `graph_lookup` until something else triggered a rebuild — so the
+    graph could be confidently wrong about which tables exist."""
+    monkeypatch.chdir(project)
+    handlers.record_step(
+        "specs/stg_orders.yaml",
+        {
+            "id": "cleaned",
+            "op": "normalize",
+            "input": "orders",
+            "transforms": [{"column": "country_name", "op": "lower"}],
+        },
+    )
+
+    answer = query.lookup(neo4j_session, "stg_orders")
+    assert answer["table"]["kind"] == "Model"
+    assert [t["name"] for t in answer["reads"]] == ["orders"]
+    # …and the lineage of the table it just built is there too.
+    assert query.lookup(neo4j_session, "stg_orders", "country_name")["derives_from"] == [
+        {
+            "kind": "Source",
+            "table": "orders",
+            "path": "data/orders.csv",
+            "column": "country_name",
+            "via": "normalize",
+            "step": "stg_orders#cleaned",
+        }
+    ]
+
+
+def test_a_step_is_still_recorded_when_the_graph_cannot_be_reached(project, monkeypatch):
+    """The step is on disk before this runs; failing the write would lose it."""
+    monkeypatch.chdir(project)
+    monkeypatch.setenv("NEO4J_URI", "bolt://localhost:1")
+    written = handlers.record_step(
+        "specs/stg_orders.yaml",
+        {
+            "id": "cleaned",
+            "op": "normalize",
+            "input": "orders",
+            "transforms": [{"column": "country_name", "op": "lower"}],
+        },
+    )
+    assert written["step_id"] == "cleaned"
+    assert written["graph"].startswith("not updated")
+    assert (project / "specs" / "stg_orders.yaml").exists()

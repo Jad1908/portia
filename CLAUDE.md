@@ -231,9 +231,15 @@ adding code, and extend them rather than working around them:
     questions) · `store.py` (the only module that knows what Cypher is, behind the `graph` extra).
     **A rebuild owns the structural half and nothing else** — stale structural edges are deleted,
     `OVERLAPS` is never touched, because an absent edge has to keep meaning *nobody measured*
-    (§4.4). Built by `python -m portia.cli.knowledge`; `cli.index` and `measure_overlaps` refresh
-    it too, both **best-effort** — an index that fails because a container is stopped is §6.6's
-    leak, so a missing database is one printed line.
+    (§4.4). Built by `python -m portia.cli.knowledge`; `cli.index`, `record_step` and
+    `measure_overlaps` refresh it too, all three **best-effort** — a write that fails because a
+    container is stopped is §6.6's leak, so a missing database is one printed line and the step is
+    already on disk regardless.
+    - **It is not the pipeline graph, and §6.9 is where that is settled.** The project canvas draws
+      what we specified; this draws what the data is to itself. Model nodes carry `spec` and
+      `fingerprint` — pointers into the pipeline — and none of its vocabulary: `layer` groups the
+      canvas and says nothing about what a table is *to* another table. The picture is Neo4j's own
+      rendering embedded, never `ui/graph.py` reused.
     - **`measure.py` is the only measured thing in here** and the one edge kind that costs a
       query. Its `reason` is required *in code*: a measured zero means *no shared values*, never
       *unrelated* (`France` vs `FRA`), and the agent's sentence is what stops it reading as a dead

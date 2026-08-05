@@ -338,12 +338,6 @@ own open questions where the code now has something to say about them.*
   can say whether the copilot got worse — because the failure mode is subtle (generic judgment
   from missing context), it is exactly what `context.py` says pushing L1 exists to prevent, and
   §9.4 calls D the riskiest and insists it be evaluated on its own.
-- **Two of §5's three write moments are hooked up; saving a spec is not.** `cli.index` refreshes
-  the graph after indexing and `measure_overlaps` refreshes before it writes, both best-effort.
-  `record_step` does not, so a spec written mid-conversation is invisible to `graph_lookup` until
-  something else triggers a refresh. Cheap to add; left out because a refresh on every recorded
-  step is a Neo4j round-trip inside the tightest loop in the product, and nobody has felt the gap
-  yet.
 - **Does anything measure outside indexing?** (§7, still open.) `measure_overlaps` is available in
   any turn and nothing stops the agent reaching for it mid-conversation — but only the indexing
   prompts *ask* for it. Whether a conversation-phase prompt should, and whether a user-invoked
@@ -363,9 +357,11 @@ own open questions where the code now has something to say about them.*
 - **Orphan nodes are pruned only when they have no relationships at all.** A Column that lost its
   table but kept a measurement stays, on purpose (§4.5: mark stale, never delete). Nothing marks it
   yet, so it is currently indistinguishable from a live one.
-- **Drawing it** (§6.9). The store and the picture are separate purchases, and the collision to
-  settle first is that a force-directed layout ranks by connectivity, which `DESIGN.md` forbids.
-  The Neo4j browser is the answer until that has an explicit answer in `DESIGN.md`.
+- **`DESIGN.md` needs one line on where its ranking rule governs.** *Colour and prominence
+  communicate kind, never rank* is stated as a product rule; it plainly governs surfaces portia
+  lays out itself, and plainly cannot govern an embedded third-party explorer with its own force
+  layout. That boundary should be written down rather than inferred from `KNOWLEDGE_GRAPH.md`
+  §6.9.
 - **`profiling.py` computes `min`/`max` per column and `catalog._column_facts` drops them**
   (§6.5). A fact the profiler already paid for, and exactly what the agent needs to judge whether a
   pair is worth measuring in phase C.

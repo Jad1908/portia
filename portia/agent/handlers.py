@@ -508,7 +508,31 @@ def record_step(
         "outcome": result.outcome,
         "drift": result.drift,
         "acknowledged": result.acknowledged,
+        "graph": _sync_graph(root, portia_dir),
     }
+
+
+def _sync_graph(root: Path, portia_dir: str) -> str:
+    """Put the table this spec now builds into the graph — best effort, always.
+
+    The third of §5's write moments, and the one that was missing: a spec written
+    mid-conversation used to be invisible to `graph_lookup` until something else
+    triggered a rebuild, so the graph could be confidently wrong about what
+    exists. Recording a step is exactly when a **new table** comes into being,
+    and the column lineage of that table is derived from the spec that was just
+    saved — so this is a restatement of a file that changed one line ago.
+
+    Cheap: building the graph reads YAML and runs nothing (`knowledge/build.py`),
+    and the write is a handful of `UNWIND`s. It is also **never fatal** — the
+    step is already recorded and the spec is already on disk, and failing the
+    write because a container is stopped would undo none of that while losing
+    the user their step (§6.6).
+    """
+    try:
+        knowledge.sync(root, portia_dir=portia_dir)
+    except store.GraphUnavailable as exc:
+        return f"not updated — {exc}"
+    return "updated"
 
 
 def run_spec(spec_path: str, portia_dir: str = catalog.DEFAULT_DIR) -> dict:

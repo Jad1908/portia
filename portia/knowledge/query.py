@@ -80,9 +80,7 @@ _TABLE_BY_NAME = "MATCH (t) WHERE (t:Source OR t:Model) AND $name IN [t.name, t.
 
 #: What every answer needs to know about the table it is about. Named rather than
 #: spelled twice, the way `checks/join.py` names its overlap expressions.
-_TABLE_FIELDS = (
-    "labels(t)[0] AS kind, t.name AS name, t.path AS path, t.layer AS layer, t.summary AS summary"
-)
+_TABLE_FIELDS = "labels(t)[0] AS kind, t.name AS name, t.path AS path, t.summary AS summary"
 
 
 def _resolve(session: Any, table: str) -> dict:
@@ -139,7 +137,6 @@ def _table_answer(session: Any, found: dict) -> dict:
             "kind": found["kind"],
             "name": found["name"],
             "path": found["path"],
-            "layer": found["layer"],
             "summary": found["summary"],
         },
         "columns": sorted(found["columns"] or []),
@@ -298,8 +295,6 @@ def _render_table(answer: dict) -> str:
     table = answer["table"]
     where = table["path"] or table["name"]
     lines = [f"{table['kind']} {table['name']}  ({where})"]
-    if table.get("layer"):
-        lines.append(f"  layer: {table['layer']}")
     lines.append(f"  columns: {', '.join(answer['columns']) or '(none)'}")
     for heading, key in (("reads", "reads"), ("read by", "read_by")):
         for row in answer[key]:

@@ -213,12 +213,14 @@ def _add_models(graph: Graph, result: BuildResult, root: Path, source_columns) -
     outputs: dict[str, _Relation] = {}
     for name in spec.run_order(models, base_dir=root):
         doc = docs[name]
+        # `spec` and `fingerprint` are **pointers** into the pipeline — where to
+        # read what this table does, and what it looked like when something was
+        # measured against it (§4.5). The pipeline's own vocabulary is not here:
+        # `layer` (staging/intermediate/mart) groups and orders the project
+        # canvas and says nothing about what a table *is to* another table,
+        # which is the only question this graph answers.
         node = graph.add_node(
-            MODEL,
-            name,
-            spec=str(models[name]),
-            layer=doc.get("layer"),
-            fingerprint=pipeline.fingerprint(doc),
+            MODEL, name, spec=str(models[name]), fingerprint=pipeline.fingerprint(doc)
         )
         outputs[name] = _add_model(graph, result, node, doc, models, outputs, source_columns)
 

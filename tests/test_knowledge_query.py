@@ -53,7 +53,6 @@ def project(tmp_path: Path) -> Path:
         yaml.safe_dump(
             {
                 "version": 1,
-                "layer": "staging",
                 "sources": {"orders": "data/orders.csv"},
                 "steps": [
                     {
@@ -71,7 +70,6 @@ def project(tmp_path: Path) -> Path:
         yaml.safe_dump(
             {
                 "version": 1,
-                "layer": "mart",
                 "sources": {"customers": "data/customers.csv"},
                 "steps": [
                     {
@@ -109,7 +107,7 @@ def test_a_source_answers_with_the_models_that_read_it(filled):
 
 def test_a_model_answers_with_what_it_reads_including_another_model(filled):
     answer = query.lookup(filled, "mart_orders")
-    assert answer["table"]["layer"] == "mart"
+    assert answer["table"]["kind"] == "Model"
     assert [(t["kind"], t["name"]) for t in answer["reads"]] == [
         ("Source", "customers"),
         ("Model", "stg_orders"),
@@ -131,6 +129,9 @@ def test_asking_about_a_table_never_returns_column_pairs(filled):
     """§9.1 — the router narrows the field; it does not dump the neighbourhood."""
     answer = query.lookup(filled, "orders")
     assert set(answer) == {"table", "columns", "reads", "read_by", "groups", "overlaps"}
+    # And nothing of the pipeline's own vocabulary: `layer` groups the project
+    # canvas and says nothing about what a table is *to* another table.
+    assert set(answer["table"]) == {"kind", "name", "path", "summary"}
     # `overlaps` is table-granular and counts pairs; it never lists them.
     assert all(
         set(row) <= {"kind", "name", "path", "n_measured_pairs"} for row in answer["overlaps"]
