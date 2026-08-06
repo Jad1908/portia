@@ -151,7 +151,8 @@ asset.
    see specs in subdirectories, and its Run did not resolve cross-spec references — so a spec that
    ran from the CLI failed in the window, which is the one seam `VISION.md` says must never break.
 
-**In progress — the knowledge graph** (`docs/KNOWLEDGE_GRAPH.md`, designed 2026-08-04, **phase A shipped the same day**). The gap it fills is
+**Shipped — the knowledge graph** (`docs/KNOWLEDGE_GRAPH.md`, designed and built 2026-08-04,
+all four phases). The gap it fills is
 structural and visible without any run: **the catalog is one file per source and has no shape for
 what a source *relates to***, and `checks/join.py` measures exactly that relationship and then
 discards it when the turn ends. On top of that, **L1 is exhaustive and pushed into every system
@@ -182,8 +183,12 @@ lineage rank (a transform outranks a rename outranks a carry), made the `sql` ha
 countable rather than guessed, fixed the rule that a rebuild may delete structural edges and
 **never** a measurement, and answered §7's open question about what a query may return — *a router
 returns tables*, so the fifty-edge answer never gets constructed and nothing has to be truncated to
-avoid it. **Still no measurement anywhere**: phase C is where the agent picks pairs while indexing,
-and D — the L1 shrink — is last and on its own.
+avoid it. **C** is the measured half: the agent picks which column pairs are worth comparing *while it is
+indexing*, and portia measures them and stores the numbers with the reason it was asked. **D** was
+taken **half way, deliberately** — each source's line in the always-on brief lost its column count
+and candidate keys, and the index itself stays. §1.4 wants it replaced by traversal; its premise is
+"unproven at 50", which is not a measurement, and there is no re-runnable fixture that could say
+whether the copilot got worse. `BACKLOG.md` holds what would have to be true first.
 
 **The loop changes with it, not after it** (§9). The graph sits *before* `describe_source` as a
 router — *which* table should I look at, and where did this column come from — rather than as a

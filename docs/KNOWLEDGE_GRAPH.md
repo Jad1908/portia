@@ -1,10 +1,58 @@
 # The knowledge graph — design
 
 *Designed 2026-08-04, revised the same day after the design was talked through.
-**Phases A and B are built** — see the status note below. This document is the whole of the decision,
+**All four phases are built** — see the status note below, and read the phase D entry, which
+deliberately stopped short of what §1.4 asks for. This document is the whole of the decision,
 written so a new session can pick it up cold.*
 
-> ## Status — phases A and B shipped, 2026-08-04
+> ## Status — all four phases shipped, 2026-08-04
+>
+> ## Phase D — and where it deliberately stopped
+>
+> §1.4 wants L1 to stop being an exhaustive index and become a neighbourhood you walk outward
+> from. **What shipped is the trim, not the traversal**, and the reason is worth more than the
+> change: *"fine at 3 sources, unproven at 50"* is not a measurement, `EVALUATION.md` has a
+> standing rule about acting on evidence that was never designed to support the claim, and there
+> is no re-runnable fixture that would say whether dropping a source's sentence helped or hurt.
+> §9.4 itself calls D the riskiest and says it must be evaluated on its own — which presupposes a
+> way to evaluate it that this repo does not have yet.
+>
+> So each line lost its **column count and candidate-key list** — the facts `describe_source` and
+> `profile_source` exist to serve, paid for on every turn whether or not that source was ever
+> mentioned — and kept its **name and one sentence**, which together *are* the routing decision.
+> The template now points at `graph_lookup` for the relationships it used to be silent about.
+> `BACKLOG.md` holds the fuller change and what would have to be true to take it.
+>
+> A defect fell out of it: `_first_sentence` appended a full stop unconditionally, so a
+> single-sentence summary — which a well-written one usually is — had been reaching every system
+> prompt ending in `..` It was invisible until a test asserted an exact line.
+>
+> ## Phase C — the agent picks the pairs
+>
+> `checks.join.column_overlap`, `knowledge/measure.py`, the `measure_overlaps` tool, and rewritten
+> `index_batch.md` / `interpret.md`. §5.1 as built: **the agent chooses which pairs are worth
+> measuring, while it is indexing**, and a pair arrives with a required `reason`. Four things
+> settled:
+>
+> - **The reason is enforced in code, not asked for in prose.** A pair without one is refused
+>   through `prompts/errors/overlap_needs_a_reason.md`, which explains *why* rather than restating
+>   the rule. §4.4's whole argument is that the sentence is what stops a zero reading as a dead
+>   end, and an optional field would have been absent exactly when the measurement was routine.
+> - **Staleness turned out to be a read-time question.** §4.5 asks for edges that record what they
+>   were measured against; the implementation puts a fingerprint on every node and both of an
+>   edge's on the edge, and computes `stale` **in the query**. So nothing walks the graph
+>   invalidating things when a file changes, and marking-never-deleting is free rather than
+>   disciplined.
+> - **A stopped container must not cost the caller what it just paid for.** The numbers come back
+>   with `stored: false` rather than the call failing, and `cli.index`'s graph refresh is
+>   best-effort and never fatal — §6.6 applied to the two places it actually bites.
+> - **`measure_overlaps` is auto-approved** despite writing. The line for the permission flow is
+>   *does it change a durable artifact the user reviews in a diff*, and this writes metadata into a
+>   store §5.2 already calls re-derivable. Confirming a dozen pairs mid-index would make the one
+>   tool that must be used in bulk the most expensive one to use.
+>
+> Verified end to end on the `France`/`FRA` case: a true zero, stored with its hypothesis, and the
+> router afterwards names the neighbouring table it was measured against.
 >
 > **Phase B (the read path).** `knowledge/query.py`, the `graph_lookup` tool, and
 > `python -m portia.cli.knowledge --table X [--column Y]`. Fixed queries, not agent-written
@@ -832,8 +880,10 @@ Existing prompts that change: `index_batch.md` and `interpret.md` (the new task)
 |---|---|---|---|
 | **A** ✅ | Write path: structural edges + `DERIVES_FROM` from catalog and specs. The build command. | Whether the schema is right. Inspectable directly; **no agent involved**. | None |
 | **B** ✅ | Read path: one tool, fixed queries. | Whether traversal helps at all. Lineage alone already earns it — *"where did this column come from"* is answerable with zero measurements. | One new tool |
-| **C** | The agent picks pairs during indexing; measurements written with their reasons. | §5.1 and §4.4. | **Indexing is rewritten** |
-| **D** | Shrink L1 from an exhaustive index to traversal. | §1.4. | Yes, and the riskiest |
+| **C** ✅ | The agent picks pairs during indexing; measurements written with their reasons. | §5.1 and §4.4. | **Indexing is rewritten** |
+| **D** ◐ | Shrink L1 from an exhaustive index to traversal. | §1.4. | Yes, and the riskiest |
+
+*D is half-taken: the per-source line was trimmed, the index was not replaced by traversal. The status note says why, and `BACKLOG.md` holds the rest.*
 
 **B before C, for a reason that is easy to miss.** At source 23 the agent must know something about
 sources 1–22 to judge which pairs are worth measuring — which is the context problem the graph

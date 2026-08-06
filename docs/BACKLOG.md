@@ -329,12 +329,26 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
 *Phase A is built (`KNOWLEDGE_GRAPH.md` → Status). These are what it deferred, plus the design's
 own open questions where the code now has something to say about them.*
 
-- **Phases C and D** are the design's, not this list's — read §9.4. C is the agent picking pairs
-  during indexing, D is the L1 shrink. D is last **on its own** for a reason.
-- **Nothing writes the graph except the build command.** §5 names three write moments — index a
-  source, save a spec, measure a join — and none of them is hooked up. Phase C forces the first
-  one, since §5.1 has the agent choosing pairs *while* indexing; whatever it does has to degrade
-  when the container is down rather than failing the index (§6.6).
+- **Replacing the L1 index with traversal — the other half of phase D.** What shipped is the
+  trim: each source's line lost its column count and candidate keys and kept its name and one
+  sentence. §1.4 wants the list itself gone, so the agent walks outward from wherever it is
+  instead of being handed everything. **Not taken, and the reason is the interesting part** — the
+  premise is "fine at 3 sources, unproven at 50", and unproven is not measured. What would have to
+  be true first: a project big enough for the cost to be visible, *and* a re-runnable fixture that
+  can say whether the copilot got worse — because the failure mode is subtle (generic judgment
+  from missing context), it is exactly what `context.py` says pushing L1 exists to prevent, and
+  §9.4 calls D the riskiest and insists it be evaluated on its own.
+- **Two of §5's three write moments are hooked up; saving a spec is not.** `cli.index` refreshes
+  the graph after indexing and `measure_overlaps` refreshes before it writes, both best-effort.
+  `record_step` does not, so a spec written mid-conversation is invisible to `graph_lookup` until
+  something else triggers a refresh. Cheap to add; left out because a refresh on every recorded
+  step is a Neo4j round-trip inside the tightest loop in the product, and nobody has felt the gap
+  yet.
+- **Does anything measure outside indexing?** (§7, still open.) `measure_overlaps` is available in
+  any turn and nothing stops the agent reaching for it mid-conversation — but only the indexing
+  prompts *ask* for it. Whether a conversation-phase prompt should, and whether a user-invoked
+  sweep should exist as an escape hatch, is unsettled. §6.5's three reasons against sweeping are
+  unchanged.
 - **Column lineage through the `sql` hatch** (§4.2, §7). A model downstream of a `sql` step gets no
   Column nodes and lands in `BuildResult.unresolved`. That dict is the evidence to decide on:
   if real projects run mostly through the hatch, `sqlglot` earns its place; if they don't, the
@@ -445,6 +459,17 @@ odd finding worth carrying forward isn't lost with it.*
 
 **Knowledge graph**
 
+- **Phase D (half) — the L1 trim** — 2026-08-04, `agent/context.py`. Each source's line dropped its
+  column count and candidate keys, which is what `describe_source`/`profile_source` are for. The
+  index itself stays; replacing it with traversal is above, with what would have to be true first.
+  *Found on the way: `_first_sentence` had been appending a full stop unconditionally, so a
+  one-sentence summary reached every system prompt ending in `..`*
+- **Phase C — the agent picks the pairs** — 2026-08-04, `checks.join.column_overlap`,
+  `knowledge/measure.py`, `measure_overlaps`, rewritten indexing prompts. The reason on a pair is
+  **required in code**, because §4.4's whole argument is that the sentence is what stops a zero
+  reading as a dead end. *The finding worth carrying: staleness turned out to be a **read-time**
+  question — fingerprints on both ends and a comparison in the query — so "mark, never delete" is
+  free rather than disciplined, and nothing has to invalidate anything when a file changes.*
 - **Phase B — the read path** — 2026-08-04, `knowledge/query.py` + the `graph_lookup` tool. Fixed
   queries, taught as a *router* that comes before L2 rather than a rung above L4. *The finding
   worth carrying: §7's "what may a query return at once" needed no cap — asking about a table
