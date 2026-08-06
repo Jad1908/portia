@@ -1,10 +1,34 @@
 # The knowledge graph — design
 
 *Designed 2026-08-04, revised the same day after the design was talked through.
-**Phase A is built** — see the status note below. This document is the whole of the decision,
+**Phases A and B are built** — see the status note below. This document is the whole of the decision,
 written so a new session can pick it up cold.*
 
-> ## Status — phase A shipped, 2026-08-04
+> ## Status — phases A and B shipped, 2026-08-04
+>
+> **Phase B (the read path).** `knowledge/query.py`, the `graph_lookup` tool, and
+> `python -m portia.cli.knowledge --table X [--column Y]`. Fixed queries, not agent-written
+> Cypher — §7 leaves that open and it is a *separate* question from whether traversal helps at
+> all, which is what B exists to answer. Two things it settled:
+>
+> - **§7's "what a query may return at once" is answered by §9.1's own framing.** The graph is a
+>   router, so **asking about a table returns tables** — what it reads, what reads it, its
+>   groups, which tables share a measured overlap and how many pairs that covers. Never column
+>   pairs. You climb to column granularity by naming a column, and then get one hop each way plus
+>   the files underneath, never every path. The answer is small by construction rather than by a
+>   cap that hides things.
+> - **A router introduced as a deeper rung gets used as a worse `describe_source`.** So it is
+>   taught in `copilot.md` as sitting *before* L2 rather than above L4, and `describe_source.md`
+>   now says out loud that it describes one source and cannot tell you which source to read.
+>
+> `store.GraphUnavailable` is its own exception type: a stopped container is not a failure of the
+> question, and §3.5 asks for the product to behave sensibly when the database is down. The agent
+> is told which tools still work and not to retry.
+>
+> **Both phases are now verified against a live Neo4j** (`docker compose up -d neo4j`), which
+> phase A's note said was outstanding. Every Cypher statement passed first run.
+>
+> ## Phase A
 >
 > `portia/knowledge/` (`schema.py` · `build.py` · `store.py`), `python -m portia.cli.knowledge`,
 > a `graph` extra and a `docker-compose.yml`. **The write path only** (§9.4 phase A): sources,
@@ -34,8 +58,7 @@ written so a new session can pick it up cold.*
 >   §6.6 warns about, and nothing reads the graph until phase B.
 >
 > Lineage was checked end to end on a two-spec project: `mart_orders.amount` →
-> `stg_orders.amount` → `data/orders.csv:amount`, with the pointer on each hop. **The Neo4j writer
-> is not yet verified against a live server** — its test skips without one.
+> `stg_orders.amount` → `data/orders.csv:amount`, with the pointer on each hop.
 
 *What the revision changed, because it moved the centre of the design: column-level **lineage** is
 now half of what the graph is for (§2, §4.2) and a model's output columns are nodes (§4.1) · **the
@@ -694,11 +717,13 @@ algorithm ranking by connectivity. It needs an explicit answer in `DESIGN.md`, n
 
 Not decided. Listed so a new session knows they are open rather than overlooked.
 
-- **What a graph query is allowed to return at once.** §4.4's storage rule keeps the *store* from
-  filling with noise; it does nothing about the *context window*. A column with genuine overlaps
-  against fifty others hands back fifty edges. Neither the design nor the discussion that produced
-  it has an answer, and §9 makes it sharper rather than softer: a router that returns fifty things
-  has not routed.
+- ~~**What a graph query is allowed to return at once.**~~ **Answered by phase B**, and the answer
+  came from §9.1 rather than from a cap: *a router returns tables.* Ask about a table and you get
+  its neighbouring **tables**, with a count of measured column pairs per neighbour; you reach a
+  column pair only by naming a column, and then get one hop each way plus the terminal origins.
+  The fifty-edge answer never gets constructed, so nothing has to be truncated to avoid it. What
+  remains open is only the sharper form of it: whether a column with fifty *genuine* overlaps
+  needs anything beyond `MAX_ROWS` saying it was cut.
 - **Column lineage through the `sql` hatch** (§4.2). `join` and `normalize` give it for free; a
   `sql` step declares only table-level `inputs`. Options: a coarse step-level edge that is true, or
   a parser (`sqlglot`) for real column-level lineage. Start coarse; decide later on evidence.
@@ -806,7 +831,7 @@ Existing prompts that change: `index_batch.md` and `interpret.md` (the new task)
 | Phase | What lands | What it settles | Loop change |
 |---|---|---|---|
 | **A** ✅ | Write path: structural edges + `DERIVES_FROM` from catalog and specs. The build command. | Whether the schema is right. Inspectable directly; **no agent involved**. | None |
-| **B** | Read path: one tool, fixed queries. | Whether traversal helps at all. Lineage alone already earns it — *"where did this column come from"* is answerable with zero measurements. | One new tool |
+| **B** ✅ | Read path: one tool, fixed queries. | Whether traversal helps at all. Lineage alone already earns it — *"where did this column come from"* is answerable with zero measurements. | One new tool |
 | **C** | The agent picks pairs during indexing; measurements written with their reasons. | §5.1 and §4.4. | **Indexing is rewritten** |
 | **D** | Shrink L1 from an exhaustive index to traversal. | §1.4. | Yes, and the riskiest |
 

@@ -33,6 +33,7 @@ from portia.checks.outcome import BLOCKING_FLAGS
 from portia.checks.profiling import profile_path
 from portia.core.io import connect, load_table
 from portia.core.serialize import to_json
+from portia.knowledge import query, store
 from portia.ops import join as join_op
 from portia.ops import normalize as normalize_op
 from portia.ops import sql as sql_op
@@ -150,6 +151,32 @@ def describe_source(source: str, portia_dir: str = catalog.DEFAULT_DIR) -> dict:
             for col in entry.get("columns", [])
         ],
     }
+
+
+def graph_lookup(table: str, column: str | None = None) -> dict:
+    """The router — *which* table should I look at, and where did this column come from.
+
+    Not a rung on the disclosure ladder: the ladder is depth on one source, and
+    this is breadth. It sits **before** ``describe_source`` (`KNOWLEDGE_GRAPH.md`
+    §9.1) — ask it where to start, then climb.
+
+    Named without a table it returns tables, never column pairs: what this one
+    reads, what reads it, its groups, and which other tables share a measured
+    overlap with it. Add a column and it returns that column's lineage — one hop
+    each way with the step that explains it, plus the files underneath.
+
+    The graph lives in Neo4j, which may not be running. That is not an error in
+    the question; it is reported as itself so the caller can carry on with the
+    tools that need no database.
+    """
+    try:
+        with store.session() as live:
+            return query.lookup(live, table, column)
+    except store.GraphUnavailable as exc:
+        # Reframed rather than re-raised: what the model needs at this moment is
+        # not the stack but which tools still work. The other refusals in
+        # `prompts/errors/` exist for the same reason.
+        raise ValueError(prompts.error("graph_unavailable", reason=str(exc))) from None
 
 
 def profile_source(source: str, portia_dir: str = catalog.DEFAULT_DIR) -> dict:

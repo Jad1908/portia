@@ -192,6 +192,11 @@ adding code, and extend them rather than working around them:
     to climb: L2 `describe_source` (meaning, no stats) → L3 `profile_source` (full facts) →
     L4 `join_findings`. **Adding a tool means placing it on that ladder and saying so in its
     description** — the description is what teaches the model when to climb.
+  - **`graph_lookup` is deliberately *not* on that ladder** — it is what tells you which ladder to
+    climb (`KNOWLEDGE_GRAPH.md` §9.1). The rungs are depth on one table and assume you know which
+    one; the graph is breadth. Its description places it **before** L2 and says it will not tell
+    you what a column means, because a router introduced as a deeper rung gets used as a worse
+    `describe_source`.
   - Do not add a code layer that ranks decisions or suggests answers — see "facts vs judgment".
 - **Durable artifacts** (git-diffable YAML, the residue that makes this a product, not a script):
   - `portia/spec.py` — the **spec** (*what we did to the data*). **A spec produces one table**, and
@@ -218,14 +223,20 @@ adding code, and extend them rather than working around them:
     check facts). The agent's memory. **Update rule: facts refresh, prose/roles are preserved** —
     corrections are never clobbered (facts vs judgment, applied to updates).
   - `portia/knowledge/` — the **knowledge graph** (*what the tables and columns are to each other*),
-    in Neo4j (`docs/KNOWLEDGE_GRAPH.md`). Three modules and the split is the seam: `schema.py` (the
+    in Neo4j (`docs/KNOWLEDGE_GRAPH.md`). Four modules and the split is the seam: `schema.py` (the
     closed vocabulary + a `Graph` — imports no driver) · `build.py` (catalog + specs → a `Graph`;
     **runs nothing and opens no connection**, so column lineage comes off `ops.join.join_columns`
-    rather than a second implementation of the `_x`/`_y` rule) · `store.py` (the only module that
-    knows what Cypher is, behind the `graph` extra). **A rebuild owns the structural half and
-    nothing else** — stale structural edges are deleted, `OVERLAPS` is never touched, because an
-    absent edge has to keep meaning *nobody measured* (§4.4). Built by
-    `python -m portia.cli.knowledge`; nothing writes it automatically yet.
+    rather than a second implementation of the `_x`/`_y` rule) · `query.py` (the fixed read
+    questions) · `store.py` (the only module that knows what Cypher is, behind the `graph` extra).
+    **A rebuild owns the structural half and nothing else** — stale structural edges are deleted,
+    `OVERLAPS` is never touched, because an absent edge has to keep meaning *nobody measured*
+    (§4.4). Built by `python -m portia.cli.knowledge`; nothing writes it automatically yet.
+    - **The read path is a router, not a rung** (§9.1). `graph_lookup` answers *which* table and
+      *where did this column come from*; every ladder rung answers *tell me more about this one*.
+      So it is taught as sitting **before** L2, and asking about a table returns **tables** —
+      never column pairs, because a router that returns fifty things has not routed. Its tests
+      need a live Neo4j and skip without one (`conftest.neo4j_session`); they are not mocked,
+      because a stub answering Cypher would be a second, wrong Neo4j.
   - `portia/runlog.py` — the **run log** (*what the copilot did*): one JSONL per turn in
     `.portia/runs/`, one `Event` per line under a header naming model, effort, prompt and portia
     sha. Read with `python -m portia.cli.runs`. **Project-local, with no central store and nothing

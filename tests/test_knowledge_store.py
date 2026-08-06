@@ -11,8 +11,6 @@ The one test that does need a server says so and skips when there isn't one.
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from portia.knowledge import store
@@ -86,7 +84,12 @@ def test_the_prune_only_deletes_structural_edges(graph):
 
 
 def test_a_missing_driver_says_what_to_install(monkeypatch):
-    """§6.6 — a stopped container or an uninstalled extra must not read as a bug."""
+    """§6.6 — a stopped container or an uninstalled extra must not read as a bug.
+
+    `GraphUnavailable` and not `ImportError`: the caller's right response is to
+    carry on without the graph, and that has to be distinguishable from "no such
+    table", which is a failure of the question rather than of the database.
+    """
     import builtins
 
     real_import = builtins.__import__
@@ -97,30 +100,20 @@ def test_a_missing_driver_says_what_to_install(monkeypatch):
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", refuse)
-    with pytest.raises(ImportError, match=r"portia\[graph\]"):
+    with pytest.raises(store.GraphUnavailable, match=r"portia\[graph\]"):
         store.connect()
 
 
 # --- the half that needs a server -------------------------------------------
+#
+# `neo4j_session` lives in conftest.py: one place decides when a graph test
+# skips, so "the container isn't running" is never read as "this is broken".
 
 
-@pytest.fixture
-def session():
-    """A real Neo4j session, or a skip. ``docker compose up -d neo4j``."""
-    pytest.importorskip("neo4j", reason="the graph extra is not installed")
-    if not os.environ.get("NEO4J_PASSWORD"):
-        pytest.skip("no NEO4J_PASSWORD — see docker-compose.yml")
-    try:
-        driver = store.connect()
-    except Exception as exc:  # noqa: BLE001 — any failure to reach it is the same skip
-        pytest.skip(f"no Neo4j at {store.settings()['uri']}: {exc}")
-    with driver.session(database=store.settings()["database"]) as live:
-        live.run("MATCH (n) DETACH DELETE n")
-        yield live
-    driver.close()
-
-
-def test_a_rebuild_drops_what_the_files_stopped_saying_and_keeps_a_measurement(session, graph):
+def test_a_rebuild_drops_what_the_files_stopped_saying_and_keeps_a_measurement(
+    neo4j_session, graph
+):
+    session = neo4j_session
     store.write(graph, session)
     # Written by hand because no rebuild writes one — which is the point: phase C
     # puts it there, and phase A must not be able to take it away.

@@ -33,7 +33,13 @@ def main() -> None:
         action="store_true",
         help="print the statements a --write would send, and send nothing",
     )
+    parser.add_argument("--table", help="ask the stored graph about one table instead of building")
+    parser.add_argument("--column", help="with --table: that column's lineage")
     args = parser.parse_args()
+
+    if args.table:
+        _lookup(args.table, args.column)
+        return
 
     result = build.build_graph(args.root)
     print(render_text(result))
@@ -60,19 +66,34 @@ def _print_cypher(graph) -> None:
         print(f"{statement};" + (f"  -- {len(rows)} row(s)" if rows else ""))
 
 
+def _lookup(table: str, column: str | None) -> None:
+    """The read path, from a terminal — the same queries the copilot's tool runs.
+
+    A play surface, in the sense `CLI` always means here: it must go through
+    `knowledge.query` rather than writing Cypher of its own, or the window, the
+    copilot and the terminal end up with three opinions about one graph.
+    """
+    from portia.knowledge import query, store
+
+    try:
+        with store.session() as session:
+            print(query.render_text(query.lookup(session, table, column)))
+    except store.GraphUnavailable as exc:
+        raise SystemExit(str(exc)) from None
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from None
+
+
 def _write(graph) -> None:
     """Send it. The failure to say clearly is "the database isn't running"."""
     from portia.knowledge import store
 
     config = store.settings()
     try:
-        driver = store.connect()
-    except Exception as exc:
-        raise SystemExit(f"cannot reach Neo4j at {config['uri']}: {exc}") from None
-
-    with driver:
-        with driver.session(database=config["database"]) as session:
+        with store.session() as session:
             stamp = store.write(graph, session)
+    except store.GraphUnavailable as exc:
+        raise SystemExit(str(exc)) from None
     print(f"\nwritten to {config['uri']} as build {stamp}")
 
 

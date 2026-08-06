@@ -29,6 +29,8 @@ one that still carries a measurement stays, whatever the files now say.
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
 from uuid import uuid4
@@ -56,8 +58,18 @@ def settings() -> dict[str, str]:
     }
 
 
+class GraphUnavailable(RuntimeError):
+    """The graph could not be reached — no driver, or nothing listening.
+
+    Its own type because **it is not a failure of the question being asked**, and
+    the caller's right response is different: a surface should say the database
+    is down and carry on with what it can answer without it (§3.5). A
+    `ValueError` here would be indistinguishable from "no such table".
+    """
+
+
 def connect(**overrides: str) -> Any:
-    """A Neo4j driver, verified. Raises with something actionable if it can't.
+    """A Neo4j driver, verified. Raises :class:`GraphUnavailable` if it can't.
 
     The import is here rather than at module scope so importing this package
     costs nothing without the extra installed — §6.6's "if a stopped container
@@ -66,12 +78,33 @@ def connect(**overrides: str) -> Any:
     try:
         from neo4j import GraphDatabase
     except ImportError:
-        raise ImportError(_NO_DRIVER) from None
+        raise GraphUnavailable(_NO_DRIVER) from None
 
     config = settings() | overrides
-    driver = GraphDatabase.driver(config["uri"], auth=(config["user"], config["password"]))
-    driver.verify_connectivity()
+    try:
+        driver = GraphDatabase.driver(config["uri"], auth=(config["user"], config["password"]))
+        driver.verify_connectivity()
+    except Exception as exc:
+        raise GraphUnavailable(f"no Neo4j at {config['uri']}: {exc}") from None
     return driver
+
+
+@contextmanager
+def session(**overrides: str) -> Iterator[Any]:
+    """A session on the configured database, closed on the way out.
+
+    One place that knows a read needs a driver *and* a session and that both get
+    closed, so every surface that asks the graph a question opens it the same
+    way. `docs/PIPELINE.md`'s argument about `plan()` being called by both edges,
+    applied to a connection.
+    """
+    driver = connect(**overrides)
+    config = settings() | overrides
+    try:
+        with driver.session(database=config["database"]) as live:
+            yield live
+    finally:
+        driver.close()
 
 
 _NO_DRIVER = (

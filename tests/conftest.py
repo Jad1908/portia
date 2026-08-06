@@ -1,14 +1,19 @@
-"""Shared fixtures — one way to get a `Table` in a test.
+"""Shared fixtures — one way to get a `Table` in a test, and one way to get a graph.
 
 The engine's currency is `core.table.Table` and the fixtures' is `DataFrame`
 (deliberately: they are tiny, and they are the readable definition of the test
 data — `docs/DUCKDB_MIGRATION.md` §9). This is the bridge, in one place, so five
 test modules don't each grow their own connection fixture and drift apart on
 when it gets closed.
+
+`neo4j_session` is the same argument for the knowledge graph, plus one of its
+own: it is the **one** place that decides when a graph test skips, so "the
+container isn't running" can never be mistaken for "the feature is broken".
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -58,3 +63,30 @@ def ingested(con):
         return load_table(MOCK / f"{name}.csv", con, name=name)
 
     return make
+
+
+@pytest.fixture
+def neo4j_session():
+    """A real Neo4j session, emptied first — or a skip. ``docker compose up -d neo4j``.
+
+    Everything the knowledge graph *decides* is tested without a database
+    (`knowledge/schema.py`, `knowledge/build.py`, and the statement builders in
+    `store.py`). What needs one is whether the Cypher is right, and that cannot
+    be faked: a stub session that answered queries would be a second, wrong
+    implementation of Neo4j, and the test would pass against it.
+
+    So these skip rather than mock, and the skip is loud about why.
+    """
+    from portia.knowledge import store
+
+    pytest.importorskip("neo4j", reason="the graph extra is not installed")
+    if not os.environ.get("NEO4J_PASSWORD"):
+        pytest.skip("no NEO4J_PASSWORD — see docker-compose.yml")
+    try:
+        driver = store.connect()
+    except store.GraphUnavailable as exc:
+        pytest.skip(str(exc))
+    with driver.session(database=store.settings()["database"]) as live:
+        live.run("MATCH (n) DETACH DELETE n")
+        yield live
+    driver.close()
