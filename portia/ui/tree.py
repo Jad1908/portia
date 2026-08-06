@@ -187,21 +187,34 @@ class Choice:
     ``files`` is a **count of files**, not a measurement of anything in them —
     it is what makes "which of these six folders is the data" answerable without
     clicking into all six, and it is the only number this screen shows.
+
+    **Zero is a real answer and is offered** (2026-08-06). Folders with nothing
+    readable under them used to be left out entirely, which made the list read
+    as the whole directory and quietly wasn't — so a folder you knew was there
+    and could not see was a bug you had to go to a terminal to disprove.
+    Showing them, quietly, says *this exists and has nothing portia can read*,
+    which is the answer to the question you were actually asking.
     """
 
     rel: str
     name: str
     files: int
 
+    @property
+    def has_data(self) -> bool:
+        return self.files > 0
+
 
 def choices(root: str | Path, at: str, readable: Collection[str]) -> tuple[Choice, ...]:
-    """The sub-folders of ``root/at`` that have readable data anywhere under them.
+    """Every sub-folder of ``root/at``, and how much readable data is under each.
 
-    A folder with nothing portia can read below it is not offered, for the same
-    reason it is not drawn in the left pane: it is not a place the data is. That
-    includes folders whose data is three levels down, which is why the count is
-    recursive — ``raw/`` holding nothing but ``raw/2024/orders.csv`` is still the
-    answer someone is looking for.
+    The count is **recursive** — ``raw/`` holding nothing but
+    ``raw/2024/orders.csv`` is still the answer someone is looking for, so a
+    folder is judged by everything beneath it rather than by its own listing.
+
+    Folders with a count of zero come back too, and it is the caller's job to
+    draw them quietly (`Choice.has_data`). Omitting them made the picker look
+    like a complete directory listing while silently not being one.
     """
     root = Path(root)
     suffixes = frozenset(s.lower() for s in readable)
@@ -210,11 +223,13 @@ def choices(root: str | Path, at: str, readable: Collection[str]) -> tuple[Choic
     for entry in _listdir(root / scope if scope else root):
         if not entry.is_dir() or entry.is_symlink() or _skipped(entry.name):
             continue
-        count = len(_data_files(entry, suffixes))
-        if count:
-            found.append(
-                Choice(rel=entry.relative_to(root).as_posix(), name=entry.name, files=count)
+        found.append(
+            Choice(
+                rel=entry.relative_to(root).as_posix(),
+                name=entry.name,
+                files=len(_data_files(entry, suffixes)),
             )
+        )
     return tuple(found)
 
 

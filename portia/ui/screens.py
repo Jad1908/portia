@@ -192,49 +192,52 @@ def project_context() -> None:
     the data: the goal, how it is modelled, and roughly what sources exist —
     `VISION.md`'s "the *global* project, not necessarily the data".
 
-    **The guidance used to ask for the wrong altitude.** "Say what one row means,
-    and which source is authoritative for what" is a question about the data, and
-    it got answers about the data — which is the half portia measures for itself
-    and the half the copilot is forbidden to take on trust. The shape lines now
-    ask for goal, modelling and the kinds of data, and `CONTEXT_EXAMPLE` shows
-    the register in four sentences from an unrelated industry.
+    **The same card as add data** (`p-panel`, in `p-panel--prose` width): the
+    question and the box, and the file it writes pinned in the footer beside the
+    button that writes it. As a bare column on the canvas it was a heading, a
+    text box and four paragraphs of loose text with a raw path trailing under
+    them — a screen with nothing holding it together.
+
+    **It says far less than it used to** (2026-08-04). The guidance had grown
+    into the notes that described this screen while it was being designed: four
+    shape lines, a rule about what not to write, and a four-sentence worked
+    example. That is a briefing about writing a brief, and it dwarfed the box it
+    was meant to introduce. One line of shape survives; the register is taught by
+    the question, which is a short one.
     """
     with ui.element("div").classes("p-centered"):
-        with ui.element("div").classes("p-centered-column"):
-            ui.label("What is this project?").classes("t-heading-md")
-            c.text(CONTEXT_WHY, color="c-mute")
+        with ui.element("div").classes("p-panel p-panel--prose"):
+            with ui.element("div").classes("p-panel-head"):
+                ui.label("What is this project?").classes("t-heading-md")
+                ui.label(CONTEXT_WHY).classes("p-panel-sub")
 
-            box = (
-                ui.textarea(placeholder=CONTEXT_PLACEHOLDER)
-                .classes("p-field p-editor w-full")
-                .props("borderless autofocus")
-                .style("min-height:180px")
-            )
-            box.bind_value(APP, "goal")  # reused as scratch until it is saved
+            with ui.element("div").classes("p-panel-body"):
+                box = (
+                    ui.textarea(placeholder=CONTEXT_PLACEHOLDER)
+                    .classes("p-field p-editor p-editor--tall w-full")
+                    .props("borderless autofocus")
+                )
+                box.bind_value(APP, "goal")  # reused as scratch until it is saved
+                context_guidance()
 
-            context_guidance()
-
-            with ui.element("div").classes("row-gap-sm"):
-                c.button("Continue", lambda: _save_context(box.value), kind="primary")
-                # The gate has no skip, but it must have a way back: choosing the
-                # wrong folder is easy, and the only other exit was the process.
-                c.button("Back", _back_to_picker, kind="secondary")
-                c.caption(str(APP.catalog_dir / "project.yaml"))
+            with ui.element("div").classes("p-panel-actions"):
+                with ui.element("div").classes("row-gap-sm"):
+                    c.button("Continue", lambda: _save_context(box.value), kind="primary")
+                    # The gate has no skip, but it must have a way back: choosing
+                    # the wrong folder is easy, and the only other exit was the
+                    # process.
+                    c.button("Back", _back_to_picker, kind="secondary")
+                c.path_row(APP.catalog_dir / "project.yaml")
 
 
 def context_guidance() -> None:
-    """What a good brief looks like: its shape, then one written at that altitude.
+    """The one line saying what shape a brief takes.
 
-    One function rather than two lists a caller loops over, because the gate and
+    One function rather than a list each caller loops over, because the gate and
     the brief pane are the same box in two places and the day they teach it
     differently is the day one of them is wrong.
     """
-    with ui.element("div").classes("stack-xs"):
-        for line in CONTEXT_SHAPE:
-            c.caption(line, color="c-stone")
-    # `c-mute`, one step up from the shape lines' `c-stone`: those are glanced at,
-    # and this is the one piece of guidance meant to be read through.
-    c.caption(CONTEXT_EXAMPLE, color="c-mute").classes("context-example")
+    c.caption(CONTEXT_SHAPE, color="c-stone")
 
 
 def _back_to_picker() -> None:
@@ -275,7 +278,7 @@ def add_data() -> None:
     one, with the heading and the button drifting to opposite ends of the window.
     """
     with ui.element("div").classes("p-centered"):
-        with ui.element("div").classes("add-data-card"):
+        with ui.element("div").classes("p-panel"):
             panel()
 
 
@@ -294,10 +297,10 @@ def panel(*, in_dialog: bool = False) -> None:
     list gets — a panel where the primary action is somewhere below the fold is a
     panel that looks like it did nothing when you press it.
     """
-    with ui.element("div").classes("add-data-head"):
+    with ui.element("div").classes("p-panel-head"):
         ui.label("Add data").classes("t-heading-md")
-        ui.label(ADD_WHY.format(formats=_formats())).classes("add-data-sub")
-    with ui.element("div").classes("add-data-body"):
+        ui.label(ADD_WHY.format(formats=_formats())).classes("p-panel-sub")
+    with ui.element("div").classes("p-panel-body add-data-body"):
         # Two columns where there is room for two: the question you are almost
         # always answering on the left, the one you are usually not on the right.
         # A wide panel laid out as one stacked column is a wide panel that reads
@@ -309,7 +312,7 @@ def panel(*, in_dialog: bool = False) -> None:
             _interpret_toggle()
         with ui.element("div").classes("add-data-progress"):
             _progress()
-    with ui.element("div").classes("add-data-actions"):
+    with ui.element("div").classes("p-panel-actions"):
         # No rule: the region's own top border is the divider, and two lines a
         # pixel apart is what a rule inside a bordered footer looks like.
         _actions(in_dialog=in_dialog)
@@ -372,16 +375,18 @@ def _picker() -> None:
     clicked. These rows are a bordered list with a trailing chevron: the chevron
     is what says *this goes somewhere*.
     """
+    choices = engine.folder_choices(APP, APP.browse_at)
+    files = engine.data_files_in(APP, APP.browse_at)
+    here = len(files)
     with ui.element("div").classes("picker"):
         _crumbs()
-        choices = engine.folder_choices(APP, APP.browse_at)
         for choice in choices:
             _folder_row(choice)
         if not choices:
             with ui.element("div").classes("picker-empty"):
                 c.caption(NO_SUBFOLDERS)
-    here = len(engine.data_files_in(APP, APP.browse_at))
-    if not here and not engine.folder_choices(APP, APP.browse_at):
+        _picker_files(files)
+    if not here and not any(choice.has_data for choice in choices):
         c.empty_note(NOTHING_HERE.format(formats=_formats()))
     with ui.element("div").classes("add-section-actions"):
         c.button(
@@ -398,14 +403,54 @@ def _picker() -> None:
 
 
 def _folder_row(choice) -> None:
-    """One folder you can open: name, how much data is under it, and a chevron."""
-    row = ui.element("div").classes("picker-row")
+    """One folder: name, how much data is under it, and a chevron if it has any.
+
+    **A folder with nothing readable under it is drawn, quietly, and does not
+    open.** Leaving those out made the list look like the directory and silently
+    not be it, so a folder you knew existed and could not see cost a trip to a
+    terminal to explain. Drawn dim with an open outline, it answers the question
+    instead: *this is here, and there is nothing in it portia can read.*
+
+    Dimming here is not `DESIGN.md`'s forbidden ranking — it is not saying one
+    folder is better than another, it is saying one of them is not a thing you
+    can pick. That is a **kind**, and kind is exactly what prominence may say.
+    """
+    row = ui.element("div").classes("picker-row" if choice.has_data else "picker-row is-empty")
     with row:
-        ui.icon("folder").classes("picker-row-icon")
+        ui.icon("folder" if choice.has_data else "folder_open").classes("picker-row-icon")
         ui.label(choice.name).classes("picker-row-name")
-        ui.label(c.count(choice.files, "file")).classes("picker-row-meta")
-        ui.icon("chevron_right").classes("picker-row-go")
-    row.on("click", lambda rel=choice.rel: _browse_to(rel))
+        ui.label(c.count(choice.files, "file") if choice.has_data else NO_DATA_HERE).classes(
+            "picker-row-meta"
+        )
+        if choice.has_data:
+            ui.icon("chevron_right").classes("picker-row-go")
+    if choice.has_data:
+        row.on("click", lambda rel=choice.rel: _browse_to(rel))
+
+
+#: How many of the eligible files the picker names before it stops listing and
+#: starts counting. Enough to recognise the folder — you are answering "is this
+#: the data", not reading an inventory.
+PICKER_FILES_SHOWN = 6
+
+
+def _picker_files(files: list[Path]) -> None:
+    """The eligible files under here, **before** you commit to the folder.
+
+    The count alone told you *how many* and never *which*, so picking between
+    two plausible folders meant choosing one, looking, and going back. These are
+    the files that would be profiled if you pressed the button, which is the
+    thing the button is actually asking about.
+    """
+    if not files:
+        return
+    with ui.element("div").classes("picker-files"):
+        for path in files[:PICKER_FILES_SHOWN]:
+            with ui.element("div").classes("picker-file"):
+                ui.icon("table_chart").classes("picker-file-icon")
+                ui.label(_rel(path).as_posix()).classes("picker-file-name")
+        if len(files) > PICKER_FILES_SHOWN:
+            c.caption(MORE_FILES.format(n=len(files) - PICKER_FILES_SHOWN))
 
 
 def _crumbs() -> None:
@@ -669,11 +714,12 @@ def _import_destination() -> None:
         )
         if not APP.import_to_data_dir:
             (
-                ui.input(placeholder=DATA_DIR)
+                ui.input(placeholder=DESTINATION_PLACEHOLDER)
                 .classes("p-field p-field-mono w-full")
                 .props("borderless")
                 .bind_value(APP, "import_destination")
             )
+            c.caption(DESTINATION_ROOT)
         c.caption(DESTINATION_SCOPE)
 
 
@@ -972,25 +1018,45 @@ async def _leave(in_dialog: bool) -> None:
     if in_dialog:
         _close_dialog()
         return
+    # **Interpret before leaving, not after.** The workspace used to open the
+    # moment profiling finished, with the copilot's read still running behind
+    # it — so the first thing you saw was a project whose sources say nothing,
+    # filling in underneath you while you tried to read them. The screen holds
+    # until the turn ends, and `turn._stop` is the one thing that opens it
+    # early: a question needs the transcript's form to answer it.
+    await _interpret_pending()
     APP.left_add_data = True
     app_module.shell.refresh()
-    await _interpret_pending()
 
 
 async def _interpret_pending() -> None:
-    """Spend the turn that reads what each source *is*, if one was asked for."""
+    """Spend the turn that reads what each source *is*, if one was asked for.
+
+    **This screen waits for it.** The status line is deliberately coarse — one
+    sentence, not a running commentary — because the running commentary is the
+    transcript's, and you are put in front of that the moment the copilot has
+    something to ask (`turn._stop`). What this has to say is only *something is
+    happening and it is not finished*, which is what a screen that has taken
+    your way out away owes you.
+    """
     from portia.ui import turn
 
     names, APP.pending_interpret = APP.pending_interpret, []
     if not (APP.interpret and names):
         return
-    await turn.start(
-        prompts.task("index_batch", names=", ".join(repr(n) for n in names)),
-        model=APP.model or _default_model(),
-        effort=APP.effort,
-        kind=state.INDEXING,
-        label=", ".join(names),
-    )
+    APP.indexing_status = INTERPRETING.format(n=c.count(len(names), "source"))
+    _progress.refresh()
+    try:
+        await turn.start(
+            prompts.task("index_batch", names=", ".join(repr(n) for n in names)),
+            model=APP.model or _default_model(),
+            effort=APP.effort,
+            kind=state.INDEXING,
+            label=", ".join(names),
+        )
+    finally:
+        APP.indexing_status = ""
+        _progress.refresh()
 
 
 # --- the same surface, as a dialog ------------------------------------------
@@ -1026,9 +1092,9 @@ def build_add_dialog() -> None:
         # bounded height with its own scroll; the screen having been a full-page
         # column was the odd one out, and giving them one class is what stops the
         # two surfaces drifting apart the next time either is touched.
-        # No inline width: `add-data-card` sizes itself in both places it appears,
+        # No inline width: `p-panel` sizes itself in both places it appears,
         # and `portia.css` out-specifies Quasar's 560px cap on a dialog's child.
-        with ui.element("div").classes("add-data-card"):
+        with ui.element("div").classes("p-panel"):
             panel(in_dialog=True)
     _ADD_DIALOG = dialog
 
@@ -1097,47 +1163,24 @@ def _default_model() -> str:
 _OPEN_SUBTITLE = "Open a project directory. If it doesn't exist yet, it gets created."
 _OPEN_NEW = "Type a path instead"
 
-CONTEXT_WHY = (
-    "A few sentences, the way you would describe this project to another engineer. "
-    "The copilot measures the files itself — this is the part it cannot."
-)
+CONTEXT_WHY = "The copilot measures the files itself — this is the part it cannot."
 CONTEXT_PLACEHOLDER = "The project in a few sentences…"
-CONTEXT_SHAPE = (
-    "The domain and the goal — what the work is for.",
-    "How you model it: what you produce, at what grain, over what horizon.",
-    "Roughly what data you have, in the names your team uses for it.",
-    "Not the schema, and not a description of the files.",
-)
-#: A worked brief, from a domain that is plainly not the one on screen.
-#:
-#: `DESIGN.md` forbade *any* example here, and the reason was sound: an example
-#: that could pass for an answer about the data at hand is one people edit rather
-#: than replace. What it did not distinguish is **register** from **content** —
-#: and register is the whole difficulty of this box. Asked abstractly for context,
-#: people write a schema; shown four sentences of hotel revenue forecasting in a
-#: pharmacy project, nobody mistakes it for their own and everybody sees the
-#: altitude. The rule is narrowed rather than dropped: the example must be from
-#: another industry, and it is styled as guidance, not seeded into the field.
-#:
-#: Sentence per line and joined, rather than one implicitly-concatenated literal:
-#: the parser folds those into a single constant, and `test_agent_prompts` reads
-#: any constant over 200 characters as prompt text that escaped `prompts/`. The
-#: check is blunt on purpose and this is the honest way past it — the example is
-#: read by a person, never by the model.
-CONTEXT_EXAMPLE = " ".join(
-    (
-        "For example — “A revenue forecasting project for a hotel group.",
-        "We predict RevPAR per hotel by forecasting occupancy and ADR separately,",
-        "at M+1, M+2 and M+3.",
-        "The data is hotel reference information, on-the-books bookings, FX rates",
-        "and a third-party events feed.”",
-    )
-)
+#: The shape of a brief, in one line. It was four, plus a worked example from
+#: another industry, and together they were longer than most briefs anyone would
+#: write into the box beneath them — the conceptual notes for this screen painted
+#: back onto it. Altitude is taught by asking a short question about the project
+#: rather than by explaining at length what an answer is not.
+CONTEXT_SHAPE = "The goal, how you model it, and roughly what data you have."
 
 ADD_WHY = "portia reads {formats}. Point it at the data in this repo, and bring in what is outside."
 IN_REPO_HEADING = "Data in this repo"
 IN_REPO_WHY = "Which folder holds this project's data? Open a folder to look inside it."
 NO_SUBFOLDERS = "No folders below this one hold data portia can read."
+NO_DATA_HERE = "nothing readable"
+MORE_FILES = "and {n} more"
+INTERPRETING = "The copilot is reading {n} — the workspace opens when it is done."
+DESTINATION_PLACEHOLDER = "the project root"
+DESTINATION_ROOT = "leave it empty to copy into the project root itself"
 PICK_WHICH = "Profile these files"
 ALL_DONE = "Everything here is already indexed"
 PROJECT_ROOT = "the project root"

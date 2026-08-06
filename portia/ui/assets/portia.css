@@ -614,6 +614,25 @@ html body {
   padding-bottom: var(--sp-sm);
 }
 
+/* The brief: a box you are meant to write a paragraph into, so it opens at the
+ * size of the answer rather than growing into it. Every other `p-editor` is an
+ * `autogrow` one-liner and must stay one.
+ *
+ * **The height goes on the bordered control, not on the field.** Quasar's
+ * `q-field` root is a wrapper the border does not follow, so a `min-height` out
+ * there — which is where an inline `.style()` put it, and a size does not belong
+ * in Python anyway — stretched the wrapper and left the drawn box the height of
+ * its rows, the difference showing as dead space under a border that had already
+ * ended. */
+.p-editor--tall .q-field__control {
+  min-height: 200px;
+  align-items: stretch;
+}
+.p-editor--tall .q-field__control-container,
+.p-editor--tall textarea {
+  height: 100%;
+}
+
 /* segmented control — the selected segment is a soft accent wash, not a solid
  * fill; the solid one belongs to the single primary action per view. */
 .btn.seg-active,
@@ -720,34 +739,23 @@ html body {
   max-width: 100%;
 }
 
-/* A worked brief, set apart from the shape lines above it: those are
- * instructions, this is a specimen, and a fifth bullet in the same voice would
- * read as a fifth instruction. Indented behind a rule, the way a quotation is. */
-.context-example {
-  margin-top: var(--sp-sm);
-  padding-left: var(--sp-md);
-  border-left: 2px solid var(--hairline-strong);
-  line-height: 1.55;
-}
-
-/* Add data: a floating panel, not a page.
+/* A floating panel, not a page — the shape every first-run surface takes.
  *
- * It is the same card in both places it appears — centred on the canvas as the
- * first-run screen, and inside `ui.dialog` when reopened from the left pane —
- * because it is the same thing: a transient surface you finish and leave. As a
- * full-height column it read as a web page, and the longer the file list grew
- * the more it read as one, with the heading and the button drifting to opposite
- * ends of the window.
+ * Add data was the first to need it and the brief is the second, so it is one
+ * card with one set of region classes rather than each screen growing its own:
+ * they are the same thing, a transient surface you finish and leave. As a
+ * full-height column either of them read as a web page, with the heading and the
+ * button drifting to opposite ends of the window.
  *
  * One soft shadow, which is the exception `DESIGN.md` allows for transient
  * overlays and nowhere else — the hairline and the surface ladder do this work
  * on everything persistent. */
-.add-data-card {
+.p-panel {
   width: 100%;
-  /* Wide. The panel holds two side-by-side questions and a list of repo-relative
-   * paths, and at 560px it was a tall column of things wrapping — a shape that
-   * made a short form feel long. Falls back to the viewport on a narrow window
-   * rather than overflowing it. */
+  /* Wide, for the panel that holds two side-by-side questions and a list of
+   * repo-relative paths: at 560px it was a tall column of things wrapping, a
+   * shape that made a short form feel long. Falls back to the viewport on a
+   * narrow window rather than overflowing it. */
   max-width: min(880px, calc(100vw - 2 * var(--sp-xxl)));
   /* Bounded, so it always floats clear of the top and bottom edges. Content
    * beyond that scrolls inside; the card never grows to meet it.
@@ -766,22 +774,28 @@ html body {
   border-radius: var(--r-lg);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
 }
-body.body--dark .add-data-card {
+body.body--dark .p-panel {
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
 }
 
+/* One question and one text box. The wide card is shaped around a file list;
+ * a paragraph set 880px across is a paragraph nobody finishes reading. */
+.p-panel--prose {
+  max-width: min(620px, calc(100vw - 2 * var(--sp-xxl)));
+}
+
 /* Quasar's minimized dialog caps its child at 560px, which is why the panel
- * used to carry an inline width. `div.add-data-card` out-specifies that rule
+ * used to carry an inline width. `div.p-panel` out-specifies that rule
  * without an `!important`, so the card's own width now holds in the dialog
  * exactly as it does on the canvas — one width, declared once, in the file
  * that owns the look. */
-.q-dialog__inner > div.add-data-card,
-.q-dialog__inner--minimized > div.add-data-card {
+.q-dialog__inner > div.p-panel,
+.q-dialog__inner--minimized > div.p-panel {
   max-width: min(880px, 92vw);
 }
 
 /* What you are doing. Pinned, so it survives a long list. */
-.add-data-head {
+.p-panel-head {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
@@ -790,21 +804,28 @@ body.body--dark .add-data-card {
   border-bottom: 1px solid var(--hairline);
 }
 
-/* The only region that scrolls, and the one that uses the width.
+/* The only region that scrolls. */
+.p-panel-body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-md);
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-lg);
+}
+
+/* Add data's body is the one that uses the width.
  *
  * `auto-fit` rather than a media query: the card's own width is already capped
  * against the viewport, so what decides one column or two is how much room the
  * card ended up with — which is a question about this element, not about the
  * window. Two columns whenever 340px each will fit, one below that. */
 .add-data-body {
-  flex: 1 1 auto;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
   align-items: start;
   gap: var(--sp-lg);
-  min-height: 0;
-  overflow-y: auto;
-  padding: var(--sp-lg);
 }
 .add-data-col {
   display: flex;
@@ -821,7 +842,7 @@ body.body--dark .add-data-card {
  * below the fold is one that looks like it did nothing when you press it. The
  * region's own top border is the divider — a rule inside a bordered footer is
  * two lines a pixel apart. */
-.add-data-actions {
+.p-panel-actions {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
@@ -829,6 +850,45 @@ body.body--dark .add-data-card {
   padding: var(--sp-lg);
   border-top: 1px solid var(--hairline);
   background: var(--surface);
+}
+
+/* A file a surface writes, as a path. The name identifies it and the folders
+ * say where it sits, so the name is `{colors.ink}` and the folders are quiet —
+ * and the folders are what truncates, because the end of a path is the half you
+ * were reading. Boxed at `{colors.surface-elevated}` so it reads as a fact about
+ * this card and not as a fifth line of guidance. */
+.path-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  align-self: flex-start;
+  max-width: 100%;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+  background: var(--surface-elevated);
+}
+.path-row-icon {
+  font-size: 14px;
+  color: var(--stone);
+  flex: 0 0 auto;
+}
+.path-row-dir {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--stone);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.path-row-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 
 /* Indexing says what it is doing. A spinner on its own is the thing this
@@ -911,7 +971,7 @@ body.body--dark .add-data-card {
 
 /* Body size, not caption: it is the one sentence explaining the screen, and at
  * 11px it sat below the section hints it is meant to introduce. */
-.add-data-sub {
+.p-panel-sub {
   font-size: 13px;
   line-height: 1.5;
   color: var(--mute);
@@ -2142,4 +2202,107 @@ body.body--dark .step-card {
   display: flex;
   flex-direction: column;
   gap: var(--sp-xs);
+}
+
+/* The knowledge explorer's canvas. vis-network draws into it and owns
+   everything inside; all this does is give it a surface and a border that
+   matches the panes around it. */
+.p-knowledge {
+  width: 100%;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+/* A picker row for a folder with nothing readable under it. Dimmed and
+   un-clickable, because it is not a thing you can pick — a *kind*, which is
+   what prominence is allowed to say (DESIGN.md), and not a rank. */
+.picker-row.is-empty {
+  cursor: default;
+  opacity: 0.45;
+}
+.picker-row.is-empty:hover {
+  background: transparent;
+}
+
+/* The eligible files under the folder you are looking at, listed before you
+   commit to it: the count said how many and never which. */
+.picker-files {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xxs);
+  padding: var(--sp-sm) var(--sp-md);
+  border-top: 1px solid var(--hairline-soft);
+}
+.picker-file {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+}
+.picker-file-icon {
+  font-size: 14px;
+  color: var(--ash);
+}
+.picker-file-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--mute);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The indexing tab's source list: what portia knows about each file, and what
+   you can do next. Three states, and the middle one — profiled but never read —
+   is the one a two-state list cannot show. Colour says *kind*, never rank: a
+   source nobody has read is not worse than one that has been, it is at a
+   different point in the same sequence (DESIGN.md). */
+.index-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.index-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  padding: var(--sp-xs) var(--sp-sm);
+  border-bottom: 1px solid var(--hairline-soft);
+}
+.index-row:last-child {
+  border-bottom: none;
+}
+.index-row-icon {
+  font-size: 15px;
+  color: var(--ash);
+}
+.index-row.is-interpreted .index-row-icon {
+  color: var(--success);
+}
+.index-row.is-unread .index-row-icon {
+  color: var(--warning);
+}
+.index-row-name {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.index-row-state {
+  font-size: 11px;
+  color: var(--mute);
+}
+.index-row-stale {
+  font-size: 11px;
+  color: var(--warning);
+}
+.index-actions {
+  display: flex;
+  gap: var(--sp-sm);
+  margin-top: var(--sp-sm);
 }

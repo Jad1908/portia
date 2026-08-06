@@ -648,13 +648,22 @@ def test_the_destination_is_the_one_the_operator_chose(project):
     assert pairs[0][1] == app.root / "data" / "raw" / "orders.csv"
 
 
-def test_an_empty_destination_falls_back_to_the_data_directory(project):
+def test_an_empty_destination_means_the_project_root(project):
+    """Reversed 2026-08-06. It used to fall through to `data/`, on the reading
+    that files loose at the top of a project are nobody's deliberate choice.
+
+    That is wrong for the project whose data *is* its root — a folder of CSVs
+    opened directly — where inventing `data/` is the surprise. The checkbox
+    above the field is still the default, so an empty box is now something you
+    cleared on purpose.
+    """
     from portia.ui import engine
 
     app, _ = project
 
-    assert engine.destination_in("", app) == app.root / engine.DATA_DIR
-    assert engine.destination_in("   ", app) == app.root / engine.DATA_DIR
+    assert engine.destination_in("", app) == app.root
+    assert engine.destination_in("   ", app) == app.root
+    assert engine.destination_in("raw", app) == app.root / "raw"
 
 
 def test_a_destination_outside_the_project_is_refused(project):
@@ -1298,3 +1307,66 @@ def test_the_whole_repo_as_a_scope_still_draws_every_readable_file(tmp_path):
     names = [n.name for n in engine.project_tree(app)]
 
     assert names == ["data", "notebooks"]
+
+
+# --- the brief: one card, and one line of guidance ---------------------------
+
+
+def test_the_brief_and_add_data_are_the_same_card():
+    """Two first-run surfaces, one panel — `p-panel` and its three regions.
+
+    They were separately-assembled layouts of the same idea, and the brief's was
+    a bare centered column: a heading, a box, and loose text with a raw path
+    under it. Neither screen owns the card, so neither may grow its own.
+    """
+    import inspect
+
+    from portia.ui import screens
+
+    gate = inspect.getsource(screens.project_context)
+    add_data = inspect.getsource(screens.panel.func)  # it is a refreshable
+    for region in ("p-panel", "p-panel-head", "p-panel-body", "p-panel-actions"):
+        assert region in gate and region in add_data, region
+    assert "add-data-card" not in inspect.getsource(screens), "the card is not add-data's any more"
+
+
+def test_the_brief_teaches_its_shape_in_one_line_and_shows_no_example():
+    """The guidance had become the notes that described this screen — four shape
+    lines, a rule about what not to write, and a worked brief from another
+    industry, together longer than the answer they were introducing."""
+    from portia.ui import screens
+
+    assert isinstance(screens.CONTEXT_SHAPE, str), "the shape is one line, not a list of them"
+    assert not hasattr(screens, "CONTEXT_EXAMPLE"), "no example — people edit one instead of it"
+    assert "engineer" not in screens.CONTEXT_WHY, "who else would read it is not the question"
+
+
+def test_a_written_path_shows_its_name_apart_from_its_folders():
+    """`path-row`: the name identifies the file, the folders say where it sits,
+    and `$HOME` is a third of the string that tells the reader nothing."""
+    with ui.element("div"):
+        row = c.path_row(Path.home() / "projects" / "demo" / ".portia" / "project.yaml")
+
+    labels = [el for el in row.descendants() if isinstance(el, ui.label)]
+    assert [el.text for el in labels] == ["~/projects/demo/.portia/", "project.yaml"]
+    assert "path-row-name" in labels[-1].classes
+
+
+def test_a_pending_decision_opens_the_workspace(project):
+    """The first-run block has to have exactly one exit, and this is it.
+
+    The add-data screen holds you while the opening interpretation runs, so you
+    cannot walk into a workspace describing sources nobody has read yet. But the
+    copilot may stop and ask, and the form it asks with lives in the transcript
+    — so a decision is the one thing allowed to open the workspace early.
+    Blocking without this is a screen waiting forever for an answer it gives you
+    no way to give.
+    """
+    app, _ = project
+
+    app.left_add_data = False
+    assert app.reveal_for_decision() is True
+    assert app.left_add_data
+
+    # Already there: nothing to reveal, and nothing to redraw for.
+    assert app.reveal_for_decision() is False

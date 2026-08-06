@@ -63,6 +63,10 @@ stack, and product vision. Read them every session, before proposing changes or 
   rewritten and the conversation phase is not · two new tools, not one · and a four-phase order
   where the read path precedes the agent-writes-measurements path, because at source 23 the agent
   queries the graph while filling it.
+- `docs/GRAPH_SCHEMA.md` — **the knowledge graph as it actually is**: every label, every property,
+  where each value comes from, and a page of Cypher recipes. The reference to `KNOWLEDGE_GRAPH.md`'s
+  design — read that one for *why*, this one for *what you will find in the browser*.
+  `tests/test_graph_schema_doc.py` fails if `knowledge/schema.py` gains something it does not mention.
 - `docs/BACKLOG.md` — parking lot of deferred ideas, by stream, with a compact **Shipped** list at
   the bottom. Not required reading; scan it when picking the next thing to build, and **add to it
   whenever we postpone something mid-work.**
@@ -222,7 +226,11 @@ adding code, and extend them rather than working around them:
   - `portia/catalog.py` — the **context catalog** (*what the data is*), in `.portia/`: project
     context + groups + per-source metadata (Layer 1 prose `summary`, Layer 2 per-column `role` +
     check facts). The agent's memory. **Update rule: facts refresh, prose/roles are preserved** —
-    corrections are never clobbered (facts vs judgment, applied to updates).
+    corrections are never clobbered (facts vs judgment, applied to updates). **`is_stale` compares
+    facts about the *file* and only those** — `STALENESS_FACTS` is `(size, mtime)`, and the `at`
+    recorded beside them (when portia last *looked*) is deliberately excluded: it moves every second
+    without the file moving, and comparing it made every source read as stale one second after being
+    indexed. Prefer naming that tuple to iterating whatever the record happens to hold.
   - `portia/knowledge/` — the **knowledge graph** (*what the tables and columns are to each other*),
     in Neo4j (`docs/KNOWLEDGE_GRAPH.md`). Four modules and the split is the seam: `schema.py` (the
     closed vocabulary + a `Graph` — imports no driver) · `build.py` (catalog + specs → a `Graph`;
@@ -231,9 +239,15 @@ adding code, and extend them rather than working around them:
     questions) · `store.py` (the only module that knows what Cypher is, behind the `graph` extra).
     **A rebuild owns the structural half and nothing else** — stale structural edges are deleted,
     `OVERLAPS` is never touched, because an absent edge has to keep meaning *nobody measured*
-    (§4.4). Built by `python -m portia.cli.knowledge`; `cli.index` and `measure_overlaps` refresh
-    it too, both **best-effort** — an index that fails because a container is stopped is §6.6's
-    leak, so a missing database is one printed line.
+    (§4.4). Built by `python -m portia.cli.knowledge`; `cli.index`, `record_step` and
+    `measure_overlaps` refresh it too, all three **best-effort** — a write that fails because a
+    container is stopped is §6.6's leak, so a missing database is one printed line and the step is
+    already on disk regardless.
+    - **It is not the pipeline graph, and §6.9 is where that is settled.** The project canvas draws
+      what we specified; this draws what the data is to itself. Model nodes carry `spec` and
+      `fingerprint` — pointers into the pipeline — and none of its vocabulary: `layer` groups the
+      canvas and says nothing about what a table is *to* another table. The picture is Neo4j's own
+      rendering embedded, never `ui/graph.py` reused.
     - **`measure.py` is the only measured thing in here** and the one edge kind that costs a
       query. Its `reason` is required *in code*: a measured zero means *no shared values*, never
       *unrelated* (`France` vs `FRA`), and the agent's sentence is what stops it reading as a dead

@@ -58,7 +58,7 @@ the interactive copilot loop over it (the questions-and-insights UX, emitting a 
 a decision stream) → the surface where those questions are asked and answered. The interactive
 layer is **core, not deferred** — all three now exist; `VISION.md` is where its shape is worked out.
 
-**Where we are (2026-08-02).** The engine is built (`checks`, `ops`, `spec`, `catalog`), so is the
+**Where we are (2026-08-03).** The engine is built (`checks`, `ops`, `spec`, `catalog`), so is the
 copilot loop (`portia/agent/` — in-process MCP server, layered context, `AskUserQuestion` routed to
 a human, spec writing, chat CLI), and so is **V0 of the app** (`portia/ui/`) — the loop runs in one
 window, with no terminal. The **verification loop** exists too: recording a step executes it,
@@ -90,6 +90,20 @@ files, and what an import defaults to. Importing outside data is a fold-away sec
 and **one button copies what was planned and profiles what was ticked**, so the screen has exactly
 one control that writes anything. The browser drop zone is gone: it was a third route doing the same
 job, and the only one whose refusals portia could not explain.
+
+**The pass after it (2026-08-03) was the first-run path driven on a real extract, and everything it
+found was a surface claiming more than it knew.** The project-brief box asked *"what does one row
+mean, and which source is authoritative for what"* — a question about the data, which got answers
+about the data: half of it portia measures for itself, and half of it the copilot may never take on
+trust. It asks for the **project** now (domain and goal · how it is modelled — what you produce, at
+what grain, over what horizon · roughly what data exists), which is what `VISION.md` always
+specified and the screen had drifted off. The CLI prompt and the copilot's ask-for-context moved
+with it, so no surface teaches that box differently. In the same shape: a source that nobody had
+interpreted was showing `catalog`'s auto-drafted restatement of its own profile in the prose slot,
+which reads as a read of the data — it says *not read yet* now, and leaves the facts to the columns
+table where they are measured. The add-data list stopped offering to re-index what it had already
+indexed, and its CTA caption stopped counting a copy as if it replaced a profile. Nothing here
+changed what the engine does; all of it changed what the window claims.
 
 **Scale is built.** The engine is DuckDB throughout and everything is a lazy relation. Measured end
 to end on real PHQ data: 4.82 GB across three tables indexes in 32 s, a 50M × 3M join is diagnosed
@@ -189,6 +203,17 @@ taken **half way, deliberately** — each source's line in the always-on brief l
 and candidate keys, and the index itself stays. §1.4 wants it replaced by traversal; its premise is
 "unproven at 50", which is not a measurement, and there is no re-runnable fixture that could say
 whether the copilot got worse. `BACKLOG.md` holds what would have to be true first.
+
+**And it has been watched once on real data** (2026-08-06, `EVALUATION.md`). Haiku at low effort,
+23 PHQ sources, one indexing turn, $0.19. It chose 12 column pairs out of the ~245,000 the schema
+permits; eight are ordinary foreign keys and measure like it, one is a name join that half-works,
+one is a plain miss the measurement caught — and **the two that connect the event data to the hotel
+golden record both measure zero**, one of them with mismatched types. That second one is the thing
+worth remembering: a *type check* would have discarded it with certainty and been correct to, and
+it is one of the two pairs that project exists to resolve. §6.5's warning that a provable excluder
+can still be blind to meaning is no longer hypothetical. It also never called `graph_lookup` — three
+indexing runs now, zero uses of the router — which is a prompt problem and is where the next work
+is.
 
 **The loop changes with it, not after it** (§9). The graph sits *before* `describe_source` as a
 router — *which* table should I look at, and where did this column come from — rather than as a

@@ -113,16 +113,52 @@ def test_no_runs_directory_is_an_empty_list_not_a_crash(tmp_path):
 # --- what it can answer without labels ---------------------------------------
 
 
-def test_the_tool_sequence_is_kept_in_order(tmp_path):
-    """ "Which rungs were pulled and in what order" — the order *is* the finding,
-    so it is kept whole rather than reduced to a set of names."""
+def test_the_tool_sequence_is_kept_in_order_and_says_what_each_call_was_about(tmp_path):
+    """ "Which rungs were pulled, in what order, and about what."
+
+    The order *is* the finding, so it is kept whole rather than reduced to a set.
+    The **subject** was added when the graph arrived: `graph_lookup` is a router,
+    and a log recording only that it was called cannot say whether it routed
+    anywhere.
+    """
     log = runlog.start(tmp_path, prompt="p", model="m")
-    _turn(log, _call("describe_source"), _call("profile_source"), _call("describe_source"))
+    _turn(
+        log,
+        _call("graph_lookup", table="orders"),
+        _call("graph_lookup", table="orders", column="country_name"),
+        _call("describe_source", source="customers"),
+    )
 
     summary = runlog.summary(runlog.read(log.path))
-    assert summary["sequence"] == ["describe_source", "profile_source", "describe_source"]
-    assert summary["by_tool"] == {"describe_source": 2, "profile_source": 1}
+    assert summary["sequence"] == [
+        "graph_lookup(orders)",
+        "graph_lookup(orders.country_name)",
+        "describe_source(customers)",
+    ]
+    # Counting stays on the bare names — the mix is a question about tools.
+    assert summary["by_tool"] == {"graph_lookup": 2, "describe_source": 1}
     assert summary["tools"] == 3
+
+
+def test_a_call_with_a_list_argument_is_summarised_by_how_many(tmp_path):
+    """`measure_overlaps` takes pairs; how many it asked for is the fact."""
+    log = runlog.start(tmp_path, prompt="p", model="m")
+    _turn(log, _call("measure_overlaps", pairs=[{"left": "a"}, {"left": "b"}]))
+    assert runlog.summary(runlog.read(log.path))["sequence"] == ["measure_overlaps(2 pairs)"]
+
+
+def test_a_call_with_no_arguments_is_just_its_name(tmp_path):
+    log = runlog.start(tmp_path, prompt="p", model="m")
+    _turn(log, _call("get_context"))
+    assert runlog.summary(runlog.read(log.path))["sequence"] == ["get_context"]
+
+
+def test_a_long_argument_is_clipped_rather_than_filling_the_line(tmp_path):
+    """Thirty calls have to still read as one line."""
+    log = runlog.start(tmp_path, prompt="p", model="m")
+    _turn(log, _call("set_group", name="g", context="x" * 200))
+    entry = runlog.summary(runlog.read(log.path))["sequence"][0]
+    assert len(entry) <= len("set_group()") + runlog.SUBJECT_CHARS
 
 
 def test_refused_writes_are_counted_separately_from_allowed_ones(tmp_path):

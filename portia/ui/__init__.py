@@ -26,7 +26,13 @@ Layout, per module:
 - `transcript.py` — right: the turn, the question form, the write confirmation
 - `turn.py`     — driving `session.run` with the app's own answer/confirm
 - `engine.py`   — the only module that calls the engine
-- `graph.py`    — DAG geometry (no NiceGUI import)
+- `graph.py`    — DAG geometry for the **pipeline** canvas (no NiceGUI import)
+- `assets/knowledge.js` — the **knowledge graph**, drawn by vis-network. A
+  different surface from the pipeline canvas and deliberately not built out of
+  it (`KNOWLEDGE_GRAPH.md` §6.9): force layout and hairball management are the
+  whole job of a library that already exists, and `graph.py`'s job is dependency
+  order. The data comes from `engine.knowledge_subgraph`, so the browser never
+  holds a database password.
 - `state.py`    — what is being looked at (no NiceGUI import)
 - `theme.py` + `assets/portia.css` — the look, as tokens
 

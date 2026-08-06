@@ -51,6 +51,7 @@ import os
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
 from pathlib import Path
@@ -314,8 +315,13 @@ def destination_in(raw: str, app: App) -> Path:
     inside is accepted, and one that points outside is refused by ``plan``. Data
     lives in the repo (`PIPELINE.md` §2.7) and the destination field is not the
     place to make an exception to that.
+
+    **Empty means the project root** (2026-08-06), where it used to mean
+    ``data/``. See `state.App.import_dir` for the reversal and why: a project
+    whose data *is* its root is an ordinary shape, and inventing a folder for it
+    is the surprising answer rather than the safe one.
     """
-    typed = Path((raw or "").strip() or DATA_DIR)
+    typed = Path((raw or "").strip() or ".")
     return typed if typed.is_absolute() else app.root / typed
 
 
@@ -357,6 +363,7 @@ async def index(paths: list[Path], app: App, *, on_progress=None) -> list[str]:
             on_progress(done, len(paths), path.stem)
         names.append(await asyncio.to_thread(_index_one, path, app.portia_dir))
     refresh_catalog(app)
+    await asyncio.to_thread(sync_knowledge, app)
     return names
 
 
@@ -690,6 +697,99 @@ def read_table(path: Path):
 
 
 # --- reloading the spec after the copilot has written to it -----------------
+
+
+#: What portia knows about one source, as three states rather than two. The
+#: middle one is the one that matters and the one the app kept losing: a source
+#: can be **profiled and never read**, which looks identical to a read one in any
+#: list that only knows indexed/not-indexed — and it is the state a project sits
+#: in when the copilot ran out of turn, or was never asked.
+UNINDEXED, UNREAD, INTERPRETED = "unindexed", "unread", "interpreted"
+
+
+@dataclass(frozen=True)
+class SourceState:
+    """One data file and what portia has done with it so far."""
+
+    name: str
+    rel: str
+    state: str
+    stale: bool = False
+
+    @property
+    def indexed(self) -> bool:
+        return self.state != UNINDEXED
+
+
+def source_states(app: App) -> list[SourceState]:
+    """Every data file in the project's scope, with what portia knows about it.
+
+    **Both halves in one list, deliberately.** The un-indexed files come from the
+    data folder and the rest from the catalog, and a screen that showed only one
+    of them made "what is left to do here" a question you answered by comparing
+    two places. Sorted by name, never by state: which sources need attention is a
+    judgment, and ordering by it would be the screen making it (`DESIGN.md`).
+    """
+    entries = catalog.load_catalog(app.portia_dir).get("sources") or {}
+    known = {entry.get("source") for entry in entries.values()}
+    states = [
+        SourceState(
+            name=name,
+            rel=entry.get("source", ""),
+            state=INTERPRETED if catalog.is_interpreted(entry) else UNREAD,
+            stale=catalog.is_stale(entry, portia_dir=app.portia_dir),
+        )
+        for name, entry in entries.items()
+    ]
+    states += [
+        SourceState(name=path.stem, rel=rel, state=UNINDEXED)
+        for path in data_files_in(app, app.data_dir)
+        if (rel := path.relative_to(app.root).as_posix()) not in known
+    ]
+    return sorted(states, key=lambda s: s.name)
+
+
+def sync_knowledge(app: App) -> str:
+    """Put the project's structural half in the graph — **best effort, always**.
+
+    The window indexes through `catalog.index_source` and used to stop there,
+    so a source added here was in the catalog and absent from the graph until
+    something else happened to refresh it. `cli.index` had done this since the
+    graph shipped; the two edges disagreeing about what portia knows is the seam
+    `docs/VISION.md` says must never break.
+
+    Threaded, because it opens a Neo4j connection. Never fatal: an index that
+    fails because a container is stopped is `KNOWLEDGE_GRAPH.md` §6.6's leak, and
+    the catalog is written either way.
+    """
+    from portia import knowledge
+    from portia.knowledge import store
+
+    try:
+        knowledge.sync(app.root, portia_dir=app.portia_dir)
+    except store.GraphUnavailable as exc:
+        return str(exc)
+    return ""
+
+
+def knowledge_subgraph(*, columns: bool = False) -> dict:
+    """The knowledge graph, as nodes and edges for the explorer to draw.
+
+    Synchronous, like every other read a pane draws in one pass: this is a
+    handful of Cypher over a few hundred nodes, not a scan of anyone's data.
+
+    A stopped container comes back as ``{"unavailable": ...}`` rather than
+    raising. The window has to behave sensibly when the database is down
+    (`KNOWLEDGE_GRAPH.md` §3.5), and a pane is the surface where "behave
+    sensibly" means *say so and draw nothing else*.
+    """
+    from portia.knowledge import query, store
+
+    try:
+        with store.session() as session:
+            return query.subgraph(session, columns=columns)
+    except store.GraphUnavailable as exc:
+        return {"nodes": [], "edges": [], "unavailable": str(exc)}
 
 
 def reload_spec(app: App) -> None:

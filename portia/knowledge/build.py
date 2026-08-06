@@ -157,7 +157,14 @@ def _add_catalog(graph: Graph, data: dict) -> dict[str, list[str]]:
             SOURCE,
             path,
             name=name,
-            summary=entry.get("summary"),
+            # **Only a real read.** `catalog._auto_summary` drafts a restatement
+            # of the profile so the YAML is never empty, and carrying that into
+            # the graph would put a placeholder in the prose slot where it is
+            # indistinguishable from an interpretation — the same mistake the
+            # source inspector's `not-read` state exists to undo. Absent means
+            # nobody has read this source, which is a fact worth being able to
+            # see. The facts it restated are on the columns, measured.
+            summary=entry.get("summary") if catalog.is_interpreted(entry) else None,
             candidate_keys=entry.get("candidate_keys") or [],
             # The same two numbers, also as one comparable string: a measured
             # edge records what it was taken against, and comparing that in
@@ -213,12 +220,14 @@ def _add_models(graph: Graph, result: BuildResult, root: Path, source_columns) -
     outputs: dict[str, _Relation] = {}
     for name in spec.run_order(models, base_dir=root):
         doc = docs[name]
+        # `spec` and `fingerprint` are **pointers** into the pipeline — where to
+        # read what this table does, and what it looked like when something was
+        # measured against it (§4.5). The pipeline's own vocabulary is not here:
+        # `layer` (staging/intermediate/mart) groups and orders the project
+        # canvas and says nothing about what a table *is to* another table,
+        # which is the only question this graph answers.
         node = graph.add_node(
-            MODEL,
-            name,
-            spec=str(models[name]),
-            layer=doc.get("layer"),
-            fingerprint=pipeline.fingerprint(doc),
+            MODEL, name, spec=str(models[name]), fingerprint=pipeline.fingerprint(doc)
         )
         outputs[name] = _add_model(graph, result, node, doc, models, outputs, source_columns)
 

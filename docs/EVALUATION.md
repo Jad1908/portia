@@ -19,6 +19,12 @@ Update it whenever a fixture is run.*
 > **What would be evidence:** a run against prompts someone has actually worked on, scored against an
 > answer key, with model and effort recorded. That run has not happened, and until it does, nothing
 > here should be used to argue what the copilot can or cannot do.
+>
+> **One thing has been observed since, and it is not a score either.** The PHQ indexing run of
+> 2026-08-06 is written up below. It has no answer key and it grades nothing — but the pairs it
+> chose are checkable against a real schema, and two of them are zeros that a provably-correct
+> filter would have discarded. That is evidence about a **mechanism**, not about a model, and it is
+> the only thing in this file that was not run against a fixture.
 
 ---
 
@@ -184,6 +190,81 @@ result; that plainly does not extend to *names*. The code conclusion is more evi
 examples — carry the row's other columns — not a sterner prompt.
 
 ---
+
+## The PHQ indexing run — 2026-08-06
+
+*The first time the copilot has been watched doing something on real, too-big-to-eyeball data.
+Haiku 4.5 at low effort, 23 sources from a PHQ extract, one indexing turn. 51 tool calls, no
+errors, 25 writes all approved, no questions asked, 533K input tokens in and 10K out, **$0.19**.*
+
+**Read this as one observation, not a score.** There is no answer key for this project, so nothing
+below is graded — what makes it worth writing down is that the pairs it chose are checkable against
+the data by anyone who knows the schema, and the numbers beside them are the engine's.
+
+### What it did
+
+Read all 23 sources with `describe_source`, wrote an interpretation for each, chose **12 column
+pairs** to measure out of the ~245,000 the schema permits, and put them in the graph with a reason
+each. Then two groups.
+
+Eight of the twelve are ordinary foreign keys and they measure like it — `EVENT_ID` into the master
+event table at 100% left coverage, `GEO_ID` into geo and address at 99%, `LABEL_ID` into a 126-row
+label dimension at 126/126. One is a partial that is worth knowing about: `PHQ_LABELS.LABEL` against
+`LABELS.LABEL_NAME` shares 79 values and covers **12%** of the left rows, which is a name join that
+half-works. One is a plain miss — `LOCATION_ID` against `DIVISION_PLACE_ID`, 7 shared values against
+25 distinct on the right — and the measurement is what says so.
+
+### The two that matter, and why they are the argument
+
+The remaining two are the pairs that connect PHQ's event data to the hotel golden record, which is
+**the entire point of this project**. Both measure exactly zero.
+
+| pair | shared | comparable | distinct |
+|---|---|---|---|
+| `EVENT_DETAILS.LOCATION_ID` ↔ `golden.ESTABLISHMENT_CODE` | 0 | **false** | 3,461 / 34,214 |
+| `VBPPRED_EVENTS.COUNTRY` ↔ `golden.GEOGRAPHIC_5_COUNTRY` | 0 | true | **17 / 179** |
+
+The second is `KNOWLEDGE_GRAPH.md` §4.4's `France`/`FRA` case, on real data and found without being
+looked for: same type, no shared values, seventeen distinct against a hundred and seventy-nine.
+That shape is a code-versus-name mismatch and nothing else. The agent's recorded reason —
+*"Country field in events should align with hotel country geography for location-event matching"* —
+is what turns the zero from a dead end into the work item it is.
+
+The first is worse, and it is the one that settles §6.5. `comparable_types: false` means those two
+columns can never match whatever their values are — **a type check would have discarded that pair
+with certainty, and been correct to.** §6.5's rejected prefilter design allowed exactly that class
+of excluder on the grounds that "an excluder must be a proof", and warned in the abstract that a
+proof can still be misleading. It is no longer abstract: the provable excluder would have thrown
+away one of the two pairs the project exists to resolve.
+
+**So the central mechanism held.** The agent picked from meaning, the engine measured, and the two
+most valuable findings of the run are two zeros that no deterministic filter would have kept.
+
+### What it did not do, and both are prompt problems
+
+- **`graph_lookup` was never called.** Not once, in this run or either of the two before it. Three
+  indexing runs, zero uses of the router — while `index_batch.md` tells it in as many words to use
+  the graph as it goes, and §9.4's whole reason for building B before C was that at source 23 the
+  agent needs it. This project *is* source 23, and it did the job from `describe_source` alone.
+  Whether the graph would have improved the picks is untested; what is measured is that it was
+  offered and not taken.
+- **`profile_source` was never called either.** Twenty-three sources interpreted from L2 alone —
+  meaning and flags, no statistics. Cheap, and the summaries came out plausible, but every claim in
+  them rests on column names rather than on measured values.
+
+One small defect in the prose, worth naming because it is the kind that is hard to see: a group
+context guesses *"PHQ - probably 'Places of High Quality' or similar"*. Nothing gave it that
+expansion. Speculating in a durable artifact where "I do not know what this stands for" was
+available is the copilot doing exactly what `copilot.md` tells it not to.
+
+### What this does not establish
+
+No answer key, one model, one effort, one run, and the prompts are still the first drafts
+`BACKLOG.md` has been asking to work on. It does not say Haiku is good enough, it does not compare
+anything to anything, and it must not be cited as a score. What it does establish is narrower and
+real: **the pairs-chosen-by-meaning mechanism produces findings a filter would have destroyed**, on
+data big enough that nobody was going to find them by looking.
+
 
 ## What has not been measured
 

@@ -53,7 +53,6 @@ def project(tmp_path: Path) -> Path:
         yaml.safe_dump(
             {
                 "version": 1,
-                "layer": "staging",
                 "sources": {"orders": "data/orders.csv"},
                 "steps": [
                     {
@@ -71,7 +70,6 @@ def project(tmp_path: Path) -> Path:
         yaml.safe_dump(
             {
                 "version": 1,
-                "layer": "mart",
                 "sources": {"customers": "data/customers.csv"},
                 "steps": [
                     {
@@ -109,7 +107,7 @@ def test_a_source_answers_with_the_models_that_read_it(filled):
 
 def test_a_model_answers_with_what_it_reads_including_another_model(filled):
     answer = query.lookup(filled, "mart_orders")
-    assert answer["table"]["layer"] == "mart"
+    assert answer["table"]["kind"] == "Model"
     assert [(t["kind"], t["name"]) for t in answer["reads"]] == [
         ("Source", "customers"),
         ("Model", "stg_orders"),
@@ -131,6 +129,9 @@ def test_asking_about_a_table_never_returns_column_pairs(filled):
     """§9.1 — the router narrows the field; it does not dump the neighbourhood."""
     answer = query.lookup(filled, "orders")
     assert set(answer) == {"table", "columns", "reads", "read_by", "groups", "overlaps"}
+    # And nothing of the pipeline's own vocabulary: `layer` groups the project
+    # canvas and says nothing about what a table is *to* another table.
+    assert set(answer["table"]) == {"kind", "name", "path", "summary"}
     # `overlaps` is table-granular and counts pairs; it never lists them.
     assert all(
         set(row) <= {"kind", "name", "path", "n_measured_pairs"} for row in answer["overlaps"]
@@ -210,3 +211,53 @@ def test_an_empty_graph_says_to_build_it_rather_than_that_the_table_is_missing(n
     """Two very different misses, and they ask for different next moves."""
     with pytest.raises(ValueError, match="is empty"):
         query.lookup(neo4j_session, "orders")
+
+
+# --- the picture ------------------------------------------------------------
+
+
+def test_the_subgraph_is_tables_until_you_ask_for_columns(filled):
+    """The one query here that deliberately returns a lot.
+
+    Every other one is shaped by "a router that returns fifty things has not
+    routed" — a rule about what an *agent* can act on. A picture is read by a
+    person, who copes with far more at once, so the constraint is different and
+    the function is separate rather than the router being loosened.
+    """
+    tables = query.subgraph(filled)
+    assert {n["kind"] for n in tables["nodes"]} == {"Source", "Model", "Group"}
+
+    columns = query.subgraph(filled, columns=True)
+    assert "Column" in {n["kind"] for n in columns["nodes"]}
+    assert len(columns["nodes"]) > len(tables["nodes"])
+
+
+def test_the_picture_speaks_portias_vocabulary_and_no_librarys(filled):
+    """Swapping what draws it must be one JavaScript file and nothing else."""
+    node = query.subgraph(filled)["nodes"][0]
+    assert set(node) == {"id", "kind", "label", "properties"}
+    edge = query.subgraph(filled)["edges"][0]
+    assert set(edge) == {"from", "to", "kind", "properties"}
+
+
+def test_table_level_overlap_is_derived_rather_than_stored(neo4j_session, project):
+    """§4.1 rejected a stored source-to-source summary edge — two things would
+    state one fact and could disagree — and said to derive it in the query."""
+    from portia.knowledge import measure
+    from portia.knowledge.schema import SOURCE, Ref
+
+    store.write(build_graph(project).graph, neo4j_session)
+    orders, customers = Ref(SOURCE, "data/orders.csv"), Ref(SOURCE, "data/customers.csv")
+    store.write_measured(
+        [
+            measure.overlap_edge(
+                measure.Pair(orders, "customer_id", customers, "customer_id", "same key"),
+                {"n_shared_values": 2, "left_coverage": 1.0, "right_coverage": 1.0},
+            )
+        ],
+        neo4j_session,
+    )
+
+    edges = [e for e in query.subgraph(neo4j_session)["edges"] if e["kind"] == "OVERLAPS"]
+    assert len(edges) == 1
+    assert edges[0]["properties"] == {"n_measured_pairs": 1}

@@ -338,12 +338,6 @@ own open questions where the code now has something to say about them.*
   can say whether the copilot got worse — because the failure mode is subtle (generic judgment
   from missing context), it is exactly what `context.py` says pushing L1 exists to prevent, and
   §9.4 calls D the riskiest and insists it be evaluated on its own.
-- **Two of §5's three write moments are hooked up; saving a spec is not.** `cli.index` refreshes
-  the graph after indexing and `measure_overlaps` refreshes before it writes, both best-effort.
-  `record_step` does not, so a spec written mid-conversation is invisible to `graph_lookup` until
-  something else triggers a refresh. Cheap to add; left out because a refresh on every recorded
-  step is a Neo4j round-trip inside the tightest loop in the product, and nobody has felt the gap
-  yet.
 - **Does anything measure outside indexing?** (§7, still open.) `measure_overlaps` is available in
   any turn and nothing stops the agent reaching for it mid-conversation — but only the indexing
   prompts *ask* for it. Whether a conversation-phase prompt should, and whether a user-invoked
@@ -363,12 +357,21 @@ own open questions where the code now has something to say about them.*
 - **Orphan nodes are pruned only when they have no relationships at all.** A Column that lost its
   table but kept a measurement stays, on purpose (§4.5: mark stale, never delete). Nothing marks it
   yet, so it is currently indistinguishable from a live one.
-- **Drawing it** (§6.9). The store and the picture are separate purchases, and the collision to
-  settle first is that a force-directed layout ranks by connectivity, which `DESIGN.md` forbids.
-  The Neo4j browser is the answer until that has an explicit answer in `DESIGN.md`.
+- **`DESIGN.md` needs one line on where its ranking rule governs.** *Colour and prominence
+  communicate kind, never rank* is stated as a product rule; it plainly governs surfaces portia
+  lays out itself, and plainly cannot govern an embedded third-party explorer with its own force
+  layout. That boundary should be written down rather than inferred from `KNOWLEDGE_GRAPH.md`
+  §6.9.
 - **`profiling.py` computes `min`/`max` per column and `catalog._column_facts` drops them**
   (§6.5). A fact the profiler already paid for, and exactly what the agent needs to judge whether a
   pair is worth measuring in phase C.
+
+- **Indexing is offered from three places** — the add-data screen, the un-indexed-file inspector,
+  and the Indexing tab (2026-08-06). Chosen deliberately, and it is the duplication the 2026-08-02
+  overhaul removed from the add-data screen, reintroduced. The tab is where *"what does portia know
+  about each source"* belongs; the other two are where you happen to be standing when the question
+  comes up. Worth revisiting if they start to disagree — the risk is not the three buttons, it is
+  three ideas of what indexing *means*.
 
 ## Core / infra
 
@@ -431,6 +434,14 @@ odd finding worth carrying forward isn't lost with it.*
 - **`handlers.profile_source` re-reads the file rather than the store** — moot: the store was
   removed 2026-07-31. *Worth keeping the finding that led there: it was written at index time and
   read by almost nothing. A fast copy nobody reads is not a cache.*
+- **`catalog.is_stale` compared the clock, not just the file** — fixed 2026-08-03 with
+  `STALENESS_FACTS = ("size", "mtime")`; the `at` recorded beside them is *when portia looked* and is
+  now excluded. Every source went stale one second after being indexed, at an identical size and
+  mtime. *Two findings worth carrying: nothing user-facing read it — the left pane's staleness is
+  `pipeline.stale_models`, a different check — which is why it survived; and the tests hid it
+  because each finished inside the same wall-clock second as its own index, so they only started
+  failing, one at random per run, once profiling got fast enough to move that boundary. A test whose
+  pass depends on how long the code takes is a test that will lie to you eventually.*
 - **Ingesting Parquet inflates it ~2.3× on disk** — moot with the store, but the measurement stands
   and is why parquet-in-the-repo is the answer if reads get slow: 6.2 GB of Parquet produced a
   **19.2 GB** `store.duckdb`. DuckDB's native format compresses, but not as hard as Parquet+ZSTD.
@@ -504,6 +515,18 @@ odd finding worth carrying forward isn't lost with it.*
   **one** button copies the plan and profiles the ticks. The browser drop zone was removed rather
   than fixed (`DESIGN.md` → Removed): it duplicated both other routes and was the only one that
   could refuse a file for a reason portia could not explain.
+- **The first-run path, driven on a real extract** — 2026-08-03, and every finding was a surface
+  claiming more than it knew. The **project brief** asked about the data and got answers about the
+  data; it asks for the project now (`DESIGN.md` → `project-context`), which also **narrowed** that
+  section's "never an example" rather than dropping it — register is the difficulty of that box, and
+  four sentences of hotel forecasting in a pharmacy project cannot pass for your own. An
+  **uninterpreted source** showed `_auto_summary`'s restatement of its own profile in the prose
+  slot, which reads as a read; it says *not read yet* now. A **thirty-column** source buried the
+  rows, the actions and the preview, so the list folds to eight with the count on the button. The
+  **add-data list** stopped offering to re-index what it had already indexed, and long paths wrap
+  instead of overprinting the note (truncating takes the tail, which is what tells two real extract
+  filenames apart). Its **CTA caption** counted a copy as if it replaced a profile — the parts
+  partition the button's total by where each file came from now.
 - **The chrome was in the wrong places** — the rest of the same overhaul, 2026-08-02, and the theme
   is that a control belongs where the thing it acts on is. Preferences moved out of the toolbar into
   a tabbed `ui/settings.py`; the four run actions moved onto the **middle pane** and became icons

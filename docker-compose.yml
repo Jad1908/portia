@@ -23,5 +23,20 @@ services:
     volumes:
       - neo4j-data:/data
 
+  # A second, disposable one for the test suite. Not fussiness: `conftest`
+  # empties the database it connects to, so pointing the tests at the working
+  # graph deletes the project you were looking at and leaves fixture nodes in it
+  # — which is exactly how `data/orders.csv` turned up in a project that has no
+  # such file. Neo4j Community allows one user database per server, so a second
+  # database is not an option and a second server is.
+  neo4j-test:
+    image: neo4j:5-community
+    ports:
+      - "7475:7474"
+      - "7688:7687"
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-portia-dev}
+    # No volume: nothing in here is worth keeping between runs.
+
 volumes:
   neo4j-data:

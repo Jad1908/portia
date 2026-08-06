@@ -17,6 +17,7 @@ Two rules are enforced here rather than trusted to each caller:
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -80,6 +81,31 @@ def empty_note(value: str) -> ui.label:
 
 def section_header(value: str) -> ui.label:
     return ui.label(value).classes("p-section-header")
+
+
+def path_row(path: Path, *, icon: str = "description") -> ui.element:
+    """A file this surface writes, as a path you can read at a glance.
+
+    The file name is the part that identifies it and the folders are where it
+    sits, so they are set differently — name in `{colors.ink}`, folders quiet,
+    and the folders are what gets truncated when there is no room. A path dumped
+    as one 12px caption is a line nobody's eye finds the end of.
+
+    ``$HOME`` becomes ``~``: it is a third of the string on every machine and
+    tells the reader nothing they don't know.
+    """
+    home = str(Path.home())
+    shown = str(path)
+    shown = f"~{shown[len(home) :]}" if shown.startswith(home) else shown
+    parent, _, name = shown.rpartition("/")
+    row = ui.element("div").classes("path-row")
+    with row:
+        ui.icon(icon).classes("path-row-icon")
+        if parent:
+            ui.label(f"{parent}/").classes("path-row-dir")
+        ui.label(name).classes("path-row-name")
+    hint(row, str(path))
+    return row
 
 
 def pane_title(value: str) -> ui.label:
