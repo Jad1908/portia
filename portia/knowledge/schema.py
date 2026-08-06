@@ -96,6 +96,22 @@ STRUCTURAL = (HAS_COLUMN, IN_GROUP, READS, DERIVES_FROM)
 VIA_OPS = ("join", "normalize", "sql")
 
 
+#: On a Model column: portia could not name a single column its values came
+#: from. `docs/SQL_LINEAGE.md` §5.5 — and it exists because *no outgoing
+#: `DERIVES_FROM`* already means something else. `query.origins` reads a column
+#: with no outgoing edges as the place the data came from, which is true of a
+#: file's column and a lie about `count(*) AS n`. Without this property the two
+#: are the same shape, and the graph would report a computed column as a source.
+#:
+#: **Two states, never a vocabulary.** It is present or it is absent, which is
+#: what keeps it clear of §4.8's fragmentation risk: a set of names for *why* a
+#: derivation is unknown would diverge per session exactly as Entity's would.
+#: The reason lives in `BuildResult.unresolved`, which is a build report rather
+#: than a store.
+DERIVATION = "derivation"
+DERIVATION_UNKNOWN = "unknown"
+
+
 #: What a table looked like when something was measured against it (§4.5). Every
 #: node carries one and every measured edge records the two it was taken
 #: against, so "is this number still backed by the data it came from" is a

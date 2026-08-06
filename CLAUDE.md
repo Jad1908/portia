@@ -63,6 +63,16 @@ stack, and product vision. Read them every session, before proposing changes or 
   rewritten and the conversation phase is not · two new tools, not one · and a four-phase order
   where the read path precedes the agent-writes-measurements path, because at source 23 the agent
   queries the graph while filling it.
+- `docs/SQL_LINEAGE.md` — **the hole that was in the knowledge graph's write path**, specified and
+  **built 2026-08-06**. A `sql` step declares table-level `inputs` only, so the spec cannot name
+  its output columns — and the model therefore lost **every** Column node, not just its lineage,
+  which took the harmonized table out of the measured half and made an `OVERLAPS` against it
+  *silently* unstorable. §3 is the finding that reversed `KNOWLEDGE_GRAPH.md` §7's plan: there is
+  no coarse-but-honest fallback, because coarse needs the column names too and only a parser can
+  supply them — so `sqlglot` reads them out of the SQL, using the input columns the build already
+  holds. **§9 is the part to read**, because building it reversed two of its own decisions: a
+  silence the spec accepted turned out to read as something false. Required reading before
+  touching `knowledge/build.py`'s spec walk or `knowledge/sqllineage.py`.
 - `docs/GRAPH_SCHEMA.md` — **the knowledge graph as it actually is**: every label, every property,
   where each value comes from, and a page of Cypher recipes. The reference to `KNOWLEDGE_GRAPH.md`'s
   design — read that one for *why*, this one for *what you will find in the browser*.

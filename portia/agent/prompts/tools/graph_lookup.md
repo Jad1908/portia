@@ -14,6 +14,12 @@ it was derived from, which op did it and at which step, what is built from it
 downstream, and the source files its values ultimately come from. Nothing else in
 portia can answer that.
 
+A column marked `derivation: unknown` is one whose trail stops there — a count, a
+literal, something with no input column beneath it. That is a real answer, not a
+gap in the graph: read it as *this value was computed here*, and follow the
+`step` pointer into the spec if you need to know how. Do not guess at an origin
+for it, and do not report it as coming from a file.
+
 Reach for it when:
 
 - you need to combine two things and don't know what connects to what;

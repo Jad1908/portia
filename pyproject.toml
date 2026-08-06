@@ -32,6 +32,11 @@ ui = [
 # `portia/knowledge/store.py` imports the driver.
 graph = [
     "neo4j>=5.0",
+    # Reads a `sql` step's output columns and where they came from, which the
+    # spec cannot say (docs/SQL_LINEAGE.md). Optional for the same reason the
+    # driver is: without it a hatch step is unresolved exactly as it was before,
+    # and the build says which columns that cost. Pure python, no dependencies.
+    "sqlglot>=25.0",
 ]
 
 [build-system]

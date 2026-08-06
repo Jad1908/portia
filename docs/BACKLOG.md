@@ -343,10 +343,11 @@ own open questions where the code now has something to say about them.*
   prompts *ask* for it. Whether a conversation-phase prompt should, and whether a user-invoked
   sweep should exist as an escape hatch, is unsettled. §6.5's three reasons against sweeping are
   unchanged.
-- **Column lineage through the `sql` hatch** (§4.2, §7). A model downstream of a `sql` step gets no
-  Column nodes and lands in `BuildResult.unresolved`. That dict is the evidence to decide on:
-  if real projects run mostly through the hatch, `sqlglot` earns its place; if they don't, the
-  coarse answer is the right one. **Don't buy the parser before reading the number.**
+- **What `BuildResult.unresolved` reports now that the hatch is readable.** It used to be the
+  measure of what the `sql` escape hatch cost lineage; it is now one line per *column* nobody
+  could name an origin for — aggregates, literals, and queries no parser resolves. Much smaller,
+  and a more interesting number. Nothing consumes it beyond the CLI. Worth watching before
+  deciding whether any of the residue deserves its own handling.
 - **A build never notices a spec it did not run.** `is_stale` compares a `.sql` to its spec and
   `catalog.is_stale` compares a file to its record; the graph has both fingerprints on its nodes
   and nothing yet asks the question. Cheap, and it is what §4.5's "walk forward from a changed file
@@ -470,6 +471,14 @@ odd finding worth carrying forward isn't lost with it.*
 
 **Knowledge graph**
 
+- **Column lineage through the `sql` hatch** — 2026-08-06, `knowledge/sqllineage.py` +
+  `build.py`'s `sql` branch, `docs/SQL_LINEAGE.md`. `sqlglot` (the `graph` extra) reads the output
+  columns and their origins out of the SQL, resolving `*`, CTEs and joins against the input
+  columns the build already holds. *Three findings worth carrying: the loss was never the lineage
+  — the model lost **every** Column node, which took the harmonized table out of the measured
+  half · there was no cheap coarse fallback to start with, because coarse needs the column names
+  too, so it became the no-parser path instead · and a measurement on a column with no node was
+  paid for, reported `stored: True`, and silently dropped by the `MATCH`.*
 - **Phase D (half) — the L1 trim** — 2026-08-04, `agent/context.py`. Each source's line dropped its
   column count and candidate keys, which is what `describe_source`/`profile_source` are for. The
   index itself stays; replacing it with traversal is above, with what would have to be true first.

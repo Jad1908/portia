@@ -22,7 +22,7 @@ import yaml
 
 from portia import catalog
 from portia.agent import handlers
-from portia.knowledge import build_graph, measure, query, store
+from portia.knowledge import build_graph, measure, query, sqllineage, store
 from portia.knowledge.schema import HAS_COLUMN, OVERLAPS, SOURCE, Graph, Ref, column_key
 
 ORDERS = Ref(SOURCE, "data/orders.csv")
@@ -325,3 +325,62 @@ def test_a_step_is_still_recorded_when_the_graph_cannot_be_reached(project, monk
     assert written["step_id"] == "cleaned"
     assert written["graph"].startswith("not updated")
     assert (project / "specs" / "stg_orders.yaml").exists()
+
+
+def test_a_measurement_that_could_not_be_attached_is_not_reported_as_stored(
+    neo4j_session, project, monkeypatch
+):
+    """`docs/SQL_LINEAGE.md` §1.5 — the one write that could lose what it cost.
+
+    The write matches both ends, so a pair on a column the graph does not hold
+    is dropped by Neo4j without an error. This used to come back `stored: True`,
+    which is worse than the zero §4.4 is about: there, nobody had spent
+    anything. A model whose columns could not be read is how you get here, and
+    an absent parser is the reproducible way to make one.
+    """
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(sqllineage, "_sqlglot", _no_parser)
+    (project / "specs").mkdir(exist_ok=True)
+    (project / "specs" / "agg.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "sources": {"orders": "data/orders.csv"},
+                "steps": [
+                    {
+                        "id": "picked",
+                        "op": "sql",
+                        "inputs": ["orders"],
+                        "sql": "SELECT customer_id, country_name FROM orders",
+                    }
+                ],
+            },
+            sort_keys=False,
+        )
+    )
+    answer = handlers.measure_overlaps(
+        [
+            {
+                "left": "agg",
+                "left_column": "country_name",
+                "right": "customers",
+                "right_column": "country_code",
+                "reason": "both name a country, one spelled out and one as a code",
+            }
+        ]
+    )
+
+    # The numbers were paid for and they are still handed back.
+    assert answer["measured"][0]["n_shared_values"] == 0
+    assert answer["stored"] is False
+    assert "0 of 1" in answer["not_stored_because"]
+
+
+def _no_parser():
+    raise sqllineage.LineageUnreadable("sqlglot is not installed")
+
+
+def test_write_measured_counts_what_the_database_kept(neo4j_session):
+    """Not what it was handed — the distinction the test above exists for."""
+    edge = measure.overlap_edge(_pair(), MEASUREMENT)
+    assert store.write_measured([edge], neo4j_session) == 0  # neither end exists yet

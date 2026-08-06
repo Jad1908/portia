@@ -36,6 +36,7 @@ from typing import Any
 
 from portia.knowledge.schema import (
     COLUMN,
+    DERIVATION,
     DERIVES_FROM,
     GROUP,
     HAS_COLUMN,
@@ -176,7 +177,7 @@ def _column_answer(session: Any, found: dict, column: str) -> dict:
         session,
         f"MATCH {node}-[:{HAS_COLUMN}]->(c:{COLUMN} {{name: $column}}) "
         "RETURN c.role AS role, c.inferred AS inferred, c.null_rate AS null_rate, "
-        "c.n_distinct AS n_distinct, c.flags AS flags",
+        f"c.n_distinct AS n_distinct, c.flags AS flags, c.{DERIVATION} AS {DERIVATION}",
         key=key,
         column=column,
     )
@@ -209,15 +210,31 @@ def _column_answer(session: Any, found: dict, column: str) -> dict:
         ),
         # Where it bottoms out: the columns nothing else derives from, which on a
         # fully-resolved chain are the files themselves.
+        #
+        # **`derivation` is what stops that sentence being a lie** (§5.5 of
+        # `docs/SQL_LINEAGE.md`). A trail can also end at a model column portia
+        # could name nothing underneath — `count(*)`, a literal — and that has
+        # the same shape as a file's column: no outgoing edge. It is returned
+        # rather than filtered out, because an origins list that silently loses
+        # its last rung reads as "this came from nowhere"; carrying the marker
+        # says *the trail ends here and portia could not read past it*, which is
+        # the honest answer and the same "mark, never delete" rule §4.5 applies
+        # to a stale measurement.
         "origins": _cap(
-            _run(
-                session,
-                f"{reached}-[:{DERIVES_FROM}*1..{MAX_HOPS}]->(o:{COLUMN})<-[:{HAS_COLUMN}]-(p) "
-                f"WHERE NOT (o)-[:{DERIVES_FROM}]->() "
-                "RETURN DISTINCT labels(p)[0] AS kind, p.name AS `table`, p.path AS path, "
-                "o.name AS column ORDER BY `table`, column",
-                **args,
-            )
+            [
+                # Absent rather than null on the ordinary row: this is read by a
+                # model, and a key carrying `None` on every origin in the project
+                # is tokens spent saying nothing.
+                {k: v for k, v in row.items() if k != DERIVATION or v}
+                for row in _run(
+                    session,
+                    f"{reached}-[:{DERIVES_FROM}*1..{MAX_HOPS}]->(o:{COLUMN})<-[:{HAS_COLUMN}]-(p) "
+                    f"WHERE NOT (o)-[:{DERIVES_FROM}]->() "
+                    "RETURN DISTINCT labels(p)[0] AS kind, p.name AS `table`, p.path AS path, "
+                    f"o.name AS column, o.{DERIVATION} AS {DERIVATION} ORDER BY `table`, column",
+                    **args,
+                )
+            ]
         ),
         "overlaps": _cap(
             _run(
@@ -311,12 +328,20 @@ def _render_table(answer: dict) -> str:
 def _render_column(answer: dict) -> str:
     column = answer["column"]
     lines = [f"{column['table']}.{column['name']}"]
+    if column.get(DERIVATION):
+        # Said on the column itself as well as on an origin row, because asking
+        # about this column directly is the commoner way to arrive at it — and
+        # an empty lineage with no explanation reads as *nobody built this*.
+        lines.append("  (nothing readable underneath it)")
     for heading, key in (("derives from", "derives_from"), ("feeds", "feeds")):
         for row in answer[key]:
             pointer = f"  [{row.get('via')} at {row.get('step')}]" if row.get("via") else ""
             lines.append(f"  {heading}: {row['table']}.{row['column']}{pointer}")
     for row in answer["origins"]:
-        lines.append(f"  origin: {row['table']}.{row['column']}")
+        # Said as a trail that stops rather than as an origin, because that is
+        # what it is — see the query.
+        unread = "  (nothing readable underneath it)" if row.get(DERIVATION) else ""
+        lines.append(f"  origin: {row['table']}.{row['column']}{unread}")
     for row in answer["overlaps"]:
         lines.append(f"  overlaps {row['table']}.{row['column']}: {row['measured']}")
     return "\n".join(lines)

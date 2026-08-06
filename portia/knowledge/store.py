@@ -223,7 +223,11 @@ def measured_writes(edges: list[Edge]) -> list[tuple[str, dict]]:
                 "UNWIND $rows AS row "
                 f"MATCH (a:{start_label} {{{start_key}: row.start}}) "
                 f"MATCH (b:{end_label} {{{end_key}: row.end}}) "
-                f"MERGE (a)-[r:{kind}]->(b) SET r = row.properties",
+                f"MERGE (a)-[r:{kind}]->(b) SET r = row.properties "
+                # A row whose `MATCH` finds nothing never reaches here, which is
+                # exactly why the caller counts this instead of trusting how
+                # many edges it handed over.
+                "RETURN count(r) AS written",
                 {"rows": rows},
             )
         )
@@ -231,10 +235,20 @@ def measured_writes(edges: list[Edge]) -> list[tuple[str, dict]]:
 
 
 def write_measured(edges: list[Edge], session: Any) -> int:
-    """Store measured edges. Returns how many were written."""
+    """Store measured edges. Returns how many were **actually** written.
+
+    Not how many it was handed, which is what it used to return and what made
+    this the one write in portia that could lose something already paid for.
+    The statement `MATCH`es both ends, so a measurement whose column is not in
+    the graph — every column of a model portia could not read (`docs/
+    SQL_LINEAGE.md` §1.5) — is skipped by Neo4j without an error. Counting the
+    rows the write claims is how the caller finds out.
+    """
+    written = 0
     for statement, params in measured_writes(edges):
-        session.run(statement, **params)
-    return len(edges)
+        result = session.run(statement, **params)
+        written += sum(record["written"] for record in result)
+    return written
 
 
 def prune_writes(build: str) -> list[tuple[str, dict]]:
