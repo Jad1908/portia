@@ -1018,25 +1018,45 @@ async def _leave(in_dialog: bool) -> None:
     if in_dialog:
         _close_dialog()
         return
+    # **Interpret before leaving, not after.** The workspace used to open the
+    # moment profiling finished, with the copilot's read still running behind
+    # it — so the first thing you saw was a project whose sources say nothing,
+    # filling in underneath you while you tried to read them. The screen holds
+    # until the turn ends, and `turn._stop` is the one thing that opens it
+    # early: a question needs the transcript's form to answer it.
+    await _interpret_pending()
     APP.left_add_data = True
     app_module.shell.refresh()
-    await _interpret_pending()
 
 
 async def _interpret_pending() -> None:
-    """Spend the turn that reads what each source *is*, if one was asked for."""
+    """Spend the turn that reads what each source *is*, if one was asked for.
+
+    **This screen waits for it.** The status line is deliberately coarse — one
+    sentence, not a running commentary — because the running commentary is the
+    transcript's, and you are put in front of that the moment the copilot has
+    something to ask (`turn._stop`). What this has to say is only *something is
+    happening and it is not finished*, which is what a screen that has taken
+    your way out away owes you.
+    """
     from portia.ui import turn
 
     names, APP.pending_interpret = APP.pending_interpret, []
     if not (APP.interpret and names):
         return
-    await turn.start(
-        prompts.task("index_batch", names=", ".join(repr(n) for n in names)),
-        model=APP.model or _default_model(),
-        effort=APP.effort,
-        kind=state.INDEXING,
-        label=", ".join(names),
-    )
+    APP.indexing_status = INTERPRETING.format(n=c.count(len(names), "source"))
+    _progress.refresh()
+    try:
+        await turn.start(
+            prompts.task("index_batch", names=", ".join(repr(n) for n in names)),
+            model=APP.model or _default_model(),
+            effort=APP.effort,
+            kind=state.INDEXING,
+            label=", ".join(names),
+        )
+    finally:
+        APP.indexing_status = ""
+        _progress.refresh()
 
 
 # --- the same surface, as a dialog ------------------------------------------
@@ -1158,6 +1178,7 @@ IN_REPO_WHY = "Which folder holds this project's data? Open a folder to look ins
 NO_SUBFOLDERS = "No folders below this one hold data portia can read."
 NO_DATA_HERE = "nothing readable"
 MORE_FILES = "and {n} more"
+INTERPRETING = "The copilot is reading {n} — the workspace opens when it is done."
 DESTINATION_PLACEHOLDER = "the project root"
 DESTINATION_ROOT = "leave it empty to copy into the project root itself"
 PICK_WHICH = "Profile these files"

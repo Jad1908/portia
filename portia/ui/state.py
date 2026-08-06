@@ -396,6 +396,24 @@ class App:
         # empty box is now something you have to clear on purpose.
         return (self.import_destination or "").strip()
 
+    def reveal_for_decision(self) -> bool:
+        """A pending question or write opens the workspace. Did it need opening?
+
+        The **one exit** from the first-run block. The add-data screen holds you
+        while the opening interpretation runs, so you cannot walk into a
+        workspace describing sources nobody has read yet — but the copilot may
+        stop and ask, and the form it asks with lives in the transcript. Blocking
+        without this is a screen waiting forever for an answer it gives you no
+        way to give.
+
+        A rule rather than two lines inside `turn._stop` because it is worth
+        stating, and because stating it makes it testable without a browser.
+        """
+        if self.left_add_data:
+            return False
+        self.left_add_data = True
+        return True
+
     @property
     def spec_has_steps(self) -> bool:
         """Whether there is anything to run. Decides which action carries the
