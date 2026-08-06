@@ -145,25 +145,22 @@ def _stop(kind: str, payload: dict) -> Decision:
     The loop is now blocked on a human. A question sitting behind a tab nobody
     is looking at is indistinguishable from a hung turn, so the pane follows the
     decision rather than waiting to be found — and if the human is still on the
-    add-data screen, so does the whole window.
+    add-data screen, they are **invited** to come and see it.
 
-    **That last part is what makes the first-run block safe.** The add-data
-    screen holds you while the opening interpretation runs, so you cannot walk
-    into a workspace describing sources nobody has read yet. But the copilot may
-    stop and ask, and the form it asks with lives in the transcript — so a
-    question is the one thing allowed to open the workspace early. Blocking
-    without this exit is a screen that waits forever for an answer it gives you
-    no way to give.
+    That last part is what makes the opening read safe. It starts as soon as
+    profiling finishes, with the add-data screen still up, so the copilot can
+    stop and ask while the transcript is nowhere on screen. The popup is the
+    bridge: it says what is waiting and offers the way through, and the human
+    decides when to take it (`state.prompt_for_decision`).
     """
-    from portia.ui import app as app_module
-    from portia.ui import transcript
+    from portia.ui import screens, transcript
 
     decision = Decision(kind, payload, asyncio.get_running_loop().create_future())
     stream = _running_stream()
     stream.rows.append(decision)
     APP.tab = next(tab for tab, s in APP.streams.items() if s is stream)
-    if APP.reveal_for_decision():
-        app_module.shell.refresh()
+    if APP.prompt_for_decision(kind):
+        screens.offer_workspace()
     transcript.pane.refresh()
     return decision
 

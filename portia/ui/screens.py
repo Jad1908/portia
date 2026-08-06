@@ -54,6 +54,17 @@ not: profiling is deterministic and always happens, and interpretation is a mode
 turn that runs through the ordinary transcript with its own write confirmations.
 Never one merged spinner.
 
+**The read starts on its own, and the popup is how it reaches you** (2026-08-07).
+The turn used to wait for *Open the workspace* to be pressed, which spent the
+wait twice — profiling finished, the screen went quiet, and the minute of model
+time only began once you noticed. Now it starts the moment profiling ends, with
+this screen still up and saying so. That leaves one gap, which the popup closes:
+the copilot can stop to ask, or to have a write allowed, while the form it needs
+is on a screen you are not looking at. So a stop **invites** you through
+(`state.prompt_for_decision`) rather than swapping the window under you, which is
+what it used to do — moving screens is the human's move to make, and it was
+taking the screen away mid-tick.
+
 **The browser drop zone is gone** (2026-08-02). It was a third route that did the
 same job as the other two while being the only one that streamed the file through
 the browser — which meant a silent refusal on files the browser dislikes, a red
@@ -820,12 +831,25 @@ def _interpret_toggle() -> None:
             .bind_value(APP, "interpret")
             # The model controls appear with the cost they belong to, so turning
             # this off has to take them away rather than leave a dead setting.
-            .on_value_change(_refresh)
+            .on_value_change(_interpret_switched)
         )
         if APP.interpret:
             with ui.element("div").classes("cost-controls"):
                 c.model_effort(APP, _set_indexing_effort)
         ui.label(INTERPRET_COST).classes("add-section-hint")
+
+
+async def _interpret_switched() -> None:
+    """Redraw for the controls, and read anything profiled while it was off.
+
+    One rule, applied at the only two moments it can fire: **whatever is
+    profiled and unread gets read while this is on.** Indexing with the switch
+    off and turning it on afterwards is the same request as indexing with it on,
+    and the alternative is a screen where the switch does nothing until you
+    index something else.
+    """
+    _refresh()
+    await _interpret_pending()
 
 
 def _set_indexing_effort(effort: str) -> None:
@@ -908,9 +932,10 @@ def _action_note(outstanding: int) -> str:
     *from* — outside the repo, or already in it — which is a real partition and
     sums to the total the button names.
 
-    It also says whether a model turn is coming, because the turn is deferred to
-    the workspace and a cost you pay after leaving a screen is a cost that screen
-    still has to name.
+    It also says whether a model turn is **running**, because that is the state
+    this screen is most often in now: profiling ends, the read starts by itself,
+    and the way out stops being a promise about a cost you are going to pay and
+    becomes a way to go and watch one you already are.
     """
     if outstanding:
         planned = len(APP.import_plan)
@@ -923,13 +948,26 @@ def _action_note(outstanding: int) -> str:
         if here:
             parts.append(ALREADY_HERE.format(n=here))
         return PROFILE_ALL.format(n=c.count(outstanding, "file"), parts=" · ".join(parts))
-    if APP.sources and APP.interpret and APP.pending_interpret:
-        return READS_NEXT.format(n=c.count(len(APP.pending_interpret), "source"))
+    if _read_running():
+        # A dismissed popup must not leave the screen saying the copilot is
+        # working when it has stopped and is waiting on the human who dismissed
+        # it. The button's caption is the one line that is always on screen.
+        return WAITING_ON_YOU if APP.stream_for(state.INDEXING).pending else READING_NOW
     if APP.indexed is not None:
         return PROFILED.format(n=c.count(APP.indexed, "source"))
     if APP.sources:
         return ADD_MORE_LATER
     return SKIP_HINT
+
+
+def _read_running() -> bool:
+    """Whether the copilot is reading sources right now.
+
+    Off the indexing stream rather than off `indexing_status`, which is also set
+    while profiling: the question here is whether a *model turn* is in flight,
+    and `APP.busy` would answer yes to a goal turn in the other tab.
+    """
+    return APP.stream_for(state.INDEXING).busy
 
 
 async def _index_now(*, in_dialog: bool = False) -> None:
@@ -959,10 +997,13 @@ async def _index_now(*, in_dialog: bool = False) -> None:
 async def _index_and_interpret(paths: list[Path], *, in_dialog: bool = False) -> None:
     """Profile first — free, deterministic, always. Then, optionally, a turn.
 
-    From the **dialog** the workspace is already open, so the interpretation turn
-    can run immediately and be watched. From the **screen** it waits for the way
-    out, because this surface has no transcript and paying for a turn you cannot
-    see is how the first version of this spent money on a blank page.
+    **Both routes start the read the moment profiling ends** (2026-08-07). It
+    used to wait for the way out to be pressed when it ran from the screen, on
+    the reading that a turn nobody can watch is a turn nobody should pay for —
+    which was true of the version that ran it on a blank page, and stopped being
+    true once the screen grew a status line and the popup below. What it cost
+    was the whole wait, twice: profiling finished, the screen went quiet, and the
+    minute of model time only began when you noticed and clicked.
     """
     from portia.ui import app as app_module
     from portia.ui import artifacts
@@ -1000,63 +1041,78 @@ async def _index_and_interpret(paths: list[Path], *, in_dialog: bool = False) ->
         _close_dialog()
         app_module.shell.refresh()
         artifacts.pane.refresh()
-        await _interpret_pending()
-        return
-    _refresh()
+    else:
+        _refresh()
+    await _interpret_pending()
 
 
-async def _leave(in_dialog: bool) -> None:
+def _leave(in_dialog: bool) -> None:
     """Out of this surface. From the screen that means into the workspace.
 
-    The interpretation turn fires *here*, after the workspace is up, rather than
-    on this screen: the add-data surface has no transcript, and the first version
-    of this paid for a turn you then watched on a blank page. It lands in the
-    Indexing tab, where it is legible.
+    **It no longer waits for the read.** The turn started when profiling ended
+    and it lands in the Indexing tab either way, so leaving mid-read walks into
+    the transcript that is running rather than into a project describing sources
+    nobody has looked at — which was what the wait existed to prevent. The
+    screen still says a read is in flight (`_action_note`); being told is the
+    part that was missing, not being held.
     """
     from portia.ui import app as app_module
 
     if in_dialog:
         _close_dialog()
         return
-    # **Interpret before leaving, not after.** The workspace used to open the
-    # moment profiling finished, with the copilot's read still running behind
-    # it — so the first thing you saw was a project whose sources say nothing,
-    # filling in underneath you while you tried to read them. The screen holds
-    # until the turn ends, and `turn._stop` is the one thing that opens it
-    # early: a question needs the transcript's form to answer it.
-    await _interpret_pending()
-    APP.left_add_data = True
+    # The invitation goes with the screen it was an invitation *away* from —
+    # leaving under your own steam has to take it down, or it floats over the
+    # workspace pointing at a tab you are already looking at.
+    dismiss_invitation()
+    APP.enter_workspace()
     app_module.shell.refresh()
 
 
 async def _interpret_pending() -> None:
     """Spend the turn that reads what each source *is*, if one was asked for.
 
-    **This screen waits for it.** The status line is deliberately coarse — one
-    sentence, not a running commentary — because the running commentary is the
-    transcript's, and you are put in front of that the moment the copilot has
-    something to ask (`turn._stop`). What this has to say is only *something is
-    happening and it is not finished*, which is what a screen that has taken
-    your way out away owes you.
+    **A loop, not one turn**, because indexing a second batch while the first is
+    being read is an ordinary thing to do on this screen: the names queue up in
+    `pending_interpret` and are picked up when the running turn ends. The
+    `busy` guard is checked immediately before `turn.start`, with nothing
+    awaited in between — `turn.start` refuses a second live turn silently, and
+    silently is exactly how a batch would go unread.
+
+    The status line is deliberately coarse — one sentence, not a running
+    commentary — because the running commentary is the transcript's, and the
+    popup is what offers to put you in front of it.
     """
     from portia.ui import turn
 
-    names, APP.pending_interpret = APP.pending_interpret, []
-    if not (APP.interpret and names):
-        return
-    APP.indexing_status = INTERPRETING.format(n=c.count(len(names), "source"))
+    while APP.interpret and APP.pending_interpret and not APP.busy:
+        names, APP.pending_interpret = APP.pending_interpret, []
+        APP.indexing_status = INTERPRETING.format(n=c.count(len(names), "source"))
+        _redraw_progress()
+        try:
+            await turn.start(
+                prompts.task("index_batch", names=", ".join(repr(n) for n in names)),
+                model=APP.model or _default_model(),
+                effort=APP.effort,
+                kind=state.INDEXING,
+                label=", ".join(names),
+            )
+        finally:
+            APP.indexing_status = ""
+            # A turn that ended mid-question leaves an invitation to go and
+            # answer something nobody can answer any more (`turn._resolve_orphans`).
+            dismiss_invitation()
+            _redraw_progress()
+
+
+def _redraw_progress() -> None:
+    """The two parts of this screen a running read changes, and only those.
+
+    Not `_refresh()`: rebuilding the whole panel between turns throws away the
+    folder you had opened and the ticks you were half-way through setting.
+    """
     _progress.refresh()
-    try:
-        await turn.start(
-            prompts.task("index_batch", names=", ".join(repr(n) for n in names)),
-            model=APP.model or _default_model(),
-            effort=APP.effort,
-            kind=state.INDEXING,
-            label=", ".join(names),
-        )
-    finally:
-        APP.indexing_status = ""
-        _progress.refresh()
+    _actions.refresh()
 
 
 # --- the same surface, as a dialog ------------------------------------------
@@ -1124,6 +1180,88 @@ def _close_dialog() -> None:
         _ADD_DIALOG.close()
 
 
+# --- the invitation: the copilot has stopped, and you are not there ---------
+
+#: The invitation for this page. Built once at page level, for the reason
+#: `build_add_dialog` documents: a dialog created inside a refreshable is deleted
+#: by that refreshable's first refresh, and this one is opened from a callback
+#: several refreshes later.
+_DECISION_DIALOG: ui.dialog | None = None
+
+
+def build_decision_dialog() -> None:
+    """Create the come-through popup. **Called once per page, never from a pane.**"""
+    global _DECISION_DIALOG
+    with ui.dialog().props("transition-duration=0") as dialog:
+        with ui.element("div").classes("p-panel p-panel--prose"):
+            _invitation()
+    _DECISION_DIALOG = dialog
+
+
+@ui.refreshable
+def _invitation() -> None:
+    """What is waiting, where it is, and the one button that goes there.
+
+    **It names the kind of stop, not the question.** The question itself is a
+    form with options and a free-text box, and a popup that reproduced it would
+    be a second place to answer — which is a second answer waiting to disagree
+    with the first, and the transcript is where every other decision in this app
+    is taken. So this says what has happened and hands you over.
+
+    Not-now is a real answer and says what it costs: the copilot is blocked
+    either way, and a popup that implied otherwise would be describing a turn
+    that has quietly stopped as one that is still working.
+    """
+    with ui.element("div").classes("p-panel-head"):
+        ui.label(DECISION_TITLE).classes("t-heading-md")
+        ui.label(_decision_line()).classes("p-panel-sub")
+    with ui.element("div").classes("p-panel-body"):
+        c.text(DECISION_WHERE, color="c-mute")
+    with ui.element("div").classes("p-panel-actions"):
+        with ui.element("div").classes("row-gap-sm"):
+            c.button(DECISION_GO, _go_to_decision, kind="primary", icon="arrow_forward")
+            c.button(DECISION_STAY, dismiss_invitation, kind="secondary")
+        c.caption(DECISION_WAITS)
+
+
+def _decision_line() -> str:
+    """A question and a pending write are two different stops. Say which."""
+    from portia.agent import events
+
+    return DECISION_APPROVAL if APP.decision_waiting == events.APPROVAL else DECISION_QUESTION
+
+
+def offer_workspace() -> None:
+    """Invite them through to the decision. Called by `turn._stop`, once.
+
+    Silent when the popup could not be built — an invitation that fails to
+    appear must not take the turn down with it, and the way out of this screen
+    is on screen regardless.
+    """
+    if _DECISION_DIALOG is None or _DECISION_DIALOG.is_deleted:
+        return
+    _invitation.refresh()
+    _DECISION_DIALOG.open()
+
+
+def dismiss_invitation() -> None:
+    """Take the popup away, leaving the decision exactly where it was."""
+    APP.decision_waiting = ""
+    if _DECISION_DIALOG is not None and not _DECISION_DIALOG.is_deleted:
+        _DECISION_DIALOG.close()
+
+
+def _go_to_decision() -> None:
+    """Accept: the workspace, on the tab the turn is already showing.
+
+    **The screen's own way out**, not a second one — going through a popup and
+    going through the button underneath it land you in the same place, and
+    `turn._stop` already set `APP.tab` when it parked the decision. Choosing a
+    tab here would be a second opinion about where the copilot stopped.
+    """
+    _leave(in_dialog=False)
+
+
 # --- shared helpers ---------------------------------------------------------
 
 
@@ -1178,7 +1316,7 @@ IN_REPO_WHY = "Which folder holds this project's data? Open a folder to look ins
 NO_SUBFOLDERS = "No folders below this one hold data portia can read."
 NO_DATA_HERE = "nothing readable"
 MORE_FILES = "and {n} more"
-INTERPRETING = "The copilot is reading {n} — the workspace opens when it is done."
+INTERPRETING = "The copilot is reading {n} — open the workspace to watch it, or wait here."
 DESTINATION_PLACEHOLDER = "the project root"
 DESTINATION_ROOT = "leave it empty to copy into the project root itself"
 PICK_WHICH = "Profile these files"
@@ -1205,8 +1343,20 @@ COPY_PART = "{n} copied in to {where}/"
 ALREADY_HERE = "{n} already in the repo"
 PROFILE_ALL = "Profiles {n} — {parts}"
 PROFILED = "Profiled {n}. Everything here is indexed."
-READS_NEXT = "the copilot reads {n} once the workspace is open"
+READING_NOW = "the copilot is reading them — it carries on in the Indexing tab"
+WAITING_ON_YOU = "the copilot has stopped for you — the form is in the Indexing tab"
 ADD_MORE_LATER = "you can add more later from the left pane"
 SKIP_HINT = "you can add data later from the left pane"
 NO_DIALOG = "The add-data panel didn't load — reload the page."
 STALE_PANEL = "Add data may be showing stale values ({why}) — reload the page to be sure."
+
+#: The come-through popup. It names the stop and where the form is, and nothing
+#: about the question itself — that is the transcript's, and one decision cannot
+#: have two places to be taken.
+DECISION_TITLE = "The copilot needs you"
+DECISION_QUESTION = "It has stopped to ask a question about the sources it is reading."
+DECISION_APPROVAL = "It wants to write what it has read, and is waiting to be allowed."
+DECISION_WHERE = "The form is in the workspace, on the Indexing tab."
+DECISION_GO = "Open the workspace"
+DECISION_STAY = "Not now"
+DECISION_WAITS = "it waits either way — nothing carries on until you answer"

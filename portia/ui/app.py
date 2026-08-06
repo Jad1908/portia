@@ -32,6 +32,7 @@ def page() -> None:
     # At page level, deliberately: a dialog built inside a refreshable is deleted
     # by the first refresh (see `screens.build_add_dialog`).
     screens.build_add_dialog()
+    screens.build_decision_dialog()
     settings.build_dialog()
     # `DESIGN.md` → Width behaviour, which cannot be done in CSS once the panes
     # are inside splitters: a splitter sets an inline pixel width on its panel, so
@@ -58,7 +59,7 @@ def shell() -> None:
         screens.project_open()
     elif not engine.has_context(APP):
         screens.project_context()
-    elif not APP.left_add_data and not APP.skipped_sources:
+    elif APP.on_add_data:
         screens.add_data()
     else:
         _window()
