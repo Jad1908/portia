@@ -3,17 +3,22 @@
 *Companion to `PLAN.md`. What we test against, what the current score is, and what is known-broken.
 Update it whenever a fixture is run.*
 
-> **Status as of 2026-08-02: eight runs, all failing, and the copilot has not been worked on since
-> Run 8 (2026-07-29).** Everything built since — the pipeline, the compiled models, the app's
-> rendering of them — has been engine and interface work, tested end to end rather than scored for
-> output quality. So the diagnosis below is the current one, and it has not moved: **the engine is
-> no longer the constraint; the copilot's judgment is.** The per-run narratives were compacted on
-> 2026-08-02 to the findings that changed the code.
+> **Status as of 2026-08-04: eight runs exist, and none of them is evidence about the copilot's
+> judgment.** They were run to shake out the pipeline end to end — does a turn complete, does a spec
+> get written, does the gate fire when it should, does the run log capture any of it. **No prompt
+> work was done before them or between them.** Every instruction the model read was a first draft,
+> and several were written against a pandas engine that no longer exists. A failing run therefore
+> says the loop ran and produced a wrong table. It does not say the model cannot do the task, and it
+> does not license a diagnosis of *why* — the runs were never designed to separate a prompt problem
+> from a judgment problem, so any claim about which one it was is speculation.
 >
-> **The one run that would move this forward:** `claude-opus-5`, reaching `chat ask` and getting as
-> far as a `record_step`. It answers three open questions at once — does it use the SQL hatch, does
-> it ask before acknowledging, and does the sequence read differently now that a correct move
-> exists.
+> They are kept for one reason: a few of them found **real defects in portia's own code**, and those
+> are listed below. Read them for that. The per-run narratives were **compacted hard on 2026-08-04**
+> because they had accumulated causal reasoning that read like findings and was never tested as one.
+>
+> **What would be evidence:** a run against prompts someone has actually worked on, scored against an
+> answer key, with model and effort recorded. That run has not happened, and until it does, nothing
+> here should be used to argue what the copilot can or cannot do.
 
 ---
 
@@ -75,10 +80,11 @@ The truth for the hotel table: **14 rows, revenue 136,240, rooms_sold 147.**
 
 ---
 
-## The eight runs
+## The eight pipeline shakedown runs
 
-Compacted 2026-08-02. Each row is one run; the column that matters is **how it got past the gate**,
-because that is what each fix closed and where the next failure appeared.
+Compacted 2026-08-04. **These are not scores.** Each row records what the loop did on a first-draft
+prompt, so that the defects they exposed have a reference. The "how it escaped" column is a
+description of the mechanism, not a diagnosis of the model.
 
 | Run | Model | How it escaped | Table |
 |---|---|---|---|
@@ -87,70 +93,61 @@ because that is what each fix closed and where the next failure appeared.
 | 3 | haiku-4-5 | Grain widened to `[booking_id, event_name]` — a **tautology** on the column the fan-out varies over | ❌ +480 (0.35%) |
 | 4 | haiku-4-5 | Same tautology; the gate never fired at all | ❌ +5,240 (3.85%) |
 | 5 | haiku-4-5 | Honest grain `[booking_id]`, gate fired — then wrote `acknowledge` **alone, with zero `AskUserQuestion` calls** | ❌ +5,240 (3.85%) |
-| 6 | **opus-5** low | Never reached the gate (Ctrl-C during `index`) — but the indexing phase alone surfaced more of the answer key than Runs 1–5 combined | — incomplete |
+| 6 | **opus-5** low | Never reached the gate (Ctrl-C during `index`) | — incomplete |
 | 7 | haiku-4-5 | Reverted to the tautology; **zero `op: sql` calls** with the hatch available | ❌ +5,240 (3.85%) |
 | 8 | haiku-4-5 | First run on real data (23 PHQ sources, 4.8 GB). Planned a two-path join and **measured nothing** — zero `profile_source`, zero `join_findings` — then asked permission to measure | — read-only goal |
 
-### What each escape taught, and what closed it
+### What these runs actually found — defects in portia, not facts about models
+
+This is the whole of what survives from them. Each item is a change to code or to a prompt file that
+was made because a run surfaced it.
 
 - **Run 1 → two engine defects, both fixed.** `record_step`'s description never mentioned that steps
   chain, and `_validate_step` checked that `transforms` existed but never looked inside. This is why
   `CLAUDE.md` forbids inline prompt text: one missing sentence made the copilot tell the user portia
   couldn't do the job.
-- **Run 2 → self-assessment is worthless.** Asked "was that good?", the agent said yes at every step.
-  Verification must compute post-conditions **in code**. This produced `checks/outcome.py` and the
-  rule that a recorded step is immutable. Worth noting what passed: the brief named no columns and
-  no keys, and it still derived `hotel_id` and matched `city` to `city_name` by meaning.
-- **Run 3 → a grain claim can be widened until it passes.** `record_step.md` gained the sentence
-  that a grain of "every column that makes the duplicates unique" is trivially true and measures
-  nothing. Also: **`join_findings` now reaches a step's output** (`<spec>#<step id>`), which had
-  made *"always measure before deciding"* impossible to obey from hop 2 onward. And the `expect`
-  vocabulary is now generated from `PROVENANCE_KEYS`, and its *values* shape-checked.
-- **Run 4 → the tautology again, and the table got worse.** Fixing the spelling makes Paris's second
-  event reachable, so the fan-out doubles: 14 bookings → 18 rows. **A claim that cannot fail
-  measures nothing, and verifying it is indistinguishable, in the output, from verifying something
-  real.**
-- **Run 5 → the loop worked and the table was still wrong.** The tautology did not reappear; the
-  gate fired correctly. Then it acknowledged in one move with no human in between. But note what the
-  instruction it skipped asks for: at the moment of refusal the agent holds `n_duplicated_keys` and
-  example keys, **not the revenue effect**, and nothing hands it over. That is a missing
-  measurement, not a missing instruction — `PLAN.md` → Next → *the consequence of a zero*.
-- **Run 6 → the diagnosis changes.** On a bigger model, in indexing alone: it asked about the
-  revenue outliers (never raised in any prior run), predicted the fan-out **before any join**,
-  derived the grain from the goal unprompted (*"you said you model per hotel, so this needs
-  aggregating first"*), diagnosed portia's own missing aggregate op rather than faking one, and
-  offered options carrying consequences. Handed two garbled answers it said so and re-asked.
-  **The judgment failures in Runs 1–5 read as capability, not architecture** — which is the more
-  important half of the design being validated.
-- **Run 7 → the hatch is necessary but not sufficient.** It removes the excuse; it does not create
-  the judgment. `record_step`'s description names *"aggregating to a coarser grain"* as the hatch's
-  purpose in as many words, and the model never called it. **"It had no way to do the right thing"
-  is no longer available as a defence for any future failure on this fixture.** *(Caveat: Run 7 was
-  auto-driven with canned answers and a facts-only catalog, so it is not a valid test of the asking
-  behaviour.)* A candidate cause, unproven: `prompts.tool()` collapses every description to a single
-  line, so `record_step.md` reaches the model as 6,038 characters with zero newlines — headings and
-  the JSON example flattened. Filed in `BACKLOG.md`.
-- **Run 8 → the engine got fast enough that the copilot's caution is the bottleneck.** Its "bridge"
-  table had **56 rows**. Both joins it proposed match **0 keys**, established afterwards by two
-  0.02 s queries. One was on a 4-value, 51%-null column called `LOCATION` whose values are
-  `PRIME LOCATION`, `SECONDARY LOCATION`, … — a site-quality grade, not a place. It proposed it
-  because the name reads like one, and never looked at a value or a distinct count, both of which
-  are in `profile_source`'s ordinary output. **A candidate cause in our own prompt:**
-  `profile_source.md` still opens with *"Expensive — the detailed rung"* and closes with *"Not for
-  browsing"*, written when profiling meant pandas reading a whole file. What is still expensive is
-  the **tokens of the returned evidence**, not the work; the prompt conflates them. `BACKLOG.md`.
-  - It does **not** support building a layer that flags "suspicious" columns. That is exactly the
-    judgment call the agent exists to make, and the distinct count that gives it away is already in
-    the evidence. **The fix is to stop discouraging the call, not to make the call for it.**
-  - *Caveat on that write-up:* only the last 90 lines of the transcript were kept, so the
-    `describe_source`-only claim rests on that tail plus the absence of any profile in the output.
+- **Run 2 → asking the model to grade itself measures nothing.** Asked "was that good?", it said yes
+  at every step. Verification must compute post-conditions **in code**. This produced
+  `checks/outcome.py` and the rule that a recorded step is immutable.
+- **Run 3 → a grain claim can be widened until it passes**, so a claim the agent authors cannot on
+  its own be the gate. Three changes: `record_step.md` gained the sentence that a grain of "every
+  column that makes the duplicates unique" is trivially true; **`join_findings` now reaches a step's
+  output** (`<spec>#<step id>`), which had made *"measure before deciding"* impossible to obey from
+  hop 2 onward; and the `expect` vocabulary is now generated from `PROVENANCE_KEYS` with its values
+  shape-checked.
+- **Run 5 → a missing measurement, not a missing instruction.** At the moment the gate refuses, the
+  agent holds `n_duplicated_keys` and example keys but **not the revenue effect**, and nothing hands
+  it over — so the instruction to tell the user what a total would be off by asks for a number that
+  is nowhere in its evidence. `PLAN.md` → Next → *the consequence of a zero*.
+- **Run 6 → portia had no aggregate op, and this is why `ops/sql.py` exists.** Handling the hotel
+  fixture's fatal fan-out means reducing events to one row per city-date *before* joining. A model
+  worked that out unaided, said there was no op for it, and stopped. That is a fact about portia's
+  op set, not about the model. *(`ops/sql.py`, `tests/test_ops_sql.py` and
+  `tests/test_agent_handlers.py` all cite this run for that reason — the citation is to the missing
+  op, nothing else.)*
+- **Run 8 → the one durable number: post-DuckDB, measurement is nearly free.** Two candidate joins
+  over 100M rows were measured in **0.02 s each**. That is a fact about the engine, and it is what
+  makes `profile_source.md`'s *"Expensive — the detailed rung"* / *"Not for browsing"* stale — that
+  language was written when profiling meant pandas reading a whole file. What is still costly is the
+  **tokens of the returned evidence**, not the work. Filed in `BACKLOG.md` as prompt work.
+- **`prompts.tool()` collapses every description to one line** — `record_step.md` reaches the model
+  as 6,038 characters with zero newlines, headings and JSON example flattened. A code fact, found
+  while reading Run 7's transcript rather than proven by it. `BACKLOG.md`.
 
-> **The engine changed underneath Runs 1–7** (2026-07-28) — they were scored against a pandas engine
-> that no longer exists. **The scores still stand**, and that is measured rather than assumed: the
-> DuckDB migration froze all 29 evidence dicts first and every end-to-end case came out
-> byte-identical. Three things the copilot reads did change deliberately — `samples` are now distinct
-> and ordered, `mixed_types` was redefined, and a date column reads `inferred: datetime`
-> (`DUCKDB_MIGRATION.md` §6.3, §7).
+> **What is deliberately no longer here.** Earlier versions of this section argued from these runs
+> about model capability, about which prompt line caused which behaviour, and about the engine
+> having stopped being the constraint. None of that was tested — the runs held the prompts fixed at
+> their first draft and varied nothing — so the arguments were unfalsifiable by construction. They
+> were removed on 2026-08-04. The one that came closest to earning its keep, and still did not, was
+> that a bigger model surfaced more of the answer key in Run 6 than Runs 1–5 combined: the model and
+> the effort both changed at once against unimproved prompts, and the run ended before the gate.
+
+> **The engine changed underneath Runs 1–7** (2026-07-28) — they ran against a pandas engine that no
+> longer exists. The *evidence the agent saw* is nevertheless comparable across that boundary, and
+> that is measured rather than assumed: the DuckDB migration froze all 29 evidence dicts first and
+> every end-to-end case came out byte-identical. Three things the copilot reads did change
+> deliberately — `samples` are now distinct and ordered, `mixed_types` was redefined, and a date
+> column reads `inferred: datetime` (`DUCKDB_MIGRATION.md` §6.3, §7).
 
 ### The verification loop, reproduced against the engine by hand
 
@@ -179,36 +176,26 @@ events matched). **A partial join failure is invisible to a zero-only blocking r
 limit of the design, not a bug in it, and it is why `BLOCKING_FLAGS` holds zeros only: the moment a
 tunable number appears there, code is deciding what counts as bad.
 
-### It states facts it was never given
+### A gap in the evidence the agent is handed
 
 Run 3's closing summary named a city and two event names that appear nowhere in its evidence,
-inventing them to make a readable sentence. Run 5's rationale invented a column (`event_id`) that
-does not exist in the data. `copilot.md` says every number must come from a tool result; that plainly
-does not extend to *names*. The fix is more evidence in the grain examples — carry the row's other
-columns — not a sterner prompt.
+inventing them to make a readable sentence. `copilot.md` requires every *number* to come from a tool
+result; that plainly does not extend to *names*. The code conclusion is more evidence in the grain
+examples — carry the row's other columns — not a sterner prompt.
 
 ---
 
-## The biggest untested thing: whether it asks at all
+## What has not been measured
 
-Runs 1 and 2 piped `yes y`, so nothing about the asking behaviour was measured. Runs 3–5 were driven
-by hand, which settled the mechanical path: questions are generated, rendered, answered and routed
-back, and both numbered picks and free text parse.
+The asking behaviour. Runs 1, 2 and 7 were auto-driven with canned answers, so they say nothing
+about it; Runs 3–5 were driven by hand, which settled only the **mechanical** path — questions are
+generated, rendered, answered and routed back, and both numbered picks and free text parse.
 
-What replaced that gap is sharper. **Run 5 asked nothing at all** across an entire session in which
-it hit a blocking flag, overrode it, and shipped a table with 3.85% too much revenue. Runs 3 and 4
-each asked, but never about a fatal trap.
-
-So the unmeasured thing is no longer *"are the questions good"* but *"does it ask when it matters"* —
-`PLAN.md`: *"the questions-and-insights UX **is** the product"*.
-
-**Run 6 answered the first half and not the second.** On a bigger model the questions were good by
-the answer key's own standard. But it asked them all during *indexing*, and the session ended before
-a single step was recorded. **Nobody has yet watched a capable model reach a blocking flag.**
-
-Also still untested, and worth an hour: how it behaves when a human **disagrees** with it. Push back
-on a recommendation, give a vague answer, tell it something that contradicts the data. None of that
-is gradeable by the answer key, and none of it needs to be — the failure modes will be obvious.
+Whether the copilot asks *when it matters*, and whether the questions are good, is unmeasured, and
+`PLAN.md` calls that UX the product. Worth an hour whenever the copilot is next worked on: how it
+behaves when a human **disagrees** with it — push back on a recommendation, give a vague answer, say
+something that contradicts the data. None of that is gradeable by the answer key and none of it needs
+to be.
 
 ## A retracted result
 
@@ -236,12 +223,13 @@ python -m portia.cli.run specs/<whatever it wrote>.yaml --write out
 
 Both agent commands take `--model` and `--effort`, and each turn prints what it is about to spend.
 The default is `claude-haiku-4-5` — the develop-on-a-small-model discipline (`PLAN.md`), and the one
-a run costs by accident. **Record the model and effort with every result**: Run 6 is only comparable
-to Run 5 because they differ in that and nothing else.
+a run costs by accident. **Record the model, the effort and the prompt revision with every result.**
+Two runs are comparable only if they differ in exactly one of those, which is why the eight above
+compare to nothing — several vary two at once.
 
 > **Note which phase a finding comes from.** `index` and `ask` are separate turns with separate
-> transcripts, and Run 6 is a standing reminder that a run can produce excellent evidence in the
-> first and never reach the second. A finding from indexing says nothing about the gate.
+> transcripts, and a run can end in the first without ever reaching the second. A finding from
+> indexing says nothing about the gate.
 
 **The prompt is the goal and nothing else.** It used to end "Record what you decide as a spec", which
 was a bug in the test: writing the residue is what portia *is*, so a run that only produces one
