@@ -52,6 +52,7 @@ from portia.checks.join import resolve_keys
 from portia.knowledge.schema import (
     COLUMN,
     DERIVES_FROM,
+    FINGERPRINT,
     GROUP,
     HAS_COLUMN,
     IN_GROUP,
@@ -61,6 +62,7 @@ from portia.knowledge.schema import (
     Graph,
     Ref,
     column_key,
+    source_fingerprint,
 )
 from portia.ops.join import join_columns
 
@@ -150,13 +152,18 @@ def _add_catalog(graph: Graph, data: dict) -> dict[str, list[str]]:
         if not path:
             continue
         indexed = entry.get("indexed") or {}
+        facts = {fact: indexed.get(fact) for fact in catalog.STALENESS_FACTS}
         table = graph.add_node(
             SOURCE,
             path,
             name=name,
             summary=entry.get("summary"),
             candidate_keys=entry.get("candidate_keys") or [],
-            **{fact: indexed.get(fact) for fact in catalog.STALENESS_FACTS},
+            # The same two numbers, also as one comparable string: a measured
+            # edge records what it was taken against, and comparing that in
+            # Cypher wants one property rather than two (§4.5).
+            **{FINGERPRINT: source_fingerprint(**facts)},
+            **facts,
         )
         paths[name] = path
         columns[path] = [c["name"] for c in entry.get("columns") or []]

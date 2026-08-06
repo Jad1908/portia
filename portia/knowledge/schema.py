@@ -96,6 +96,29 @@ STRUCTURAL = (HAS_COLUMN, IN_GROUP, READS, DERIVES_FROM)
 VIA_OPS = ("join", "normalize", "sql")
 
 
+#: What a table looked like when something was measured against it (§4.5). Every
+#: node carries one and every measured edge records the two it was taken
+#: against, so "is this number still backed by the data it came from" is a
+#: string comparison rather than new machinery.
+#:
+#: The values come from fingerprints portia already computes for other reasons —
+#: `catalog.STALENESS_FACTS` for a file, `pipeline.fingerprint` for a spec — which
+#: is the whole point of §4.5: nothing new has to be invented or kept in step.
+FINGERPRINT = "fingerprint"
+
+
+def source_fingerprint(size: Any, mtime: Any) -> str | None:
+    """A file's fingerprint, as one comparable string.
+
+    One property rather than two, because the comparison happens **in Cypher**
+    against what an edge recorded, and comparing one string is something the
+    query language does without arithmetic.
+    """
+    if size is None or mtime is None:
+        return None
+    return f"{size}:{mtime}"
+
+
 def column_key(table_label: str, table_key: str, column: str) -> str:
     """The identity of one column: which table it belongs to, and its name.
 

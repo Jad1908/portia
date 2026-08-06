@@ -88,6 +88,42 @@ async def graph_lookup(args: dict[str, Any]) -> dict[str, Any]:
 
 
 @tool(
+    "measure_overlaps",
+    prompts.tool("measure_overlaps"),
+    {
+        "type": "object",
+        "properties": {
+            "pairs": {
+                "type": "array",
+                "description": "Column pairs to compare, each with the reason you picked it",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "left": {"type": "string", "description": "Source or model name"},
+                        "left_column": {"type": "string"},
+                        "right": {"type": "string", "description": "Source or model name"},
+                        "right_column": {"type": "string"},
+                        "reason": {
+                            "type": "string",
+                            "description": "Why these two might be related — required",
+                        },
+                    },
+                    "required": ["left", "left_column", "right", "right_column", "reason"],
+                },
+            },
+            "portia_dir": {"type": "string"},
+        },
+        "required": ["pairs"],
+    },
+)
+async def measure_overlaps(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return _ok(handlers.measure_overlaps(args["pairs"], **_dir(args)))
+    except Exception as exc:  # noqa: BLE001
+        return _failed(exc)
+
+
+@tool(
     "profile_source",
     prompts.tool("profile_source"),
     {
@@ -258,9 +294,25 @@ def _dir(args: dict[str, Any]) -> dict[str, str]:
     return {"portia_dir": args["portia_dir"]} if args.get("portia_dir") else {}
 
 
-#: Read-only checks — safe to auto-approve. Writes are listed separately so the
-#: session can route them through the permission flow instead.
-READ_TOOLS = [get_context, graph_lookup, describe_source, profile_source, join_findings, run_spec]
+#: Auto-approved. Writes are listed separately so the session can route them
+#: through the permission flow instead.
+#:
+#: The line is **"does it change a durable artifact the user reviews in a diff"**,
+#: not "does it write anything at all". `measure_overlaps` is here despite storing
+#: its results: what it writes is metadata *about* the data, in a store §5.2 is
+#: explicit about being re-derivable — losing it costs time, not truth — and the
+#: decisions still live in the spec, in git. Confirming each of a dozen pairs
+#: while indexing would also make the one tool that has to be used in bulk the
+#: most expensive one to use.
+READ_TOOLS = [
+    get_context,
+    graph_lookup,
+    measure_overlaps,
+    describe_source,
+    profile_source,
+    join_findings,
+    run_spec,
+]
 WRITE_TOOLS = [set_interpretation, set_group, record_step]
 
 ALL_TOOLS = [*READ_TOOLS, *WRITE_TOOLS]

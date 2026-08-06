@@ -23,7 +23,29 @@ restatement of files (§4.2) and costs nothing to compute. The measured half
 built so a rebuild of this half cannot delete them.
 """
 
-from portia.knowledge.build import build_graph
+from pathlib import Path
+
+from portia.knowledge.build import BuildResult, build_graph
 from portia.knowledge.schema import Edge, Graph, Node
 
-__all__ = ["Edge", "Graph", "Node", "build_graph"]
+__all__ = ["BuildResult", "Edge", "Graph", "Node", "build_graph", "sync"]
+
+
+def sync(root: str | Path = ".", *, portia_dir: str | Path | None = None) -> BuildResult:
+    """Read the project and put its structural half in the store, in one call.
+
+    The write moment §5 asks for, in the one shape that keeps the two halves in
+    step: a measurement can only attach to Column nodes that exist, and the
+    structural half is free to recompute, so refreshing it before measuring is
+    cheaper than working out what changed.
+
+    Raises `store.GraphUnavailable` if the database is down. **Callers on the
+    indexing path must catch that and carry on** — an index that fails because a
+    container is stopped is exactly the leak §6.6 warns about.
+    """
+    from portia.knowledge import store
+
+    result = build_graph(root, portia_dir=portia_dir)
+    with store.session() as live:
+        store.write(result.graph, live)
+    return result

@@ -45,7 +45,13 @@ Enforced by `tests/test_agent_prompts.py`, which fails on any non-docstring stri
 200 characters anywhere in `portia/`, and separately on any `@tool` whose description isn't
 `prompts.tool(...)`. Docstrings are exempt — they're written for us, not the model. If the scan
 trips on something that genuinely isn't prompt text, that's worth a conversation rather than a
-threshold bump; nothing in the package has needed a 200-character string yet.
+threshold bump.
+
+**It has tripped twice, both times on Cypher** (`knowledge/query.py`, 2026-08-04). Neither was
+prompt text and neither was a reason to raise the limit: the fix both times was to name the query's
+parts as module constants, which is what `checks/join.py` already does with its overlap
+expressions and reads better anyway. If a long literal is a query, name its pieces; if it is
+something the model reads, it belongs in this directory.
 
 ## What deliberately stays in code
 
