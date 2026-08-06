@@ -366,6 +366,13 @@ own open questions where the code now has something to say about them.*
   (§6.5). A fact the profiler already paid for, and exactly what the agent needs to judge whether a
   pair is worth measuring in phase C.
 
+- **Indexing is offered from three places** — the add-data screen, the un-indexed-file inspector,
+  and the Indexing tab (2026-08-06). Chosen deliberately, and it is the duplication the 2026-08-02
+  overhaul removed from the add-data screen, reintroduced. The tab is where *"what does portia know
+  about each source"* belongs; the other two are where you happen to be standing when the question
+  comes up. Worth revisiting if they start to disagree — the risk is not the three buttons, it is
+  three ideas of what indexing *means*.
+
 ## Core / infra
 
 - **README says nothing about auth — a decision awaiting the user, not an oversight.** `PLAN.md`
