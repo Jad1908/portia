@@ -675,6 +675,12 @@ That rule is internally sound. Three things killed it anyway.
    `FRA` share no values and no range. The filter discards the pair with certainty and is *correct*,
    and the pair was the most important one in the project (§4.4). The filter is not wrong about
    values; it is blind to meaning, and meaning is the only thing that gets you there.
+   - **This stopped being hypothetical on 2026-08-06** (`EVALUATION.md` → the PHQ run). On 23 real
+     sources the copilot chose 12 pairs, and the two that connect the event data to the hotel golden
+     record — the entire point of that project — both measured **zero**. One of them is
+     `comparable_types: false`, meaning a *type check* would have discarded it with certainty and
+     been right to. The provable excluder this section allowed would have thrown away one of the two
+     pairs the project exists to resolve.
 3. **Sweeping is a liability even when affordable.** Every swept pair is a stored confident zero
    nobody asked about, plus a measurement someone must keep valid over time (§4.5). Volume was never
    the objection — §6.4 says not to design for volume — but 245,000 unrequested facts is a context

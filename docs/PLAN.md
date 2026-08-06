@@ -204,6 +204,17 @@ and candidate keys, and the index itself stays. §1.4 wants it replaced by trave
 "unproven at 50", which is not a measurement, and there is no re-runnable fixture that could say
 whether the copilot got worse. `BACKLOG.md` holds what would have to be true first.
 
+**And it has been watched once on real data** (2026-08-06, `EVALUATION.md`). Haiku at low effort,
+23 PHQ sources, one indexing turn, $0.19. It chose 12 column pairs out of the ~245,000 the schema
+permits; eight are ordinary foreign keys and measure like it, one is a name join that half-works,
+one is a plain miss the measurement caught — and **the two that connect the event data to the hotel
+golden record both measure zero**, one of them with mismatched types. That second one is the thing
+worth remembering: a *type check* would have discarded it with certainty and been correct to, and
+it is one of the two pairs that project exists to resolve. §6.5's warning that a provable excluder
+can still be blind to meaning is no longer hypothetical. It also never called `graph_lookup` — three
+indexing runs now, zero uses of the router — which is a prompt problem and is where the next work
+is.
+
 **The loop changes with it, not after it** (§9). The graph sits *before* `describe_source` as a
 router — *which* table should I look at, and where did this column come from — rather than as a
 deeper rung above `join_findings`. **Indexing is the part that gets rewritten**: it becomes "read
