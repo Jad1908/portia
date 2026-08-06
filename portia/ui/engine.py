@@ -51,6 +51,7 @@ import os
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
 from pathlib import Path
@@ -696,6 +697,56 @@ def read_table(path: Path):
 
 
 # --- reloading the spec after the copilot has written to it -----------------
+
+
+#: What portia knows about one source, as three states rather than two. The
+#: middle one is the one that matters and the one the app kept losing: a source
+#: can be **profiled and never read**, which looks identical to a read one in any
+#: list that only knows indexed/not-indexed — and it is the state a project sits
+#: in when the copilot ran out of turn, or was never asked.
+UNINDEXED, UNREAD, INTERPRETED = "unindexed", "unread", "interpreted"
+
+
+@dataclass(frozen=True)
+class SourceState:
+    """One data file and what portia has done with it so far."""
+
+    name: str
+    rel: str
+    state: str
+    stale: bool = False
+
+    @property
+    def indexed(self) -> bool:
+        return self.state != UNINDEXED
+
+
+def source_states(app: App) -> list[SourceState]:
+    """Every data file in the project's scope, with what portia knows about it.
+
+    **Both halves in one list, deliberately.** The un-indexed files come from the
+    data folder and the rest from the catalog, and a screen that showed only one
+    of them made "what is left to do here" a question you answered by comparing
+    two places. Sorted by name, never by state: which sources need attention is a
+    judgment, and ordering by it would be the screen making it (`DESIGN.md`).
+    """
+    entries = catalog.load_catalog(app.portia_dir).get("sources") or {}
+    known = {entry.get("source") for entry in entries.values()}
+    states = [
+        SourceState(
+            name=name,
+            rel=entry.get("source", ""),
+            state=INTERPRETED if catalog.is_interpreted(entry) else UNREAD,
+            stale=catalog.is_stale(entry, portia_dir=app.portia_dir),
+        )
+        for name, entry in entries.items()
+    ]
+    states += [
+        SourceState(name=path.stem, rel=rel, state=UNINDEXED)
+        for path in data_files_in(app, app.data_dir)
+        if (rel := path.relative_to(app.root).as_posix()) not in known
+    ]
+    return sorted(states, key=lambda s: s.name)
 
 
 def sync_knowledge(app: App) -> str:

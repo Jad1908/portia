@@ -225,6 +225,10 @@ class App:
     #: A view, not a preference: it is about what is on screen right now, so it
     #: lives here rather than in `ui/settings.py`.
     knowledge_columns: bool = False
+    #: Which sources the indexing tab has ticked. A selection, not a setting —
+    #: it is about what you are doing right now, so it lives here rather than in
+    #: `ui/settings.py` and is not persisted.
+    index_ticks: frozenset[str] = frozenset()
     selected_step: str | None = None
     #: Which folders in the left tree the operator has opened, and which they have
     #: shut. Two sets rather than one because the default is neither: **the top

@@ -31,7 +31,7 @@ from nicegui import ui
 
 from portia.agent import events
 from portia.ui import components as c
-from portia.ui import state
+from portia.ui import engine, state
 from portia.ui import turn as turn_driver
 from portia.ui.state import APP, Decision
 
@@ -97,7 +97,18 @@ def _show_tab(tab: str) -> None:
 
 
 def _index_header(stream) -> None:
-    """What this tab is for, and what is happening in it."""
+    """What this tab is for, what is happening in it, and what is left to do.
+
+    **The list is the point of the tab now.** It used to be a transcript and
+    nothing else, so "which sources has the copilot actually read" was a
+    question you answered by clicking through the left pane one row at a time —
+    and the state that matters most, *profiled but never read*, is invisible in
+    a list that only knows indexed from not.
+
+    While a turn runs the list is replaced by the banner: the turn is about
+    these sources, and offering to start a second one on top of it is an
+    invitation to a race.
+    """
     with ui.element("div").classes("p-pad stack-md"):
         if stream.turn is not None:
             _turn_banner(stream.turn)
@@ -107,7 +118,132 @@ def _index_header(stream) -> None:
                     c.caption("the copilot is working")
         else:
             c.caption(_INDEX_WHAT)
+            _source_states()
     c.rule()
+
+
+#: What each state is called on screen, and the icon that repeats down the rows.
+#: Words once at the top would be a legend; these are short enough to repeat.
+_STATE_LABEL = {
+    engine.UNINDEXED: "not indexed",
+    engine.UNREAD: "not read",
+    engine.INTERPRETED: "read",
+}
+_STATE_ICON = {
+    engine.UNINDEXED: "radio_button_unchecked",
+    engine.UNREAD: "pending",
+    engine.INTERPRETED: "check_circle",
+}
+
+
+def _source_states() -> None:
+    """Every source, what portia knows about it, and what you can do next."""
+    states = engine.source_states(APP)
+    if not states:
+        c.empty_note(_NO_SOURCES)
+        return
+
+    with ui.element("div").classes("index-list"):
+        for source in states:
+            _source_state_row(source)
+    _index_actions()
+
+
+def _source_state_row(source) -> None:
+    ticked = source.name in APP.index_ticks
+    with ui.element("div").classes(f"index-row is-{source.state}"):
+        (
+            ui.checkbox(value=ticked)
+            .classes("p-check")
+            .props("dense")
+            .on_value_change(lambda e, n=source.name: _tick_source(n, bool(e.value)))
+        )
+        ui.icon(_STATE_ICON[source.state]).classes("index-row-icon")
+        ui.label(source.name).classes("index-row-name")
+        ui.label(_STATE_LABEL[source.state]).classes("index-row-state")
+        if source.stale:
+            ui.label("changed").classes("index-row-stale")
+
+
+def _tick_source(name: str, on: bool) -> None:
+    """Only the buttons redraw, **not** the list.
+
+    Refreshing the whole pane rebuilt the rows, which deletes the checkbox you
+    are in the middle of clicking — so ticking two boxes quickly registered one.
+    The checkbox holds its own value; the only thing a tick changes on screen is
+    what the two buttons say they will do.
+    """
+    APP.index_ticks = (APP.index_ticks | {name}) if on else (APP.index_ticks - {name})
+    _index_actions.refresh()
+
+
+@ui.refreshable
+def _index_actions() -> None:
+    """Two actions, because they cost different things.
+
+    Profiling is deterministic and free; reading costs a model turn. A single
+    button doing both would hide which of the two you were about to spend.
+    """
+    ticked = [s for s in engine.source_states(APP) if s.name in APP.index_ticks]
+    to_index = [s for s in ticked if not s.indexed]
+    to_read = [s for s in ticked if s.indexed]
+    with ui.element("div").classes("index-actions"):
+        c.button(
+            f"Index {c.count(len(to_index), 'source')}",
+            _index_ticked,
+            kind="secondary",
+            enabled=bool(to_index),
+            icon=c.INDEX_ICON,
+        )
+        c.button(
+            f"Interpret {c.count(len(to_read), 'source')}",
+            _interpret_ticked,
+            kind="primary",
+            enabled=bool(to_read),
+            icon="auto_awesome",
+        )
+    c.caption(_INDEX_COST)
+
+
+async def _index_ticked() -> None:
+    """Profile the ticked files. Free, deterministic, no model turn."""
+    from portia.ui import artifacts
+
+    paths = [
+        APP.root / s.rel
+        for s in engine.source_states(APP)
+        if s.name in APP.index_ticks and not s.indexed
+    ]
+    if not paths:
+        return
+    await engine.index(paths, APP)
+    artifacts.pane.refresh()
+    pane.refresh()
+    ui.notify(f"profiled {c.count(len(paths), 'source')}")
+
+
+async def _interpret_ticked() -> None:
+    """Spend a turn reading the ticked sources — including ones already read.
+
+    Re-reading is the same act as reading: `set_interpretation` writes judgment
+    and never touches a measured fact, so running it again over a source whose
+    context has changed is a correction, not a conflict.
+    """
+    from portia.agent import prompts
+    from portia.ui import turn as turn_driver_module
+    from portia.ui.screens import _default_model
+
+    names = [s.name for s in engine.source_states(APP) if s.name in APP.index_ticks and s.indexed]
+    if not names:
+        return
+    APP.index_ticks = frozenset()
+    await turn_driver_module.start(
+        prompts.task("index_batch", names=", ".join(repr(n) for n in names)),
+        model=APP.model or _default_model(),
+        effort=APP.effort,
+        kind=state.INDEXING,
+        label=", ".join(names),
+    )
 
 
 def _stay_at_the_bottom(scroll: ui.element) -> None:
@@ -551,6 +687,8 @@ _UNANSWERED = "The turn ended with this question unanswered."
 
 _IDLE = "Nothing yet. Describe the goal above and press Go."
 _IDLE_INDEX = "Nothing indexed in this session."
+_NO_SOURCES = "No data in this project's folder yet. Add some from the left pane."
+_INDEX_COST = "profiling is free and deterministic · interpreting spends a model turn"
 _INDEX_WHAT = "Reading a source lands here — from Add data, or from Ask the copilot on a source."
 _GOAL_PLACEHOLDER = "What do you want from this data?"
 _ANSWER_PLACEHOLDER = "…or answer in your own words"
