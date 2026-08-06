@@ -234,18 +234,172 @@ def test_the_add_data_copy_is_read_off_the_loader(monkeypatch):
     assert screens._formats() == "CSV, JSON or PARQUET"
 
 
-def test_the_way_out_of_add_data_says_whether_it_spends_money():
-    """The interpretation turn is deferred to the workspace, so the screen you
-    leave still has to name the cost you are about to pay on the next one."""
+def test_the_way_out_of_add_data_says_a_read_is_running(loop):
+    """The read starts when profiling ends, so the screen you are still on has
+    to name the turn that is running rather than promise one that is coming."""
     from portia.ui import screens
     from portia.ui.state import App
 
-    app = App(catalog={"sources": {"orders": {}}}, pending_interpret=["orders"])
+    app = App(catalog={"sources": {"orders": {}}})
     with _as_app(screens, app):
-        app.interpret = True
-        assert "reads" in screens._action_note(0)
-        app.interpret = False
-        assert "reads" not in screens._action_note(0)
+        app.indexed = 1
+        assert screens._action_note(0) == screens.PROFILED.format(n="1 source")
+
+        stream = app.start_turn("read them", model="m", effort=None, kind=state.INDEXING)
+        assert screens._action_note(0) == screens.READING_NOW
+
+        # Stopped for a human who may have dismissed the popup: the screen must
+        # not go on saying it is working.
+        stream.rows.append(Decision("question", {}, loop.create_future()))
+        assert screens._action_note(0) == screens.WAITING_ON_YOU
+
+        stream.turn.running = False
+        assert screens._action_note(0) not in (screens.READING_NOW, screens.WAITING_ON_YOU)
+
+
+def _reading(app, monkeypatch, on_start=None):
+    """Run the add-data screen's read with the model turn stubbed out.
+
+    Returns the list of labels each turn was started with — one entry per turn,
+    so the drain loop is visible as two entries rather than inferred. ``on_start``
+    runs inside the fake turn, which is where "something happened while it was
+    reading" has to happen to mean anything.
+    """
+    import asyncio
+
+    from nicegui import core
+
+    from portia.ui import screens, turn
+
+    started: list[str] = []
+
+    async def fake_start(prompt, *, model, effort, kind, label):
+        started.append(label)
+        if on_start is not None:
+            on_start(len(started))
+
+    async def read() -> None:
+        # Redrawing a refreshable is fire-and-forget through NiceGUI's own task
+        # helper, which wants the app's loop. There is no server here, so the
+        # test's loop is it — with nothing rendered, the redraws are no-ops.
+        monkeypatch.setattr(core, "loop", asyncio.get_running_loop())
+        await screens._interpret_pending()
+        await asyncio.sleep(0)  # let those no-op redraws run before the loop shuts
+
+    monkeypatch.setattr(turn, "start", fake_start)
+    with _as_app(screens, app):
+        asyncio.run(read())
+    return started
+
+
+def test_the_read_starts_without_waiting_for_the_way_out(monkeypatch):
+    """Profiling ends, the read begins — with the add-data screen still up.
+
+    It used to wait for `Open the workspace`, which spent the wait twice: the
+    screen went quiet and the minute of model time only started when you noticed.
+    """
+    from portia.ui.state import App
+
+    app = App(catalog={"sources": {"orders": {}}}, pending_interpret=["orders"])
+
+    assert _reading(app, monkeypatch) == ["orders"]
+    assert app.pending_interpret == [], "a source read is a source no longer queued"
+
+
+def test_indexing_hands_straight_over_to_the_read(tmp_path, monkeypatch):
+    """The whole change, at the level of the one button that does it: profiling
+    ends and the read begins, with nothing clicked in between and the add-data
+    screen still up."""
+    import asyncio
+
+    from nicegui import core, ui
+
+    from portia.ui import screens, turn
+    from portia.ui.state import App
+
+    pd.DataFrame({"a": [1, 2]}).to_csv(tmp_path / "orders.csv", index=False)
+    monkeypatch.chdir(tmp_path)  # the catalog resolves source paths from the cwd
+    app = App(root=tmp_path)
+    catalog.init_project("test", portia_dir=app.portia_dir)
+
+    started: list[str] = []
+
+    async def fake_start(prompt, *, model, effort, kind, label):
+        started.append(label)
+        assert not app.left_add_data, "the read runs with the add-data screen still showing"
+
+    monkeypatch.setattr(turn, "start", fake_start)
+    monkeypatch.setattr(ui, "notify", lambda *a, **k: None)  # no client to notify
+
+    async def index() -> None:
+        monkeypatch.setattr(core, "loop", asyncio.get_running_loop())
+        await screens._index_and_interpret([tmp_path / "orders.csv"])
+        await asyncio.sleep(0)
+
+    with _as_app(screens, app):
+        asyncio.run(index())
+
+    assert list(app.sources) == ["orders"], "profiled, deterministically, as always"
+    assert started == ["orders"], "and read, without waiting to be asked twice"
+
+
+def test_a_batch_indexed_while_the_first_is_being_read_is_not_dropped(monkeypatch):
+    """Indexing again mid-read is ordinary on this screen, and `turn.start`
+    refuses a second live turn *silently* — so the queue is drained in a loop
+    rather than read once."""
+    from portia.ui.state import App
+
+    app = App(catalog={"sources": {"orders": {}}}, pending_interpret=["orders"])
+
+    def index_again(nth: int) -> None:
+        if nth == 1:  # a second batch lands while the first is being read
+            app.pending_interpret = ["invoices"]
+
+    assert _reading(app, monkeypatch, index_again) == ["orders", "invoices"]
+    assert app.pending_interpret == []
+
+
+def test_the_switch_being_off_queues_the_sources_rather_than_discarding_them(monkeypatch):
+    """One rule, at both moments it can fire: whatever is profiled and unread
+    gets read while the switch is on. Consuming the names with it off would make
+    turning it on afterwards a control that does nothing."""
+    from portia.ui.state import App
+
+    app = App(catalog={"sources": {"orders": {}}}, pending_interpret=["orders"], interpret=False)
+
+    assert _reading(app, monkeypatch) == []
+    assert app.pending_interpret == ["orders"]
+
+    app.interpret = True
+    assert _reading(app, monkeypatch) == ["orders"]
+
+
+def test_a_read_already_running_is_not_started_a_second_time(monkeypatch):
+    """The engine runs one turn at a time. A second start is a no-op that would
+    take the queue with it."""
+    from portia.ui.state import App
+
+    app = App(catalog={"sources": {"orders": {}}})
+    app.start_turn("read them", model="m", effort=None, kind=state.INDEXING)
+    app.pending_interpret = ["invoices"]
+
+    assert _reading(app, monkeypatch) == []
+    assert app.pending_interpret == ["invoices"], "the running read picks them up when it ends"
+
+
+def test_the_invitation_names_which_kind_of_stop_it_is():
+    """A question and a pending write are two different stops, and the popup is
+    the only thing on screen saying which one is waiting."""
+    from portia.agent import events
+    from portia.ui import screens
+    from portia.ui.state import App
+
+    app = App()
+    with _as_app(screens, app):
+        app.decision_waiting = events.QUESTION
+        assert screens._decision_line() == screens.DECISION_QUESTION
+        app.decision_waiting = events.APPROVAL
+        assert screens._decision_line() == screens.DECISION_APPROVAL
 
 
 def test_the_breakdown_partitions_the_button_and_does_not_double_count(tmp_path):
@@ -1352,21 +1506,31 @@ def test_a_written_path_shows_its_name_apart_from_its_folders():
     assert "path-row-name" in labels[-1].classes
 
 
-def test_a_pending_decision_opens_the_workspace(project):
-    """The first-run block has to have exactly one exit, and this is it.
-
-    The add-data screen holds you while the opening interpretation runs, so you
-    cannot walk into a workspace describing sources nobody has read yet. But the
-    copilot may stop and ask, and the form it asks with lives in the transcript
-    — so a decision is the one thing allowed to open the workspace early.
-    Blocking without this is a screen waiting forever for an answer it gives you
-    no way to give.
+def test_a_pending_decision_invites_you_in_rather_than_moving_you(project):
+    """The opening read runs with the add-data screen still up, so the copilot
+    can stop for a human whose transcript is nowhere on screen. It asks: the
+    popup says what is waiting, and *going* there stays the human's move —
+    swapping the window under someone mid-tick is what this replaced.
     """
+    from portia.agent import events
+
     app, _ = project
 
     app.left_add_data = False
-    assert app.reveal_for_decision() is True
-    assert app.left_add_data
+    assert app.prompt_for_decision(events.QUESTION) is True
+    assert app.decision_waiting == events.QUESTION
+    assert not app.left_add_data, "the popup offers the way through; it is not the way through"
 
-    # Already there: nothing to reveal, and nothing to redraw for.
-    assert app.reveal_for_decision() is False
+    app.enter_workspace()
+    assert app.left_add_data
+    assert app.decision_waiting == ""
+
+    # Already there: the decision is on screen, and there is nothing to invite.
+    assert app.prompt_for_decision(events.APPROVAL) is False
+    assert app.decision_waiting == ""
+
+    # Skipped past adding data is the other way to be in the workspace, and it
+    # is `app.shell`'s rule that decides — one rule, or the popup floats over a
+    # workspace saying the transcript is somewhere else.
+    app.left_add_data, app.skipped_sources = False, True
+    assert app.prompt_for_decision(events.QUESTION) is False

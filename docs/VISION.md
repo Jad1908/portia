@@ -381,9 +381,12 @@ turn.
 The workflow this is built for, end to end, in one window, starting from nothing:
 
 1. Open a new project directory. Write the brief into the context panel.
-2. Drop the data in. Profiling names each file as it goes; **Continue** takes you to the project
-   and starts the interpret turn there, where the Indexing tab can show it — you approve each
-   `set_interpretation` — already a place where the copilot's judgment is worth reading.
+2. Drop the data in. Profiling names each file as it goes, and the interpret turn **starts by
+   itself the moment profiling ends** (2026-08-07) — it used to wait for **Continue**, which spent
+   the same wait twice. The add-data screen says a read is running; **Open the workspace** takes
+   you to the Indexing tab to watch it, and if the copilot stops to ask or to have a
+   `set_interpretation` allowed while you are still on that screen, a popup says so and offers the
+   way through. It invites rather than teleports: moving screens is yours to do.
 3. Pick a model and effort, type the goal, Go.
 4. Watch it climb the ladder — `describe` → `profile` → `join_findings` — with **tool results
    expandable inline**, so you can see the evidence it is reasoning from rather than inferring it.

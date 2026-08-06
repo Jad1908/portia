@@ -310,11 +310,17 @@ class App:
     #: when nothing is running. Profiling twenty real extracts takes a minute,
     #: and a window that says nothing for a minute reads as broken.
     indexing_status: str = ""
-    #: Sources profiled but not yet read by the copilot. The interpretation turn
-    #: is deferred until the workspace is open, because that is the only screen
-    #: with a transcript to show it in — running it on the add-data screen meant
-    #: paying for a turn nobody could see.
+    #: Sources profiled but not yet read by the copilot. The read **starts as
+    #: soon as profiling finishes** (2026-08-07) rather than waiting for the way
+    #: out to be pressed: the turn is the slow half, and a screen that holds it
+    #: back until you click is a screen that spends your wait twice. This is the
+    #: queue between the two halves, so a second batch indexed while the first is
+    #: still being read is picked up rather than dropped.
     pending_interpret: list[str] = field(default_factory=list)
+    #: The kind of decision the copilot has stopped on while the human is still
+    #: on the add-data screen — an `events` kind, or ``""`` for none. It is what
+    #: the invitation popup reads, and clearing it is what closes that popup.
+    decision_waiting: str = ""
     #: How many sources the last indexing run profiled, or ``None`` if none has
     #: finished on this screen. It is what turns the primary action from "index
     #: these" into "open the workspace" — the screen has to say the work is done
@@ -396,23 +402,45 @@ class App:
         # empty box is now something you have to clear on purpose.
         return (self.import_destination or "").strip()
 
-    def reveal_for_decision(self) -> bool:
-        """A pending question or write opens the workspace. Did it need opening?
+    @property
+    def on_add_data(self) -> bool:
+        """Whether the add-data screen is the thing on screen.
 
-        The **one exit** from the first-run block. The add-data screen holds you
-        while the opening interpretation runs, so you cannot walk into a
-        workspace describing sources nobody has read yet — but the copilot may
-        stop and ask, and the form it asks with lives in the transcript. Blocking
-        without this is a screen waiting forever for an answer it gives you no
-        way to give.
+        One rule, read by `app.shell` (which draws it) and by
+        `prompt_for_decision` (which is only true *because* it is drawn). Two
+        copies of it is how a popup ends up floating over a workspace saying the
+        transcript is somewhere else.
+        """
+        return not self.left_add_data and not self.skipped_sources
+
+    def prompt_for_decision(self, kind: str) -> bool:
+        """The copilot has stopped for a human. Do they have to be invited in?
+
+        The read now runs **while** you are still on the add-data screen, so the
+        copilot can stop and ask with the transcript nowhere on screen. The form
+        it asks with lives in the workspace, so something has to bridge that —
+        and this records that a bridge is owed rather than building one.
+
+        **It asks rather than teleports** (2026-08-07). This used to set
+        ``left_add_data`` itself: a question arriving swapped the whole window
+        for a workspace mid-click, while you were half-way through ticking the
+        next batch of files. Moving screens is the human's move to make, so the
+        answer here is a popup that says what is waiting and offers the way
+        through — and ``False`` means they are already there and it is on screen
+        anyway.
 
         A rule rather than two lines inside `turn._stop` because it is worth
         stating, and because stating it makes it testable without a browser.
         """
-        if self.left_add_data:
+        if not self.on_add_data:
             return False
-        self.left_add_data = True
+        self.decision_waiting = kind
         return True
+
+    def enter_workspace(self) -> None:
+        """Through to the three panes, with nothing left inviting you there."""
+        self.decision_waiting = ""
+        self.left_add_data = True
 
     @property
     def spec_has_steps(self) -> bool:
