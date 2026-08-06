@@ -90,6 +90,7 @@ for example `source:data/orders.csv::customer_id` or `model:mart_orders::note_x`
 | `null_rate` | float | `checks.profiling` | it is a model's column |
 | `n_distinct` | int | `checks.profiling` | it is a model's column |
 | `flags` | list of string | `checks.profiling` | it is a model's column |
+| `derivation` | `"unknown"` | `knowledge.build` — see below | almost always; only a model's column ever carries it |
 | `_build` | string | see *Rebuilds* | never |
 
 **A column belongs to one table and is never shared.** Two tables that both have `customer_id`
@@ -98,6 +99,19 @@ so merging them would assume the answer to the question the graph is being built
 
 **A model's columns carry no facts.** Nothing has profiled the table portia *would* build, and
 inventing numbers for it would be the one thing this project forbids.
+
+**`derivation: "unknown"` means the trail stops here and portia could not read past it** — a
+`count(*)`, a literal, anything a `sql` step produced with no input column underneath it. It exists
+because *no outgoing `DERIVES_FROM`* already means something else: on a file's column it means *this
+is where the data came from*, and without the marker a computed column has the identical shape. Two
+states only, present or absent — a vocabulary of reasons would fragment the way `Entity`'s names
+would, so the reason lives in the build report instead. To ask for the honest terminal columns:
+
+```cypher
+MATCH (c:Column {name: 'amount'})-[:DERIVES_FROM*]->(o:Column)
+WHERE NOT (o)-[:DERIVES_FROM]->() AND o.derivation IS NULL
+RETURN o.key
+```
 
 ### `:Group` — a set of sources someone said belong together
 
@@ -147,9 +161,18 @@ that **changes the values** (a `normalize` transform) outranks one that only **r
 `_x`/`_y` suffix), which outranks one that merely **carries** the column; ties go to the later step,
 and a column no step ever claimed keeps the step that first read it in.
 
-**Lineage stops at a `sql` step.** That op declares table names and nothing about columns, so a
-model downstream of one gets its `Model` node and its true `READS` edges and **no** `Column` nodes
-at all. `python -m portia.cli.knowledge` prints which models those are and why.
+**A `sql` step is read by a parser, and the rank comes off the parse tree.** That op declares table
+names and nothing about columns, so `knowledge/sqllineage.py` reads them out of the SQL text using
+the input columns the build already holds — through CTEs, sub-selects, `*` and joins. A value that
+travelled as a bare column reference the whole way was *carried* (or *renamed*, if it arrived under
+another name); a function, an operator, a cast or a `CASE` anywhere in the path makes it *changed*.
+Aggregates and windows get no rank of their own — `step` already points at the one place that says
+what the step did.
+
+It needs `sqlglot`, from the `graph` extra. **Without it the step is unresolved**, and so is any
+model downstream: `Model` node, true `READS` edges, no `Column` nodes. Same when the SQL cannot be
+parsed or cannot be resolved against its inputs. `python -m portia.cli.knowledge` prints what could
+not be read and why — per model when the whole spec stalled, per column when only one did.
 
 ### Measured — costs a query, and is nobody's to delete
 

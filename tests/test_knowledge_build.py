@@ -16,9 +16,11 @@ import pytest
 import yaml
 
 from portia import catalog, spec
-from portia.knowledge import build_graph
+from portia.knowledge import build_graph, sqllineage
 from portia.knowledge.schema import (
     COLUMN,
+    DERIVATION,
+    DERIVATION_UNKNOWN,
     DERIVES_FROM,
     GROUP,
     HAS_COLUMN,
@@ -271,32 +273,143 @@ def test_lineage_stops_at_the_upstream_models_own_column(project):
     assert [e.end.key for e in onward] == [ORDERS.column("amount").key]
 
 
-def test_a_sql_step_leaves_the_model_without_columns_and_says_so(project):
-    """§7 — the honest coarse start. `READS` is still true; the columns are not
-    guessed, and the model is reported so the cost of the hatch is countable."""
-    _write_spec(
+def _sql_spec(project: Path, sql: str, *, name: str = "agg_orders", step: str = "totals"):
+    return _write_spec(
         project,
-        "agg_orders",
+        name,
         {
             "version": 1,
             "sources": {"orders": "data/orders.csv"},
-            "steps": [
-                {
-                    "id": "totals",
-                    "op": "sql",
-                    "inputs": ["orders"],
-                    "sql": "SELECT customer_id, sum(amount) AS total FROM orders GROUP BY 1",
-                }
-            ],
+            "steps": [{"id": step, "op": "sql", "inputs": ["orders"], "sql": sql}],
         },
     )
+
+
+def _sql_derives(graph, model: str, column: str) -> dict[str, dict]:
+    start = Ref(MODEL, model).column(column)
+    return {e.end.key: e.properties for e in graph.edges_of(DERIVES_FROM) if e.start == start}
+
+
+def test_a_sql_step_gets_its_columns_and_its_lineage(project):
+    """`docs/SQL_LINEAGE.md` — the hatch used to cost the model every column.
+
+    The rank is read off the parse tree: `customer_id` travelled as a bare
+    reference and was *carried*; `total` went through a `sum` and was *changed*.
+    """
+    _sql_spec(project, "SELECT customer_id, sum(amount) AS total FROM orders GROUP BY 1")
     result = build_graph(project)
-    assert "sql step" in result.unresolved["agg_orders"]
+
+    assert result.unresolved == {}
+    assert [
+        e.end.key for e in result.graph.edges_of(HAS_COLUMN) if e.start == Ref(MODEL, "agg_orders")
+    ] == [
+        Ref(MODEL, "agg_orders").column("customer_id").key,
+        Ref(MODEL, "agg_orders").column("total").key,
+    ]
+    assert _sql_derives(result.graph, "agg_orders", "customer_id") == {
+        ORDERS.column("customer_id").key: {"via": "sql", "step": "agg_orders#totals"}
+    }
+    assert _sql_derives(result.graph, "agg_orders", "total") == {
+        ORDERS.column("amount").key: {"via": "sql", "step": "agg_orders#totals"}
+    }
+
+
+def test_a_star_select_is_expanded_from_the_inputs_the_build_already_holds(project):
+    """The schema is what makes this cheap here — nothing else has to supply it."""
+    _sql_spec(project, "SELECT * FROM orders")
+    graph = build_graph(project).graph
+    assert [
+        e.end.key for e in graph.edges_of(HAS_COLUMN) if e.start == Ref(MODEL, "agg_orders")
+    ] == [
+        Ref(MODEL, "agg_orders").column(c).key
+        for c in ("order_id", "customer_id", "amount", "note")
+    ]
+
+
+def test_a_column_with_nothing_underneath_it_is_marked_rather_than_left_bare(project):
+    """§5.5 — *no outgoing `DERIVES_FROM`* already means *this is where the data
+    came from*, so a `count(*)` left unmarked would read as a source column."""
+    _sql_spec(project, "SELECT customer_id, count(*) AS n FROM orders GROUP BY 1")
+    result = build_graph(project)
+
+    counted = result.graph.node(COLUMN, Ref(MODEL, "agg_orders").column("n").key)
+    assert counted is not None
+    assert counted.properties[DERIVATION] == DERIVATION_UNKNOWN
+    assert _sql_derives(result.graph, "agg_orders", "n") == {}
+    # The model itself resolved — one line about one column, not a vanished table.
+    assert list(result.unresolved) == ["agg_orders.n"]
+    carried = result.graph.node(COLUMN, Ref(MODEL, "agg_orders").column("customer_id").key)
+    assert DERIVATION not in carried.properties
+
+
+def test_sql_that_cannot_be_read_leaves_the_model_unresolved_with_the_reason(project):
+    """Unparseable, and unresolvable against the declared inputs — two different
+    next moves, so two different reasons rather than one 'sql step' catch-all."""
+    _sql_spec(project, "SELECT FROM WHERE")
+    assert "could not be parsed" in build_graph(project).unresolved["agg_orders"]
+
+    _sql_spec(project, "SELECT nope FROM orders")
+    assert "could not be resolved" in build_graph(project).unresolved["agg_orders"]
+
+
+def test_without_the_parser_a_sql_step_behaves_exactly_as_it_did_before(project, monkeypatch):
+    """§6.6 — a missing optional dependency costs what a stopped container costs.
+
+    The coarse answer `SQL_LINEAGE.md` §3 could find no honest home for as a
+    design stage is this: what happens when `sqlglot` is not installed.
+    """
+
+    def missing():
+        raise sqllineage.LineageUnreadable("sqlglot is not installed")
+
+    monkeypatch.setattr(sqllineage, "_sqlglot", missing)
+    _sql_spec(project, "SELECT customer_id FROM orders")
+    result = build_graph(project)
+
+    assert "sqlglot is not installed" in result.unresolved["agg_orders"]
     assert result.graph.edges_of(DERIVES_FROM) == []
     assert {e.end for e in result.graph.edges_of(READS)} == {ORDERS}
     assert [
         e.end for e in result.graph.edges_of(HAS_COLUMN) if e.start == Ref(MODEL, "agg_orders")
     ] == []
+
+
+def test_a_later_step_keeps_walking_through_a_sql_step(project):
+    """The failure this fixes was not confined to the hatch step: the walk is
+    sequential, so an unresolved step used to blank every step after it."""
+    _write_spec(
+        project,
+        "enriched",
+        {
+            "version": 1,
+            "sources": {"orders": "data/orders.csv", "customers": "data/customers.csv"},
+            "steps": [
+                {
+                    "id": "clean",
+                    "op": "sql",
+                    "inputs": ["orders"],
+                    "sql": "SELECT order_id, trim(customer_id) AS customer_id FROM orders",
+                },
+                {
+                    "id": "joined",
+                    "op": "join",
+                    "left": "clean",
+                    "right": "customers",
+                    "keys": ["customer_id"],
+                },
+            ],
+        },
+    )
+    result = build_graph(project)
+
+    assert result.unresolved == {}
+    # The trim is what explains the key, so it outranks the join that carried it.
+    assert _sql_derives(result.graph, "enriched", "customer_id") == {
+        ORDERS.column("customer_id").key: {"via": "sql", "step": "enriched#clean"},
+        CUSTOMERS.column("customer_id").key: {"via": "join", "step": "enriched#joined"},
+    }
+    # …and a column the hatch only carried still reaches its file.
+    assert list(_sql_derives(result.graph, "enriched", "name")) == [CUSTOMERS.column("name").key]
 
 
 def test_an_unindexed_source_is_a_node_with_no_columns(project):

@@ -231,13 +231,28 @@ def _store_overlaps(graph, edges: list) -> dict:
     A stopped container must not lose the caller the numbers it just paid for,
     so this reports rather than raises: the measurements are in the result
     either way, and only their *durability* is in question (§6.6).
+
+    **A reachable database is not the same as a stored measurement**, and that
+    gap used to be silent (`docs/SQL_LINEAGE.md` §1.5). The write matches both
+    ends, so a pair on a column the graph does not hold is dropped by Neo4j
+    without an error — and this returned `stored: True` regardless. A number the
+    agent paid a real query for, was told was kept, and then could not find is
+    worse than the one §4.4 is about: there, at least, nobody had spent
+    anything.
     """
     try:
         with store.session() as live:
             store.write(graph, live)
-            store.write_measured(edges, live)
+            written = store.write_measured(edges, live)
     except store.GraphUnavailable as exc:
         return {"stored": False, "not_stored_because": str(exc)}
+    if written < len(edges):
+        return {
+            "stored": False,
+            "not_stored_because": prompts.error(
+                "overlaps_not_attached", written=written, asked=len(edges)
+            ),
+        }
     return {"stored": True}
 
 

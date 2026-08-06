@@ -261,3 +261,96 @@ def test_table_level_overlap_is_derived_rather_than_stored(neo4j_session, projec
     edges = [e for e in query.subgraph(neo4j_session)["edges"] if e["kind"] == "OVERLAPS"]
     assert len(edges) == 1
     assert edges[0]["properties"] == {"n_measured_pairs": 1}
+
+
+def test_a_column_with_nothing_underneath_it_says_so_instead_of_looking_like_a_file(
+    neo4j_session, project
+):
+    """`docs/SQL_LINEAGE.md` §1.4 — the trail ending and the data starting are
+    the same shape in the graph, and only the marker tells them apart.
+
+    Without it `origins` reports `count(*)` as the place the data came from,
+    which is the graph asserting something false rather than staying silent.
+    """
+    (project / "specs" / "agg_orders.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "sources": {"orders": "data/orders.csv"},
+                "steps": [
+                    {
+                        "id": "totals",
+                        "op": "sql",
+                        "inputs": ["orders"],
+                        "sql": "SELECT customer_id, count(*) AS n FROM orders GROUP BY 1",
+                    }
+                ],
+            },
+            sort_keys=False,
+        )
+    )
+    store.write(build_graph(project).graph, neo4j_session)
+
+    counted = query.lookup(neo4j_session, "agg_orders", "n")
+    assert counted["column"]["derivation"] == "unknown"
+    assert counted["derives_from"] == []
+    assert "nothing readable underneath it" in query.render_text(counted)
+
+    # The column beside it resolved, and says nothing about derivation at all.
+    carried = query.lookup(neo4j_session, "agg_orders", "customer_id")
+    assert carried["column"]["derivation"] is None
+    assert carried["origins"] == [
+        {"kind": "Source", "table": "orders", "path": "data/orders.csv", "column": "customer_id"}
+    ]
+
+
+def test_a_trail_that_ends_at_an_unreadable_column_still_reports_that_column(
+    neo4j_session, project
+):
+    """It is returned marked rather than filtered out: an origins list that
+    silently loses its last rung reads as *this came from nowhere*."""
+    (project / "specs" / "agg_orders.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "sources": {"orders": "data/orders.csv"},
+                "steps": [
+                    {
+                        "id": "totals",
+                        "op": "sql",
+                        "inputs": ["orders"],
+                        "sql": "SELECT customer_id, count(*) AS n FROM orders GROUP BY 1",
+                    }
+                ],
+            },
+            sort_keys=False,
+        )
+    )
+    (project / "specs" / "mart_totals.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "sources": {},
+                "steps": [
+                    {
+                        "id": "cleaned",
+                        "op": "normalize",
+                        "input": "agg_orders",
+                        "transforms": [],
+                    }
+                ],
+            },
+            sort_keys=False,
+        )
+    )
+    store.write(build_graph(project).graph, neo4j_session)
+
+    assert query.lookup(neo4j_session, "mart_totals", "n")["origins"] == [
+        {
+            "kind": "Model",
+            "table": "agg_orders",
+            "path": None,
+            "column": "n",
+            "derivation": "unknown",
+        }
+    ]

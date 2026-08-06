@@ -765,7 +765,14 @@ Not decided. Listed so a new session knows they are open rather than overlooked.
   needs anything beyond `MAX_ROWS` saying it was cut.
 - **Column lineage through the `sql` hatch** (§4.2). `join` and `normalize` give it for free; a
   `sql` step declares only table-level `inputs`. Options: a coarse step-level edge that is true, or
-  a parser (`sqlglot`) for real column-level lineage. Start coarse; decide later on evidence.
+  a parser (`sqlglot`) for real column-level lineage. ~~Start coarse; decide later on evidence.~~
+  **Closed 2026-08-06 — `docs/SQL_LINEAGE.md`, built.** The premise was wrong: the coarse option
+  needs the output column *names*, and there is no honest source for those that isn't a parser, so
+  coarse and parser were one purchase rather than two. Coarse survives as what happens when the
+  parser is **not installed**, which is a better home for it than a design stage. That doc also
+  records what this bullet understated — a hatch step cost the model **all** of its Column nodes,
+  not just its lineage, which took the harmonized table out of the measured half (§4.1) and made a
+  measurement against it *silently* unstorable.
 - **Composite keys.** A join sometimes needs two columns together. The schema in §4 only knows
   single-column overlaps. This will show up in real data and the modelling is not obvious.
 - **Entity, whenever it ships.** §4.8 defers it and says the fix is a mechanism — show the agent the

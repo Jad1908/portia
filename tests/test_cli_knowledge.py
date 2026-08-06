@@ -77,8 +77,12 @@ def test_a_stopped_database_is_reported_as_one(project, monkeypatch, capsys):
         _run(monkeypatch, "--root", str(project), "--write")
 
 
-def test_unresolved_models_are_reported_and_are_not_a_failure(project, monkeypatch, capsys):
-    """A pipeline that uses the `sql` hatch is not a broken pipeline (§7)."""
+def test_what_could_not_be_read_is_reported_and_is_not_a_failure(project, monkeypatch, capsys):
+    """A pipeline that uses the `sql` hatch is not a broken pipeline.
+
+    And the report is now per **column** when only a column stalled — a model
+    with one `count(*)` in it should cost one line, not the whole table.
+    """
     (project / "specs" / "agg.yaml").write_text(
         yaml.safe_dump(
             {
@@ -89,7 +93,7 @@ def test_unresolved_models_are_reported_and_are_not_a_failure(project, monkeypat
                         "id": "totals",
                         "op": "sql",
                         "inputs": ["orders"],
-                        "sql": "SELECT sum(amount) AS total FROM orders",
+                        "sql": "SELECT order_id, count(*) AS n FROM orders GROUP BY 1",
                     }
                 ],
             },
@@ -97,4 +101,4 @@ def test_unresolved_models_are_reported_and_are_not_a_failure(project, monkeypat
         )
     )
     _run(monkeypatch, "--root", str(project))
-    assert "agg: step 'totals' is a sql step" in capsys.readouterr().out
+    assert "agg.n: no input column underneath it" in capsys.readouterr().out

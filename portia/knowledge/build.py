@@ -33,13 +33,20 @@ edges, and each carries the step that explains its own side — because a
 `coalesce` picks a value rather than changing one. That the column is a
 composite needs no property: it is free from the edge count (§4.2).
 
-**Where it stops: the `sql` hatch.** A `sql` step declares *table* names as its
-inputs and nothing about columns, so its output columns cannot be named from the
-spec at all. Rather than guess them, a model downstream of one is reported as
-unresolved: it gets its Model node and its `READS` edges, which are true, and no
-Column nodes. §7 keeps "a parser (`sqlglot`) for real column-level lineage" open
-and says to start coarse and decide on evidence; this is the coarse start, and
-:attr:`BuildResult.unresolved` is the evidence.
+**The `sql` hatch, and why it needed a parser.** A `sql` step declares *table*
+names as its inputs and nothing about columns, so the spec alone cannot name what
+came out. This used to stop the walk, and the cost was not the lineage: it was
+that the model lost **every** Column node, which took the harmonized table out of
+the measured half of the graph — the columns §4.1 argues are the only ones where
+measuring shared values means what it says. `sqllineage.py` reads the columns out
+of the SQL text instead, using the input columns this walk is already carrying.
+It stays optional (`KNOWLEDGE_GRAPH.md` §6.6): without it the step is unresolved
+exactly as before, with a reason saying so. `docs/SQL_LINEAGE.md`.
+
+A column the parser can name no origin for — `count(*)`, a literal — is still a
+Column node, marked :data:`schema.DERIVATION_UNKNOWN`. Leaving it unmarked would
+make it indistinguishable from a file's column, which is the one thing
+`query.origins` reads as *this is where the data came from*.
 """
 
 from __future__ import annotations
@@ -49,8 +56,11 @@ from pathlib import Path
 
 from portia import catalog, pipeline, spec
 from portia.checks.join import resolve_keys
+from portia.knowledge import sqllineage
 from portia.knowledge.schema import (
     COLUMN,
+    DERIVATION,
+    DERIVATION_UNKNOWN,
     DERIVES_FROM,
     FINGERPRINT,
     GROUP,
@@ -111,10 +121,12 @@ class _Relation:
 class BuildResult:
     """The graph, and what the project could not be read into it.
 
-    ``unresolved`` is one line per model whose output columns the spec cannot
-    name. It is deliberately part of the result rather than a warning printed
-    somewhere: it is the measure of how much the `sql` hatch costs column
-    lineage, which is the evidence §7 asks for before buying a SQL parser.
+    ``unresolved`` is one line per thing that could not be read, keyed by the
+    model — or by ``<model>.<column>`` when the model itself is fine and one of
+    its columns has no nameable origin. Both granularities on purpose: a model
+    with eight clean columns and one `count(*)` should report one line, not
+    vanish. It is part of the result rather than a warning printed somewhere
+    because it is the standing measure of what the `sql` hatch still costs.
     """
 
     graph: Graph
@@ -186,12 +198,22 @@ def _add_catalog(graph: Graph, data: dict) -> dict[str, list[str]]:
     return columns
 
 
-def _add_column(graph: Graph, table: Ref, name: str, facts: dict | None = None) -> Ref:
+def _add_column(
+    graph: Graph,
+    table: Ref,
+    name: str,
+    facts: dict | None = None,
+    *,
+    derivation_unknown: bool = False,
+) -> Ref:
     """One column node. Facts when the catalog has them; a name when it doesn't.
 
     A model's columns arrive with no facts at all, and that is honest — nothing
     has profiled the table portia would build. `role` is judgment the catalog
     holds and the graph restates; it is never invented here.
+
+    ``derivation_unknown`` is only ever true of a model column, and only when
+    nothing could be named underneath it — see :data:`schema.DERIVATION`.
     """
     facts = facts or {}
     return graph.add_node(
@@ -204,6 +226,7 @@ def _add_column(graph: Graph, table: Ref, name: str, facts: dict | None = None) 
         null_rate=facts.get("null_rate"),
         n_distinct=facts.get("n_distinct"),
         flags=facts.get("flags"),
+        **{DERIVATION: DERIVATION_UNKNOWN if derivation_unknown else None},
     )
 
 
@@ -271,9 +294,16 @@ def _add_model(
         return produced
 
     for name in produced.columns:
-        column = _add_column(graph, node, name)
+        # Every op but `sql` gives each output column at least one trace, so an
+        # empty list means one thing: the parser read the column but could name
+        # nothing underneath it. Marking it is what keeps `query.origins` from
+        # reporting a computed column as the file the data came from.
+        traces = produced.traces.get(name) or []
+        column = _add_column(graph, node, name, derivation_unknown=not traces)
         graph.add_edge(HAS_COLUMN, node, column)
-        for trace in produced.traces.get(name, []):
+        if not traces:
+            result.unresolved[f"{node.key}.{name}"] = _UNKNOWN_ORIGIN
+        for trace in traces:
             origin = trace.table.column(trace.column)
             if graph.node(COLUMN, origin.key) is None:
                 continue  # its table's columns are not in the graph; say nothing
@@ -283,6 +313,7 @@ def _add_model(
 
 _UNBUILT = "reads a model whose own columns could not be resolved"
 _NO_STEPS = "the spec has no steps, so it produces no table"
+_UNKNOWN_ORIGIN = "no input column underneath it — a literal, or an aggregate over rows"
 
 
 def _model_relation(model: Ref, produced: _Relation | None) -> _Relation:
@@ -321,7 +352,7 @@ def _step_relation(step: dict, relations: dict[str, _Relation], model: str) -> _
     if op == "join":
         return _join_relation(step, relations, pointer)
     if op == "sql":
-        return _Relation(None, reason=f"step {step.get('id')!r} is a sql step — see §7")
+        return _sql_relation(step, relations, pointer)
     return _Relation(None, reason=f"unknown op {op!r} in step {step.get('id')!r}")
 
 
@@ -369,6 +400,50 @@ def _join_relation(step: dict, relations: dict[str, _Relation], pointer: str) ->
         columns.append(out.name)
         traces[out.name] = _dedupe(found)
     return _Relation(columns, traces)
+
+
+def _sql_relation(step: dict, relations: dict[str, _Relation], pointer: str) -> _Relation:
+    """`sql` says nothing about columns, so they are read out of the SQL text.
+
+    The rank is the same question the other two ops answer, and the parser
+    answers it structurally: a value that travelled as a bare column reference
+    the whole way was carried (or renamed, if it arrived under another name),
+    and anything with a function, an operator or a `CASE` in its path was
+    changed. No vocabulary of transform kinds, and no rank of its own for
+    aggregates or windows — `via` and `step` already point at the one place that
+    says what the step does (§4.2).
+    """
+    inputs: dict[str, list[str]] = {}
+    for name in step.get("inputs") or []:
+        relation = relations.get(name)
+        if relation is None:
+            return _Relation(None, reason=_MISSING)
+        if relation.columns is None:
+            return relation
+        inputs[name] = relation.columns
+
+    try:
+        origins = sqllineage.column_origins(step.get("sql") or "", inputs)
+    except sqllineage.LineageUnreadable as exc:
+        return _Relation(None, reason=f"step {step.get('id')!r}: {exc}")
+
+    traces = {}
+    for name, found in origins.items():
+        traces[name] = _dedupe(
+            [
+                trace.touched("sql", pointer, _sql_rank(origin, name))
+                for origin in found
+                for trace in relations[origin.table].traces.get(origin.column, [])
+            ]
+        )
+    return _Relation(list(origins), traces)
+
+
+def _sql_rank(origin: sqllineage.Origin, output: str) -> int:
+    """One origin's rank — the same three the other ops use, no fourth."""
+    if origin.transformed:
+        return CHANGED
+    return CARRIED if origin.column == output else RENAMED
 
 
 _MISSING = "a step reads a table this spec does not declare"
