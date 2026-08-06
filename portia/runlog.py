@@ -259,7 +259,8 @@ def summary(run: Run) -> dict[str, Any]:
     better than another — see this module's docstring, and `CLAUDE.md` → facts
     vs judgment.
     """
-    calls = [events.tool_label(str(e.data.get("name", ""))) for e in _of(run, events.TOOL_CALL)]
+    called = _of(run, events.TOOL_CALL)
+    calls = [events.tool_label(str(e.data.get("name", ""))) for e in called]
     approvals = _of(run, events.APPROVAL_RESULT)
     allowed = [e for e in approvals if e.data.get("allowed")]
     questions = _of(run, events.QUESTION)
@@ -273,9 +274,12 @@ def summary(run: Run) -> dict[str, Any]:
         "effort": run.header.get("effort"),
         "prompt": run.header.get("prompt"),
         "portia_sha": run.header.get("portia_sha"),
-        # Rungs pulled and in what order — the sequence *is* the finding, so it
-        # is kept whole rather than reduced to a set.
-        "sequence": calls,
+        # Rungs pulled, in what order, and **what each one was about** — the
+        # sequence *is* the finding, so it is kept whole rather than reduced to
+        # a set, and since the graph arrived it has to carry the subject too:
+        # `graph_lookup` is a router, and a log that says only that it was
+        # called cannot say whether it routed anywhere.
+        "sequence": [_call_label(e) for e in called],
         "by_tool": _tally(calls),
         "tools": len(calls),
         "tool_errors": sum(1 for e in _of(run, events.TOOL_RESULT) if e.data.get("is_error")),
@@ -289,7 +293,7 @@ def summary(run: Run) -> dict[str, Any]:
         "refused": len(approvals) - len(allowed),
         "subtype": result.data.get("subtype") if result else None,
         "cost_usd": result.data.get("cost_usd") if result else None,
-        **_tokens(usage),
+        **token_totals(usage),
     }
 
 
@@ -297,11 +301,54 @@ def _of(run: Run, kind: str) -> list[events.Event]:
     return [e for e in run.events if e.kind == kind]
 
 
+#: How much of one argument, and of the whole subject, a sequence entry keeps.
+#: Long enough to name a source or a column, short enough that thirty calls
+#: still read as one line.
+SUBJECT_PART_CHARS = 24
+SUBJECT_CHARS = 48
+
+
+def call_subject(tool_input: dict | None) -> str:
+    """What one call was *about*, in a few characters — `graph_lookup(orders.city)`.
+
+    The sequence used to record only which tools were called, which was enough
+    while every tool answered "tell me more about one table you already named".
+    It stopped being enough when the graph arrived: `graph_lookup` is a
+    **router**, so the question it answers is *which* table — and a log saying
+    only that it was called cannot tell you whether it routed anywhere. Same for
+    `measure_overlaps`, where the interesting fact is how many pairs.
+
+    Deliberately **derived from the argument shapes rather than a table of
+    tools**: a per-tool map is one more thing to go stale silently, and the
+    generic rule — the string arguments, or a count of the list one — happens to
+    read correctly for every tool there is. Still counting, never scoring: this
+    says what was asked, not whether asking was right.
+    """
+    items = [(k, v) for k, v in (tool_input or {}).items() if k != "portia_dir"]
+    strings = [_clip(v, SUBJECT_PART_CHARS) for k, v in items if isinstance(v, str) and v]
+    if strings:
+        return _clip(".".join(strings), SUBJECT_CHARS)
+    counted = [f"{len(v)} {k}" for k, v in items if isinstance(v, list)]
+    return _clip(", ".join(counted), SUBJECT_CHARS)
+
+
+def _call_label(event: events.Event) -> str:
+    """One call as the sequence records it: the tool, and what it was about."""
+    name = events.tool_label(str(event.data.get("name", "")))
+    subject = call_subject(event.data.get("input"))
+    return f"{name}({subject})" if subject else name
+
+
+def _clip(text: str, chars: int) -> str:
+    text = str(text)
+    return text if len(text) <= chars else text[: chars - 1] + "…"
+
+
 #: The three fields that together make up everything sent to the model.
 INPUT_FIELDS = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
 
 
-def _tokens(usage: dict[str, Any]) -> dict[str, Any]:
+def token_totals(usage: dict[str, Any]) -> dict[str, Any]:
     """What the turn actually sent and received.
 
     The SDK's ``input_tokens`` counts only the *uncached* part, and on a portia
@@ -315,6 +362,11 @@ def _tokens(usage: dict[str, Any]) -> dict[str, Any]:
     So `input_tokens` here is the whole of it, and `cached_tokens` says how much
     of that was read from cache rather than sent fresh. Both are facts; neither
     says whether a run was expensive, which is a judgment that needs a goal.
+
+    **Public because the window shows these live**, at the end of a turn, and a
+    second implementation of "which of the SDK's three input fields count" is
+    how the panel and `cli.runs` end up quoting different numbers for one turn —
+    the disagreement `core/present.py` exists to stop.
     """
     if not usage:
         return {"input_tokens": None, "cached_tokens": None, "output_tokens": None}

@@ -205,10 +205,11 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
 - **Role vocabulary** — the agent invents role names per run (`attribute` vs `category`,
   `unused` vs `dropped`). Fine while we learn what roles are useful; revisit once real use shows
   which ones carry weight, and only then consider constraining them.
-- **Broad "how sources interact" model** — likely joins / relationships across sources (the
-  context-aware end goal). Deferred as too early — forge convictions via the UI first.
-- **Groups in use** — `groups` are stored and rendered into the L1 brief, but nothing downstream
-  consumes them.
+- **Broad "how sources interact" model** — *picked back up 2026-08-04 as `KNOWLEDGE_GRAPH.md`,
+  phase A built.* The design is that document; what is left of the item is its phases B–D, tracked
+  under **Knowledge graph** below.
+- **Groups in use** — `groups` are stored and rendered into the L1 brief, and now restated as
+  `Source IN_GROUP Group` in the knowledge graph. Still nothing *reads* them until phase B.
 - **Catalog storage shape** — one-file-per-source now; revisit one-file vs per-group vs harmonized
   once we've used it (kept deliberately un-locked / hand-editable).
 - **Context bundle** — a token-lean projection of the catalog for the agent to consume; and a
@@ -323,6 +324,55 @@ column roles + facts; facts refresh, judgment preserved. Remaining:*
   results. `core.table.Table` is the seam: a name, a query and a connection is not a DuckDB-shaped
   idea, which was the point of building it that way. The product vision for it is in `VISION.md`.
 
+## Knowledge graph — `portia/knowledge/`
+
+*Phase A is built (`KNOWLEDGE_GRAPH.md` → Status). These are what it deferred, plus the design's
+own open questions where the code now has something to say about them.*
+
+- **Replacing the L1 index with traversal — the other half of phase D.** What shipped is the
+  trim: each source's line lost its column count and candidate keys and kept its name and one
+  sentence. §1.4 wants the list itself gone, so the agent walks outward from wherever it is
+  instead of being handed everything. **Not taken, and the reason is the interesting part** — the
+  premise is "fine at 3 sources, unproven at 50", and unproven is not measured. What would have to
+  be true first: a project big enough for the cost to be visible, *and* a re-runnable fixture that
+  can say whether the copilot got worse — because the failure mode is subtle (generic judgment
+  from missing context), it is exactly what `context.py` says pushing L1 exists to prevent, and
+  §9.4 calls D the riskiest and insists it be evaluated on its own.
+- **Does anything measure outside indexing?** (§7, still open.) `measure_overlaps` is available in
+  any turn and nothing stops the agent reaching for it mid-conversation — but only the indexing
+  prompts *ask* for it. Whether a conversation-phase prompt should, and whether a user-invoked
+  sweep should exist as an escape hatch, is unsettled. §6.5's three reasons against sweeping are
+  unchanged.
+- **Column lineage through the `sql` hatch** (§4.2, §7). A model downstream of a `sql` step gets no
+  Column nodes and lands in `BuildResult.unresolved`. That dict is the evidence to decide on:
+  if real projects run mostly through the hatch, `sqlglot` earns its place; if they don't, the
+  coarse answer is the right one. **Don't buy the parser before reading the number.**
+- **A build never notices a spec it did not run.** `is_stale` compares a `.sql` to its spec and
+  `catalog.is_stale` compares a file to its record; the graph has both fingerprints on its nodes
+  and nothing yet asks the question. Cheap, and it is what §4.5's "walk forward from a changed file
+  and name the affected model columns" needs.
+- **Composite keys** (§7). The schema knows single-column overlaps only. Nothing in phase A hits
+  this — a composite join key already produces one `DERIVES_FROM` edge per key column — but
+  `OVERLAPS` will.
+- **Orphan nodes are pruned only when they have no relationships at all.** A Column that lost its
+  table but kept a measurement stays, on purpose (§4.5: mark stale, never delete). Nothing marks it
+  yet, so it is currently indistinguishable from a live one.
+- **`DESIGN.md` needs one line on where its ranking rule governs.** *Colour and prominence
+  communicate kind, never rank* is stated as a product rule; it plainly governs surfaces portia
+  lays out itself, and plainly cannot govern an embedded third-party explorer with its own force
+  layout. That boundary should be written down rather than inferred from `KNOWLEDGE_GRAPH.md`
+  §6.9.
+- **`profiling.py` computes `min`/`max` per column and `catalog._column_facts` drops them**
+  (§6.5). A fact the profiler already paid for, and exactly what the agent needs to judge whether a
+  pair is worth measuring in phase C.
+
+- **Indexing is offered from three places** — the add-data screen, the un-indexed-file inspector,
+  and the Indexing tab (2026-08-06). Chosen deliberately, and it is the duplication the 2026-08-02
+  overhaul removed from the add-data screen, reintroduced. The tab is where *"what does portia know
+  about each source"* belongs; the other two are where you happen to be standing when the question
+  comes up. Worth revisiting if they start to disagree — the risk is not the three buttons, it is
+  three ideas of what indexing *means*.
+
 ## Core / infra
 
 - **README says nothing about auth — a decision awaiting the user, not an oversight.** `PLAN.md`
@@ -417,6 +467,30 @@ odd finding worth carrying forward isn't lost with it.*
   (see `ask.py:59` above).
 - **Prompt work the pipeline overhaul required** — `record_step.md` teaches new-spec-vs-new-step and
   the `layer` field; `copilot.md` covers proposing the project's shape.
+
+**Knowledge graph**
+
+- **Phase D (half) — the L1 trim** — 2026-08-04, `agent/context.py`. Each source's line dropped its
+  column count and candidate keys, which is what `describe_source`/`profile_source` are for. The
+  index itself stays; replacing it with traversal is above, with what would have to be true first.
+  *Found on the way: `_first_sentence` had been appending a full stop unconditionally, so a
+  one-sentence summary reached every system prompt ending in `..`*
+- **Phase C — the agent picks the pairs** — 2026-08-04, `checks.join.column_overlap`,
+  `knowledge/measure.py`, `measure_overlaps`, rewritten indexing prompts. The reason on a pair is
+  **required in code**, because §4.4's whole argument is that the sentence is what stops a zero
+  reading as a dead end. *The finding worth carrying: staleness turned out to be a **read-time**
+  question — fingerprints on both ends and a comparison in the query — so "mark, never delete" is
+  free rather than disciplined, and nothing has to invalidate anything when a file changes.*
+- **Phase B — the read path** — 2026-08-04, `knowledge/query.py` + the `graph_lookup` tool. Fixed
+  queries, taught as a *router* that comes before L2 rather than a rung above L4. *The finding
+  worth carrying: §7's "what may a query return at once" needed no cap — asking about a table
+  returns tables, so the fifty-edge answer is never built.*
+- **Phase A — the write path** — 2026-08-04, `portia/knowledge/`. The catalog and the specs read
+  into nodes and edges, column-level `DERIVES_FROM` included, with nothing run and no connection
+  opened. `python -m portia.cli.knowledge` builds and prints it; `--write` needs Neo4j and nothing
+  else does. *The finding worth carrying: lineage came out of `ops.join.join_columns` rather than a
+  second implementation of the `_x`/`_y` rule — the same argument `OpResult.compiled` makes about
+  compilation not being a second rendering of execution.*
 
 **Interface**
 

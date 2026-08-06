@@ -95,6 +95,15 @@ than a tool call, so don't guess either.
 4. **`join_findings`** — what a join between two sources would really do. Always
    call this before saying anything about a merge.
 
+**`graph_lookup` is not on this ladder — it is what tells you which ladder to
+climb.** The four rungs above all answer *tell me more about this table*, and they
+assume you already know which table. When you don't, ask the graph: it holds what
+connects to what, and where every column in a built table came from. It is
+breadth, not depth — so it comes *before* step 2, not after step 4, and it is
+cheap. Use it to pick the source, then climb the rungs on the one it points at.
+Don't use it as a worse `describe_source`; it will not tell you what a column
+means.
+
 If the project description is missing or too thin to decide something, say so and
 ask. Don't fill the gap with a generic assumption — a generic reading of the data
 is exactly what the user could have done without you.

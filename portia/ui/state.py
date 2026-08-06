@@ -77,6 +77,12 @@ UNINDEXED = tree.DATA
 #: pinned above it, because it is the most consequential text in the product and
 #: it was previously reachable only from a toolbar button.
 BRIEF = "brief"
+#: The knowledge graph — **not** the project canvas, and pinned rather than in
+#: the tree for the same reason the brief is: it lives in Neo4j, not on disk.
+#: The canvas draws what we specified; this draws what the data is to itself
+#: (`docs/KNOWLEDGE_GRAPH.md` §6.9), so they are two rows, never two modes of
+#: one.
+KNOWLEDGE = "knowledge"
 
 
 @dataclass
@@ -154,6 +160,13 @@ class Turn:
     running: bool = True
     subtype: str | None = None
     cost_usd: float | None = None
+    #: What the turn sent and received, from `runlog.token_totals` — the same
+    #: arithmetic `cli.runs` prints, so the window and the terminal cannot quote
+    #: two different numbers for one turn. `input_tokens` is the whole input
+    #: including the cached part, which on a portia turn is nearly all of it.
+    input_tokens: int | None = None
+    cached_tokens: int | None = None
+    output_tokens: int | None = None
     error: str | None = None
 
     @property
@@ -208,6 +221,14 @@ class App:
     outputs: list[Path] = field(default_factory=list)
 
     selection: tuple[str, str] | None = None  # (kind, name) — None = the workflow
+    #: Whether the knowledge explorer is showing columns as well as tables.
+    #: A view, not a preference: it is about what is on screen right now, so it
+    #: lives here rather than in `ui/settings.py`.
+    knowledge_columns: bool = False
+    #: Which sources the indexing tab has ticked. A selection, not a setting —
+    #: it is about what you are doing right now, so it lives here rather than in
+    #: `ui/settings.py` and is not persisted.
+    index_ticks: frozenset[str] = frozenset()
     selected_step: str | None = None
     #: Which folders in the left tree the operator has opened, and which they have
     #: shut. Two sets rather than one because the default is neither: **the top
@@ -366,7 +387,32 @@ class App:
         """
         if self.import_to_data_dir:
             return self.data_dir if self.data_dir not in ("", ".") else fallback
-        return (self.import_destination or "").strip() or fallback
+        # **An empty box means the project root** (2026-08-06). It used to fall
+        # through to `data/`, on the reading above that dropping files loose at
+        # the top of a project is not a decision anyone makes deliberately. That
+        # is wrong for the project whose data *is* at its root — a folder of
+        # CSVs opened directly — where `data/` is the surprise and the root is
+        # the obvious answer. The checkbox above is still the default, so the
+        # empty box is now something you have to clear on purpose.
+        return (self.import_destination or "").strip()
+
+    def reveal_for_decision(self) -> bool:
+        """A pending question or write opens the workspace. Did it need opening?
+
+        The **one exit** from the first-run block. The add-data screen holds you
+        while the opening interpretation runs, so you cannot walk into a
+        workspace describing sources nobody has read yet — but the copilot may
+        stop and ask, and the form it asks with lives in the transcript. Blocking
+        without this is a screen waiting forever for an answer it gives you no
+        way to give.
+
+        A rule rather than two lines inside `turn._stop` because it is worth
+        stating, and because stating it makes it testable without a browser.
+        """
+        if self.left_add_data:
+            return False
+        self.left_add_data = True
+        return True
 
     @property
     def spec_has_steps(self) -> bool:

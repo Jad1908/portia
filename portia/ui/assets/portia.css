@@ -2203,3 +2203,106 @@ body.body--dark .step-card {
   flex-direction: column;
   gap: var(--sp-xs);
 }
+
+/* The knowledge explorer's canvas. vis-network draws into it and owns
+   everything inside; all this does is give it a surface and a border that
+   matches the panes around it. */
+.p-knowledge {
+  width: 100%;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+/* A picker row for a folder with nothing readable under it. Dimmed and
+   un-clickable, because it is not a thing you can pick — a *kind*, which is
+   what prominence is allowed to say (DESIGN.md), and not a rank. */
+.picker-row.is-empty {
+  cursor: default;
+  opacity: 0.45;
+}
+.picker-row.is-empty:hover {
+  background: transparent;
+}
+
+/* The eligible files under the folder you are looking at, listed before you
+   commit to it: the count said how many and never which. */
+.picker-files {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xxs);
+  padding: var(--sp-sm) var(--sp-md);
+  border-top: 1px solid var(--hairline-soft);
+}
+.picker-file {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+}
+.picker-file-icon {
+  font-size: 14px;
+  color: var(--ash);
+}
+.picker-file-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--mute);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The indexing tab's source list: what portia knows about each file, and what
+   you can do next. Three states, and the middle one — profiled but never read —
+   is the one a two-state list cannot show. Colour says *kind*, never rank: a
+   source nobody has read is not worse than one that has been, it is at a
+   different point in the same sequence (DESIGN.md). */
+.index-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.index-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  padding: var(--sp-xs) var(--sp-sm);
+  border-bottom: 1px solid var(--hairline-soft);
+}
+.index-row:last-child {
+  border-bottom: none;
+}
+.index-row-icon {
+  font-size: 15px;
+  color: var(--ash);
+}
+.index-row.is-interpreted .index-row-icon {
+  color: var(--success);
+}
+.index-row.is-unread .index-row-icon {
+  color: var(--warning);
+}
+.index-row-name {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.index-row-state {
+  font-size: 11px;
+  color: var(--mute);
+}
+.index-row-stale {
+  font-size: 11px;
+  color: var(--warning);
+}
+.index-actions {
+  display: flex;
+  gap: var(--sp-sm);
+  margin-top: var(--sp-sm);
+}

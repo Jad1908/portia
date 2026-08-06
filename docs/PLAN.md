@@ -165,7 +165,8 @@ asset.
    see specs in subdirectories, and its Run did not resolve cross-spec references — so a spec that
    ran from the CLI failed in the window, which is the one seam `VISION.md` says must never break.
 
-**Next — the knowledge graph** (`docs/KNOWLEDGE_GRAPH.md`, designed 2026-08-04). The gap it fills is
+**Shipped — the knowledge graph** (`docs/KNOWLEDGE_GRAPH.md`, designed and built 2026-08-04,
+all four phases). The gap it fills is
 structural and visible without any run: **the catalog is one file per source and has no shape for
 what a source *relates to***, and `checks/join.py` measures exactly that relationship and then
 discards it when the turn ends. On top of that, **L1 is exhaustive and pushed into every system
@@ -187,6 +188,32 @@ agent picks them while it is indexing, the same act in which it already writes a
 proposes groups — not a code prefilter and not a sweep of all ~245,000 pairs. Above all, §6.1: **the
 graph surfaces edges and never ranks them**, and §4.4: a measured zero means *no shared values*, not
 *unrelated* — which is why the edge carries the reason the agent asked for it.
+
+**Where it actually is.** §9.4's phases A and B are built and verified against a live Neo4j.
+**A** is the write path — sources, models, columns, groups, `READS` and column-level
+`DERIVES_FROM`, read off the catalog and the specs with nothing run and no connection opened.
+**B** is the read path: `graph_lookup`, fixed queries, one new tool. Between them they settled the
+lineage rank (a transform outranks a rename outranks a carry), made the `sql` hatch's cost
+countable rather than guessed, fixed the rule that a rebuild may delete structural edges and
+**never** a measurement, and answered §7's open question about what a query may return — *a router
+returns tables*, so the fifty-edge answer never gets constructed and nothing has to be truncated to
+avoid it. **C** is the measured half: the agent picks which column pairs are worth comparing *while it is
+indexing*, and portia measures them and stores the numbers with the reason it was asked. **D** was
+taken **half way, deliberately** — each source's line in the always-on brief lost its column count
+and candidate keys, and the index itself stays. §1.4 wants it replaced by traversal; its premise is
+"unproven at 50", which is not a measurement, and there is no re-runnable fixture that could say
+whether the copilot got worse. `BACKLOG.md` holds what would have to be true first.
+
+**And it has been watched once on real data** (2026-08-06, `EVALUATION.md`). Haiku at low effort,
+23 PHQ sources, one indexing turn, $0.19. It chose 12 column pairs out of the ~245,000 the schema
+permits; eight are ordinary foreign keys and measure like it, one is a name join that half-works,
+one is a plain miss the measurement caught — and **the two that connect the event data to the hotel
+golden record both measure zero**, one of them with mismatched types. That second one is the thing
+worth remembering: a *type check* would have discarded it with certainty and been correct to, and
+it is one of the two pairs that project exists to resolve. §6.5's warning that a provable excluder
+can still be blind to meaning is no longer hypothetical. It also never called `graph_lookup` — three
+indexing runs now, zero uses of the router — which is a prompt problem and is where the next work
+is.
 
 **The loop changes with it, not after it** (§9). The graph sits *before* `describe_source` as a
 router — *which* table should I look at, and where did this column come from — rather than as a

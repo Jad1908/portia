@@ -22,17 +22,21 @@ turns them into a tool result the agent can react to.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from portia import catalog, spec
+from portia import catalog, knowledge, spec
 from portia.agent import prompts
 from portia.checks import profiling
+from portia.checks.join import column_overlap
 from portia.checks.join import join_findings as _join_findings
 from portia.checks.outcome import BLOCKING_FLAGS
 from portia.checks.profiling import profile_path
 from portia.core.io import connect, load_table
 from portia.core.serialize import to_json
+from portia.knowledge import measure, query, store
+from portia.knowledge import schema as knowledge_schema
 from portia.ops import join as join_op
 from portia.ops import normalize as normalize_op
 from portia.ops import sql as sql_op
@@ -149,6 +153,145 @@ def describe_source(source: str, portia_dir: str = catalog.DEFAULT_DIR) -> dict:
             }
             for col in entry.get("columns", [])
         ],
+    }
+
+
+def graph_lookup(table: str, column: str | None = None) -> dict:
+    """The router — *which* table should I look at, and where did this column come from.
+
+    Not a rung on the disclosure ladder: the ladder is depth on one source, and
+    this is breadth. It sits **before** ``describe_source`` (`KNOWLEDGE_GRAPH.md`
+    §9.1) — ask it where to start, then climb.
+
+    Named without a table it returns tables, never column pairs: what this one
+    reads, what reads it, its groups, and which other tables share a measured
+    overlap with it. Add a column and it returns that column's lineage — one hop
+    each way with the step that explains it, plus the files underneath.
+
+    The graph lives in Neo4j, which may not be running. That is not an error in
+    the question; it is reported as itself so the caller can carry on with the
+    tools that need no database.
+    """
+    try:
+        with store.session() as live:
+            return query.lookup(live, table, column)
+    except store.GraphUnavailable as exc:
+        # Reframed rather than re-raised: what the model needs at this moment is
+        # not the stack but which tools still work. The other refusals in
+        # `prompts/errors/` exist for the same reason.
+        raise ValueError(prompts.error("graph_unavailable", reason=str(exc))) from None
+
+
+def measure_overlaps(pairs: list[dict], portia_dir: str = catalog.DEFAULT_DIR) -> dict:
+    """Measure whether column pairs share values, and keep the answers.
+
+    **The pairs are yours to choose** (`KNOWLEDGE_GRAPH.md` §5.1). Nothing in code
+    picks them: which relationships are worth a query is a judgment from meaning,
+    and a filter comparing min/max would drop `country_name` against
+    `country_code` with total confidence and be wrong about the most important
+    pair in the project.
+
+    Each pair carries ``reason`` — why you think these two are worth comparing —
+    and it is **required**. It is stored beside the numbers and it is what stops
+    a zero from reading as a dead end a year later (§4.4).
+
+    The structural half of the graph is refreshed first, because a measurement
+    can only attach to columns the graph knows about, and refreshing is free.
+    """
+    con = connect()
+    root = _project_root(portia_dir)
+    graph = knowledge.build_graph(root, portia_dir=portia_dir).graph
+    fingerprints = _table_fingerprints(graph)
+
+    measured, edges = [], []
+    for raw in pairs:
+        pair = _pair(raw, graph, portia_dir)
+        overlap = column_overlap(
+            _table(pair.left_table, portia_dir, con),
+            pair.left_column,
+            _table(pair.right_table, portia_dir, con),
+            pair.right_column,
+        )
+        measured.append({**overlap, "asked_because": pair.spec.asked_because})
+        edges.append(
+            measure.overlap_edge(
+                pair.spec,
+                overlap,
+                left_fingerprint=fingerprints.get(pair.spec.left),
+                right_fingerprint=fingerprints.get(pair.spec.right),
+            )
+        )
+
+    return {"measured": measured, **_store_overlaps(graph, edges)}
+
+
+def _store_overlaps(graph, edges: list) -> dict:
+    """Write the measurements, and say plainly if they could not be kept.
+
+    A stopped container must not lose the caller the numbers it just paid for,
+    so this reports rather than raises: the measurements are in the result
+    either way, and only their *durability* is in question (§6.6).
+    """
+    try:
+        with store.session() as live:
+            store.write(graph, live)
+            store.write_measured(edges, live)
+    except store.GraphUnavailable as exc:
+        return {"stored": False, "not_stored_because": str(exc)}
+    return {"stored": True}
+
+
+@dataclass(frozen=True)
+class _ResolvedPair:
+    """A requested pair, with both ends resolved to graph nodes and table refs."""
+
+    spec: measure.Pair
+    left_table: str
+    right_table: str
+    left_column: str
+    right_column: str
+
+
+def _pair(raw: dict, graph, portia_dir: str) -> _ResolvedPair:
+    """One requested pair, validated. A missing reason is refused, not defaulted."""
+    missing = [f for f in ("left", "left_column", "right", "right_column") if not raw.get(f)]
+    if missing:
+        raise ValueError(f"pair needs {', '.join(missing)}")
+    reason = (raw.get("reason") or "").strip()
+    if not reason:
+        raise ValueError(prompts.error("overlap_needs_a_reason"))
+
+    left, right = _graph_ref(raw["left"], graph), _graph_ref(raw["right"], graph)
+    return _ResolvedPair(
+        measure.Pair(left, raw["left_column"], right, raw["right_column"], reason),
+        raw["left"],
+        raw["right"],
+        raw["left_column"],
+        raw["right_column"],
+    )
+
+
+def _graph_ref(table: str, graph):
+    """Which node in the graph a table name means — a Source's path, or a model."""
+    for node in graph.nodes.values():
+        if node.label == knowledge_schema.SOURCE and node.properties.get("name") == table:
+            return node.ref
+        if node.label == knowledge_schema.MODEL and node.key == table:
+            return node.ref
+    known = sorted(
+        n.properties.get("name") or n.key
+        for n in graph.nodes.values()
+        if n.label in (knowledge_schema.SOURCE, knowledge_schema.MODEL)
+    )
+    raise ValueError(f"no table {table!r} in the graph — have: {', '.join(known) or '(none)'}")
+
+
+def _table_fingerprints(graph) -> dict:
+    """Each table's fingerprint now — what a measurement records itself against."""
+    return {
+        node.ref: node.properties.get(knowledge_schema.FINGERPRINT)
+        for node in graph.nodes.values()
+        if node.label in (knowledge_schema.SOURCE, knowledge_schema.MODEL)
     }
 
 
@@ -365,7 +508,31 @@ def record_step(
         "outcome": result.outcome,
         "drift": result.drift,
         "acknowledged": result.acknowledged,
+        "graph": _sync_graph(root, portia_dir),
     }
+
+
+def _sync_graph(root: Path, portia_dir: str) -> str:
+    """Put the table this spec now builds into the graph — best effort, always.
+
+    The third of §5's write moments, and the one that was missing: a spec written
+    mid-conversation used to be invisible to `graph_lookup` until something else
+    triggered a rebuild, so the graph could be confidently wrong about what
+    exists. Recording a step is exactly when a **new table** comes into being,
+    and the column lineage of that table is derived from the spec that was just
+    saved — so this is a restatement of a file that changed one line ago.
+
+    Cheap: building the graph reads YAML and runs nothing (`knowledge/build.py`),
+    and the write is a handful of `UNWIND`s. It is also **never fatal** — the
+    step is already recorded and the spec is already on disk, and failing the
+    write because a container is stopped would undo none of that while losing
+    the user their step (§6.6).
+    """
+    try:
+        knowledge.sync(root, portia_dir=portia_dir)
+    except store.GraphUnavailable as exc:
+        return f"not updated — {exc}"
+    return "updated"
 
 
 def run_spec(spec_path: str, portia_dir: str = catalog.DEFAULT_DIR) -> dict:

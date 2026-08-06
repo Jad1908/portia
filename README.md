@@ -74,6 +74,22 @@ python -m portia.cli.chat  ask "..."     # a copilot turn
 python -m portia.cli.run   specs/x.yaml  # execute one spec (--write out --report runs)
 python -m portia.cli.build               # compile every spec to models/*.sql
 python -m portia.cli.build --check       # CI: fail if a .sql no longer matches its spec
+python -m portia.cli.knowledge           # build the knowledge graph and print what's in it
+```
+
+## The knowledge graph
+
+*Being built — the write path only ([design](docs/KNOWLEDGE_GRAPH.md)).* portia knows which column
+in a spec came from which column in a file, and until now nothing could ask it. The graph holds
+that lineage, plus every source, model, column and group, and it is built from the catalog and the
+specs alone — no data is read.
+
+Printing it needs nothing. Storing and querying it needs Neo4j, which is optional on purpose:
+
+```bash
+docker compose up -d neo4j
+uv sync --extra graph
+NEO4J_PASSWORD=portia-dev python -m portia.cli.knowledge --write
 ```
 
 ## Docs
@@ -84,5 +100,7 @@ python -m portia.cli.build --check       # CI: fail if a .sql no longer matches 
 - [Product vision](docs/VISION.md)
 - [Design](DESIGN.md)
 - [The scale tier](docs/DUCKDB_MIGRATION.md) — what the DuckDB engine cost, and what it found
+- [The knowledge graph](docs/KNOWLEDGE_GRAPH.md) — relationships between sources, and column lineage
+- [Graph schema](docs/GRAPH_SCHEMA.md) — every node, edge and property, with Cypher recipes
 - [Backlog](docs/BACKLOG.md)
 - [Brief](docs/brief.md)

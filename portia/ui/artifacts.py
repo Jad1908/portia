@@ -42,6 +42,7 @@ from portia.ui import engine, tree
 from portia.ui.state import (
     APP,
     BRIEF,
+    KNOWLEDGE,
     MODEL,
     OUTPUT,
     RUN,
@@ -90,6 +91,7 @@ def pane() -> None:
     """
     with c.scroll_area("artifacts"):
         _brief_row()
+        _knowledge_row()
         _tree()
         _turns()
     _add_data_affordance()
@@ -120,6 +122,23 @@ def _brief_row() -> None:
     # The one tooltip left in this pane, because it is the one that says
     # something the row does not: the brief itself.
     c.hint(row, APP.project_context)
+
+
+def _knowledge_row() -> None:
+    """The knowledge graph, pinned beside the brief.
+
+    Not in the tree because it is not a file — it lives in Neo4j — and not a
+    mode of the workflow canvas because it is not the same graph. The canvas
+    draws what we specified; this draws what the data is to itself
+    (`KNOWLEDGE_GRAPH.md` §6.9). Two rows, so neither has to pretend to be the
+    other.
+    """
+    c.artifact_row(
+        name="Knowledge graph",
+        icon="hub",
+        selected=APP.is_selected(KNOWLEDGE, ""),
+        on_click=lambda: _select(KNOWLEDGE, ""),
+    )
 
 
 # --- the tree ---------------------------------------------------------------

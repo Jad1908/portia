@@ -375,16 +375,18 @@ def _picker() -> None:
     clicked. These rows are a bordered list with a trailing chevron: the chevron
     is what says *this goes somewhere*.
     """
+    choices = engine.folder_choices(APP, APP.browse_at)
+    files = engine.data_files_in(APP, APP.browse_at)
+    here = len(files)
     with ui.element("div").classes("picker"):
         _crumbs()
-        choices = engine.folder_choices(APP, APP.browse_at)
         for choice in choices:
             _folder_row(choice)
         if not choices:
             with ui.element("div").classes("picker-empty"):
                 c.caption(NO_SUBFOLDERS)
-    here = len(engine.data_files_in(APP, APP.browse_at))
-    if not here and not engine.folder_choices(APP, APP.browse_at):
+        _picker_files(files)
+    if not here and not any(choice.has_data for choice in choices):
         c.empty_note(NOTHING_HERE.format(formats=_formats()))
     with ui.element("div").classes("add-section-actions"):
         c.button(
@@ -401,14 +403,54 @@ def _picker() -> None:
 
 
 def _folder_row(choice) -> None:
-    """One folder you can open: name, how much data is under it, and a chevron."""
-    row = ui.element("div").classes("picker-row")
+    """One folder: name, how much data is under it, and a chevron if it has any.
+
+    **A folder with nothing readable under it is drawn, quietly, and does not
+    open.** Leaving those out made the list look like the directory and silently
+    not be it, so a folder you knew existed and could not see cost a trip to a
+    terminal to explain. Drawn dim with an open outline, it answers the question
+    instead: *this is here, and there is nothing in it portia can read.*
+
+    Dimming here is not `DESIGN.md`'s forbidden ranking — it is not saying one
+    folder is better than another, it is saying one of them is not a thing you
+    can pick. That is a **kind**, and kind is exactly what prominence may say.
+    """
+    row = ui.element("div").classes("picker-row" if choice.has_data else "picker-row is-empty")
     with row:
-        ui.icon("folder").classes("picker-row-icon")
+        ui.icon("folder" if choice.has_data else "folder_open").classes("picker-row-icon")
         ui.label(choice.name).classes("picker-row-name")
-        ui.label(c.count(choice.files, "file")).classes("picker-row-meta")
-        ui.icon("chevron_right").classes("picker-row-go")
-    row.on("click", lambda rel=choice.rel: _browse_to(rel))
+        ui.label(c.count(choice.files, "file") if choice.has_data else NO_DATA_HERE).classes(
+            "picker-row-meta"
+        )
+        if choice.has_data:
+            ui.icon("chevron_right").classes("picker-row-go")
+    if choice.has_data:
+        row.on("click", lambda rel=choice.rel: _browse_to(rel))
+
+
+#: How many of the eligible files the picker names before it stops listing and
+#: starts counting. Enough to recognise the folder — you are answering "is this
+#: the data", not reading an inventory.
+PICKER_FILES_SHOWN = 6
+
+
+def _picker_files(files: list[Path]) -> None:
+    """The eligible files under here, **before** you commit to the folder.
+
+    The count alone told you *how many* and never *which*, so picking between
+    two plausible folders meant choosing one, looking, and going back. These are
+    the files that would be profiled if you pressed the button, which is the
+    thing the button is actually asking about.
+    """
+    if not files:
+        return
+    with ui.element("div").classes("picker-files"):
+        for path in files[:PICKER_FILES_SHOWN]:
+            with ui.element("div").classes("picker-file"):
+                ui.icon("table_chart").classes("picker-file-icon")
+                ui.label(_rel(path).as_posix()).classes("picker-file-name")
+        if len(files) > PICKER_FILES_SHOWN:
+            c.caption(MORE_FILES.format(n=len(files) - PICKER_FILES_SHOWN))
 
 
 def _crumbs() -> None:
@@ -672,11 +714,12 @@ def _import_destination() -> None:
         )
         if not APP.import_to_data_dir:
             (
-                ui.input(placeholder=DATA_DIR)
+                ui.input(placeholder=DESTINATION_PLACEHOLDER)
                 .classes("p-field p-field-mono w-full")
                 .props("borderless")
                 .bind_value(APP, "import_destination")
             )
+            c.caption(DESTINATION_ROOT)
         c.caption(DESTINATION_SCOPE)
 
 
@@ -975,25 +1018,45 @@ async def _leave(in_dialog: bool) -> None:
     if in_dialog:
         _close_dialog()
         return
+    # **Interpret before leaving, not after.** The workspace used to open the
+    # moment profiling finished, with the copilot's read still running behind
+    # it — so the first thing you saw was a project whose sources say nothing,
+    # filling in underneath you while you tried to read them. The screen holds
+    # until the turn ends, and `turn._stop` is the one thing that opens it
+    # early: a question needs the transcript's form to answer it.
+    await _interpret_pending()
     APP.left_add_data = True
     app_module.shell.refresh()
-    await _interpret_pending()
 
 
 async def _interpret_pending() -> None:
-    """Spend the turn that reads what each source *is*, if one was asked for."""
+    """Spend the turn that reads what each source *is*, if one was asked for.
+
+    **This screen waits for it.** The status line is deliberately coarse — one
+    sentence, not a running commentary — because the running commentary is the
+    transcript's, and you are put in front of that the moment the copilot has
+    something to ask (`turn._stop`). What this has to say is only *something is
+    happening and it is not finished*, which is what a screen that has taken
+    your way out away owes you.
+    """
     from portia.ui import turn
 
     names, APP.pending_interpret = APP.pending_interpret, []
     if not (APP.interpret and names):
         return
-    await turn.start(
-        prompts.task("index_batch", names=", ".join(repr(n) for n in names)),
-        model=APP.model or _default_model(),
-        effort=APP.effort,
-        kind=state.INDEXING,
-        label=", ".join(names),
-    )
+    APP.indexing_status = INTERPRETING.format(n=c.count(len(names), "source"))
+    _progress.refresh()
+    try:
+        await turn.start(
+            prompts.task("index_batch", names=", ".join(repr(n) for n in names)),
+            model=APP.model or _default_model(),
+            effort=APP.effort,
+            kind=state.INDEXING,
+            label=", ".join(names),
+        )
+    finally:
+        APP.indexing_status = ""
+        _progress.refresh()
 
 
 # --- the same surface, as a dialog ------------------------------------------
@@ -1113,6 +1176,11 @@ ADD_WHY = "portia reads {formats}. Point it at the data in this repo, and bring 
 IN_REPO_HEADING = "Data in this repo"
 IN_REPO_WHY = "Which folder holds this project's data? Open a folder to look inside it."
 NO_SUBFOLDERS = "No folders below this one hold data portia can read."
+NO_DATA_HERE = "nothing readable"
+MORE_FILES = "and {n} more"
+INTERPRETING = "The copilot is reading {n} — the workspace opens when it is done."
+DESTINATION_PLACEHOLDER = "the project root"
+DESTINATION_ROOT = "leave it empty to copy into the project root itself"
 PICK_WHICH = "Profile these files"
 ALL_DONE = "Everything here is already indexed"
 PROJECT_ROOT = "the project root"

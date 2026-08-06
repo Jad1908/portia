@@ -50,3 +50,45 @@ def test_provenance_keys_declaration_matches_reality(table):
         table(sales_orders()), table(sales_customers()), on="customer_id", how="left"
     )
     assert set(result.provenance) == set(PROVENANCE_KEYS)
+
+
+def test_join_columns_names_match_the_table_it_builds(table):
+    """The naming rule and the built table must agree — they are one function.
+
+    `join_columns` is what `knowledge/build.py` reads a model's column lineage
+    off, statically, without a connection. If it ever disagreed with what
+    `apply_join` actually produces, the graph would describe a table that doesn't
+    exist. So the two are pinned together the way compilation and execution are
+    (`tests/test_pipeline.py`).
+    """
+    from portia.ops.join import join_columns
+
+    left, right = table(sales_orders()), table(sales_customers())
+    result = apply_join(left, right, on="customer_id")
+    declared = join_columns(
+        left.columns, right.columns, ["customer_id"], ["customer_id"], shared_names=True
+    )
+    assert [c.name for c in declared] == result.table.columns
+
+
+def test_a_shared_key_reads_both_sides(table):
+    """The one output column with two origins — `coalesce(l.k, r.k)`."""
+    from portia.ops.join import join_columns
+
+    columns = join_columns(["k", "a"], ["k", "b"], ["k"], ["k"], shared_names=True)
+    key = next(c for c in columns if c.name == "k")
+    assert (key.left, key.right) == ("k", "k")
+    assert [c.name for c in columns] == ["k", "a", "b"]
+
+
+def test_a_collision_is_suffixed_on_both_sides(table):
+    """`_x`/`_y` say which side a column came from — the attribution `outcome` uses."""
+    from portia.ops.join import join_columns
+
+    columns = join_columns(["lk", "note"], ["rk", "note"], ["lk"], ["rk"], shared_names=False)
+    assert [(c.name, c.left, c.right) for c in columns] == [
+        ("lk", "lk", None),
+        ("note_x", "note", None),
+        ("rk", None, "rk"),
+        ("note_y", None, "note"),
+    ]

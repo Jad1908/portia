@@ -249,16 +249,26 @@ def test_a_sibling_folder_with_a_shared_prefix_is_not_in_scope(tmp_path):
 # --- the folder picker ------------------------------------------------------
 
 
-def test_the_picker_offers_only_folders_that_have_data_under_them(tmp_path):
-    """A folder with nothing portia can read below it is not a place the data
-    is — the same rule that keeps it out of the left pane."""
+def test_the_picker_offers_every_folder_and_says_which_hold_data(tmp_path):
+    """Reversed 2026-08-06: folders with nothing readable are offered too.
+
+    Leaving them out made the list look like the directory while silently not
+    being it, so a folder you knew was there and could not see cost a trip to a
+    terminal to explain. `has_data` is what the screen draws quietly.
+    """
     _project(tmp_path)
     (tmp_path / "docs").mkdir()
     (tmp_path / "docs" / "readme.md").write_text("hi\n")
 
-    offered = tree.choices(tmp_path, "", READABLE)
+    offered = {ch.name: ch for ch in tree.choices(tmp_path, "", READABLE)}
 
-    assert [ch.name for ch in offered] == ["data"]
+    # Every folder is there, portia's own output directories included — the
+    # picker shows the repo, and `has_data` is what separates a candidate from
+    # something that merely exists.
+    assert {"data", "docs", "specs", "models"} <= set(offered)
+    assert offered["data"].has_data and offered["data"].files == 2
+    for empty in ("docs", "specs", "models"):
+        assert not offered[empty].has_data and offered[empty].files == 0
 
 
 def test_the_count_is_recursive_so_a_wrapper_folder_still_says_it_holds_data(tmp_path):

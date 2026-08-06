@@ -38,8 +38,10 @@ stack, and product vision. Read them every session, before proposing changes or 
   `cli/index.py`. **§6 is where the app half landed** — the compiled models are rendered, and the
   three design questions are answered there (a card is a table *or* a step depending on zoom level ·
   Run means this model and everything it reads · layers group and order, never rank).
-- `docs/KNOWLEDGE_GRAPH.md` — **designed and revised 2026-08-04, nothing built, and it is what's
-  next.** Two halves that only pay off together (§2): **measured relationships** between sources —
+- `docs/KNOWLEDGE_GRAPH.md` — **designed, revised and built 2026-08-04; all four phases of §9.4,
+  with D half-taken on purpose.** Read the Status note at the top: it is per phase, and the phase D
+  entry is the one to read, because it records a change *not* made and why — "unproven at 50" is
+  not a measurement. Two halves that only pay off together (§2): **measured relationships** between sources —
   because nothing in portia holds one and `join_report`'s answer dies with the turn — and
   **column-level lineage**, which portia's specs already know and no surface can answer.
   **Neo4j, settled**; §3.2 records what each rejected option was rejected *for* (NetworkX for the
@@ -61,6 +63,10 @@ stack, and product vision. Read them every session, before proposing changes or 
   rewritten and the conversation phase is not · two new tools, not one · and a four-phase order
   where the read path precedes the agent-writes-measurements path, because at source 23 the agent
   queries the graph while filling it.
+- `docs/GRAPH_SCHEMA.md` — **the knowledge graph as it actually is**: every label, every property,
+  where each value comes from, and a page of Cypher recipes. The reference to `KNOWLEDGE_GRAPH.md`'s
+  design — read that one for *why*, this one for *what you will find in the browser*.
+  `tests/test_graph_schema_doc.py` fails if `knowledge/schema.py` gains something it does not mention.
 - `docs/BACKLOG.md` — parking lot of deferred ideas, by stream, with a compact **Shipped** list at
   the bottom. Not required reading; scan it when picking the next thing to build, and **add to it
   whenever we postpone something mid-work.**
@@ -191,6 +197,11 @@ adding code, and extend them rather than working around them:
     to climb: L2 `describe_source` (meaning, no stats) → L3 `profile_source` (full facts) →
     L4 `join_findings`. **Adding a tool means placing it on that ladder and saying so in its
     description** — the description is what teaches the model when to climb.
+  - **`graph_lookup` is deliberately *not* on that ladder** — it is what tells you which ladder to
+    climb (`KNOWLEDGE_GRAPH.md` §9.1). The rungs are depth on one table and assume you know which
+    one; the graph is breadth. Its description places it **before** L2 and says it will not tell
+    you what a column means, because a router introduced as a deeper rung gets used as a worse
+    `describe_source`.
   - Do not add a code layer that ranks decisions or suggests answers — see "facts vs judgment".
 - **Durable artifacts** (git-diffable YAML, the residue that makes this a product, not a script):
   - `portia/spec.py` — the **spec** (*what we did to the data*). **A spec produces one table**, and
@@ -220,6 +231,34 @@ adding code, and extend them rather than working around them:
     recorded beside them (when portia last *looked*) is deliberately excluded: it moves every second
     without the file moving, and comparing it made every source read as stale one second after being
     indexed. Prefer naming that tuple to iterating whatever the record happens to hold.
+  - `portia/knowledge/` — the **knowledge graph** (*what the tables and columns are to each other*),
+    in Neo4j (`docs/KNOWLEDGE_GRAPH.md`). Four modules and the split is the seam: `schema.py` (the
+    closed vocabulary + a `Graph` — imports no driver) · `build.py` (catalog + specs → a `Graph`;
+    **runs nothing and opens no connection**, so column lineage comes off `ops.join.join_columns`
+    rather than a second implementation of the `_x`/`_y` rule) · `query.py` (the fixed read
+    questions) · `store.py` (the only module that knows what Cypher is, behind the `graph` extra).
+    **A rebuild owns the structural half and nothing else** — stale structural edges are deleted,
+    `OVERLAPS` is never touched, because an absent edge has to keep meaning *nobody measured*
+    (§4.4). Built by `python -m portia.cli.knowledge`; `cli.index`, `record_step` and
+    `measure_overlaps` refresh it too, all three **best-effort** — a write that fails because a
+    container is stopped is §6.6's leak, so a missing database is one printed line and the step is
+    already on disk regardless.
+    - **It is not the pipeline graph, and §6.9 is where that is settled.** The project canvas draws
+      what we specified; this draws what the data is to itself. Model nodes carry `spec` and
+      `fingerprint` — pointers into the pipeline — and none of its vocabulary: `layer` groups the
+      canvas and says nothing about what a table is *to* another table. The picture is Neo4j's own
+      rendering embedded, never `ui/graph.py` reused.
+    - **`measure.py` is the only measured thing in here** and the one edge kind that costs a
+      query. Its `reason` is required *in code*: a measured zero means *no shared values*, never
+      *unrelated* (`France` vs `FRA`), and the agent's sentence is what stops it reading as a dead
+      end. Staleness is a **read-time** comparison of fingerprints — nothing invalidates anything
+      when a file changes, and an edge is marked, never deleted.
+    - **The read path is a router, not a rung** (§9.1). `graph_lookup` answers *which* table and
+      *where did this column come from*; every ladder rung answers *tell me more about this one*.
+      So it is taught as sitting **before** L2, and asking about a table returns **tables** —
+      never column pairs, because a router that returns fifty things has not routed. Its tests
+      need a live Neo4j and skip without one (`conftest.neo4j_session`); they are not mocked,
+      because a stub answering Cypher would be a second, wrong Neo4j.
   - `portia/runlog.py` — the **run log** (*what the copilot did*): one JSONL per turn in
     `.portia/runs/`, one `Event` per line under a header naming model, effort, prompt and portia
     sha. Read with `python -m portia.cli.runs`. **Project-local, with no central store and nothing
@@ -310,8 +349,8 @@ adding code, and extend them rather than working around them:
     engine's behalf.
 
 Rule of thumb: **`core` = reused everywhere · `checks` = diagnosis (facts) · `ops` = execution ·
-`spec` + `catalog` + `runlog` = the durable artifacts · `agent` = judgment · `cli` + `ui` = human
-edges.**
+`spec` + `catalog` + `runlog` = the durable artifacts · `knowledge` = what they are to each other ·
+`agent` = judgment · `cli` + `ui` = human edges.**
 Deciding is the agent's job, not a layer. A new file that's none of these probably belongs in one of
 them, not loose in `portia/`.
 

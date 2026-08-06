@@ -648,13 +648,22 @@ def test_the_destination_is_the_one_the_operator_chose(project):
     assert pairs[0][1] == app.root / "data" / "raw" / "orders.csv"
 
 
-def test_an_empty_destination_falls_back_to_the_data_directory(project):
+def test_an_empty_destination_means_the_project_root(project):
+    """Reversed 2026-08-06. It used to fall through to `data/`, on the reading
+    that files loose at the top of a project are nobody's deliberate choice.
+
+    That is wrong for the project whose data *is* its root — a folder of CSVs
+    opened directly — where inventing `data/` is the surprise. The checkbox
+    above the field is still the default, so an empty box is now something you
+    cleared on purpose.
+    """
     from portia.ui import engine
 
     app, _ = project
 
-    assert engine.destination_in("", app) == app.root / engine.DATA_DIR
-    assert engine.destination_in("   ", app) == app.root / engine.DATA_DIR
+    assert engine.destination_in("", app) == app.root
+    assert engine.destination_in("   ", app) == app.root
+    assert engine.destination_in("raw", app) == app.root / "raw"
 
 
 def test_a_destination_outside_the_project_is_refused(project):
@@ -1341,3 +1350,23 @@ def test_a_written_path_shows_its_name_apart_from_its_folders():
     labels = [el for el in row.descendants() if isinstance(el, ui.label)]
     assert [el.text for el in labels] == ["~/projects/demo/.portia/", "project.yaml"]
     assert "path-row-name" in labels[-1].classes
+
+
+def test_a_pending_decision_opens_the_workspace(project):
+    """The first-run block has to have exactly one exit, and this is it.
+
+    The add-data screen holds you while the opening interpretation runs, so you
+    cannot walk into a workspace describing sources nobody has read yet. But the
+    copilot may stop and ask, and the form it asks with lives in the transcript
+    — so a decision is the one thing allowed to open the workspace early.
+    Blocking without this is a screen waiting forever for an answer it gives you
+    no way to give.
+    """
+    app, _ = project
+
+    app.left_add_data = False
+    assert app.reveal_for_decision() is True
+    assert app.left_add_data
+
+    # Already there: nothing to reveal, and nothing to redraw for.
+    assert app.reveal_for_decision() is False

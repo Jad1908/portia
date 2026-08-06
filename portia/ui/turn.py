@@ -106,6 +106,10 @@ def _record(event: events.Event, stream: state.Stream, log: runlog.Log) -> None:
     if event.kind == events.RESULT and stream.turn is not None:
         stream.turn.subtype = event.data.get("subtype")
         stream.turn.cost_usd = event.data.get("cost_usd")
+        totals = runlog.token_totals(event.data.get("usage") or {})
+        stream.turn.input_tokens = totals["input_tokens"]
+        stream.turn.cached_tokens = totals["cached_tokens"]
+        stream.turn.output_tokens = totals["output_tokens"]
     stream.rows.append(event)
     if event.kind in _SYNC_ON:
         _sync_artifacts()
@@ -136,18 +140,30 @@ async def confirm(tool_name: str, tool_input: dict) -> bool:
 
 
 def _stop(kind: str, payload: dict) -> Decision:
-    """Park a decision in the running turn's stream, and show that tab.
+    """Park a decision in the running turn's stream, and show it.
 
     The loop is now blocked on a human. A question sitting behind a tab nobody
     is looking at is indistinguishable from a hung turn, so the pane follows the
-    decision rather than waiting to be found.
+    decision rather than waiting to be found — and if the human is still on the
+    add-data screen, so does the whole window.
+
+    **That last part is what makes the first-run block safe.** The add-data
+    screen holds you while the opening interpretation runs, so you cannot walk
+    into a workspace describing sources nobody has read yet. But the copilot may
+    stop and ask, and the form it asks with lives in the transcript — so a
+    question is the one thing allowed to open the workspace early. Blocking
+    without this exit is a screen that waits forever for an answer it gives you
+    no way to give.
     """
+    from portia.ui import app as app_module
     from portia.ui import transcript
 
     decision = Decision(kind, payload, asyncio.get_running_loop().create_future())
     stream = _running_stream()
     stream.rows.append(decision)
     APP.tab = next(tab for tab, s in APP.streams.items() if s is stream)
+    if APP.reveal_for_decision():
+        app_module.shell.refresh()
     transcript.pane.refresh()
     return decision
 

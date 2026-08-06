@@ -1,7 +1,86 @@
 # The knowledge graph — design
 
-*Designed 2026-08-04, revised the same day after the design was talked through. Nothing is built yet.
-This document is the whole of the decision, written so a new session can pick it up cold.*
+*Designed 2026-08-04, revised the same day after the design was talked through.
+**All four phases are built** — see the status note below, and read the phase D entry, which
+deliberately stopped short of what §1.4 asks for. This document is the whole of the decision,
+written so a new session can pick it up cold.*
+
+> ## Status — built, 2026-08-04 / 2026-08-05
+>
+> All four phases of §9.4, **D half-taken on purpose**. Verified against a live Neo4j; every
+> Cypher statement passed first run.
+>
+> | | what landed | where |
+> |---|---|---|
+> | **A** | the write path — structural nodes and edges, column lineage, the build command | `knowledge/{schema,build,store}.py`, `cli/knowledge.py` |
+> | **B** | the read path — one tool, fixed queries, taught as a *router* | `knowledge/query.py`, `graph_lookup` |
+> | **C** | the agent picks pairs while indexing; measurements stored with their reasons | `checks.join.column_overlap`, `knowledge/measure.py`, `measure_overlaps` |
+> | **D** | the always-on source index trimmed, **not** replaced by traversal | `agent/context.py` |
+>
+> **Read D's entry below before anything else in here**, because it records a change *not* made.
+>
+> ### What building it settled that the design did not say
+>
+> - **The lineage rank.** §4.2 gives `DERIVES_FROM` one `via` + `step`, which assumes one hop; a
+>   spec has several. The rule is: a step that *changes the values* (a `normalize` transform)
+>   outranks one that only *renames* (a join's `_x`/`_y`), which outranks one that merely
+>   *carries*, ties to the later step. A first draft scored a shared key's `coalesce(l.k, r.k)` as
+>   a change on both sides and that was wrong — it picks a value rather than changing one, and
+>   scoring it that way buried the transform that had made the key match. The composite shape stays
+>   free from the edge count, exactly as §4.2 says.
+> - **§7's "what may a query return at once" needed no cap.** §9.1 already said the graph is a
+>   router; taking that literally means **asking about a table returns tables**, with a count of
+>   measured pairs per neighbour. You reach a column pair only by naming a column. The fifty-edge
+>   answer is never constructed, so nothing has to be truncated to avoid it.
+> - **A router introduced as a deeper rung gets used as a worse `describe_source`.** So it is
+>   taught in `copilot.md` as sitting *before* L2, and `describe_source.md` says out loud that it
+>   describes one source and cannot tell you which source to read.
+> - **The reason on a measured pair is enforced in code, not asked for in prose.** §4.4's whole
+>   argument is that the sentence is what stops a zero reading as a dead end; an optional field
+>   would have gone missing exactly when the measurement felt routine.
+> - **Staleness turned out to be a read-time question.** A fingerprint on every node, both of an
+>   edge's on the edge, and `stale` computed **in the query**. Nothing walks the graph invalidating
+>   things when a file changes, and "mark, never delete" is free rather than disciplined.
+> - **A rebuild owns the structural half and nothing else.** Everything structural carries the
+>   build that wrote it and is deleted when stale; `OVERLAPS` is never touched, and a node still
+>   carrying one survives even after the catalog drops the column.
+> - **A stopped container never costs anyone anything they already had.** Measurements come back
+>   with `stored: false` rather than the call failing; `cli.index` and `record_step` refresh the
+>   graph best-effort and never fatally (§6.6).
+> - **`measure_overlaps` is auto-approved despite writing.** The line for the permission flow is
+>   *does it change a durable artifact the user reviews in a diff*, and this writes metadata into a
+>   store §5.2 already calls re-derivable.
+> - **The `sql` hatch's cost is countable.** A model downstream of one gets its Model node and its
+>   true `READS` edges and no Column nodes, and is named in `BuildResult.unresolved` with the
+>   reason — the evidence §7 asks for before buying `sqlglot`.
+>
+> ### Phase D, and where it deliberately stopped
+>
+> §1.4 wants L1 to stop being an exhaustive index and become a neighbourhood you walk outward
+> from. **What shipped is the trim, not the traversal.** Each source's line lost its column count
+> and candidate-key list — facts `describe_source` and `profile_source` exist to serve, paid for on
+> every turn whether or not that source was mentioned — and kept its name and one sentence, which
+> together *are* the routing decision.
+>
+> The reason for stopping is worth more than the change: *"fine at 3 sources, unproven at 50"* is
+> not a measurement, `EVALUATION.md` has a standing rule about acting on evidence that was never
+> designed to support the claim, and there is no re-runnable fixture that would say whether
+> dropping a source's sentence helped or hurt. §9.4 calls D the riskiest and insists it be
+> evaluated on its own — which presupposes a way to evaluate it that this repo does not have yet.
+> `BACKLOG.md` holds the fuller change and what would have to be true to take it.
+>
+> A defect fell out of it: `_first_sentence` appended a full stop unconditionally, so a
+> single-sentence summary — which a well-written one usually is — had been reaching every system
+> prompt ending in `..` Invisible until a test asserted an exact line.
+>
+> ### The graph is not the pipeline
+>
+> **Settled 2026-08-05.** The project canvas draws *what we specified*; this draws *what the data is
+> to itself*. They share a project and nothing else. So Model nodes carry `spec` and `fingerprint`
+> — **pointers** into the pipeline, which is how you get from a lineage edge to the step that
+> explains it — and none of the pipeline's own vocabulary: `layer` was removed, because
+> staging/intermediate/mart groups and orders the canvas and says nothing about what a table is
+> *to* another table. §6.9 says what this does to the picture.
 
 *What the revision changed, because it moved the centre of the design: column-level **lineage** is
 now half of what the graph is for (§2, §4.2) and a model's output columns are nodes (§4.1) · **the
@@ -596,6 +675,12 @@ That rule is internally sound. Three things killed it anyway.
    `FRA` share no values and no range. The filter discards the pair with certainty and is *correct*,
    and the pair was the most important one in the project (§4.4). The filter is not wrong about
    values; it is blind to meaning, and meaning is the only thing that gets you there.
+   - **This stopped being hypothetical on 2026-08-06** (`EVALUATION.md` → the PHQ run). On 23 real
+     sources the copilot chose 12 pairs, and the two that connect the event data to the hotel golden
+     record — the entire point of that project — both measured **zero**. One of them is
+     `comparable_types: false`, meaning a *type check* would have discarded it with certainty and
+     been right to. The provable excluder this section allowed would have thrown away one of the two
+     pairs the project exists to resolve.
 3. **Sweeping is a liability even when affordable.** Every swept pair is a stored confident zero
    nobody asked about, plus a measurement someone must keep valid over time (§4.5). Volume was never
    the objection — §6.4 says not to design for volume — but 245,000 unrequested facts is a context
@@ -637,22 +722,33 @@ runlog / agent / cli+ui" rule of thumb will need updating when it lands.
 Standing rule, and it applies here. If a panel wants a number from the graph, it goes through
 `ui/engine.py`. A widget must not query Neo4j.
 
-### 6.9 The visual layer is a separate purchase from the database
+### 6.9 The visual layer is a separate purchase from the database, and it is not the pipeline canvas
 
 People assume the store and the picture come together. They don't.
 
-Neo4j's own browser is good and free. Alternatively there are mature graph visualization libraries
-(Cytoscape.js, sigma.js, vis.js) that do force layout, expand-on-click and hairball management, and
-can live inside portia's own canvas.
+**The knowledge graph and the project canvas are two different things, and the picture must not be
+built out of the second one** (settled 2026-08-05). The canvas draws *what we specified* — a DAG of
+specs, laid out by dependency order, opened in place onto its steps. This graph draws *what the data
+is to itself*: sources, columns, groups and measured overlaps, in a shape nothing in the pipeline
+decides. They share a project and nothing else.
 
-And a lot already exists: `ui/graph.py` computes positions, `workflow.py` draws cards and curved
-edges with arrowheads, `canvas.js` gives pan and zoom. A static first view could reuse all of it.
+So the picture is **Neo4j's own rendering, embedded**, rather than `ui/graph.py` and `workflow.py`
+reused. Not laziness — the alternative was reimplementing hairball management, expand-on-click and
+force layout inside a module whose job is dependency order, and ending up with one canvas trying to
+be two things.
 
-**But there is a design collision to settle first.** `DESIGN.md` says colour and prominence
-communicate kind, never rank, and `ui/graph.py` follows it strictly — position comes only from
-dependency order, nothing is re-sorted by a number. **A force-directed layout breaks that.**
-Well-connected nodes drift to the centre and the eye reads the centre as important. That is a layout
-algorithm ranking by connectivity. It needs an explicit answer in `DESIGN.md`, not a quiet breach.
+> **An earlier draft of this section spent its length on a design collision that this decision
+> removes.** It said `DESIGN.md`'s *colour and prominence communicate kind, never rank* forbids a
+> force-directed layout, because well-connected nodes drift to the centre and the eye reads the
+> centre as important. That is still true **of the project canvas**, where `ui/graph.py` takes
+> position from dependency order and nothing else. It was never a statement about a graph explorer,
+> and the draft reached for the pipeline's rules because it assumed the pipeline's code. It is kept
+> here as the clearest small example in this document of a constraint that came from the
+> implementation you happened to pick rather than from the problem.
+
+`DESIGN.md` still needs one line saying where the rule governs and where it does not — an embedded
+explorer is a different kind of surface from a canvas portia lays out itself, and that boundary
+should be written down rather than inferred from this paragraph.
 
 ---
 
@@ -660,11 +756,13 @@ algorithm ranking by connectivity. It needs an explicit answer in `DESIGN.md`, n
 
 Not decided. Listed so a new session knows they are open rather than overlooked.
 
-- **What a graph query is allowed to return at once.** §4.4's storage rule keeps the *store* from
-  filling with noise; it does nothing about the *context window*. A column with genuine overlaps
-  against fifty others hands back fifty edges. Neither the design nor the discussion that produced
-  it has an answer, and §9 makes it sharper rather than softer: a router that returns fifty things
-  has not routed.
+- ~~**What a graph query is allowed to return at once.**~~ **Answered by phase B**, and the answer
+  came from §9.1 rather than from a cap: *a router returns tables.* Ask about a table and you get
+  its neighbouring **tables**, with a count of measured column pairs per neighbour; you reach a
+  column pair only by naming a column, and then get one hop each way plus the terminal origins.
+  The fifty-edge answer never gets constructed, so nothing has to be truncated to avoid it. What
+  remains open is only the sharper form of it: whether a column with fifty *genuine* overlaps
+  needs anything beyond `MAX_ROWS` saying it was cut.
 - **Column lineage through the `sql` hatch** (§4.2). `join` and `normalize` give it for free; a
   `sql` step declares only table-level `inputs`. Options: a coarse step-level edge that is true, or
   a parser (`sqlglot`) for real column-level lineage. Start coarse; decide later on evidence.
@@ -678,7 +776,10 @@ Not decided. Listed so a new session knows they are open rather than overlooked.
 - **Does anything measure outside indexing?** §5.1 puts the agent's choosing at index time. Whether
   it also volunteers pairs mid-conversation, and whether a user-invoked sweep exists as an escape
   hatch for filling the graph without a conversation, is not settled.
-- **The force-layout collision** in §6.9.
+- ~~**The force-layout collision** in §6.9.~~ **Closed 2026-08-05**: the picture is Neo4j's own
+  rendering embedded, not the project canvas reused, so `ui/graph.py`'s rule about position coming
+  only from dependency order was never being breached — it governs the canvas, which this is not.
+  What is left is a line in `DESIGN.md` marking that boundary.
 
 **Closed during the 2026-08-04 design conversation**, recorded here so they are not re-opened by
 accident:
@@ -771,10 +872,12 @@ Existing prompts that change: `index_batch.md` and `interpret.md` (the new task)
 
 | Phase | What lands | What it settles | Loop change |
 |---|---|---|---|
-| **A** | Write path: structural edges + `DERIVES_FROM` from catalog and specs. The build command. | Whether the schema is right. Inspectable directly; **no agent involved**. | None |
-| **B** | Read path: one tool, fixed queries. | Whether traversal helps at all. Lineage alone already earns it — *"where did this column come from"* is answerable with zero measurements. | One new tool |
-| **C** | The agent picks pairs during indexing; measurements written with their reasons. | §5.1 and §4.4. | **Indexing is rewritten** |
-| **D** | Shrink L1 from an exhaustive index to traversal. | §1.4. | Yes, and the riskiest |
+| **A** ✅ | Write path: structural edges + `DERIVES_FROM` from catalog and specs. The build command. | Whether the schema is right. Inspectable directly; **no agent involved**. | None |
+| **B** ✅ | Read path: one tool, fixed queries. | Whether traversal helps at all. Lineage alone already earns it — *"where did this column come from"* is answerable with zero measurements. | One new tool |
+| **C** ✅ | The agent picks pairs during indexing; measurements written with their reasons. | §5.1 and §4.4. | **Indexing is rewritten** |
+| **D** ◐ | Shrink L1 from an exhaustive index to traversal. | §1.4. | Yes, and the riskiest |
+
+*D is half-taken: the per-source line was trimmed, the index was not replaced by traversal. The status note says why, and `BACKLOG.md` holds the rest.*
 
 **B before C, for a reason that is easy to miss.** At source 23 the agent must know something about
 sources 1–22 to judge which pairs are worth measuring — which is the context problem the graph
