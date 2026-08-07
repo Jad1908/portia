@@ -93,9 +93,15 @@ stack, and product vision. Read them every session, before proposing changes or 
   the one that was turned down) · one log per chat rather than per exchange (§5) · the chat stream
   only, indexing stays a job (§6) · and **§7, the send rule** — the box is always editable, Send is
   dark while a message is in flight, there is no queue, and interrupt is an explicit button.
-  **§8 is the one to read before touching `ask.py` or `session.py`**: interrupting mid-*question*
-  parks the loop inside portia's own `can_use_tool` callback, so `interrupt()` alone hangs the
-  generator and every pending decision has to be *resolved* rather than cancelled.
+  **§8 is the one to read before touching `ask.py` or `session.py`, and it is the section this
+  document got wrong** — kept, with the failed reasoning, per house style. It predicted that
+  interrupting mid-*question* would hang the generator, because the loop is parked in portia's own
+  `can_use_tool` callback; **measurement (2026-08-07, `sandbox/spike/`) reversed it.** `interrupt()`
+  **cancels** the parked callback, `CancelledError` is the SDK's own mechanism rather than an
+  unhandled path, a `ResultMessage` always arrives and the client stays usable. So there is no
+  resolve-before-interrupt protocol and `turn._resolve_orphans` needs no change; what portia owes is
+  to render the cancelled `Decision` as *interrupted*. The one hazard that survives is portia's own:
+  `record_step` runs the op and *then* writes the spec.
   **§11 reverses `VISION.md`'s "no chat box"** — and is kept because that argument never failed; it
   described a real boundary and refused to fake past it, and the answer was to move the boundary.
 - `docs/BACKLOG.md` — parking lot of deferred ideas, by stream, with a compact **Shipped** list at

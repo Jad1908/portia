@@ -3,7 +3,9 @@
 *Specified 2026-08-07. Not built. Read `VISION.md`'s V0 section first: it is where the single-turn
 boundary was drawn on purpose, and §11 here is the reversal.*
 
-**Status:** designed, nothing implemented. §12 is the build order.
+**Status:** designed. **§12 phase 1 is done** — the SDK behaviour is measured, not assumed, and it
+**reversed §8** (see the table there; `interrupt()` cancels the parked callback and the elaborate
+resolve-first protocol this document first specified is unnecessary). Phases 2–6 are not built.
 
 ## 1. The gap
 
@@ -54,6 +56,11 @@ Verified against the installed SDK (`claude-agent-sdk` 0.2.128) rather than assu
   one key in the `RESULT` event.
 - **`get_context_usage()` returns `totalTokens`, `maxTokens`, `percentage`** (`client.py:510`) — the
   data behind `/context`.
+
+**And measured rather than read** (`sandbox/spike/`, 2026-08-07): two `query()` calls on one live
+client share a `session_id` and the second answers from the first's tool results without re-calling
+them, so context genuinely carries. Every interrupt tested produced a `ResultMessage` and left the
+client usable. §8 has the rest, including the prediction it overturned.
 
 ## 3. Vocabulary — a run, a chat, an indexing
 
@@ -197,31 +204,54 @@ The draft has to survive a re-render, which is a solved problem here rather than
 redraws the form without throwing away a half-written objection), and `APP.goal` is already bound
 state.
 
-## 8. Interrupt — what it must not break
+## 8. Interrupt — measured, and not what this document first said
 
-**Interrupting mid-tool and interrupting mid-question are different, and the second one is the one
-that will hang.**
+**Verified 2026-08-07** against `claude-agent-sdk` 0.2.128, three rounds in `sandbox/spike/`, on a
+real project with three indexed sources. **This section was written wrong first and the failed
+version is kept**, because it is a good example of reasoning that reads well from the source and
+does not survive running it.
 
-Mid-tool, `interrupt()` does what it says. The hazard is portia's own: `record_step` *runs the op
-and then writes the spec* (`handlers.py`), so an interrupt can land between a completed execution
-and an unwritten decision. This is precisely why §7 makes interrupt explicit and never something a
-keystroke does implicitly — "never silently do the wrong thing" is a non-negotiable, and a
-half-completed durable write has to be the result of a deliberate act.
+**What was predicted.** Mid-question, the loop is parked inside portia's own `can_use_tool` callback
+awaiting a future only the human resolves (`ask.py:48`). So `interrupt()` could not free it: the
+callback would never return, no `ResultMessage` would be emitted, and `receive_response()` — which
+"continues indefinitely" if no result arrives (`client.py:583`) — would hang the generator. The
+prescription that followed was that **interrupt must resolve every pending decision before it
+signals**, and specifically must *resolve* rather than *cancel*, because a cancelled future raises
+`CancelledError` into the SDK, "which is an unhandled path".
 
-Mid-question, the loop is parked *inside portia's own `can_use_tool` callback*, awaiting a future
-that only the human resolves (`ask.py:48`). `interrupt()` alone does not free it: the callback never
-returns, the SDK never emits a `ResultMessage`, and `receive_response()` — which "continues
-indefinitely" if no result arrives (`client.py:583`) — hangs the generator. So:
+**Both halves are wrong, and the second one is wrong in an instructive way.**
 
-> **Interrupt must resolve every pending decision before it signals.** A pending approval resolves
-> to *denied*; a pending question resolves to a `PermissionResultDeny` carrying the reason. Not
-> cancellation — a cancelled future raises `CancelledError` inside the callback and into the SDK,
-> which is an unhandled path. `turn._resolve_orphans` already cancels at turn *end*; this is the
-> same problem one step earlier and needs the other answer.
+`interrupt()` frees the loop by **cancelling the parked `can_use_tool` task**. `CancelledError`
+propagates out of the awaited future; the future ends `done() and cancelled()`; the SDK emits
+`ResultMessage(subtype='error_during_execution')`; the client stays healthy and the next exchange
+succeeds. Cancellation is not an unhandled path — **it is the SDK's own mechanism**, and the design
+this document proposed was an elaborate way of doing by hand what the library already does.
 
-**Whether the stream terminates cleanly after an interrupt is the one thing to verify first**, and
-it is phase 1 of §12 for that reason. If no `ResultMessage` arrives, everything above is moot and
-the design needs a timeout.
+Measured, in order:
+
+| | |
+| --- | --- |
+| two `query()` calls on one live client | both succeed, one `session_id`, context carried — the second answered from the first's tool result without calling a tool |
+| `interrupt()` mid-tool | `ResultMessage`, `subtype='error_during_execution'` |
+| `interrupt()` parked in `can_use_tool` | callback task **cancelled**; `ResultMessage`, same subtype |
+| the awaited future afterwards | `done=True, cancelled=True` |
+| an exchange after any interrupt | `subtype='success'` — the session is not poisoned |
+
+**So the rule is the opposite of the one first written here.** Interrupt signals; it does not have
+to resolve anything first, and there is no ordering constraint on the button. What portia owes is
+not preparation but **reaction**: the `Decision` row whose future was just cancelled has to render
+as *interrupted*, because a question form left sitting on screen looking answerable, backed by a
+future nobody will ever read, is precisely the "silently does the wrong thing" this project forbids.
+
+**`turn._resolve_orphans` needs no change**, which the spike checked rather than assumed. Its guard
+is `if not row.future.done()`, and after an interrupt the future is already `done()` — so it does
+nothing, and there is no double-cancel.
+
+**One hazard survives, and it was never the SDK's.** `record_step` *runs the op and then writes the
+spec* (`handlers.py`), so an interrupt can land between a completed execution and an unwritten
+decision. That is portia's own sequencing and the measurements above say nothing about it. It is why
+§7 keeps interrupt explicit and never something a keystroke does implicitly — a half-completed
+durable write has to be the result of a deliberate act.
 
 ## 9. What the app changes
 
@@ -285,9 +315,10 @@ and loses the evidence (§1).
 
 Cheapest and most uncertain first, which here is the same thing.
 
-1. **Verify the interrupt path.** A live client, two `query()` calls, and an `interrupt()` in each of
-   the two states of §8. The question is only whether a `ResultMessage` arrives. Everything below
-   assumes it does.
+1. ~~**Verify the interrupt path.**~~ **Done 2026-08-07** (`sandbox/spike/`, three rounds). A
+   `ResultMessage` arrives in every case, the client survives, and the finding **reversed §8** — the
+   resolve-before-interrupt protocol specified there is unnecessary, because the SDK cancels the
+   parked callback itself. Nothing below is blocked.
 2. **The rename, alone, with no behaviour change** (§3). A pure vocabulary diff — directories,
    module names, state names, docs — reviewable on its own and honest before the engine moves,
    because a one-shot turn is a chat with one exchange.
