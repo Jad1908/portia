@@ -77,6 +77,27 @@ stack, and product vision. Read them every session, before proposing changes or 
   where each value comes from, and a page of Cypher recipes. The reference to `KNOWLEDGE_GRAPH.md`'s
   design — read that one for *why*, this one for *what you will find in the browser*.
   `tests/test_graph_schema_doc.py` fails if `knowledge/schema.py` gains something it does not mention.
+- `docs/CONVERSATION.md` — **the loop stops being one turn**, specified 2026-08-07 and **not built**;
+  §12 is the build order and the Status note at the top is the thing to trust over any claim here.
+  `session.run` holds the client for exactly one prompt, and §1 is the argument for why that costs
+  more than it looks: the durable artifacts survive a turn but the *evidence* does not, so a
+  follow-up re-climbs the ladder to get back where the last turn ended — and a profile is the most
+  expensive thing the agent does. **§3 is the vocabulary, and it is the part that touches code you
+  are probably already in**: three artifacts, three words — a **run** executed a spec, a **chat**
+  is a conversation with the copilot, an **indexing** is a job — replacing a scheme where "turn" was
+  invented to stop "run" meaning two things and only half-worked (`runlog.RUNS_DIR` writes *turns*
+  to `.portia/runs/`; `cli/runs.py`'s own docstring says it reads *turns*). `.portia/chats/` and
+  `.portia/indexing/`, `Turn` → `Exchange`, two left-pane lists instead of one, **old logs read and
+  never migrated**. Four more decisions, each recorded with what it was decided *against*: a live
+  client rather than `resume` (**§4** — the prompt cache is the budget, and the durable option is
+  the one that was turned down) · one log per chat rather than per exchange (§5) · the chat stream
+  only, indexing stays a job (§6) · and **§7, the send rule** — the box is always editable, Send is
+  dark while a message is in flight, there is no queue, and interrupt is an explicit button.
+  **§8 is the one to read before touching `ask.py` or `session.py`**: interrupting mid-*question*
+  parks the loop inside portia's own `can_use_tool` callback, so `interrupt()` alone hangs the
+  generator and every pending decision has to be *resolved* rather than cancelled.
+  **§11 reverses `VISION.md`'s "no chat box"** — and is kept because that argument never failed; it
+  described a real boundary and refused to fake past it, and the answer was to move the boundary.
 - `docs/BACKLOG.md` — parking lot of deferred ideas, by stream, with a compact **Shipped** list at
   the bottom. Not required reading; scan it when picking the next thing to build, and **add to it
   whenever we postpone something mid-work.**

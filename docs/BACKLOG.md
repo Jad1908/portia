@@ -186,9 +186,14 @@ to re-read before prompt work.*
   turn per run), and `derived_from: <spec>` so a generated table can't be mistaken for source data.
   Path convention is not judgment: if every project invents its own tree nothing can find anything
   and the left panel has no stable view.
-- **Multi-turn chat** — `session.run` is one turn per invocation today; hold the `ClaudeSDKClient`
-  open for follow-ups and wire `interrupt()`. **Not a prerequisite for the app** — a turn is a
-  complete unit of work, and V0 offers a fresh turn rather than a fake conversation.
+- **Multi-turn chat** — *specified 2026-08-07, `docs/CONVERSATION.md`; no longer parked here.* The
+  entry read: hold the `ClaudeSDKClient` open for follow-ups and wire `interrupt()`, **not a
+  prerequisite for the app** — a turn is a complete unit of work, and V0 offers a fresh turn rather
+  than a fake conversation. That was right about V0 and wrong about the cost: a fresh turn keeps the
+  catalog and the spec and loses the *evidence*, so it re-profiles to get back where the last one
+  ended (`CONVERSATION.md` §1). What stays parked is the **terminal REPL** — the CLI's one-shot
+  subcommands are a one-message conversation and keep working, so `chat repl` is a fifth surface
+  nothing else needs (§11).
 - **Don't reconstruct rows from samples** — asked for raw data the agent politely assembles a
   plausible table from `samples` and hedges. Honest, but consider whether the prompt should refuse
   outright.

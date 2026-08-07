@@ -213,6 +213,13 @@ turn, which starts fresh with the catalog and spec on disk as its memory — exa
 `chat ask` does today. It must not present a chat box that implies a conversation the engine
 cannot hold; a follow-up that silently loses context is worse than an honest boundary.
 
+> **Still true of the app as it stands, and specified to change** — `docs/CONVERSATION.md`
+> (2026-08-07, **not built**). Read that paragraph carefully before the chat box arrives, because
+> only its *premise* is being removed. The rule survives intact: the engine will hold the
+> conversation, and a follow-up that silently lost context would still be worse than the honest
+> boundary — which is why ending a conversation has to be a visible control and why the window has
+> to be honest that closing it ends the thread (`CONVERSATION.md` §3, §8, §10).
+
 **How it looks is already decided — see `DESIGN.md`**, which specs every token and every component
 named below (`artifact-row`, `step-card`, `report-step-block`, `acknowledged-banner`,
 `table-preview`, `transcript-row`). This section says what the panels *do*; that file says what they
