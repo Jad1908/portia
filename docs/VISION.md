@@ -208,10 +208,22 @@ So V0 runs a turn, catches the decisions, and shows the artifacts — because **
 are the thing being tuned**, and answering a question with the evidence and the spec-so-far visible
 beside it is the product (`PLAN.md`: "the questions-and-insights UX *is* the product").
 
-**What V0 is honest about not having:** when a turn ends, it ends. The UI says so and offers a new
+~~**What V0 is honest about not having:** when a turn ends, it ends. The UI says so and offers a new
 turn, which starts fresh with the catalog and spec on disk as its memory — exactly what
 `chat ask` does today. It must not present a chat box that implies a conversation the engine
-cannot hold; a follow-up that silently loses context is worse than an honest boundary.
+cannot hold; a follow-up that silently loses context is worse than an honest boundary.~~
+
+> **Reversed 2026-08-07 — the chat box is built** (`docs/CONVERSATION.md`). Kept struck through
+> rather than deleted because **this argument never failed.** It described a real boundary and
+> refused to fake past it; what changed is the boundary, not the reasoning. `session.Conversation`
+> holds one client across exchanges, so the engine can hold the conversation the box implies.
+>
+> **The rule survives intact, and is what the composer is built around.** A follow-up that silently
+> lost context would still be worse than an honest boundary, so: the chat is ended by a visible
+> **End chat**, closing the window ends the thread and the window says so, and **Send is dark while
+> a message is in flight with no queue behind it** — because a queued message that arrives on the
+> far side of a question the copilot asked in the meantime is exactly the silent context loss this
+> paragraph was protecting against (`CONVERSATION.md` §4, §7, §11).
 
 **How it looks is already decided — see `DESIGN.md`**, which specs every token and every component
 named below (`artifact-row`, `step-card`, `report-step-block`, `acknowledged-banner`,

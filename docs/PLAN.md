@@ -58,6 +58,18 @@ the interactive copilot loop over it (the questions-and-insights UX, emitting a 
 a decision stream) → the surface where those questions are asked and answered. The interactive
 layer is **core, not deferred** — all three now exist; `VISION.md` is where its shape is worked out.
 
+**The loop is a conversation** (2026-08-07, `docs/CONVERSATION.md`). `session.run` held the SDK
+client for exactly one prompt, and what that cost was not "no follow-up" — the catalog and the spec
+survive a turn deliberately. What died was the *evidence*: the profile it pulled, the findings it
+read, the key it rejected and why. So a follow-up re-climbed the ladder to get back where the last
+turn ended, and a profile is the most expensive thing the agent does. `session.Conversation` now
+holds one client across exchanges, the log's unit is the **chat** rather than the exchange, and the
+window has a composer. Two findings worth carrying: **measurement reversed the spec's own §8** —
+`interrupt()` cancels the parked `can_use_tool` task itself, so the elaborate resolve-first protocol
+it specified was unnecessary — and the vocabulary fix was overdue rather than new, since
+`.portia/runs/` held *turns* beside a project-root `runs/` that held runs. Three artifacts, three
+words: a **run** executed a spec, a **chat** is a conversation, an **indexing** is a job.
+
 **Where we are (2026-08-03).** The engine is built (`checks`, `ops`, `spec`, `catalog`), so is the
 copilot loop (`portia/agent/` — in-process MCP server, layered context, `AskUserQuestion` routed to
 a human, spec writing, chat CLI), and so is **V0 of the app** (`portia/ui/`) — the loop runs in one
@@ -146,9 +158,10 @@ asset.
    wrote**, and the 80M-row fan-out that inflated revenue in Run 5 is reported in 0.1 s without
    being built. **What measurement changed is the part worth reading** — §6.1, §6.3 and §13.
 
-4. **The run log** (2026-07-29, `portia/runlog.py`, `python -m portia.cli.runs`). One JSONL per
-   turn, teed at both edges, replayable in the terminal and under **Turns** in the app's left pane.
-   A copilot turn no longer dies with the window. It caught one thing worth carrying into any cost
+4. **The run log** (2026-07-29, `portia/runlog.py`, `python -m portia.cli.history`). One JSONL each,
+   teed at both edges, replayable in the terminal and under **Chats** and **Indexing** in the app's
+   left pane — two histories since 2026-08-07 (`CONVERSATION.md` §3), because a conversation you had
+   and a job the app ran are not one list. A copilot chat no longer dies with the window. It caught one thing worth carrying into any cost
    claim: the SDK's `input_tokens` excludes cached input, so a 14,651-token turn reported **17** —
    and nearly all of a portia turn's input is the pushed L0/L1 context, i.e. exactly the cached
    part. **It has not yet proved itself:** no run has been scored *using* it.

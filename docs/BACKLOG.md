@@ -186,9 +186,14 @@ to re-read before prompt work.*
   turn per run), and `derived_from: <spec>` so a generated table can't be mistaken for source data.
   Path convention is not judgment: if every project invents its own tree nothing can find anything
   and the left panel has no stable view.
-- **Multi-turn chat** — `session.run` is one turn per invocation today; hold the `ClaudeSDKClient`
-  open for follow-ups and wire `interrupt()`. **Not a prerequisite for the app** — a turn is a
-  complete unit of work, and V0 offers a fresh turn rather than a fake conversation.
+- **Multi-turn chat** — *specified 2026-08-07, `docs/CONVERSATION.md`; no longer parked here.* The
+  entry read: hold the `ClaudeSDKClient` open for follow-ups and wire `interrupt()`, **not a
+  prerequisite for the app** — a turn is a complete unit of work, and V0 offers a fresh turn rather
+  than a fake conversation. That was right about V0 and wrong about the cost: a fresh turn keeps the
+  catalog and the spec and loses the *evidence*, so it re-profiles to get back where the last one
+  ended (`CONVERSATION.md` §1). What stays parked is the **terminal REPL** — the CLI's one-shot
+  subcommands are a one-message conversation and keep working, so `chat repl` is a fifth surface
+  nothing else needs (§11).
 - **Don't reconstruct rows from samples** — asked for raw data the agent politely assembles a
   plausible table from `samples` and hedges. Honest, but consider whether the prompt should refuse
   outright.
@@ -459,7 +464,7 @@ odd finding worth carrying forward isn't lost with it.*
   authenticates off the local login and meters against the **subscription**. `PLAN.md` → "Auth
   posture" for what portia claims about it; the posture is unchanged by the good news.
 - **Run log + the metrics that need no labels** — 2026-07-29, `portia/runlog.py` +
-  `python -m portia.cli.runs`. Two surprises in `EVALUATION.md` → "The run log".
+  `python -m portia.cli.history`. Two surprises in `EVALUATION.md` → "The run log".
 - **`copilot.md` told the model something false about itself** — "You never see raw rows." It does:
   `join_findings` returns up to 12 complete rows. Fixed 2026-07-31 by naming the tool and saying
   why. *The kind of thing to look for again: the code was right and the prompt was wrong.*
@@ -507,7 +512,7 @@ odd finding worth carrying forward isn't lost with it.*
   write confirmation; the no-terminal audit in `VISION.md` passes end to end.
 - **Tool results are missing from the event stream** — fixed 2026-07-26 (`events.TOOL_RESULT`).
   `cli/chat.py` still ignores the kind **deliberately**, so terminal transcripts stay comparable
-  across runs already scored; the log stores them and `cli.runs show` renders them. Logging and
+  across runs already scored; the log stores them and `cli.history show` renders them. Logging and
   rendering are different jobs; only the second had a reason to stay still.
 - **Nothing is editable** — 2026-07-27: brief editable from the toolbar, a source's summary and
   roles editable in place or correctable by asking the copilot. Both write through

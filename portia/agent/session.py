@@ -1,5 +1,9 @@
 """The loop: options, client lifecycle, event stream.
 
+`Conversation` is the unit — one **chat**, holding one SDK client across many
+exchanges (`docs/CONVERSATION.md`). `run` is the one-message wrapper over it that
+every non-conversational caller uses.
+
 This is where the project's non-negotiables stop being prose and become
 configuration. Two lines in ``build_options`` do most of that work — see the
 comments there.
@@ -101,6 +105,173 @@ def _silence_shadowed_tool_warning() -> None:
     warnings.filterwarnings("ignore", category=CanUseToolShadowedWarning)
 
 
+def _sdk_client(options: Any) -> Any:
+    """The real client. Behind a function so a test can supply its own.
+
+    Same seam, and the same argument, as `ask.py` injecting ``answer`` and
+    ``confirm``: the drain order, the no-queue guard and the session bookkeeping
+    below are all worth testing, and none of them should cost a model call.
+    """
+    from claude_agent_sdk import ClaudeSDKClient
+
+    return ClaudeSDKClient(options=options)
+
+
+class Conversation:
+    """One **chat**: an SDK client held open across exchanges.
+
+    `docs/CONVERSATION.md` §2 — the client's lifetime used to be one prompt's,
+    and moving that boundary is the whole of the change. ``ClaudeSDKClient`` is
+    already the right object: connecting with no prompt keeps the input stream
+    open on its own (which is what makes ``can_use_tool`` usable in Python
+    without the dummy-hook workaround), and `query()` is just a transport write,
+    so calling it again is the SDK's own multi-turn shape rather than a trick.
+
+    **A chat dies with the process** (§4). This holds a live subprocess, so
+    whoever opens one owns closing it; the durable artifacts are written as the
+    chat goes and are what survives.
+
+    **`send` refuses to overlap rather than queueing** (§7). A queued message
+    would have to arrive either before or after whatever the agent does next,
+    and neither answer is defensible when what it does next might be to ask you
+    a question. The surface holds the draft; the engine holds the line.
+    """
+
+    def __init__(
+        self,
+        *,
+        answer: ask.AnswerFn,
+        confirm: ask.ConfirmFn,
+        model: str = DEFAULT_MODEL,
+        effort: str | None = None,
+        cwd: str | Path | None = None,
+        portia_dir: str = catalog.DEFAULT_DIR,
+        client_factory: Callable[[Any], Any] | None = None,
+    ) -> None:
+        #: Questions and approvals are emitted from inside `can_use_tool` while
+        #: the message stream is paused waiting on it, so they land here and
+        #: `send` drains them from the outer loop. Ordering depends on it.
+        self._pending: list[events.Event] = []
+        self._options = build_options(
+            model=model,
+            effort=effort,
+            cwd=cwd,
+            portia_dir=portia_dir,
+            can_use_tool=ask.build_can_use_tool(
+                answer=answer, confirm=confirm, emit=self._pending.append
+            ),
+        )
+        self._factory = client_factory or _sdk_client
+        self._client: Any = None
+        self._sending = False
+        self.model = model
+        #: Fixed for the life of the chat: effort is an option, and the SDK has
+        #: no runtime equivalent of `set_model` for it.
+        self.effort = effort
+        #: The SDK's own id for this session, off the first result. Recorded
+        #: from day one because it costs one field and is what would make
+        #: "reopen this chat" an addition rather than a rewrite (§4). **Nothing
+        #: reads it yet**, and recording it is not a commitment to using it.
+        self.session_id: str | None = None
+
+    async def __aenter__(self) -> Conversation:
+        await self.connect()
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        await self.close()
+
+    @property
+    def open(self) -> bool:
+        return self._client is not None
+
+    @property
+    def busy(self) -> bool:
+        """Whether a message is in flight — **not** whether a chat exists.
+
+        The distinction is the one `CONVERSATION.md` §9 asks the app to make: an
+        open chat sitting idle must not read as busy, or it blocks indexing for
+        as long as it stays open.
+        """
+        return self._sending
+
+    async def connect(self) -> None:
+        if self._client is not None:
+            return
+        # The SDK warns that auto-approved tools skip `can_use_tool`. That is the
+        # design here, not an accident: read-only checks run freely and only
+        # writes stop for confirmation. Silence it rather than let it fire.
+        _silence_shadowed_tool_warning()
+        self._client = self._factory(self._options)
+        await self._client.connect()
+
+    async def close(self) -> None:
+        """End the chat. Idempotent, because every path out of a window hits it."""
+        client, self._client = self._client, None
+        if client is not None:
+            await client.disconnect()
+
+    async def send(self, prompt: str) -> AsyncIterator[events.Event]:
+        """One exchange: send a message, yield events until the result."""
+        if self._client is None:
+            raise RuntimeError("this chat is not open — call connect() first")
+        if self._sending:
+            raise RuntimeError("a message is already in flight; interrupt it or wait for it")
+        self._sending = True
+        try:
+            # The human's message opens the exchange, in the stream rather than
+            # at each edge: the log and the transcript both need it in exactly
+            # this position, and two surfaces agreeing to insert it is how they
+            # come to disagree (`CONVERSATION.md` §5).
+            yield events.prompt_event(prompt, model=self.model, effort=self.effort)
+            await self._client.query(prompt)
+            async for message in self._client.receive_response():
+                while self._pending:
+                    yield self._pending.pop(0)
+                for event in events.from_message(message):
+                    if event.kind == events.RESULT:
+                        self.session_id = event.data.get("session_id") or self.session_id
+                    yield event
+            while self._pending:
+                yield self._pending.pop(0)
+        finally:
+            self._sending = False
+
+    async def interrupt(self) -> None:
+        """Stop the message in flight.
+
+        **Nothing has to be resolved first**, which is not what
+        `CONVERSATION.md` §8 originally specified: the SDK cancels the parked
+        `can_use_tool` task itself, a `ResultMessage` arrives, and the client
+        stays usable. Measured, not assumed — `sandbox/spike/`, and §8 keeps the
+        prediction that was wrong.
+
+        What the *surface* owes is to render the cancelled decision as
+        interrupted; a question form left looking answerable is backed by a
+        future nobody will read.
+        """
+        if self._client is not None:
+            await self._client.interrupt()
+
+    async def set_model(self, model: str) -> None:
+        """Switch models mid-chat. Effort cannot move — see ``effort``."""
+        if self._client is None:
+            raise RuntimeError("this chat is not open — call connect() first")
+        await self._client.set_model(model)
+        self.model = model
+
+    async def context_usage(self) -> dict[str, Any] | None:
+        """What the chat is holding, as the SDK counts it.
+
+        A **fact**, which is why a surface may show it: token counts are
+        measured. `CONVERSATION.md` §13 is the other half — no policy is built
+        on top of this until a real chat has been watched hitting the ceiling.
+        """
+        if self._client is None:
+            return None
+        return cast("dict[str, Any]", await self._client.get_context_usage())
+
+
 async def run(
     prompt: str,
     *,
@@ -111,37 +282,20 @@ async def run(
     cwd: str | Path | None = None,
     portia_dir: str = catalog.DEFAULT_DIR,
 ) -> AsyncIterator[events.Event]:
-    """Run one copilot turn, yielding portia events as they happen.
+    """One exchange, in a chat that lasts exactly as long as it does.
 
-    Uses ``ClaudeSDKClient`` rather than ``query()``: it keeps the session open
-    for follow-ups and interrupts, and connecting with no prompt keeps the input
-    stream open on its own — which is what makes ``can_use_tool`` usable in
-    Python without the dummy-hook workaround.
+    The one-message shape every existing caller wants — `cli/chat.py`'s three
+    subcommands, `cli/index.py`, and the app's indexing jobs, none of which are
+    conversations (`CONVERSATION.md` §6). Kept as a wrapper rather than a second
+    implementation, so there is one drain loop and one set of ordering rules.
     """
-    from claude_agent_sdk import ClaudeSDKClient
-
-    # The SDK warns that auto-approved tools skip `can_use_tool`. That is the
-    # design here, not an accident: read-only checks run freely and only writes
-    # stop for confirmation. Silence the notice rather than let it fire per run.
-    _silence_shadowed_tool_warning()
-
-    pending: list[events.Event] = []
-    options = build_options(
+    async with Conversation(
+        answer=answer,
+        confirm=confirm,
         model=model,
         effort=effort,
         cwd=cwd,
         portia_dir=portia_dir,
-        can_use_tool=ask.build_can_use_tool(answer=answer, confirm=confirm, emit=pending.append),
-    )
-
-    async with ClaudeSDKClient(options=options) as client:
-        await client.query(prompt)
-        async for message in client.receive_response():
-            # Questions and approvals are emitted from inside the callback while
-            # the stream is paused; drain them first so ordering stays true.
-            while pending:
-                yield pending.pop(0)
-            for event in events.from_message(message):
-                yield event
-        while pending:
-            yield pending.pop(0)
+    ) as chat:
+        async for event in chat.send(prompt):
+            yield event

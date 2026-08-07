@@ -76,17 +76,17 @@ def test_the_accent_follows_the_state_the_project_is_in():
 def test_a_turn_in_flight_makes_the_app_busy():
     app = App()
     assert app.busy is False
-    stream = app.start_turn("merge these", model="claude-haiku-4-5", effort="low")
+    stream = app.start_exchange("merge these", model="claude-haiku-4-5", effort="low")
     assert app.busy is True
-    stream.turn.running = False
-    assert app.busy is False and stream.turn.ended is True
+    stream.exchange.running = False
+    assert app.busy is False and stream.exchange.ended is True
 
 
 def test_starting_a_turn_clears_the_last_one():
     """A turn is one shot; a new one starts fresh, per the engine it drives."""
     app = App()
     app.stream().rows = ["something from before"]
-    app.start_turn("again", model="m", effort=None)
+    app.start_exchange("again", model="m", effort=None)
     assert app.rows == []
 
 
@@ -94,7 +94,7 @@ def test_indexing_and_chat_keep_separate_transcripts():
     """Two jobs with different rhythms; interleaving them made both hard to read."""
     app = App()
     app.stream(state.CHAT).rows = ["a goal I typed"]
-    app.start_turn("index these", model="m", effort=None, kind=state.INDEXING)
+    app.start_exchange("index these", model="m", effort=None, kind=state.INDEXING)
     assert app.tab == state.INDEX, "the pane follows the turn that just started"
     assert app.stream(state.CHAT).rows == ["a goal I typed"], "the chat is untouched"
     assert app.stream(state.INDEX).rows == []
@@ -103,7 +103,7 @@ def test_indexing_and_chat_keep_separate_transcripts():
 def test_a_turn_anywhere_makes_the_app_busy():
     """The engine is single-turn: a chat turn must block an indexing one."""
     app = App()
-    app.start_turn("index these", model="m", effort=None, kind=state.INDEXING)
+    app.start_exchange("index these", model="m", effort=None, kind=state.INDEXING)
     assert app.busy is True
 
 
@@ -245,7 +245,7 @@ def test_the_way_out_of_add_data_says_a_read_is_running(loop):
         app.indexed = 1
         assert screens._action_note(0) == screens.PROFILED.format(n="1 source")
 
-        stream = app.start_turn("read them", model="m", effort=None, kind=state.INDEXING)
+        stream = app.start_exchange("read them", model="m", effort=None, kind=state.INDEXING)
         assert screens._action_note(0) == screens.READING_NOW
 
         # Stopped for a human who may have dismissed the popup: the screen must
@@ -253,7 +253,7 @@ def test_the_way_out_of_add_data_says_a_read_is_running(loop):
         stream.rows.append(Decision("question", {}, loop.create_future()))
         assert screens._action_note(0) == screens.WAITING_ON_YOU
 
-        stream.turn.running = False
+        stream.exchange.running = False
         assert screens._action_note(0) not in (screens.READING_NOW, screens.WAITING_ON_YOU)
 
 
@@ -269,7 +269,7 @@ def _reading(app, monkeypatch, on_start=None):
 
     from nicegui import core
 
-    from portia.ui import screens, turn
+    from portia.ui import exchange, screens
 
     started: list[str] = []
 
@@ -286,7 +286,7 @@ def _reading(app, monkeypatch, on_start=None):
         await screens._interpret_pending()
         await asyncio.sleep(0)  # let those no-op redraws run before the loop shuts
 
-    monkeypatch.setattr(turn, "start", fake_start)
+    monkeypatch.setattr(exchange, "start", fake_start)
     with _as_app(screens, app):
         asyncio.run(read())
     return started
@@ -314,7 +314,7 @@ def test_indexing_hands_straight_over_to_the_read(tmp_path, monkeypatch):
 
     from nicegui import core, ui
 
-    from portia.ui import screens, turn
+    from portia.ui import exchange, screens
     from portia.ui.state import App
 
     pd.DataFrame({"a": [1, 2]}).to_csv(tmp_path / "orders.csv", index=False)
@@ -328,7 +328,7 @@ def test_indexing_hands_straight_over_to_the_read(tmp_path, monkeypatch):
         started.append(label)
         assert not app.left_add_data, "the read runs with the add-data screen still showing"
 
-    monkeypatch.setattr(turn, "start", fake_start)
+    monkeypatch.setattr(exchange, "start", fake_start)
     monkeypatch.setattr(ui, "notify", lambda *a, **k: None)  # no client to notify
 
     async def index() -> None:
@@ -344,7 +344,7 @@ def test_indexing_hands_straight_over_to_the_read(tmp_path, monkeypatch):
 
 
 def test_a_batch_indexed_while_the_first_is_being_read_is_not_dropped(monkeypatch):
-    """Indexing again mid-read is ordinary on this screen, and `turn.start`
+    """Indexing again mid-read is ordinary on this screen, and `exchange.start`
     refuses a second live turn *silently* — so the queue is drained in a loop
     rather than read once."""
     from portia.ui.state import App
@@ -380,7 +380,7 @@ def test_a_read_already_running_is_not_started_a_second_time(monkeypatch):
     from portia.ui.state import App
 
     app = App(catalog={"sources": {"orders": {}}})
-    app.start_turn("read them", model="m", effort=None, kind=state.INDEXING)
+    app.start_exchange("read them", model="m", effort=None, kind=state.INDEXING)
     app.pending_interpret = ["invoices"]
 
     assert _reading(app, monkeypatch) == []
@@ -507,35 +507,43 @@ def test_a_writes_outcome_is_never_read_off_the_next_write():
     assert transcript._outcome_after(rows, 1) is True
 
 
-def test_turns_and_saved_runs_are_two_different_lists(tmp_path):
-    """Same word, two artifacts: a *run* executed a spec, a *turn* was the
-    copilot deciding what the spec should say. The pane must not merge them."""
+def test_runs_chats_and_indexing_are_three_different_lists(tmp_path):
+    """Three artifacts, three lists (`docs/CONVERSATION.md` §3): a *run* executed
+    a spec, a *chat* was a conversation about what it should say, an *indexing*
+    was a job the app ran. The pane must not merge any of them."""
     from portia import runlog
-    from portia.ui import engine
+    from portia.ui import engine, state
 
     app = App(root=tmp_path)
     (tmp_path / "runs").mkdir()
     (tmp_path / "runs" / "2026-07-29T09-00-00.md").write_text("# a spec run")
-    runlog.start(app.catalog_dir, prompt="a goal", model="m")
+    chat = runlog.start(app.catalog_dir, kind=runlog.CHAT)
+    job = runlog.start(app.catalog_dir, kind=runlog.INDEXING)
 
     assert [p.suffix for p in engine.runs_in(app)] == [".md"]
-    assert [p.suffix for p in engine.turns_in(app)] == [".jsonl"]
+    assert engine.logs_in(app, state.CHAT_LOG) == [chat.path]
+    assert engine.logs_in(app, state.INDEX_LOG) == [job.path]
 
 
-def test_a_turns_counts_come_from_the_engine_not_the_panel(tmp_path):
-    """`DESIGN.md`: nothing in `ui/` computes. The window and `cli.runs` have to
+def test_a_logs_counts_come_from_the_engine_not_the_panel(tmp_path):
+    """`DESIGN.md`: nothing in `ui/` computes. The window and `cli.history` have to
     quote the same number for how often the copilot asked."""
     from portia import runlog
     from portia.agent import events
     from portia.ui import engine
 
     app = App(root=tmp_path)
-    log = runlog.start(app.catalog_dir, prompt="a goal", model="m")
+    log = runlog.start(app.catalog_dir)
+    log.event(events.prompt_event("a goal", model="m", effort="low"))
     log.event(events.question_event([{"question": "which grain?"}]))
 
-    run = runlog.read(engine.turn_path(app, log.path.name))
-    assert engine.turn_summary(run) == runlog.summary(run)
-    assert engine.turn_summary(run)["questions"] == 1
+    from portia.ui import state
+
+    path = engine.log_path(app, log.path.name, state.CHAT_LOG)
+    assert path is not None
+    logged = runlog.read(path)
+    assert engine.log_summary(logged) == runlog.summary(logged)
+    assert engine.log_summary(logged)["questions"] == 1
 
 
 def test_an_answered_question_is_one_row_not_two():
@@ -686,7 +694,7 @@ def test_the_middle_pane_draws_in_one_pass():
     from portia.ui import workflow
 
     assert not inspect.iscoroutinefunction(workflow.pane.func), "see the docstring on pane()"
-    for name in ("read_text", "read_turn", "read_table"):
+    for name in ("read_text", "read_log", "read_table"):
         reader = getattr(engine_module, name)
         assert not inspect.iscoroutinefunction(reader), f"{name} is drawn, not awaited"
 
@@ -920,23 +928,54 @@ def test_every_setting_binds_a_field_the_rest_of_the_app_actually_reads():
     assert set(bound) <= fields, f"settings writes what nothing reads: {set(bound) - fields}"
 
 
-def test_switching_projects_refuses_while_a_turn_is_running(monkeypatch):
-    """A switch mid-turn leaves the copilot writing into a directory the window
-    has stopped looking at."""
+def test_switching_projects_refuses_while_a_message_is_in_flight(monkeypatch):
+    """A switch mid-exchange leaves the copilot writing into a directory the
+    window has stopped looking at."""
+    import asyncio
+
     from portia.ui import settings
     from portia.ui.state import APP
 
-    APP.streams[state.CHAT].turn = state.Turn(prompt="g", model="m", effort="low")
+    APP.streams[state.CHAT].exchange = state.Exchange(prompt="g", model="m", effort="low")
     said = []
     monkeypatch.setattr(settings.ui, "notify", said.append)
     monkeypatch.setattr(settings, "_close", lambda: None)
     APP.opened = True
 
-    settings._switch_project()
+    asyncio.run(settings._switch_project())
 
     assert APP.opened is True, "still in the project"
     assert said == [settings.SWITCH_BUSY]
-    APP.streams[state.CHAT].turn = None
+    APP.streams[state.CHAT].exchange = None
+
+
+def test_switching_projects_closes_the_chat_it_leaves(monkeypatch):
+    """A chat holds a live SDK subprocess (`CONVERSATION.md` §4). Leaving a
+    project without closing it leaks one for as long as the window lives."""
+    import asyncio
+
+    from portia.ui import settings
+    from portia.ui.state import APP
+
+    closed = []
+
+    class FakeChat:
+        async def close(self):
+            closed.append(True)
+
+    from portia.ui import app as app_module
+
+    APP.streams[state.CHAT].conversation = FakeChat()
+    monkeypatch.setattr(settings.ui, "notify", lambda *a: None)
+    monkeypatch.setattr(settings, "_close", lambda: None)
+    monkeypatch.setattr(app_module.shell, "refresh", lambda *a, **k: None)
+    APP.opened = True
+
+    asyncio.run(settings._switch_project())
+
+    assert closed == [True]
+    assert APP.streams[state.CHAT].conversation is None
+    assert APP.opened is False
 
 
 def test_the_toolbar_no_longer_carries_a_preference():
@@ -1534,3 +1573,117 @@ def test_a_pending_decision_invites_you_in_rather_than_moving_you(project):
     # workspace saying the transcript is somewhere else.
     app.left_add_data, app.skipped_sources = False, True
     assert app.prompt_for_decision(events.QUESTION) is False
+
+
+# --- the chat (docs/CONVERSATION.md §7, §9) ----------------------------------
+
+
+def test_a_follow_up_appends_rather_than_wiping_the_transcript():
+    from portia.agent import events
+
+    """The whole point of a chat: message two is a follow-up *to* message one,
+    and a transcript that cleared between them would say otherwise."""
+    from portia.ui.state import App
+
+    app = App()
+    stream = app.start_exchange("merge them", model="m", effort="low")
+    stream.rows.append(events.Event(events.TEXT, {"text": "done"}))
+
+    stream.conversation = object()  # a chat is open
+    app.start_exchange("actually inner join", model="m", effort="low", keep_rows=stream.open)
+
+    assert len(stream.rows) == 1, "the first exchange is still there"
+    assert len(stream.exchanges) == 2
+    assert stream.exchange.prompt == "actually inner join"
+
+
+def test_an_indexing_job_replaces_the_last_ones_transcript():
+    """A job is one-shot (§6), and the last one is the one you want."""
+    from portia.agent import events
+    from portia.ui.state import App
+
+    app = App()
+    stream = app.start_exchange("read these", model="m", effort=None, kind=state.INDEXING)
+    stream.rows.append(events.Event(events.TEXT, {"text": "done"}))
+
+    app.start_exchange("read those", model="m", effort=None, kind=state.INDEXING)
+
+    assert stream.rows == []
+    assert len(stream.exchanges) == 1
+
+
+def test_an_open_chat_sitting_idle_is_not_busy():
+    """§9 — if `busy` meant "a client exists", an open chat would block indexing
+    for as long as it stayed open."""
+    from portia.ui.state import App
+
+    app = App()
+    stream = app.start_exchange("merge them", model="m", effort="low")
+    stream.conversation = object()
+    stream.exchange.running = False
+
+    assert stream.open is True
+    assert stream.busy is False
+    assert app.busy is False
+
+
+def test_a_chats_spend_is_summed_over_its_exchanges():
+    """A chat that spent four cents over three messages spent four cents."""
+    from portia.ui.state import App
+
+    app = App()
+    stream = app.start_exchange("one", model="m", effort="low")
+    stream.exchange.cost_usd = 0.02
+    app.start_exchange("two", model="m", effort="low", keep_rows=True)
+    stream.exchange.cost_usd = 0.03
+
+    assert stream.spent == pytest.approx(0.05)
+
+
+def test_a_chat_with_nothing_reported_has_no_spend_rather_than_zero():
+    """Nobody reported is not the same claim as it cost nothing."""
+    from portia.ui.state import App
+
+    app = App()
+    app.start_exchange("one", model="m", effort="low")
+    assert app.stream().spent is None
+
+
+def test_a_cancelled_decision_reads_as_interrupted_not_as_a_live_form():
+    """§8 — an interrupt cancels the parked callback, so the future behind that
+    form is one nobody will ever read. Drawing it as answerable is the silent
+    wrong thing this project forbids, where the human is being asked to act."""
+    import asyncio
+
+    from portia.agent import events
+
+    async def go():
+        decision = Decision(
+            events.QUESTION,
+            {"questions": [{"question": "which key?"}]},
+            asyncio.get_running_loop().create_future(),
+        )
+        assert decision.interrupted is False
+        decision.future.cancel()
+        return decision
+
+    decision = asyncio.run(go())
+    assert decision.interrupted is True
+    assert decision.resolved is False
+
+
+def test_an_answered_decision_is_never_interrupted():
+    import asyncio
+
+    from portia.agent import events
+
+    async def go():
+        decision = Decision(
+            events.QUESTION, {"questions": []}, asyncio.get_running_loop().create_future()
+        )
+        decision.resolve({"which key?": "hotel_id"})
+        return decision
+
+    decision = asyncio.run(go())
+    assert decision.interrupted is False
+    assert decision.resolved is True

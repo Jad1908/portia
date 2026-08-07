@@ -9,12 +9,25 @@ from __future__ import annotations
 
 import argparse
 
+from nicegui import app as nicegui_app
 from nicegui import ui
 
 from portia.ui import app, theme
 from portia.ui.state import APP
 
 DEFAULT_PORT = 8080
+
+
+async def _close_chats() -> None:
+    """Close any chat the window is holding, on the way out.
+
+    Defined above `main` and not below it: everything under the
+    ``if __name__`` block runs *after* `main` has been called, so a handler
+    registered from inside `main` and defined down there does not exist yet.
+    """
+    from portia.ui import exchange
+
+    await exchange.close_all()
 
 
 def main() -> None:
@@ -29,6 +42,11 @@ def main() -> None:
     APP.portia_dir = args.dir
     if args.project:
         app.open_at_start(args.project)
+
+    # A chat holds a live SDK subprocess (`docs/CONVERSATION.md` §4). Closing
+    # the window is the last way out of a project, so it is the last place one
+    # can be closed on purpose rather than left to the process dying.
+    nicegui_app.on_shutdown(_close_chats)
 
     ui.run(
         host=args.host,

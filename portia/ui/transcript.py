@@ -32,7 +32,7 @@ from nicegui import ui
 from portia.agent import events
 from portia.ui import components as c
 from portia.ui import engine, state
-from portia.ui import turn as turn_driver
+from portia.ui import exchange as exchange_driver
 from portia.ui.state import APP, Decision
 
 #: Free text always goes through verbatim, and typing an objection is a
@@ -45,20 +45,28 @@ ARG_CHARS = 160
 
 @ui.refreshable
 def pane() -> None:
+    """Tabs, transcript, and — on the chat tab — the composer under it.
+
+    **The composer sits at the foot**, where a chat's next message goes, rather
+    than above the transcript where a one-shot goal box could sit. The indexing
+    tab keeps its header on top: it is a job you started, not a conversation you
+    are in the middle of.
+    """
     _tabs()
     stream = APP.stream()
-    if APP.tab == state.CHAT:
-        _goal_input(stream)
-    else:
+    chatting = APP.tab == state.CHAT
+    if not chatting:
         _index_header(stream)
     with ui.element("div").classes("p-scroll p-pad stack-md") as scroll:
         if not stream.rows:
-            c.empty_note(_IDLE if APP.tab == state.CHAT else _IDLE_INDEX)
+            c.empty_note(_IDLE if chatting else _IDLE_INDEX)
         for row in stream.rows:
             _row(row)
-        if stream.turn and stream.turn.ended:
+        if not chatting and stream.exchange and stream.exchange.ended:
             _turn_ended(stream)
-    if stream.turn is not None:
+    if chatting:
+        _composer(stream)
+    if stream.exchange is not None:
         _stay_at_the_bottom(scroll)
 
 
@@ -110,8 +118,8 @@ def _index_header(stream) -> None:
     invitation to a race.
     """
     with ui.element("div").classes("p-pad stack-md"):
-        if stream.turn is not None:
-            _turn_banner(stream.turn)
+        if stream.exchange is not None:
+            _exchange_banner(stream.exchange)
             if stream.busy:
                 with ui.element("div").classes("row-gap-sm"):
                     ui.spinner(size="sm")
@@ -206,7 +214,7 @@ def _index_actions() -> None:
 
 
 async def _index_ticked() -> None:
-    """Profile the ticked files. Free, deterministic, no model turn."""
+    """Profile the ticked files. Free, deterministic, no model exchange."""
     from portia.ui import artifacts
 
     paths = [
@@ -230,14 +238,14 @@ async def _interpret_ticked() -> None:
     context has changed is a correction, not a conflict.
     """
     from portia.agent import prompts
-    from portia.ui import turn as turn_driver_module
+    from portia.ui import exchange as exchange_module
     from portia.ui.screens import _default_model
 
     names = [s.name for s in engine.source_states(APP) if s.name in APP.index_ticks and s.indexed]
     if not names:
         return
     APP.index_ticks = frozenset()
-    await turn_driver_module.start(
+    await exchange_module.start(
         prompts.task("index_batch", names=", ".join(repr(n) for n in names)),
         model=APP.model or _default_model(),
         effort=APP.effort,
@@ -262,30 +270,75 @@ def _stay_at_the_bottom(scroll: ui.element) -> None:
 # --- the goal box -----------------------------------------------------------
 
 
-def _goal_input(stream) -> None:
-    with ui.element("div").classes("p-pad stack-md"):
-        if stream.turn is not None:
-            _running_state(stream)
-            return
+def _composer(stream) -> None:
+    """Where the next message is written. **The send rule lives here**
+    (`docs/CONVERSATION.md` §7).
 
-        ui.textarea(placeholder=_GOAL_PLACEHOLDER).classes("p-field w-full p-editor").props(
+    - **The box is always editable**, in flight or not. Half a thought written
+      while the copilot works is the normal case, and a disabled textarea throws
+      it away.
+    - **Send is dark while a message is in flight**, and there is no queue. A
+      queued message would have to arrive either before or after whatever the
+      agent does next, and neither is defensible when what it does next might be
+      to ask you a question.
+    - **Stop is the only way to make a composed message go now.** Explicit,
+      never something a keystroke does: `record_step` runs an op and *then*
+      writes the spec, so a half-completed durable write has to be a deliberate
+      act (§8).
+
+    A pending question is in flight, so the form in the transcript is the only
+    live channel while one is open — there is never a moment with two boxes that
+    both look like the place to answer.
+    """
+    busy = stream.busy
+    c.rule()
+    with ui.element("div").classes("p-pad stack-md"):
+        ui.textarea(placeholder=_placeholder(stream)).classes("p-field w-full p-editor").props(
             "borderless autogrow"
         ).bind_value(APP, "goal")
-        c.model_effort(APP, _set_effort)
+        # Effort is fixed for the life of a client, so it stops being offered
+        # once a chat is open rather than being offered and quietly ignored.
+        c.model_effort(APP, _set_effort, effort_disabled=stream.open)
         with ui.element("div").classes("row-gap-sm"):
-            c.button("Go", _go, kind=_go_kind(), icon="play_arrow")
+            if busy:
+                ui.spinner(size="sm")
+                c.button("Stop", _stop, kind="tertiary", icon="stop")
+                c.caption(_WORKING)
+            else:
+                c.button("Send", _go, kind=_go_kind(), icon="arrow_upward")
+                if stream.open:
+                    c.button("End chat", lambda: _end_chat(stream), kind="tertiary", icon="refresh")
             c.caption(_spend())
-    c.rule()
+        _chat_footer(stream)
 
 
-def _running_state(stream) -> None:
-    if stream.busy:
-        with ui.element("div").classes("row-gap-sm"):
-            ui.spinner(size="sm")
-            c.caption(f"the copilot is working · {_spend()}")
+def _placeholder(stream) -> str:
+    return _FOLLOW_UP_PLACEHOLDER if stream.open else _GOAL_PLACEHOLDER
 
 
-def _turn_banner(turn) -> None:
+def _chat_footer(stream) -> None:
+    """What the chat has cost and how full it is. Counted, never judged.
+
+    Both are measured facts, which is the only reason they may be on screen at
+    all (`CLAUDE.md` → facts vs judgment). Nothing here says a chat is too long
+    or too expensive: that needs a goal, and this panel has no way to know one.
+    `CONVERSATION.md` §13 is why no policy sits on top of the context number.
+    """
+    parts = []
+    if len(stream.exchanges) > 1:
+        parts.append(c.count(len(stream.exchanges), "message"))
+    spent = stream.spent
+    if spent:
+        parts.append(f"~${spent:.4f}")
+    used = (stream.context or {}).get("totalTokens")
+    limit = (stream.context or {}).get("maxTokens")
+    if used and limit:
+        parts.append(f"{used:,} / {limit:,} context")
+    if parts:
+        c.caption(" · ".join(parts))
+
+
+def _exchange_banner(turn) -> None:
     """What this turn is, and which half of indexing is actually running.
 
     Profiling already happened and was free; what costs a turn is the
@@ -294,7 +347,7 @@ def _turn_banner(turn) -> None:
     """
     if turn.kind == state.GOAL:
         return
-    with ui.element("div").classes("turn-banner"):
+    with ui.element("div").classes("exchange-banner"):
         with ui.element("div").classes("row-gap-sm"):
             ui.icon(_BANNER_ICON[turn.kind]).classes("fact-icon")
             ui.label(_BANNER_TITLE[turn.kind]).classes("t-body-strong c-ink")
@@ -328,7 +381,18 @@ async def _go() -> None:
     goal = (APP.goal or "").strip()
     if not goal or APP.busy:
         return
-    await turn_driver.start(goal, model=APP.model, effort=APP.effort)
+    # Cleared before sending, not after: the message is now in the transcript,
+    # and a box still holding it reads as though it had not gone.
+    APP.goal = ""
+    await exchange_driver.start(goal, model=APP.model, effort=APP.effort)
+
+
+async def _stop() -> None:
+    await exchange_driver.interrupt()
+
+
+async def _end_chat(stream) -> None:
+    await exchange_driver.end_chat(stream)
 
 
 # --- one row per event ------------------------------------------------------
@@ -343,6 +407,9 @@ def _row(row: Any) -> None:
 
 def _event(event: events.Event) -> None:
     kind = event.kind
+    if kind == events.PROMPT:
+        _prompt_row(event.data)
+        return
     with ui.element("div").classes("transcript-row"):
         if kind == events.TEXT:
             # The copilot writes markdown, so it is rendered as markdown. Showing
@@ -358,7 +425,45 @@ def _event(event: events.Event) -> None:
         elif kind == events.ERROR:
             c.text(str(event.data.get("message", "")), color="c-error")
         elif kind == events.RESULT:
-            return  # `turn-ended` states how it finished
+            _exchange_end(event.data)
+
+
+def _exchange_end(data: dict) -> None:
+    """How one exchange finished, in the middle of a chat that may carry on.
+
+    A chat has no single ending until it is closed, so the cost lands per
+    exchange rather than once at the foot. An interrupted one says so plainly:
+    `error_during_execution` is what the SDK reports for a stop, and a message
+    the human cut short is not an error to apologise for.
+    """
+    subtype = str(data.get("subtype") or "")
+    cost = data.get("cost_usd")
+    spend = f" · ~${cost:.4f}" if cost else ""
+    if subtype == _STOPPED:
+        c.caption(f"stopped{spend}")
+    elif subtype and subtype != "success":
+        c.caption(f"ended ({subtype}){spend}")
+    elif spend:
+        c.caption(spend.removeprefix(" · "))
+
+
+def _prompt_row(data: dict) -> None:
+    """What the human said, opening an exchange.
+
+    Its own row kind rather than a `transcript-row`, because in a chat of six
+    messages this is the only thing separating one exchange from the next. It
+    states the model it ran on: a chat can change model mid-way, and the banner
+    above only says what the *next* one will use.
+
+    Uncoloured beyond the kind — `DESIGN.md`: prominence communicates kind, never
+    rank. A human message is not more important than the copilot's reply.
+    """
+    with ui.element("div").classes("prompt-row"):
+        c.text(str(data.get("text", "")), color="c-ink")
+        model = str(data.get("model") or "")
+        if model:
+            effort = f" · {data['effort']}" if data.get("effort") else ""
+            c.caption(f"{model.replace('claude-', '')}{effort}")
 
 
 def _tool_call(data: dict) -> None:
@@ -384,10 +489,31 @@ def _clip(value: str) -> str:
 
 
 def _decision(decision: Decision) -> None:
-    if decision.kind == events.QUESTION:
+    """A moment the loop stopped — as a live form, an answer, or an interruption.
+
+    **A cancelled decision is drawn as interrupted, never as a form.** When a
+    message is stopped mid-question the SDK cancels the parked callback, so the
+    future behind that form is one nobody will ever read (`CONVERSATION.md` §8).
+    Leaving it looking answerable is the "silently does the wrong thing" this
+    project forbids, in the one place the human is being asked to act.
+    """
+    if decision.interrupted:
+        _interrupted_decision(decision)
+    elif decision.kind == events.QUESTION:
         _question_form(decision) if not decision.resolved else _answered(decision)
     else:
         _write_confirm(decision) if not decision.resolved else _resolved_write(decision)
+
+
+def _interrupted_decision(decision: Decision) -> None:
+    if decision.kind == events.QUESTION:
+        _asked_view(decision.payload.get("questions") or [])
+    else:
+        _resolved_write_view(
+            str(decision.payload.get("name", "")), decision.payload.get("input") or {}, None
+        )
+    with ui.element("div").classes("transcript-row"):
+        c.caption(_INTERRUPTED)
 
 
 def _question_form(decision: Decision) -> None:
@@ -616,34 +742,38 @@ def _asked_view(questions: list[dict]) -> None:
                 c.caption(str(option.get("label", "")))
 
 
-# --- the end of a turn ------------------------------------------------------
+# --- the end of an indexing job ---------------------------------------------
+#
+# Only the indexing tab draws this. A **chat** has no single ending until it is
+# closed, so its cost lands per exchange in the transcript (`_exchange_end`) and
+# its totals sit under the composer (`_chat_footer`).
 
 
 def _turn_ended(stream) -> None:
-    turn = stream.turn
+    turn = stream.exchange
     assert turn is not None
-    with ui.element("div").classes("turn-ended"):
+    with ui.element("div").classes("chat-ended"):
         if turn.error:
             c.text(turn.error, color="c-error")
         c.caption(_ended_line(turn))
         spend = _spend_line(turn)
         if spend:
             c.caption(spend)
-        c.caption(_NO_FOLLOW_UP)
+        c.caption(_JOB_IS_ONE_SHOT)
         with ui.element("div").classes("row-gap-sm"):
-            c.button("New turn", lambda: _new_turn(stream), icon="refresh")
+            c.button("Clear", lambda: _new_chat(stream), icon="refresh")
 
 
 def _ended_line(turn: Any) -> str:
     cost = f" · ~${turn.cost_usd:.4f}" if turn.cost_usd else ""
-    return f"turn ended ({turn.subtype or 'stopped'}) · {turn.model}{cost}"
+    return f"ended ({turn.subtype or 'stopped'}) · {turn.model}{cost}"
 
 
 def _spend_line(turn: Any) -> str:
     """What the turn cost, in tokens — a **count**, next to the cost in money.
 
     The numbers are `runlog.token_totals`', not this panel's, so the window and
-    `cli.runs` cannot disagree about one turn. `in` is the whole input including
+    `cli.history` cannot disagree about one turn. `in` is the whole input including
     what came from cache, which on a portia turn is nearly all of it: the L0
     prompt and the L1 brief go on every request, and the SDK's raw
     `input_tokens` counts only the part that was not cached — one real run
@@ -661,9 +791,12 @@ def _spend_line(turn: Any) -> str:
     )
 
 
-def _new_turn(stream) -> None:
-    stream.turn = None
+def _new_chat(stream) -> None:
+    """Clear an indexing transcript. A *chat* ends through `_end_chat`, which
+    also closes the client it is holding open (`CONVERSATION.md` §4)."""
+    stream.exchange = None
     stream.rows = []
+    stream.exchanges = []
     pane.refresh()
 
 
@@ -680,18 +813,30 @@ _BANNER_WHY = {
 }
 
 _TAB_LABEL = {state.CHAT: "Copilot", state.INDEX: "Indexing"}
-_RUNNING = "a turn is running here"
-_WAITING = "this turn is waiting on you"
+_RUNNING = "something is running here"
+_WAITING = "this is waiting on you"
 
-_UNANSWERED = "The turn ended with this question unanswered."
+_UNANSWERED = "It ended with this question unanswered."
+_INTERRUPTED = "stopped before this was answered"
 
-_IDLE = "Nothing yet. Describe the goal above and press Go."
+#: What the SDK reports for an interrupted message — not an error to apologise
+#: for, since the human asked for it (`CONVERSATION.md` §8).
+_STOPPED = "error_during_execution"
+
+_IDLE = "Nothing yet. Describe the goal below and press Send."
 _IDLE_INDEX = "Nothing indexed in this session."
 _NO_SOURCES = "No data in this project's folder yet. Add some from the left pane."
-_INDEX_COST = "profiling is free and deterministic · interpreting spends a model turn"
+_INDEX_COST = "profiling is free and deterministic · interpreting spends a model exchange"
 _INDEX_WHAT = "Reading a source lands here — from Add data, or from Ask the copilot on a source."
 _GOAL_PLACEHOLDER = "What do you want from this data?"
+_FOLLOW_UP_PLACEHOLDER = "Reply, or ask for something else…"
+_WORKING = "working — Stop to cut it short"
 _ANSWER_PLACEHOLDER = "…or answer in your own words"
-_NO_FOLLOW_UP = (
-    "A turn is one shot. A new one starts fresh, with the catalog and spec on disk as its memory."
+#: Indexing is a **job**, not a conversation (`docs/CONVERSATION.md` §6): the app
+#: ran it on your behalf, it has a defined end, and there is nothing to reply to.
+#: Correcting what it decided is `Ask the copilot` on the source itself, which is
+#: the route that already existed.
+_JOB_IS_ONE_SHOT = (
+    "Indexing is a job, not a conversation. To correct what it decided about a "
+    "source, open it and ask the copilot to re-read it."
 )

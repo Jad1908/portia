@@ -329,8 +329,9 @@ the answer key's `pass_criteria` block is written to be machine-checkable when w
 
 ## The run log — what shipped, 2026-07-29
 
-`portia/runlog.py` + `python -m portia.cli.runs {list,show}`. One JSONL per turn under
-`.portia/runs/`, a header line naming model, effort, prompt, cwd and portia sha, teed at both edges
+`portia/runlog.py` + `python -m portia.cli.history {list,show}`. One JSONL per turn under
+`.portia/chats/` or `.portia/indexing/`, a header line naming kind, model, effort, prompt, cwd and
+portia sha, teed at both edges
 (`cli/chat.run_and_render` and `ui/turn`), no infrastructure. It exists because six runs had been
 scored by hand from terminal transcripts, some pasted twice and some lost to a `^C`, and two runs got
 conflated while writing them up.
@@ -354,7 +355,7 @@ Four things worth knowing that the spec did not say:
   these numbers cannot support. Find the two runs in `list`, read them.
 
 The app got the same thing the same day: a **Turns** section in the left pane, replayed in the middle
-one, with `engine.turn_summary` *being* `runlog.summary`, so the window and `cli.runs` cannot quote
+one, with `engine.turn_summary` *being* `runlog.summary`, so the window and `cli.history` cannot quote
 two different numbers for how often the copilot asked. Building it caught a real reading bug: drawing
 both the question **and** its answer listed every question twice, which reads as the copilot having
 asked it twice.
@@ -367,7 +368,7 @@ asked it twice.
 
 ### Where the logs live, and what that costs
 
-**Project-local, and that is the entire storage model.** `<project>/.portia/runs/*.jsonl` — no
+**Project-local, and that is the entire storage model.** `<project>/.portia/{chats,indexing}/*.jsonl` — no
 central store, no index, nothing written outside the project. The reason is that a turn is only
 interpretable beside the catalog it read and the spec it wrote; a global folder of transcripts naming
 tables you then have to go find is worse than no folder. Four consequences:

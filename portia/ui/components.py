@@ -192,15 +192,20 @@ def segmented(options, current, on_pick: Callable[[str], Any]) -> None:
                 b.classes("seg-active")
 
 
-def model_effort(app, on_effort: Callable[[str], Any]) -> None:
-    """What a turn will spend: the model, and the reasoning effort.
+def model_effort(app, on_effort: Callable[[str], Any], *, effort_disabled: bool = False) -> None:
+    """What an exchange will spend: the model, and the reasoning effort.
 
-    Picked in three places — the goal box, the add-data screen, and Settings —
+    Picked in three places — the composer, the add-data screen, and Settings —
     and it is **one setting in all three**, bound to the same two fields. Three
     hand-rolled copies of the pair is how they stop agreeing: an option added to
-    one list and not the others, or a select that writes a field the turn never
-    reads. The app is passed in rather than imported so this stays a control
-    rather than a thing that knows about the open project.
+    one list and not the others, or a select that writes a field nothing reads.
+    The app is passed in rather than imported so this stays a control rather than
+    a thing that knows about the open project.
+
+    ``effort_disabled`` is for a chat already under way. The model can change
+    between exchanges (`set_model`); effort is a `ClaudeAgentOptions` field and
+    is fixed for the life of a client, so it stops being offered rather than
+    being offered and quietly ignored (`docs/CONVERSATION.md` §7).
     """
     from portia.agent.session import DEFAULT_MODEL, EFFORTS, MODELS
 
@@ -209,6 +214,9 @@ def model_effort(app, on_effort: Callable[[str], Any]) -> None:
         ui.select(list(MODELS), value=app.model).props(
             "borderless dense options-dense new-value-mode=add-unique use-input"
         ).classes("p-field p-field-mono").bind_value(app, "model")
+    if effort_disabled:
+        caption(f"effort {app.effort}" if app.effort else "default effort")
+        return
     segmented(EFFORTS, app.effort, on_effort)
 
 

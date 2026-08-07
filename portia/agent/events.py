@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 # Event kinds. Named here so renderers can switch exhaustively.
+PROMPT = "prompt"  # the human talking — what opened this exchange
 TEXT = "text"  # the copilot talking
 THINKING = "thinking"  # reasoning, when the model surfaces it
 TOOL_CALL = "tool_call"  # a check or op was invoked
@@ -96,6 +97,11 @@ def from_message(message: Any) -> Iterator[Event]:
                 "text": getattr(message, "result", None),
                 "usage": getattr(message, "usage", None),
                 "cost_usd": getattr(message, "total_cost_usd", None),
+                # The SDK's id for the session this exchange belonged to. Carried
+                # so a chat can record which one it was (`CONVERSATION.md` §4) —
+                # it costs one key, and it is what would make reopening a chat an
+                # addition rather than a rewrite. Nothing reads it yet.
+                "session_id": getattr(message, "session_id", None),
             },
         )
 
@@ -113,6 +119,21 @@ def tool_result_text(content: Any) -> str:
         return content
     parts = [str(part.get("text", "")) for part in content if isinstance(part, dict)]
     return "\n".join(p for p in parts if p)
+
+
+def prompt_event(text: str, *, model: str, effort: str | None = None) -> Event:
+    """The human's message, and what it is about to be answered on.
+
+    **Not an SDK message** — neither are `QUESTION`, `ANSWER` or `APPROVAL`,
+    which `ask.py` emits. This is the same shape: a thing that happened in the
+    loop, normalized into the one stream every surface reads.
+
+    It carries the model and effort because a **chat** can span several of them
+    (`docs/CONVERSATION.md` §5). Those used to live in the log's header, which
+    only worked while a file held exactly one exchange; a header field that can
+    change mid-file is a lie.
+    """
+    return Event(PROMPT, {"text": text, "model": model, "effort": effort})
 
 
 def question_event(questions: list[dict]) -> Event:

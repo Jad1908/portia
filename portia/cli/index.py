@@ -126,6 +126,7 @@ def main() -> None:
             print(render_source(catalog[name]), "\n")
         return
 
+    from portia import runlog
     from portia.agent.session import DEFAULT_MODEL
     from portia.cli.chat import run_turn
 
@@ -136,6 +137,7 @@ def main() -> None:
         effort=args.effort,
         cwd=".",
         portia_dir=args.dir,
+        kind=runlog.INDEXING,
     )
 
 

@@ -24,7 +24,9 @@ from portia.agent import events, prompts
 
 
 def render(event: events.Event) -> None:
-    if event.kind == events.TEXT:
+    if event.kind == events.PROMPT:
+        print(f"\n> {event.data['text']}")
+    elif event.kind == events.TEXT:
         print(f"\n{event.data['text']}\n")
     elif event.kind == events.THINKING:
         print("  · thinking…")
@@ -114,9 +116,15 @@ async def confirm_write(tool_name: str, tool_input: dict) -> bool:
 
 
 async def run_and_render(
-    prompt: str, *, model: str, effort: str | None = None, cwd: str, portia_dir: str
+    prompt: str,
+    *,
+    model: str,
+    effort: str | None = None,
+    cwd: str,
+    portia_dir: str,
+    kind: str = runlog.CHAT,
 ) -> None:
-    """Drive one copilot turn, render its events, and log them.
+    """Drive one copilot exchange, render its events, and log them.
 
     The banner is not decoration: the default is deliberately a small model
     (`PLAN.md` → Budget & model discipline) and a run on a flagship costs orders
@@ -130,7 +138,7 @@ async def run_and_render(
     from portia.agent import session
 
     print(f"  [{model}{', effort ' + effort if effort else ''}]")
-    log = runlog.start(portia_dir, prompt=prompt, model=model, effort=effort, cwd=cwd)
+    log = runlog.start(portia_dir, cwd=cwd, kind=kind)
     print(f"  [logging to {log.path}]")
 
     async for event in session.run(
@@ -146,8 +154,19 @@ async def run_and_render(
         render(event)
 
 
-def run_turn(prompt: str, *, model: str, effort: str | None, cwd: str, portia_dir: str) -> None:
-    """One turn, start to finish. Shared entry point for `chat` and `index`.
+def run_turn(
+    prompt: str,
+    *,
+    model: str,
+    effort: str | None,
+    cwd: str,
+    portia_dir: str,
+    kind: str = runlog.CHAT,
+) -> None:
+    """One exchange, start to finish. Shared entry point for `chat` and `index`.
+
+    ``kind`` says which history it lands in — `index` passes ``INDEXING``, because
+    a job the app ran is not a conversation you had (`CONVERSATION.md` §3).
 
     Ctrl-C is how a human ends a turn they've seen enough of — an ordinary exit,
     not a crash. Without this it unwinds through the SDK's stream and prints
@@ -155,7 +174,9 @@ def run_turn(prompt: str, *, model: str, effort: str | None, cwd: str, portia_di
     """
     try:
         asyncio.run(
-            run_and_render(prompt, model=model, effort=effort, cwd=cwd, portia_dir=portia_dir)
+            run_and_render(
+                prompt, model=model, effort=effort, cwd=cwd, portia_dir=portia_dir, kind=kind
+            )
         )
     except KeyboardInterrupt:
         print("\n[interrupted]")

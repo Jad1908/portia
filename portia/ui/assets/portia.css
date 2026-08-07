@@ -2069,7 +2069,22 @@ body.body--dark .step-card {
 
 /* An indexing or re-read turn, in the panel it shares with the chat. Uncoloured
  * on purpose — it is a different *kind* of turn, not a more important one. */
-.turn-banner {
+.prompt-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  padding: var(--space-sm) 0 var(--space-xs);
+  margin-top: var(--space-sm);
+  border-top: 1px solid var(--c-hairline);
+}
+
+/* The first exchange needs no rule above it — there is nothing to separate. */
+.prompt-row:first-child {
+  border-top: none;
+  margin-top: 0;
+}
+
+.exchange-banner {
   display: flex;
   flex-direction: column;
   gap: var(--sp-xxs);
@@ -2079,7 +2094,7 @@ body.body--dark .step-card {
   padding: var(--sp-sm) var(--sp-md);
 }
 
-.turn-ended {
+.chat-ended {
   display: flex;
   flex-direction: column;
   gap: var(--sp-sm);

@@ -21,10 +21,14 @@ is not walked:
 
 - **The brief**, at the top. It is the most consequential text in the product and
   it used to be reachable only from a toolbar button that no longer exists.
-- **Turns**, at the foot. A *run* executed a spec and is a markdown file in the
-  project; a *turn* was the copilot deciding what the spec should say and is
-  JSONL inside ``.portia/`` (`portia/runlog.py`). Same word, two artifacts —
-  which is why the run sits in the tree where its file is and the turn does not.
+- **Chats** and **Indexing**, at the foot, and they are two lists rather than one
+  (`docs/CONVERSATION.md` §3). A *run* executed a spec and is a markdown file in
+  the project; a *chat* was a conversation about what the spec should say; an
+  *indexing* was a job the app ran on your behalf. Three artifacts, three
+  headings — which is why the run sits in the tree where its file is and the
+  other two do not, and why they no longer share one list called Turns. The
+  right pane has always kept these apart (`state.TABS`); this is the left pane
+  catching up.
 
 Nothing here ranks. Folders sort before files and both sort by name; no row is
 coloured, sized or ordered by anything measured (`DESIGN.md`).
@@ -42,13 +46,14 @@ from portia.ui import engine, tree
 from portia.ui.state import (
     APP,
     BRIEF,
+    CHAT_LOG,
+    INDEX_LOG,
     KNOWLEDGE,
     MODEL,
     OUTPUT,
     RUN,
     SOURCE,
     SPEC,
-    TURN,
     UNINDEXED,
 )
 
@@ -58,7 +63,8 @@ ICON = {
     MODEL: "code",
     OUTPUT: "description",
     RUN: "history",
-    TURN: "forum",
+    CHAT_LOG: "forum",
+    INDEX_LOG: "inventory_2",
     UNINDEXED: "insert_drive_file",
     tree.FOLDER: "folder",
 }
@@ -75,7 +81,18 @@ CARET_OPEN = "expand_more"
 CARET_SHUT = "chevron_right"
 
 EMPTY_TREE = "Nothing portia can read in this directory yet. Add a file to begin."
-TURNS_NOTE = "No copilot turns yet. Type a goal and press Go."
+#: One per history. A chat is something you start; an indexing is something the
+#: app does when you add data — so the two empty states point at different acts.
+CHATS_NOTE = "No chats yet. Type a goal and press Go."
+INDEXING_NOTE = "Nothing indexed yet."
+
+#: Heading, selection kind, and the note shown when a history is empty. One table
+#: rather than two near-identical blocks, so a third kind is a row and not a
+#: fourth copy of the same twelve lines.
+HISTORIES = (
+    ("Chats", CHAT_LOG, CHATS_NOTE),
+    ("Indexing", INDEX_LOG, INDEXING_NOTE),
+)
 UNINDEXED_NOTE = "not indexed"
 STALE_SPEC_NOTE = "its .sql is out of date"
 STALE_MODEL_NOTE = "stale — its spec changed"
@@ -83,7 +100,7 @@ STALE_MODEL_NOTE = "stale — its spec changed"
 
 @ui.refreshable
 def pane() -> None:
-    """The brief, the tree, then Turns.
+    """The brief, the tree, then the two histories.
 
     Keyed, because selecting a row rebuilds this pane to move one highlight and
     an unkeyed rebuild would send a long list back to the top each time you
@@ -93,7 +110,7 @@ def pane() -> None:
         _brief_row()
         _knowledge_row()
         _tree()
-        _turns()
+        _histories()
     _add_data_affordance()
 
 
@@ -196,8 +213,8 @@ def _meta(node: tree.Node) -> str:
     if node.kind == SPEC:
         steps = engine.count_steps(APP.root / node.rel)
         return "" if steps is None else c.count(steps, "step")
-    if node.kind == TURN:
-        return _turn_meta(APP.root / node.rel)
+    if node.kind in (CHAT_LOG, INDEX_LOG):
+        return _log_meta(APP.root / node.rel)
     return ""
 
 
@@ -215,41 +232,49 @@ def _note(node: tree.Node, stale: set[str]) -> str:
     return ""
 
 
-# --- turns ------------------------------------------------------------------
+# --- the two histories (docs/CONVERSATION.md §3) -----------------------------
 
 
-def _turns() -> None:
-    """Logged copilot turns — pinned below the tree, because their files are not in it.
+def _histories() -> None:
+    """Chats and indexing jobs — pinned below the tree, because their files are not in it.
 
-    A *run* executed a spec; a *turn* was the copilot deciding what the spec
-    should say. Two artifacts, two words: one heading covering both would make
-    "run" mean two things in the one place that has to be unambiguous. The run's
-    markdown is a file in the project and appears in the tree where it lives;
-    a turn is JSONL inside ``.portia/``, which is not walked.
+    Three artifacts, three headings. A *run* executed a spec; a *chat* was a
+    conversation about what the spec should say; an *indexing* was a job the app
+    ran on your behalf. One heading covering the last two would make it mean two
+    things in the one place that has to be unambiguous — which is the mistake
+    "turn" was invented to fix and only half fixed. The run's markdown is a file
+    in the project and appears in the tree where it lives; these are JSONL inside
+    ``.portia/``, which is not walked.
+
+    **They are two lists, never one sorted together.** Kind is not rank
+    (`DESIGN.md`), and a merged list would have to order chats against jobs on
+    something — recency being the only candidate, which buries the conversation
+    you had under twenty files the app profiled.
 
     The model is the meta, because it is the thing you are usually looking for.
     `EVALUATION.md` can only compare two runs when they differ in the model and
-    effort and nothing else, so that is the first question asked of this list.
+    effort and nothing else, so that is the first question asked of these lists.
     """
-    c.rule()
-    c.section_header("Turns")
-    turns = engine.turns_in(APP)
-    if not turns:
-        c.empty_note(TURNS_NOTE)
-        return
-    for path in turns:
-        c.artifact_row(
-            name=path.stem,
-            icon=ICON[TURN],
-            meta=_turn_meta(path),
-            selected=APP.is_selected(TURN, path.name),
-            on_click=lambda p=path: _select(TURN, p.name),
-        )
+    for heading, kind, empty in HISTORIES:
+        c.rule()
+        c.section_header(heading)
+        paths = engine.logs_in(APP, kind)
+        if not paths:
+            c.empty_note(empty)
+            continue
+        for path in paths:
+            c.artifact_row(
+                name=path.stem,
+                icon=ICON[kind],
+                meta=_log_meta(path),
+                selected=APP.is_selected(kind, path.name),
+                on_click=lambda p=path, k=kind: _select(k, p.name),
+            )
 
 
-def _turn_meta(path: Path) -> str:
-    """The turn's model, short enough for a 260px pane."""
-    header = engine.turn_header(path)
+def _log_meta(path: Path) -> str:
+    """The model it ran on, short enough for a 260px pane."""
+    header = engine.log_header(path)
     model = str(header.get("model") or "")
     return model.replace("claude-", "")
 
