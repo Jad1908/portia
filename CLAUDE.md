@@ -77,9 +77,10 @@ stack, and product vision. Read them every session, before proposing changes or 
   where each value comes from, and a page of Cypher recipes. The reference to `KNOWLEDGE_GRAPH.md`'s
   design — read that one for *why*, this one for *what you will find in the browser*.
   `tests/test_graph_schema_doc.py` fails if `knowledge/schema.py` gains something it does not mention.
-- `docs/CONVERSATION.md` — **the loop stops being one turn**, specified and built 2026-08-07,
-  **phases 1–5 of §12 done, phase 6 (the prompt) not**; the Status note at the top is the thing to
-  trust over any claim here.
+- `docs/CONVERSATION.md` — **the loop stops being one turn**, specified and built 2026-08-07, all
+  six phases of §12; the Status note at the top is the thing to trust over any claim here. **The
+  prompt edit is unmeasured** — `copilot.md` gained a "this is a conversation" section, and §10 is
+  why no claim is made about what it does.
   `session.run` holds the client for exactly one prompt, and §1 is the argument for why that costs
   more than it looks: the durable artifacts survive a turn but the *evidence* does not, so a
   follow-up re-climbs the ladder to get back where the last turn ended — and a profile is the most

@@ -3,12 +3,13 @@
 *Specified 2026-08-07, partly built the same day. Read `VISION.md`'s V0 section first: it is where
 the single-turn boundary was drawn on purpose, and §11 here is the reversal.*
 
-**Status:** **§12 phases 1–5 are done — the loop is a conversation.** Phase 1 measured the SDK and
+**Status:** **§12 is done — the loop is a conversation.** Phase 1 measured the SDK and
 **reversed §8**; phase 2 shipped §3's vocabulary; phase 3 built `session.Conversation`; phase 4 made
 the log's unit the chat; **phase 5 put it on screen** — a composer at the foot of the chat tab, the
 §7 send rule, an explicit Stop, End chat, and a cancelled decision drawn as interrupted. **§11's
-reversal has landed: the chat box exists and the engine holds what it implies.** Phase 6, the prompt
-edit, is not done and is deliberately last and alone.
+reversal has landed: the chat box exists and the engine holds what it implies.** Phase 6 edited
+`copilot.md` last and alone; that edit is **unmeasured** and §10 is why this document does not claim
+it helps.
 
 ## 1. The gap
 
@@ -373,7 +374,12 @@ Cheapest and most uncertain first, which here is the same thing.
    Verified against the live SDK end to end (`sandbox/spike/ui_chat_check.py`): four messages, one
    log file, a follow-up answering from the previous exchange's evidence, an interrupt leaving the
    chat usable, and End chat closing the subprocess.
-6. **The prompt edit** (§10), last and alone, so it is not moving while anything else is.
+6. ~~**The prompt edit**~~ **Done 2026-08-07**, last and alone. One new section in `copilot.md`
+   ("This is a conversation, not one shot"): do one thing properly and come back · that is about
+   *where* you stop, not doing less · a follow-up changing an earlier decision is normal, not a
+   complaint · and three things that do **not** change — record as you go, a longer conversation is
+   not more evidence, re-check after you act. **Unmeasured**, and §10 is why nothing here claims it
+   helps.
 
 A terminal REPL (`chat repl`) is the natural sixth surface and is **not** required by any of the
 above — the CLI's existing one-shot commands are a one-message chat and keep working. Left for
