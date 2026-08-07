@@ -205,12 +205,21 @@ def _set_effort(effort: str) -> None:
     _panel.refresh()
 
 
-def _switch_project() -> None:
+async def _switch_project() -> None:
+    """Back to the picker — closing any chat on the way out.
+
+    A chat holds a live SDK subprocess (`docs/CONVERSATION.md` §4), so leaving a
+    project without closing it leaks one for as long as the window lives. That
+    is `KNOWLEDGE_GRAPH.md` §6.6's shape of bug, and this is the one place a
+    project is left on purpose.
+    """
     from portia.ui import app as app_module
+    from portia.ui import exchange
 
     if APP.busy:
         ui.notify(SWITCH_BUSY)
         return
+    await exchange.close_all()
     _close()
     APP.opened = False
     app_module.shell.refresh()

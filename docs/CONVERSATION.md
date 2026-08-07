@@ -3,15 +3,12 @@
 *Specified 2026-08-07, partly built the same day. Read `VISION.md`'s V0 section first: it is where
 the single-turn boundary was drawn on purpose, and §11 here is the reversal.*
 
-**Status:** designed. **§12 phases 1 and 2 are done.** Phase 1 measured the SDK rather than assuming
-it and **reversed §8** (see the table there; `interrupt()` cancels the parked callback, so the
-resolve-first protocol this document first specified is unnecessary). Phase 2 shipped **§3's
-vocabulary** — `.portia/chats/` and `.portia/indexing/`, `cli/history.py`, `Exchange`, two left-pane
-lists — with no behaviour change. Phase 3 built **the seam**: `session.Conversation` holds one client
-across exchanges and `session.run` is a one-message wrapper over it. Phase 4 made **the log's unit
-the chat** — one file per chat, a `PROMPT` event opening each exchange, totals summed across them.
-**The engine can hold a chat and record one; no surface offers one yet.** Phases 5 and 6 are not
-built.
+**Status:** **§12 phases 1–5 are done — the loop is a conversation.** Phase 1 measured the SDK and
+**reversed §8**; phase 2 shipped §3's vocabulary; phase 3 built `session.Conversation`; phase 4 made
+the log's unit the chat; **phase 5 put it on screen** — a composer at the foot of the chat tab, the
+§7 send rule, an explicit Stop, End chat, and a cancelled decision drawn as interrupted. **§11's
+reversal has landed: the chat box exists and the engine holds what it implies.** Phase 6, the prompt
+edit, is not done and is deliberately last and alone.
 
 ## 1. The gap
 
@@ -39,7 +36,10 @@ against each other, and today the boundary wins.
 
 ## 2. The one structural fact
 
-`session.py:137`:
+*Written before the change and kept in the present tense, because it is the argument for it. The
+code below no longer exists — `session.Conversation` replaced it in phase 3.*
+
+`session.py:137`, as it was:
 
 ```python
 async with ClaudeSDKClient(options=options) as client:
@@ -362,8 +362,17 @@ Cheapest and most uncertain first, which here is the same thing.
    `session_id` off the results rather than the header, which is where §5 first put it and where it
    cannot go. **Pre-rename logs still summarize**, off their header, which is what makes §3's
    promise true rather than aspirational.
-5. **The app.** `Chat` in `state.py`, the two left-pane histories, the send rule, the interrupt
-   button, the end control, `busy` reworked, context usage on screen.
+5. ~~**The app.**~~ **Done 2026-08-07.** `Stream` holds a chat — its conversation, its log, its
+   exchanges — and rows accumulate across them while an indexing job still replaces the last one's ·
+   the goal box became a **composer at the foot** of the chat tab, with §7's rule: always editable,
+   Send dark in flight, no queue, **Stop** explicit · effort stops being offered once a chat is open
+   rather than being offered and ignored · **End chat** closes the client, as do switching projects
+   and shutting the window · `busy` means a message is in flight · cost per exchange in the
+   transcript, totals and context usage under the composer · **a cancelled `Decision` renders as
+   interrupted**, which is what §8 said portia actually owed.
+   Verified against the live SDK end to end (`sandbox/spike/ui_chat_check.py`): four messages, one
+   log file, a follow-up answering from the previous exchange's evidence, an interrupt leaving the
+   chat usable, and End chat closing the subprocess.
 6. **The prompt edit** (§10), last and alone, so it is not moving while anything else is.
 
 A terminal REPL (`chat repl`) is the natural sixth surface and is **not** required by any of the

@@ -77,8 +77,9 @@ stack, and product vision. Read them every session, before proposing changes or 
   where each value comes from, and a page of Cypher recipes. The reference to `KNOWLEDGE_GRAPH.md`'s
   design — read that one for *why*, this one for *what you will find in the browser*.
   `tests/test_graph_schema_doc.py` fails if `knowledge/schema.py` gains something it does not mention.
-- `docs/CONVERSATION.md` — **the loop stops being one turn**, specified 2026-08-07 and **not built**;
-  §12 is the build order and the Status note at the top is the thing to trust over any claim here.
+- `docs/CONVERSATION.md` — **the loop stops being one turn**, specified and built 2026-08-07,
+  **phases 1–5 of §12 done, phase 6 (the prompt) not**; the Status note at the top is the thing to
+  trust over any claim here.
   `session.run` holds the client for exactly one prompt, and §1 is the argument for why that costs
   more than it looks: the durable artifacts survive a turn but the *evidence* does not, so a
   follow-up re-climbs the ladder to get back where the last turn ended — and a profile is the most
@@ -104,6 +105,9 @@ stack, and product vision. Read them every session, before proposing changes or 
   `record_step` runs the op and *then* writes the spec.
   **§11 reverses `VISION.md`'s "no chat box"** — and is kept because that argument never failed; it
   described a real boundary and refused to fake past it, and the answer was to move the boundary.
+  Its *rule* survives and is what the composer is built around: ending a chat is a visible control,
+  closing the window ends the thread, and there is no queue — a message arriving on the far side of
+  a question the copilot asked meanwhile is the silent context loss that paragraph forbade.
 - `docs/BACKLOG.md` — parking lot of deferred ideas, by stream, with a compact **Shipped** list at
   the bottom. Not required reading; scan it when picking the next thing to build, and **add to it
   whenever we postpone something mid-work.**

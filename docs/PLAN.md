@@ -58,6 +58,18 @@ the interactive copilot loop over it (the questions-and-insights UX, emitting a 
 a decision stream) → the surface where those questions are asked and answered. The interactive
 layer is **core, not deferred** — all three now exist; `VISION.md` is where its shape is worked out.
 
+**The loop is a conversation** (2026-08-07, `docs/CONVERSATION.md`). `session.run` held the SDK
+client for exactly one prompt, and what that cost was not "no follow-up" — the catalog and the spec
+survive a turn deliberately. What died was the *evidence*: the profile it pulled, the findings it
+read, the key it rejected and why. So a follow-up re-climbed the ladder to get back where the last
+turn ended, and a profile is the most expensive thing the agent does. `session.Conversation` now
+holds one client across exchanges, the log's unit is the **chat** rather than the exchange, and the
+window has a composer. Two findings worth carrying: **measurement reversed the spec's own §8** —
+`interrupt()` cancels the parked `can_use_tool` task itself, so the elaborate resolve-first protocol
+it specified was unnecessary — and the vocabulary fix was overdue rather than new, since
+`.portia/runs/` held *turns* beside a project-root `runs/` that held runs. Three artifacts, three
+words: a **run** executed a spec, a **chat** is a conversation, an **indexing** is a job.
+
 **Where we are (2026-08-03).** The engine is built (`checks`, `ops`, `spec`, `catalog`), so is the
 copilot loop (`portia/agent/` — in-process MCP server, layered context, `AskUserQuestion` routed to
 a human, spec writing, chat CLI), and so is **V0 of the app** (`portia/ui/`) — the loop runs in one

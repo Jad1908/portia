@@ -111,6 +111,17 @@ class Decision:
     #: the form without throwing away a half-written objection.
     draft: dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def interrupted(self) -> bool:
+        """Whether this was cut short rather than answered.
+
+        The SDK cancels the parked `can_use_tool` task when a message is
+        interrupted (`docs/CONVERSATION.md` §8, measured), so the future ends
+        cancelled with nobody waiting on it. A panel that cannot tell that apart
+        from *still waiting* draws a form backed by nothing.
+        """
+        return not self.resolved and self.future.cancelled()
+
     def resolve(self, outcome: Any) -> None:
         self.resolved = True
         self.outcome = outcome
@@ -187,18 +198,58 @@ class Exchange:
 
 @dataclass
 class Stream:
-    """One tab's transcript: its rows, and the exchange that produced them.
+    """One tab's transcript — for the chat tab, **one chat**.
 
-    Two streams, one engine. At most one of these is ever live — the split is
-    about *reading* them apart, not about running two at once.
+    Two streams, one engine. At most one is ever live — the split is about
+    *reading* them apart, not about running two at once.
+
+    The chat tab's rows accumulate across exchanges; the indexing tab's are
+    replaced per job, because a job is one-shot and the last one is the one you
+    want (`docs/CONVERSATION.md` §6).
     """
 
     rows: list[Any] = field(default_factory=list)
+    #: The exchange in flight, or the last one that ran.
     exchange: Exchange | None = None
+    #: Every exchange in this chat, so the footer can total them without the
+    #: panel doing arithmetic the log would do differently.
+    exchanges: list[Exchange] = field(default_factory=list)
+    #: The live `agent.session.Conversation`, held opaquely: this module imports
+    #: no engine, and holding a handle is not calling one. ``None`` means no chat
+    #: is open, which is what makes "End chat" and "is this the first message"
+    #: answerable without asking the driver.
+    conversation: Any = None
+    #: The `runlog.Log` this chat is being written to, opened once and reused by
+    #: every exchange — the file *is* the chat (§5).
+    log: Any = None
+    #: What the chat is holding, last time the SDK was asked (`totalTokens`,
+    #: `maxTokens`). Read after an exchange ends rather than during a render,
+    #: because asking costs an await and a render may not have one.
+    context: dict[str, Any] | None = None
 
     @property
     def busy(self) -> bool:
+        """A message is **in flight** — not that a chat exists.
+
+        An open chat sitting idle is not busy, or it would block indexing for as
+        long as it stays open (`docs/CONVERSATION.md` §9).
+        """
         return self.exchange is not None and self.exchange.running
+
+    @property
+    def open(self) -> bool:
+        """Whether a chat is going. Independent of `busy`."""
+        return self.conversation is not None
+
+    @property
+    def spent(self) -> float | None:
+        """What this chat has cost, summed over its exchanges.
+
+        A total, never a verdict: whether it was expensive needs a goal, and this
+        panel has no way to know one (`runlog`).
+        """
+        costs = [e.cost_usd for e in self.exchanges if e.cost_usd is not None]
+        return sum(costs) if costs else None
 
     @property
     def pending(self) -> Decision | None:
@@ -548,17 +599,24 @@ class App:
         effort: str | None,
         kind: str = GOAL,
         label: str = "",
+        keep_rows: bool = False,
     ) -> Stream:
         """Begin an exchange in the stream its kind belongs to, and show that tab.
 
         Switching is not a nicety: the exchange is about to ask questions and
         request writes, and a loop blocked behind a hidden tab looks hung.
+
+        ``keep_rows`` is what makes a chat a chat: a follow-up appends to the
+        transcript it is a follow-up *to*, while an indexing job replaces the
+        last one's (§6).
         """
         stream = self.stream_for(kind)
-        stream.rows = []
-        stream.exchange = Exchange(
-            prompt=prompt, model=model, effort=effort, kind=kind, label=label
-        )
+        if not keep_rows:
+            stream.rows = []
+            stream.exchanges = []
+        exchange = Exchange(prompt=prompt, model=model, effort=effort, kind=kind, label=label)
+        stream.exchange = exchange
+        stream.exchanges.append(exchange)
         self.tab = TAB_FOR_KIND.get(kind, CHAT)
         return stream
 

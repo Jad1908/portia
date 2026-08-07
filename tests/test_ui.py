@@ -928,9 +928,11 @@ def test_every_setting_binds_a_field_the_rest_of_the_app_actually_reads():
     assert set(bound) <= fields, f"settings writes what nothing reads: {set(bound) - fields}"
 
 
-def test_switching_projects_refuses_while_a_turn_is_running(monkeypatch):
-    """A switch mid-turn leaves the copilot writing into a directory the window
-    has stopped looking at."""
+def test_switching_projects_refuses_while_a_message_is_in_flight(monkeypatch):
+    """A switch mid-exchange leaves the copilot writing into a directory the
+    window has stopped looking at."""
+    import asyncio
+
     from portia.ui import settings
     from portia.ui.state import APP
 
@@ -940,11 +942,40 @@ def test_switching_projects_refuses_while_a_turn_is_running(monkeypatch):
     monkeypatch.setattr(settings, "_close", lambda: None)
     APP.opened = True
 
-    settings._switch_project()
+    asyncio.run(settings._switch_project())
 
     assert APP.opened is True, "still in the project"
     assert said == [settings.SWITCH_BUSY]
-    APP.streams[state.CHAT].turn = None
+    APP.streams[state.CHAT].exchange = None
+
+
+def test_switching_projects_closes_the_chat_it_leaves(monkeypatch):
+    """A chat holds a live SDK subprocess (`CONVERSATION.md` §4). Leaving a
+    project without closing it leaks one for as long as the window lives."""
+    import asyncio
+
+    from portia.ui import settings
+    from portia.ui.state import APP
+
+    closed = []
+
+    class FakeChat:
+        async def close(self):
+            closed.append(True)
+
+    from portia.ui import app as app_module
+
+    APP.streams[state.CHAT].conversation = FakeChat()
+    monkeypatch.setattr(settings.ui, "notify", lambda *a: None)
+    monkeypatch.setattr(settings, "_close", lambda: None)
+    monkeypatch.setattr(app_module.shell, "refresh", lambda *a, **k: None)
+    APP.opened = True
+
+    asyncio.run(settings._switch_project())
+
+    assert closed == [True]
+    assert APP.streams[state.CHAT].conversation is None
+    assert APP.opened is False
 
 
 def test_the_toolbar_no_longer_carries_a_preference():
@@ -1542,3 +1573,117 @@ def test_a_pending_decision_invites_you_in_rather_than_moving_you(project):
     # workspace saying the transcript is somewhere else.
     app.left_add_data, app.skipped_sources = False, True
     assert app.prompt_for_decision(events.QUESTION) is False
+
+
+# --- the chat (docs/CONVERSATION.md §7, §9) ----------------------------------
+
+
+def test_a_follow_up_appends_rather_than_wiping_the_transcript():
+    from portia.agent import events
+
+    """The whole point of a chat: message two is a follow-up *to* message one,
+    and a transcript that cleared between them would say otherwise."""
+    from portia.ui.state import App
+
+    app = App()
+    stream = app.start_exchange("merge them", model="m", effort="low")
+    stream.rows.append(events.Event(events.TEXT, {"text": "done"}))
+
+    stream.conversation = object()  # a chat is open
+    app.start_exchange("actually inner join", model="m", effort="low", keep_rows=stream.open)
+
+    assert len(stream.rows) == 1, "the first exchange is still there"
+    assert len(stream.exchanges) == 2
+    assert stream.exchange.prompt == "actually inner join"
+
+
+def test_an_indexing_job_replaces_the_last_ones_transcript():
+    """A job is one-shot (§6), and the last one is the one you want."""
+    from portia.agent import events
+    from portia.ui.state import App
+
+    app = App()
+    stream = app.start_exchange("read these", model="m", effort=None, kind=state.INDEXING)
+    stream.rows.append(events.Event(events.TEXT, {"text": "done"}))
+
+    app.start_exchange("read those", model="m", effort=None, kind=state.INDEXING)
+
+    assert stream.rows == []
+    assert len(stream.exchanges) == 1
+
+
+def test_an_open_chat_sitting_idle_is_not_busy():
+    """§9 — if `busy` meant "a client exists", an open chat would block indexing
+    for as long as it stayed open."""
+    from portia.ui.state import App
+
+    app = App()
+    stream = app.start_exchange("merge them", model="m", effort="low")
+    stream.conversation = object()
+    stream.exchange.running = False
+
+    assert stream.open is True
+    assert stream.busy is False
+    assert app.busy is False
+
+
+def test_a_chats_spend_is_summed_over_its_exchanges():
+    """A chat that spent four cents over three messages spent four cents."""
+    from portia.ui.state import App
+
+    app = App()
+    stream = app.start_exchange("one", model="m", effort="low")
+    stream.exchange.cost_usd = 0.02
+    app.start_exchange("two", model="m", effort="low", keep_rows=True)
+    stream.exchange.cost_usd = 0.03
+
+    assert stream.spent == pytest.approx(0.05)
+
+
+def test_a_chat_with_nothing_reported_has_no_spend_rather_than_zero():
+    """Nobody reported is not the same claim as it cost nothing."""
+    from portia.ui.state import App
+
+    app = App()
+    app.start_exchange("one", model="m", effort="low")
+    assert app.stream().spent is None
+
+
+def test_a_cancelled_decision_reads_as_interrupted_not_as_a_live_form():
+    """§8 — an interrupt cancels the parked callback, so the future behind that
+    form is one nobody will ever read. Drawing it as answerable is the silent
+    wrong thing this project forbids, where the human is being asked to act."""
+    import asyncio
+
+    from portia.agent import events
+
+    async def go():
+        decision = Decision(
+            events.QUESTION,
+            {"questions": [{"question": "which key?"}]},
+            asyncio.get_running_loop().create_future(),
+        )
+        assert decision.interrupted is False
+        decision.future.cancel()
+        return decision
+
+    decision = asyncio.run(go())
+    assert decision.interrupted is True
+    assert decision.resolved is False
+
+
+def test_an_answered_decision_is_never_interrupted():
+    import asyncio
+
+    from portia.agent import events
+
+    async def go():
+        decision = Decision(
+            events.QUESTION, {"questions": []}, asyncio.get_running_loop().create_future()
+        )
+        decision.resolve({"which key?": "hotel_id"})
+        return decision
+
+    decision = asyncio.run(go())
+    assert decision.interrupted is False
+    assert decision.resolved is True

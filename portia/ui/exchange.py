@@ -58,60 +58,179 @@ async def start(
     kind: str = state.GOAL,
     label: str = "",
 ) -> None:
-    """Run one exchange to completion, streaming its events into the transcript."""
+    """Send one message, streaming its events into the transcript.
+
+    **A goal continues the open chat; a job is one-shot** (`CONVERSATION.md` §6).
+    That is the whole of the difference here: the same recording, the same
+    callbacks, the same log tee — but the chat keeps its client and its file
+    between messages, and an indexing job opens and closes both.
+    """
     from portia.ui import transcript
 
     if APP.busy:
         return
-    stream = APP.start_exchange(prompt, model=model, effort=effort, kind=kind, label=label)
-    turn = stream.exchange
-    assert turn is not None
-    transcript.pane.refresh()
 
     try:
         from portia.agent import session
     except ImportError as exc:  # the `agent` extra isn't installed
-        turn.error = f"{type(exc).__name__}: {exc}"
-        turn.running = False
-        transcript.pane.refresh()
+        _fail_before_starting(prompt, model, effort, kind, label, exc)
         return
 
-    # The window's copy of a turn dies with the window; this is the durable one
+    is_chat = kind == state.GOAL
+    stream = APP.start_exchange(
+        prompt,
+        model=model,
+        effort=effort,
+        kind=kind,
+        label=label,
+        # A follow-up appends to the transcript it is a follow-up *to*.
+        keep_rows=is_chat and APP.stream_for(kind).open,
+    )
+    exchange = stream.exchange
+    assert exchange is not None
+    transcript.pane.refresh()
+
+    # The window's copy dies with the window; this is the durable one
     # (`portia/runlog.py`). Teed here, at the edge, for the same reason the CLI
     # tees in `run_turn` — the engine must not learn it is being observed.
-    log = runlog.start(APP.portia_dir, cwd=str(APP.root), kind=_LOG_KIND_FOR.get(kind, runlog.CHAT))
+    if stream.log is None or not is_chat:
+        stream.log = runlog.start(
+            APP.portia_dir, cwd=str(APP.root), kind=_LOG_KIND_FOR.get(kind, runlog.CHAT)
+        )
 
     try:
-        async for event in session.run(
-            prompt,
+        if is_chat:
+            await _open_chat(stream, session, model=model, effort=effort)
+            await _drain(stream.conversation.send(prompt), stream)
+        else:
+            await _drain(
+                session.run(
+                    prompt,
+                    answer=answer,
+                    confirm=confirm,
+                    model=model,
+                    effort=effort,
+                    cwd=str(APP.root),
+                    portia_dir=APP.portia_dir,
+                ),
+                stream,
+            )
+    except asyncio.CancelledError:
+        exchange.error = "interrupted"
+        raise
+    except Exception as exc:  # noqa: BLE001 — shown to the operator, not swallowed
+        exchange.error = f"{type(exc).__name__}: {exc}"
+    finally:
+        exchange.running = False
+        _resolve_orphans()
+        _sync_artifacts()
+        if is_chat:
+            await _read_context(stream)
+        transcript.pane.refresh()
+
+
+async def _drain(stream_of_events, stream: state.Stream) -> None:
+    async for event in stream_of_events:
+        _record(event, stream, stream.log)
+
+
+async def _open_chat(stream: state.Stream, session, *, model: str, effort: str | None) -> None:
+    """Reuse this chat's client, or start one. Switch models if asked.
+
+    **Effort is not switchable** and the composer says so: it is a
+    `ClaudeAgentOptions` field, so it is fixed for the life of a client, and the
+    SDK has no runtime equivalent of `set_model` for it.
+    """
+    if stream.conversation is None:
+        stream.conversation = session.Conversation(
             answer=answer,
             confirm=confirm,
             model=model,
             effort=effort,
             cwd=str(APP.root),
             portia_dir=APP.portia_dir,
-        ):
-            _record(event, stream, log)
-    except asyncio.CancelledError:
-        turn.error = "interrupted"
-        raise
-    except Exception as exc:  # noqa: BLE001 — shown to the operator, not swallowed
-        turn.error = f"{type(exc).__name__}: {exc}"
-    finally:
-        turn.running = False
-        _resolve_orphans()
-        _sync_artifacts()
-        transcript.pane.refresh()
+        )
+        await stream.conversation.connect()
+    elif stream.conversation.model != model:
+        await stream.conversation.set_model(model)
 
 
-def _record(event: events.Event, stream: state.Stream, log: runlog.Log) -> None:
+async def _read_context(stream: state.Stream) -> None:
+    """How full the chat is, asked once per exchange rather than per render.
+
+    A **fact** — token counts are measured, so a surface may show them
+    (`CONVERSATION.md` §9). No policy sits on top of it; §13 is why.
+    """
+    if stream.conversation is None:
+        return
+    try:
+        stream.context = await stream.conversation.context_usage()
+    except Exception:  # noqa: BLE001 — a number for the corner, never worth failing over
+        stream.context = None
+
+
+def _fail_before_starting(prompt, model, effort, kind, label, exc: Exception) -> None:
+    """The `agent` extra isn't installed. Say so where the transcript is read."""
+    from portia.ui import transcript
+
+    stream = APP.start_exchange(prompt, model=model, effort=effort, kind=kind, label=label)
+    assert stream.exchange is not None
+    stream.exchange.error = f"{type(exc).__name__}: {exc}"
+    stream.exchange.running = False
+    transcript.pane.refresh()
+
+
+async def interrupt() -> None:
+    """Stop the message in flight. **The only way to cut one short** (§7).
+
+    Nothing has to be resolved first — the SDK cancels the parked `can_use_tool`
+    task itself and a result arrives (§8, measured). What this owes is the
+    *reaction*: `_resolve_orphans` runs when the exchange ends, and the
+    transcript draws a cancelled decision as interrupted rather than as a form
+    still waiting to be filled in.
+    """
+    stream = _running_stream()
+    if stream.conversation is not None and stream.busy:
+        await stream.conversation.interrupt()
+
+
+async def end_chat(stream: state.Stream) -> None:
+    """Close the chat and clear the transcript.
+
+    **A chat dies with the process** (§4), so an abandoned one holds a live
+    subprocess until something closes it. This is that something; so are
+    switching projects and shutting the window.
+    """
+    from portia.ui import transcript
+
+    conversation, stream.conversation = stream.conversation, None
+    stream.rows = []
+    stream.exchange = None
+    stream.exchanges = []
+    stream.log = None
+    stream.context = None
+    if conversation is not None:
+        await conversation.close()
+    transcript.pane.refresh()
+
+
+async def close_all() -> None:
+    """Every open chat, on the way out of a project or the window."""
+    for stream in APP.streams.values():
+        conversation, stream.conversation = stream.conversation, None
+        if conversation is not None:
+            await conversation.close()
+
+
+def _record(event: events.Event, stream: state.Stream, log: runlog.Log | None) -> None:
     from portia.ui import transcript
 
     # Logged before the panel's own bookkeeping: the events the transcript drops
     # are ones it has *already rendered* from inside the callback that produced
     # them, and a log missing every question and every write confirmation would
     # be missing the decisions the run is worth reading for.
-    log.event(event)
+    if log is not None:
+        log.event(event)
 
     if event.kind in _OWNED:
         return

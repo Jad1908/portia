@@ -627,13 +627,22 @@ These exist so a test run never needs a terminal (`VISION.md` → "The no-termin
   selectors as `segmented-control`s, and the `button-primary` **Go**. The model and effort in play
   are stated in `{colors.mute}` `{typography.caption}` for the duration of the exchange — an
   expensive one must never be silent.
-- **`chat-ended`** — when the chat closes: a `{colors.hairline-strong}` rule, one line of
-  `{colors.mute}` `{typography.caption}` stating it is over and what it cost, and a
-  `button-tertiary` "New chat". **No chat box yet.** The engine is still one exchange per
-  invocation; an input implying a conversation it cannot hold is a lie about the system, and this
-  component exists to tell the truth instead. `docs/CONVERSATION.md` is where that changes, and
-  §7 is the rule the box will follow when it arrives — always editable, Send dark while a message
-  is in flight.
+- **`chat-ended`** — **the indexing tab only**, now that the chat has a composer: a
+  `{colors.hairline-strong}` rule, one line of `{colors.mute}` `{typography.caption}` stating the
+  job is over and what it cost, and a `button-tertiary` "Clear". A chat has no single ending until
+  you close it, so its cost lands per exchange in the transcript and its totals sit under the
+  composer.
+- **the composer** — at the **foot** of the chat tab, where the next message goes. *This reversed
+  "No chat box" (2026-08-07, `docs/CONVERSATION.md` §11); the argument that failed is kept in
+  `VISION.md` because it never actually failed — the boundary moved.* Its rule, §7:
+  **the textarea is always editable**, in flight or not, because half a thought written while the
+  copilot works is the normal case and a disabled box throws it away; **Send is dark while a
+  message is in flight** and there is no queue; **Stop** is the only way to cut one short, and it
+  is an explicit button rather than anything a keystroke does. The effort control stops being
+  offered once a chat is open — it is fixed for the life of a client — rather than being offered
+  and quietly ignored. Under it, `{typography.caption}` in `{colors.mute}`: messages, spend, and
+  how full the context is. **All three are counts and none is a verdict** — nothing here says a
+  chat is too long or too expensive, which would need a goal the screen has no way to know.
 
 **`transcript-row`** — one event, styled by kind
 - **text** → `{colors.body}` `{typography.body-md}`, the copilot's prose.
