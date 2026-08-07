@@ -96,6 +96,11 @@ def from_message(message: Any) -> Iterator[Event]:
                 "text": getattr(message, "result", None),
                 "usage": getattr(message, "usage", None),
                 "cost_usd": getattr(message, "total_cost_usd", None),
+                # The SDK's id for the session this exchange belonged to. Carried
+                # so a chat can record which one it was (`CONVERSATION.md` §4) —
+                # it costs one key, and it is what would make reopening a chat an
+                # addition rather than a rewrite. Nothing reads it yet.
+                "session_id": getattr(message, "session_id", None),
             },
         )
 

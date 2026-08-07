@@ -7,8 +7,9 @@ the single-turn boundary was drawn on purpose, and §11 here is the reversal.*
 it and **reversed §8** (see the table there; `interrupt()` cancels the parked callback, so the
 resolve-first protocol this document first specified is unnecessary). Phase 2 shipped **§3's
 vocabulary** — `.portia/chats/` and `.portia/indexing/`, `cli/history.py`, `Exchange`, two left-pane
-lists — with no behaviour change: **the engine is still one exchange per invocation**, and every
-surface still says so. Phases 3–6 are not built.
+lists — with no behaviour change. Phase 3 built **the seam**: `session.Conversation` holds one client
+across exchanges and `session.run` is a one-message wrapper over it, so **the engine can now hold a
+chat and no surface uses one yet**. Phases 4–6 are not built.
 
 ## 1. The gap
 
@@ -334,10 +335,16 @@ Cheapest and most uncertain first, which here is the same thing.
    pre-rename logs read and never migrated. `runlog.py` **kept its name** — the collision was in
    what a human reads, not in an internal module name. No behaviour changed, so every surface still
    says a chat is one shot.
-3. **The engine seam.** A `Conversation` owning the client, with `send(prompt)` yielding events to
-   its `ResultMessage`. **`session.run` survives as a one-message wrapper over it** — that is what
-   keeps `cli/index.py`, `cli/chat.py`'s three subcommands and `ui/turn.start` working untouched,
-   and it means the seam can land and be tested before any surface uses it.
+3. ~~**The engine seam.**~~ **Done 2026-08-07.** `session.Conversation` — `connect` / `send` /
+   `interrupt` / `set_model` / `context_usage` / `close`, with `session_id` off the result and a
+   `busy` that means *a message is in flight* rather than *a client exists*. **`send` refuses to
+   overlap rather than queueing** (§7), which is the engine holding the line the surface will draw.
+   `session.run` survives as a one-message wrapper, so `cli/index.py`, `cli/chat.py`'s three
+   subcommands and `ui/exchange.start` are untouched. The client is injected the way `ask.py`
+   injects `answer`/`confirm`, so the drain order and the guard are tested without a model call —
+   and verified separately against the real SDK (`sandbox/spike/conversation_check.py`): four
+   exchanges on one session id, exchange 2 answering from exchange 1's tool result with no tool of
+   its own, an interrupt mid-tool leaving the chat open and usable.
 4. **The log.** One file per chat, `prompt` events, model and effort per exchange, `session_id` in
    the header.
 5. **The app.** `Chat` in `state.py`, the two left-pane histories, the send rule, the interrupt
@@ -355,6 +362,11 @@ above — the CLI's existing one-shot commands are a one-message chat and keep w
   Claude Code auto-compacts and portia does not control it. `get_context_usage` makes it observable
   (§9). Building a trimming or summarizing policy before watching a real chat hit the ceiling would
   be inventing a threshold, which is the mistake this project has already reversed once.
+  **One data point exists and it is not a trend**: the phase 3 check ended four exchanges — one
+  `describe_source`, one interrupted `profile_source` — at **10,158 of 200,000 tokens**, most of
+  which is the pushed L0/L1 prompt rather than anything the chat accumulated. Three fixture sources
+  at five columns each is the easiest possible case; the question is what a wide real extract does,
+  and nothing here answers it.
 - **Whether two live subprocesses cost anything** (§6). Allowed until measured otherwise.
 - **Reopening a chat** (§4). `session_id` is recorded; nothing reads it. Needs the resume spike
   before it is more than a field.
