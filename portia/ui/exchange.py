@@ -46,13 +46,13 @@ async def start(
     kind: str = state.GOAL,
     label: str = "",
 ) -> None:
-    """Run one turn to completion, streaming its events into the transcript."""
+    """Run one exchange to completion, streaming its events into the transcript."""
     from portia.ui import transcript
 
     if APP.busy:
         return
-    stream = APP.start_turn(prompt, model=model, effort=effort, kind=kind, label=label)
-    turn = stream.turn
+    stream = APP.start_exchange(prompt, model=model, effort=effort, kind=kind, label=label)
+    turn = stream.exchange
     assert turn is not None
     transcript.pane.refresh()
 
@@ -103,13 +103,13 @@ def _record(event: events.Event, stream: state.Stream, log: runlog.Log) -> None:
 
     if event.kind in _OWNED:
         return
-    if event.kind == events.RESULT and stream.turn is not None:
-        stream.turn.subtype = event.data.get("subtype")
-        stream.turn.cost_usd = event.data.get("cost_usd")
+    if event.kind == events.RESULT and stream.exchange is not None:
+        stream.exchange.subtype = event.data.get("subtype")
+        stream.exchange.cost_usd = event.data.get("cost_usd")
         totals = runlog.token_totals(event.data.get("usage") or {})
-        stream.turn.input_tokens = totals["input_tokens"]
-        stream.turn.cached_tokens = totals["cached_tokens"]
-        stream.turn.output_tokens = totals["output_tokens"]
+        stream.exchange.input_tokens = totals["input_tokens"]
+        stream.exchange.cached_tokens = totals["cached_tokens"]
+        stream.exchange.output_tokens = totals["output_tokens"]
     stream.rows.append(event)
     if event.kind in _SYNC_ON:
         _sync_artifacts()
@@ -166,7 +166,7 @@ def _stop(kind: str, payload: dict) -> Decision:
 
 
 def _running_stream() -> state.Stream:
-    """Whichever stream owns the live turn. The engine only ever runs one."""
+    """Whichever stream owns the live exchange. The engine only ever runs one."""
     return next((s for s in APP.streams.values() if s.busy), APP.stream())
 
 

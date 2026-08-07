@@ -25,10 +25,10 @@ What the app is allowed to call, and why each is on the list:
   Shared with the terminal deliberately (`docs/PIPELINE.md` §6): the window shows
   the same plan `import_data` shows because it *is* the same plan, not because
   two surfaces were written to agree about one
-- ``agent.session.run`` — a turn, driven with the app's own answer/confirm
-- ``runlog.runs_in`` / ``read`` / ``read_header`` / ``summary`` — past copilot
-  turns for the Turns section and the replay. The summary in particular: those
-  counts are the engine's, so the window and `cli.runs` cannot end up quoting
+- ``agent.session.run`` — an exchange, driven with the app's own answer/confirm
+- ``runlog.logs_in`` / ``read`` / ``read_header`` / ``summary`` — past chats and
+  indexing jobs for their two sections and the replay. The summary in particular: those
+  counts are the engine's, so the window and `cli.history` cannot end up quoting
   two different numbers for how often the copilot asked.
 
 The one thing here that isn't the engine is ``browse_for_folder``: the OS's own
@@ -37,7 +37,7 @@ thing anyone should be asked to do.
 
 Blocking work (profiling a source, executing a spec) hits the database and would freeze the
 websocket, so it goes through ``asyncio.to_thread``. Reading a file the panes
-draw — a report, a compiled model, a turn's log — deliberately does **not**: the
+draw — a report, a compiled model, a chat's log — deliberately does **not**: the
 middle pane draws in one pass so that a click never paints a blank frame, and an
 `await` in the middle of a render is exactly what that costs (`workflow.pane`).
 Nothing here formats anything for a human — that is the panes' job.
@@ -71,9 +71,9 @@ DATA_DIR = "data"
 OUT_DIR = "out"
 
 #: Saved *spec run* reports, at the project root. The Runs section lists these;
-#: the Turns section lists copilot turns, which are a different artifact living
-#: inside `.portia/` (`runlog.RUNS_DIR`). Same word, two things — hence two
-#: sections and two headings.
+#: the Chats and Indexing sections list what the copilot did, which are different
+#: artifacts living inside `.portia/` (`runlog.DIR_FOR_KIND`). Three things, three
+#: headings — see `docs/CONVERSATION.md` §3 for why "turn" stopped covering it.
 RUNS_DIR = "runs"
 
 #: Recently opened projects. Not project state, so it lives with the user rather
@@ -628,38 +628,48 @@ def read_text(path: Path) -> str:
     return path.read_text()
 
 
-# --- logged copilot turns ---------------------------------------------------
+# --- the two logged histories (docs/CONVERSATION.md §3) ----------------------
+
+#: A left-pane selection kind, to the log kind it lists. The mapping lives here
+#: rather than in `state.py` so the selection constants stay what they are — a
+#: word the pane uses — and only the engine knows which folder that means.
+LOG_KIND_FOR = {State.CHAT_LOG: runlog.CHAT, State.INDEX_LOG: runlog.INDEXING}
 
 
-def turns_in(app: App) -> list[Path]:
-    """Logged copilot turns, newest first (`portia/runlog.py`).
+def logs_in(app: App, kind: str) -> list[Path]:
+    """One history, newest first (`portia/runlog.py`). ``kind`` is a selection kind.
 
-    Not the same thing as `runs_in`, which lists saved *spec run* reports. A
-    turn is how the recipe was decided; a run is what the recipe did.
+    Not the same thing as `runs_in`, which lists saved *spec run* reports. A chat
+    is how the recipe was decided; a run is what the recipe did; an indexing is
+    neither, it is a job the app ran on your behalf.
     """
-    return runlog.runs_in(app.catalog_dir)
+    return runlog.logs_in(app.catalog_dir, LOG_KIND_FOR[kind])
 
 
-def turn_path(app: App, name: str) -> Path:
-    """Where a named turn's log lives. Resolved here, so no panel has to know
-    that turns sit inside `.portia/` while saved run reports sit beside it."""
-    return app.catalog_dir / runlog.RUNS_DIR / name
+def log_path(app: App, name: str, kind: str) -> Path | None:
+    """Where a named log lives, or ``None`` if it is not there any more.
+
+    Resolved here so no panel has to know that a chat sits in `.portia/chats/`,
+    an indexing in `.portia/indexing/`, and anything written before the rename in
+    `.portia/runs/` — which is why this searches rather than joining a path.
+    """
+    return next((p for p in logs_in(app, kind) if p.name == name), None)
 
 
-def turn_header(path: Path) -> dict:
-    """A turn's header alone — one line, for drawing a list row."""
+def log_header(path: Path) -> dict:
+    """A log's header alone — one line, for drawing a list row."""
     return runlog.read_header(path)
 
 
-def read_turn(path: Path) -> runlog.Run:
-    """One logged turn, off disk. Read in the render pass — see `read_text`."""
+def read_log(path: Path) -> runlog.Transcript:
+    """One logged transcript, off disk. Read in the render pass — see `read_text`."""
     return runlog.read(path)
 
 
-def turn_summary(run: runlog.Run) -> dict:
-    """The turn's own counts. Computed by the engine, never by a panel — the
-    app must not arrive at a different number than `cli.runs` does."""
-    return runlog.summary(run)
+def log_summary(transcript: runlog.Transcript) -> dict:
+    """Its own counts. Computed by the engine, never by a panel — the app must
+    not arrive at a different number than `cli.history` does."""
+    return runlog.summary(transcript)
 
 
 async def write_outputs(app: App) -> list[Path]:

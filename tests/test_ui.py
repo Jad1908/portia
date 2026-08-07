@@ -76,17 +76,17 @@ def test_the_accent_follows_the_state_the_project_is_in():
 def test_a_turn_in_flight_makes_the_app_busy():
     app = App()
     assert app.busy is False
-    stream = app.start_turn("merge these", model="claude-haiku-4-5", effort="low")
+    stream = app.start_exchange("merge these", model="claude-haiku-4-5", effort="low")
     assert app.busy is True
-    stream.turn.running = False
-    assert app.busy is False and stream.turn.ended is True
+    stream.exchange.running = False
+    assert app.busy is False and stream.exchange.ended is True
 
 
 def test_starting_a_turn_clears_the_last_one():
     """A turn is one shot; a new one starts fresh, per the engine it drives."""
     app = App()
     app.stream().rows = ["something from before"]
-    app.start_turn("again", model="m", effort=None)
+    app.start_exchange("again", model="m", effort=None)
     assert app.rows == []
 
 
@@ -94,7 +94,7 @@ def test_indexing_and_chat_keep_separate_transcripts():
     """Two jobs with different rhythms; interleaving them made both hard to read."""
     app = App()
     app.stream(state.CHAT).rows = ["a goal I typed"]
-    app.start_turn("index these", model="m", effort=None, kind=state.INDEXING)
+    app.start_exchange("index these", model="m", effort=None, kind=state.INDEXING)
     assert app.tab == state.INDEX, "the pane follows the turn that just started"
     assert app.stream(state.CHAT).rows == ["a goal I typed"], "the chat is untouched"
     assert app.stream(state.INDEX).rows == []
@@ -103,7 +103,7 @@ def test_indexing_and_chat_keep_separate_transcripts():
 def test_a_turn_anywhere_makes_the_app_busy():
     """The engine is single-turn: a chat turn must block an indexing one."""
     app = App()
-    app.start_turn("index these", model="m", effort=None, kind=state.INDEXING)
+    app.start_exchange("index these", model="m", effort=None, kind=state.INDEXING)
     assert app.busy is True
 
 
@@ -245,7 +245,7 @@ def test_the_way_out_of_add_data_says_a_read_is_running(loop):
         app.indexed = 1
         assert screens._action_note(0) == screens.PROFILED.format(n="1 source")
 
-        stream = app.start_turn("read them", model="m", effort=None, kind=state.INDEXING)
+        stream = app.start_exchange("read them", model="m", effort=None, kind=state.INDEXING)
         assert screens._action_note(0) == screens.READING_NOW
 
         # Stopped for a human who may have dismissed the popup: the screen must
@@ -253,7 +253,7 @@ def test_the_way_out_of_add_data_says_a_read_is_running(loop):
         stream.rows.append(Decision("question", {}, loop.create_future()))
         assert screens._action_note(0) == screens.WAITING_ON_YOU
 
-        stream.turn.running = False
+        stream.exchange.running = False
         assert screens._action_note(0) not in (screens.READING_NOW, screens.WAITING_ON_YOU)
 
 
@@ -269,7 +269,7 @@ def _reading(app, monkeypatch, on_start=None):
 
     from nicegui import core
 
-    from portia.ui import screens, turn
+    from portia.ui import exchange, screens
 
     started: list[str] = []
 
@@ -286,7 +286,7 @@ def _reading(app, monkeypatch, on_start=None):
         await screens._interpret_pending()
         await asyncio.sleep(0)  # let those no-op redraws run before the loop shuts
 
-    monkeypatch.setattr(turn, "start", fake_start)
+    monkeypatch.setattr(exchange, "start", fake_start)
     with _as_app(screens, app):
         asyncio.run(read())
     return started
@@ -314,7 +314,7 @@ def test_indexing_hands_straight_over_to_the_read(tmp_path, monkeypatch):
 
     from nicegui import core, ui
 
-    from portia.ui import screens, turn
+    from portia.ui import exchange, screens
     from portia.ui.state import App
 
     pd.DataFrame({"a": [1, 2]}).to_csv(tmp_path / "orders.csv", index=False)
@@ -328,7 +328,7 @@ def test_indexing_hands_straight_over_to_the_read(tmp_path, monkeypatch):
         started.append(label)
         assert not app.left_add_data, "the read runs with the add-data screen still showing"
 
-    monkeypatch.setattr(turn, "start", fake_start)
+    monkeypatch.setattr(exchange, "start", fake_start)
     monkeypatch.setattr(ui, "notify", lambda *a, **k: None)  # no client to notify
 
     async def index() -> None:
@@ -344,7 +344,7 @@ def test_indexing_hands_straight_over_to_the_read(tmp_path, monkeypatch):
 
 
 def test_a_batch_indexed_while_the_first_is_being_read_is_not_dropped(monkeypatch):
-    """Indexing again mid-read is ordinary on this screen, and `turn.start`
+    """Indexing again mid-read is ordinary on this screen, and `exchange.start`
     refuses a second live turn *silently* — so the queue is drained in a loop
     rather than read once."""
     from portia.ui.state import App
@@ -380,7 +380,7 @@ def test_a_read_already_running_is_not_started_a_second_time(monkeypatch):
     from portia.ui.state import App
 
     app = App(catalog={"sources": {"orders": {}}})
-    app.start_turn("read them", model="m", effort=None, kind=state.INDEXING)
+    app.start_exchange("read them", model="m", effort=None, kind=state.INDEXING)
     app.pending_interpret = ["invoices"]
 
     assert _reading(app, monkeypatch) == []
@@ -507,23 +507,26 @@ def test_a_writes_outcome_is_never_read_off_the_next_write():
     assert transcript._outcome_after(rows, 1) is True
 
 
-def test_turns_and_saved_runs_are_two_different_lists(tmp_path):
-    """Same word, two artifacts: a *run* executed a spec, a *turn* was the
-    copilot deciding what the spec should say. The pane must not merge them."""
+def test_runs_chats_and_indexing_are_three_different_lists(tmp_path):
+    """Three artifacts, three lists (`docs/CONVERSATION.md` §3): a *run* executed
+    a spec, a *chat* was a conversation about what it should say, an *indexing*
+    was a job the app ran. The pane must not merge any of them."""
     from portia import runlog
-    from portia.ui import engine
+    from portia.ui import engine, state
 
     app = App(root=tmp_path)
     (tmp_path / "runs").mkdir()
     (tmp_path / "runs" / "2026-07-29T09-00-00.md").write_text("# a spec run")
-    runlog.start(app.catalog_dir, prompt="a goal", model="m")
+    chat = runlog.start(app.catalog_dir, prompt="a goal", model="m", kind=runlog.CHAT)
+    job = runlog.start(app.catalog_dir, prompt="read these", model="m", kind=runlog.INDEXING)
 
     assert [p.suffix for p in engine.runs_in(app)] == [".md"]
-    assert [p.suffix for p in engine.turns_in(app)] == [".jsonl"]
+    assert engine.logs_in(app, state.CHAT_LOG) == [chat.path]
+    assert engine.logs_in(app, state.INDEX_LOG) == [job.path]
 
 
-def test_a_turns_counts_come_from_the_engine_not_the_panel(tmp_path):
-    """`DESIGN.md`: nothing in `ui/` computes. The window and `cli.runs` have to
+def test_a_logs_counts_come_from_the_engine_not_the_panel(tmp_path):
+    """`DESIGN.md`: nothing in `ui/` computes. The window and `cli.history` have to
     quote the same number for how often the copilot asked."""
     from portia import runlog
     from portia.agent import events
@@ -533,9 +536,13 @@ def test_a_turns_counts_come_from_the_engine_not_the_panel(tmp_path):
     log = runlog.start(app.catalog_dir, prompt="a goal", model="m")
     log.event(events.question_event([{"question": "which grain?"}]))
 
-    run = runlog.read(engine.turn_path(app, log.path.name))
-    assert engine.turn_summary(run) == runlog.summary(run)
-    assert engine.turn_summary(run)["questions"] == 1
+    from portia.ui import state
+
+    path = engine.log_path(app, log.path.name, state.CHAT_LOG)
+    assert path is not None
+    logged = runlog.read(path)
+    assert engine.log_summary(logged) == runlog.summary(logged)
+    assert engine.log_summary(logged)["questions"] == 1
 
 
 def test_an_answered_question_is_one_row_not_two():
@@ -686,7 +693,7 @@ def test_the_middle_pane_draws_in_one_pass():
     from portia.ui import workflow
 
     assert not inspect.iscoroutinefunction(workflow.pane.func), "see the docstring on pane()"
-    for name in ("read_text", "read_turn", "read_table"):
+    for name in ("read_text", "read_log", "read_table"):
         reader = getattr(engine_module, name)
         assert not inspect.iscoroutinefunction(reader), f"{name} is drawn, not awaited"
 
@@ -926,7 +933,7 @@ def test_switching_projects_refuses_while_a_turn_is_running(monkeypatch):
     from portia.ui import settings
     from portia.ui.state import APP
 
-    APP.streams[state.CHAT].turn = state.Turn(prompt="g", model="m", effort="low")
+    APP.streams[state.CHAT].exchange = state.Exchange(prompt="g", model="m", effort="low")
     said = []
     monkeypatch.setattr(settings.ui, "notify", said.append)
     monkeypatch.setattr(settings, "_close", lambda: None)

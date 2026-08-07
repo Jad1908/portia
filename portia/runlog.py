@@ -1,4 +1,12 @@
-"""The run log — a copilot turn, kept.
+"""The copilot's log — a chat, or an indexing job, kept.
+
+**The module keeps its old name on purpose** (`docs/CONVERSATION.md` §3). The
+collision that rename fixes was in what a *human* reads — a left-pane list called
+Turns, a `.portia/runs/` sitting beside the project-root `runs/`, and a
+`cli/runs.py` whose own docstring admitted it read turns. "Run log" as an
+internal module name is a generic engineering term and is in nobody's
+vocabulary; churning it for symmetry would be rename for its own sake.
+
 
 Every result in `docs/EVALUATION.md` was scored by hand off a terminal
 transcript: some of it pasted twice, some lost to a `^C`, two runs conflated
@@ -10,13 +18,13 @@ impossible.
 
 The seam already existed. `agent/events.py` normalizes every SDK message into
 `Event(kind, data)` precisely so something other than a terminal can consume it;
-persisting that stream is most of the work. **One JSONL per turn** under
-`.portia/runs/`, one object per line, opened by a header recording the model,
-effort, prompt, cwd and the portia sha that produced it — in the project
-directory, so a run travels with the spec it produced.
+persisting that stream is most of the work. **One JSONL each** under
+`.portia/chats/` or `.portia/indexing/`, one object per line, opened by a header
+recording the kind, model, effort, prompt, cwd and the portia sha that produced
+it — in the project directory, so a log travels with the spec it produced.
 
 **Written at the edge, never in the engine.** `cli/chat.run_turn` and
-`ui/turn.start` each tee their event stream through here. The engine must not
+`ui/exchange.start` each tee their event stream through here. The engine must not
 learn it is being observed, or `events.py` stops being a clean seam and becomes
 a logging framework (docs/EVALUATION.md → "The run log").
 
@@ -25,18 +33,18 @@ central store, no index, and nothing written outside the project — a turn is
 only interpretable beside the catalog it read and the spec it wrote, so a
 global folder of transcripts referring to tables you would have to go find is
 worse than no folder. The consequences are worth stating plainly rather than
-discovering: **deleting a project deletes its turns**, there is no retention,
+discovering: **deleting a project deletes its history**, there is no retention,
 rotation or delete path (logs accumulate; tool results are the bulk), and
 nothing aggregates across projects. Reading another project's log needs no
-copying — every reader here takes a path, and `cli.runs --dir <proj>/.portia`
+copying — every reader here takes a path, and `cli.history --dir <proj>/.portia`
 works from anywhere.
 
-Nothing here judges a run. `summary` counts what happened — rungs pulled and in
-what order, how often it asked, which ops it chose, what a turn cost — and every
+Nothing here judges anything. `summary` counts what happened — rungs pulled and
+in what order, how often it asked, which ops it chose, what it cost — and every
 one of those is a **cost and behaviour descriptor, not a correctness signal**.
 "Asked three times" is neither good nor bad without knowing whether it should
-have; only the answer keys make a number mean anything. A run log that scored
-runs would be `CLAUDE.md`'s facts-vs-judgment line broken in the one place it
+have; only the answer keys make a number mean anything. A log that scored what it
+logged would be `CLAUDE.md`'s facts-vs-judgment line broken in the one place it
 would be least visible.
 """
 
@@ -58,11 +66,29 @@ from portia.core.serialize import to_json_line
 #: kinds end up listed side by side.
 from portia.spec import REPORT_STAMP
 
-#: Under the project's `.portia/`, beside `sources/`. Not the
-#: project-root `runs/` that holds saved *spec-run* reports (`ui/engine.py`):
-#: those are markdown, written for a human reading a diff, and a run of a recipe
-#: is a different artifact from a turn of the copilot.
-RUNS_DIR = "runs"
+#: What was being logged. **A chat and an indexing are different artifacts and
+#: get different folders** (`docs/CONVERSATION.md` §3): a chat is a conversation
+#: you had with the copilot, an indexing is a job the app ran on your behalf, and
+#: mixing them in one list made the pane that exists to say what portia knows
+#: about say two things at once.
+CHAT = "chat"
+INDEXING = "indexing"
+KINDS = (CHAT, INDEXING)
+
+#: Under the project's `.portia/`, beside `sources/`. Neither is the project-root
+#: `runs/` that holds saved *spec-run* reports (`ui/engine.py`): those are
+#: markdown, written for a human reading a diff, and running a recipe is a
+#: different act from deciding what the recipe should say.
+DIR_FOR_KIND = {CHAT: "chats", INDEXING: "indexing"}
+
+#: Where logs landed before the split, when every one of them was called a "turn"
+#: and `.portia/runs/` collided with the project-root `runs/` in exactly the way
+#: `CONVERSATION.md` §3 describes. **Read, never written, and never migrated** —
+#: portia does not rewrite files in someone's project to suit its own rename, and
+#: the one real evaluation on PHQ data would otherwise vanish because a word
+#: changed. A log found here has no kind; it is listed under chats, which is what
+#: nearly all of them were.
+LEGACY_DIR = "runs"
 
 #: The log's first line. Shaped like an event so a reader can parse every line
 #: the same way, but deliberately *not* an `events` kind: it describes the turn
@@ -106,24 +132,28 @@ def start(
     model: str,
     effort: str | None = None,
     cwd: str | Path = ".",
+    kind: str = CHAT,
     when: datetime | None = None,
 ) -> Log:
-    """Open a log for one turn and write its header.
+    """Open a log and write its header. ``kind`` picks which folder it lands in.
 
-    The header is what makes two runs comparable: `EVALUATION.md` can only put
+    The header is what makes two logs comparable: `EVALUATION.md` can only put
     Run 6 next to Run 5 because they differ in model and effort and nothing
     else, and that fact currently survives only in prose someone remembered to
     write. `portia_sha` is the other half — which build of the prompts and the
-    engine this run was talking to.
+    engine this one was talking to.
     """
+    if kind not in DIR_FOR_KIND:
+        raise ValueError(f"unknown log kind {kind!r} — expected one of {', '.join(KINDS)}")
     when = when or datetime.now()
-    directory = Path(portia_dir) / RUNS_DIR
+    directory = Path(portia_dir) / DIR_FOR_KIND[kind]
     directory.mkdir(parents=True, exist_ok=True)
     log = Log(_free_path(directory, when))
     log.write(
         HEADER,
         {
             "started": when.isoformat(timespec="seconds"),
+            "kind": kind,
             "prompt": prompt,
             "model": model,
             "effort": effort,
@@ -174,8 +204,14 @@ def portia_sha() -> str | None:
 
 
 @dataclass(frozen=True)
-class Run:
-    """One logged turn: its header, and the events in the order they happened."""
+class Transcript:
+    """One logged thing: its header, and the events in the order they happened.
+
+    Named for what it holds rather than for what produced it, because what
+    produced it is now two things — see `CONVERSATION.md` §3. It was `Run`, which
+    was the collision that section is about: a class called `Run` that is not a
+    spec run.
+    """
 
     path: Path
     header: dict[str, Any] = field(default_factory=dict)
@@ -185,11 +221,27 @@ class Run:
     def name(self) -> str:
         return self.path.stem
 
+    @property
+    def kind(self) -> str:
+        """``CHAT`` or ``INDEXING``. A legacy log has no kind and reads as a chat."""
+        recorded = self.header.get("kind")
+        return recorded if recorded in KINDS else CHAT
 
-def runs_in(portia_dir: str | Path = DEFAULT_DIR) -> list[Path]:
-    """Every logged turn in a project, newest first (the stamp sorts)."""
-    directory = Path(portia_dir) / RUNS_DIR
-    return sorted(directory.glob("*.jsonl"), reverse=True) if directory.is_dir() else []
+
+def logs_in(portia_dir: str | Path = DEFAULT_DIR, kind: str | None = None) -> list[Path]:
+    """Every log in a project, newest first (the stamp sorts).
+
+    ``kind`` filters to one folder; ``None`` is everything. **Legacy
+    `.portia/runs/` is folded into the chats**, because that is what nearly all
+    of it was and because a history that silently omits everything written before
+    a rename is worse than one that is slightly generous about it.
+    """
+    base = Path(portia_dir)
+    folders = [base / DIR_FOR_KIND[k] for k in (KINDS if kind is None else (kind,))]
+    if kind in (None, CHAT):
+        folders.append(base / LEGACY_DIR)
+    found = [p for folder in folders if folder.is_dir() for p in folder.glob("*.jsonl")]
+    return sorted(found, key=lambda p: p.stem, reverse=True)
 
 
 def find(name: str, portia_dir: str | Path = DEFAULT_DIR) -> Path | None:
@@ -197,7 +249,7 @@ def find(name: str, portia_dir: str | Path = DEFAULT_DIR) -> Path | None:
     direct = Path(name)
     if direct.is_file():
         return direct
-    candidates = runs_in(portia_dir)
+    candidates = logs_in(portia_dir)
     return next((p for p in candidates if p.stem == name or p.stem.startswith(name)), None)
 
 
@@ -220,7 +272,7 @@ def read_header(path: str | Path) -> dict[str, Any]:
     return record.get("data") or {}
 
 
-def read(path: str | Path) -> Run:
+def read(path: str | Path) -> Transcript:
     """Parse a log back into a header and a list of events.
 
     Unparseable lines are skipped rather than raised on. The one that realistic-
@@ -245,13 +297,13 @@ def read(path: str | Path) -> Run:
             header = data
         elif isinstance(kind, str):
             collected.append(events.Event(kind, data))
-    return Run(path=path, header=header, events=collected)
+    return Transcript(path=path, header=header, events=collected)
 
 
 # --- what it can answer without any labels ----------------------------------
 
 
-def summary(run: Run) -> dict[str, Any]:
+def summary(run: Transcript) -> dict[str, Any]:
     """Counts, not verdicts.
 
     Every field here is something the stream states outright. There is no
@@ -268,7 +320,8 @@ def summary(run: Run) -> dict[str, Any]:
     usage = (result.data.get("usage") if result else None) or {}
 
     return {
-        "run": run.name,
+        "name": run.name,
+        "kind": run.kind,
         "started": run.header.get("started"),
         "model": run.header.get("model"),
         "effort": run.header.get("effort"),
@@ -297,7 +350,7 @@ def summary(run: Run) -> dict[str, Any]:
     }
 
 
-def _of(run: Run, kind: str) -> list[events.Event]:
+def _of(run: Transcript, kind: str) -> list[events.Event]:
     return [e for e in run.events if e.kind == kind]
 
 
@@ -365,7 +418,7 @@ def token_totals(usage: dict[str, Any]) -> dict[str, Any]:
 
     **Public because the window shows these live**, at the end of a turn, and a
     second implementation of "which of the SDK's three input fields count" is
-    how the panel and `cli.runs` end up quoting different numbers for one turn —
+    how the panel and `cli.history` end up quoting different numbers for one turn —
     the disagreement `core/present.py` exists to stop.
     """
     if not usage:

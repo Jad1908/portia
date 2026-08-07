@@ -42,11 +42,11 @@ TITLE = "Settings"
 #: This page's panel. One per page, never rebuilt.
 _DIALOG: ui.dialog | None = None
 
-SWITCH_BUSY = "Can't switch projects while a turn is running."
+SWITCH_BUSY = "Can't switch projects while something is running."
 NO_DATA_DIR = "not set — the whole repo"
 DATA_DIR_SCOPE = "what the left pane draws as data, and where an import lands"
-INTERPRET_COST = "Profiling is free and always happens. Reading them costs a model turn."
-SPEND_NOTE = "What a turn costs is the model and the effort, and nothing else."
+INTERPRET_COST = "Profiling is free and always happens. Reading them spends a model exchange."
+SPEND_NOTE = "What an exchange costs is the model and the effort, and nothing else."
 BRIEF_WHY = (
     "The project in a few sentences: the goal, the modelling, the data. Opens in the middle pane."
 )
@@ -147,7 +147,7 @@ def _project() -> None:
 
 
 def _copilot() -> None:
-    """What a turn spends. The same two fields the goal box and the drop zone bind."""
+    """What an exchange spends. The same two fields the goal box and the drop zone bind."""
     c.model_effort(APP, _set_effort)
     c.caption(SPEND_NOTE)
 

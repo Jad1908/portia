@@ -266,7 +266,7 @@ Cards never go flat (0px) and never exceed 16px except for full pills. Most chro
 
 **`button-primary`** — the one teal action
 - Fill `{colors.accent-primary}`, label `{colors.on-accent}`, `{typography.button}`, padding `6px 14px`, height ~32px, `{rounded.md}`.
-- In V0 this is **Go** (start a turn) and **Run** (execute a spec) — never both live at once. At
+- In V0 this is **Go** (start a chat) and **Run** (execute a spec) — never both live at once. At
   most one solid accent fill visible per view. Pressed → `{colors.accent-primary-pressed}`.
 - **Approving a write is deliberately not this.** See `write-confirm`.
 
@@ -368,7 +368,7 @@ These exist so a test run never needs a terminal (`VISION.md` → "The no-termin
   the fold is one that looks like it did nothing when you press it. The footer's own top border is
   the divider; a `rule` inside it is two lines a pixel apart.
 - **The body is `repeat(auto-fit, minmax(340px, 1fr))`** — the question you are almost always
-  answering on the left, the one you usually are not (import, and what a turn costs) on the right,
+  answering on the left, the one you usually are not (import, and what an exchange costs) on the right,
   falling to one column when the card cannot hold two. `auto-fit` rather than a media query: the
   card's width is already capped against the viewport, so what decides one column or two is how
   much room *this element* ended up with, not how wide the window is. A wide panel laid out as one
@@ -428,7 +428,7 @@ These exist so a test run never needs a terminal (`VISION.md` → "The no-termin
   `.add-section-toggle.p-expansion`: `p-expansion`'s own 11px/24px rule has equal specificity and
   sits later in the file, so class order alone loses.
 - An **interpret toggle** sits below both, on by default, labelled with its cost in
-  `{colors.mute}` `{typography.caption}` — profiling is free, interpretation is a model turn, and
+  `{colors.mute}` `{typography.caption}` — profiling is free, interpretation is a model exchange, and
   the UI must not blur the two.
 - **One accent fill, and it moves.** While files are outstanding it is on **Index N files**; the
   moment there are none it becomes **Open the workspace**. Never both — a CTA offered beside
@@ -463,7 +463,7 @@ These exist so a test run never needs a terminal (`VISION.md` → "The no-termin
 
 **`index-progress`** — a file landing
 - Each file appears as an `artifact-row` the moment it profiles, carrying the **uninterpreted**
-  marker until the turn writes its summary. Profiling is instant and deterministic; the
+  marker until the exchange writes its summary. Profiling is instant and deterministic; the
   interpretation arrives later through the ordinary transcript. **Never one merged spinner** — one
   of the two costs money and the operator should be able to see which is which.
 
@@ -493,7 +493,8 @@ These exist so a test run never needs a terminal (`VISION.md` → "The no-termin
 - Two rows are pinned outside the tree because their files live in `.portia/`, which is not walked:
   the **project brief** at the top, and **Turns** as a section at the foot under a
   `{typography.caption}` `{colors.mute}` header. A *run* executed a spec and is a file in the
-  project; a *turn* was the copilot deciding what the spec should say. Same word, two artifacts.
+  project; a *chat* was the conversation about what the spec should say, and an *indexing* was a
+  job the app ran. Three artifacts, three lists (`docs/CONVERSATION.md` §3).
 
 **`artifact-row`** + **`artifact-row-selected`** — one row, for a folder or a file
 - Default: transparent, optional caret `{colors.ash}`, leading kind icon `{colors.mute}`, name
@@ -611,26 +612,28 @@ These exist so a test run never needs a terminal (`VISION.md` → "The no-termin
 - Two transcripts, not one filtered view. A goal you typed and the catalog work the app runs on your
   behalf are different jobs with different rhythms, and interleaving them in one scroll made each
   harder to read than it is alone.
-- **Each tab carries a dot when something is happening there**: `{colors.mute}` while a turn runs,
-  `{colors.accent-primary}` when that turn is *waiting on you*. This is not decoration — the engine
-  is single-turn, so a question parked behind the tab you are not looking at is indistinguishable
-  from a hung turn. For the same reason **the pane follows a decision**: starting a turn shows its
+- **Each tab carries a dot when something is happening there**: `{colors.mute}` while one runs,
+  `{colors.accent-primary}` when it is *waiting on you*. This is not decoration — only one exchange
+  is ever live, so a question parked behind the tab you are not looking at is indistinguishable
+  from a hung one. For the same reason **the pane follows a decision**: starting an exchange shows its
   tab, and a question or write confirmation switches to its tab when it arrives.
 - Kind, never rank: the waiting dot takes the accent because it is asking for you, not because it
   is worse than anything else on screen.
 
-**`transcript-pane`** — the live turn, and replayed past ones
+**`transcript-pane`** — the live exchange, and replayed past ones
 - Fill `{colors.surface}`, padding `{spacing.lg}`. Rows in event order, streamed as `session.run`
   yields them. One per tab.
 - **`goal-input`** pinned at the top: a `text-input` at `{typography.body-md}`, model/effort
   selectors as `segmented-control`s, and the `button-primary` **Go**. The model and effort in play
-  are stated in `{colors.mute}` `{typography.caption}` for the duration of the turn — an expensive
-  run must never be silent.
-- **`turn-ended`** — when the turn closes: a `{colors.hairline-strong}` rule, one line of
-  `{colors.mute}` `{typography.caption}` stating the turn is over and what it cost, and a
-  `button-tertiary` "New turn". **No chat box.** The engine is single-turn; an input implying a
-  conversation it cannot hold is a lie about the system, and this component exists to tell the
-  truth instead.
+  are stated in `{colors.mute}` `{typography.caption}` for the duration of the exchange — an
+  expensive one must never be silent.
+- **`chat-ended`** — when the chat closes: a `{colors.hairline-strong}` rule, one line of
+  `{colors.mute}` `{typography.caption}` stating it is over and what it cost, and a
+  `button-tertiary` "New chat". **No chat box yet.** The engine is still one exchange per
+  invocation; an input implying a conversation it cannot hold is a lie about the system, and this
+  component exists to tell the truth instead. `docs/CONVERSATION.md` is where that changes, and
+  §7 is the rule the box will follow when it arrives — always editable, Send dark while a message
+  is in flight.
 
 **`transcript-row`** — one event, styled by kind
 - **text** → `{colors.body}` `{typography.body-md}`, the copilot's prose.
@@ -769,14 +772,14 @@ questions-and-insights UX *is* the product" — and they get the most design att
   naming what it is, because a number nobody can name is worse than no number.
 - For places where the same handful of facts repeats down a long list. Anywhere else, use `kv`.
 
-**`turn-banner`** — what a turn is, when the app started it rather than you
+**`exchange-banner`** — what an exchange is, when the app started it rather than you
 - `{colors.surface-elevated}`, 1px `{colors.hairline}`, `{rounded.md}`, padding `{spacing.sm}`
   `{spacing.md}`. An icon, the kind (`Indexing`, `Re-reading`), the subject in `{typography.mono-sm}`,
   and one `{typography.caption}` line saying what is actually running.
-- **Uncoloured on purpose** — it is a different *kind* of turn, not a more important one.
+- **Uncoloured on purpose** — it is a different *kind* of work, not a more important one.
 - It exists because indexing and a goal you typed share one transcript, and a panel that renders them
   identically is one you have to reconstruct from the tool calls. It also keeps the two halves of
-  indexing apart: profiling already happened and was free, interpretation is what costs a turn.
+  indexing apart: profiling already happened and was free, interpretation is what costs an exchange.
 
 **`not-read`** — the source inspector's summary slot, before anybody has written one
 - An icon plus two lines: *"The copilot has not read this source yet"* in `{typography.body-md}`
@@ -892,7 +895,7 @@ the component that drew a layer inside a flat section has nothing left to draw.
 - **The accent hue is decided: deep teal**, shared with the sibling project. Not a gap — a choice.
   It still lives in one token, so re-hueing stays a one-line change if that ever becomes wanted.
 - **Streaming states are unspecced.** What a `tool_call` row looks like while its result is still
-  pending, and how a long turn signals it is alive, need designing against a real run. *V0's answer
+  pending, and how a long exchange signals it is alive, need designing against a real run. *V0's answer
   is thin and now has a real run behind it: a spinner beside "the copilot is working", and the
   transcript pinned to its newest row. A `tool_call` still looks identical whether its result is
   seconds away or never coming.*

@@ -30,13 +30,15 @@ __all__ = [
     "APP",
     "App",
     "Decision",
-    "Turn",
+    "Exchange",
     "SOURCE",
     "SPEC",
     "MODEL",
     "OUTPUT",
     "RUN",
-    "TURN",
+    "CHAT_LOG",
+    "INDEX_LOG",
+    "LOG_KINDS",
     "UNINDEXED",
     "BRIEF",
     "GOAL",
@@ -53,12 +55,13 @@ __all__ = [
 
 #: What a left-pane selection can be. ``None`` means the workflow is in view.
 #:
-#: ``RUN`` and ``TURN`` are two different artifacts and get two different words
-#: on screen: a **run** executed a spec and was saved as markdown, a **turn** was
-#: the copilot working and was logged as events (`portia/runlog.py`). One is what
-#: the recipe did, the other is how the recipe got decided. Collapsing them into
-#: one list would make "run" mean two things in the pane that exists to say what
-#: portia knows about.
+#: ``RUN``, ``CHAT_LOG`` and ``INDEX_LOG`` are three different artifacts and get
+#: three different words on screen (`docs/CONVERSATION.md` §3): a **run** executed
+#: a spec and was saved as markdown, a **chat** was a conversation with the
+#: copilot, an **indexing** was a job the app ran on your behalf. Collapsing any
+#: of them would make one word mean two things in the pane that exists to say what
+#: portia knows about — which is what "turn" was invented to stop, and only half
+#: did.
 SOURCE = "source"
 SPEC = "spec"
 #: A compiled ``models/*.sql`` — **the deliverable**, and deliberately not an
@@ -68,7 +71,10 @@ SPEC = "spec"
 MODEL = "model"
 OUTPUT = "output"
 RUN = "run"
-TURN = "turn"
+CHAT_LOG = "chat-log"
+INDEX_LOG = "index-log"
+#: Both histories, in the order they are drawn.
+LOG_KINDS = (CHAT_LOG, INDEX_LOG)
 #: A file in the tree that portia can read and has never profiled. It is a
 #: selection because the tree shows such files, and a row you can click into
 #: nothing is a dead end — the inspector says what it is and offers to index it.
@@ -149,8 +155,13 @@ def band_for(width: int) -> str:
 
 
 @dataclass
-class Turn:
-    """One copilot turn: what it was asked, what it is spending, how it ended."""
+class Exchange:
+    """One exchange: what it was asked, what it is spending, how it ended.
+
+    One human message and the agent's work in response — not a whole chat, which
+    is the file this lands in (`docs/CONVERSATION.md` §3). It was ``Turn``, and
+    "turn" retired because the word was doing two jobs.
+    """
 
     prompt: str
     model: str
@@ -161,7 +172,7 @@ class Turn:
     subtype: str | None = None
     cost_usd: float | None = None
     #: What the turn sent and received, from `runlog.token_totals` — the same
-    #: arithmetic `cli.runs` prints, so the window and the terminal cannot quote
+    #: arithmetic `cli.history` prints, so the window and the terminal cannot quote
     #: two different numbers for one turn. `input_tokens` is the whole input
     #: including the cached part, which on a portia turn is nearly all of it.
     input_tokens: int | None = None
@@ -176,19 +187,18 @@ class Turn:
 
 @dataclass
 class Stream:
-    """One tab's transcript: its rows, and the turn that produced them.
+    """One tab's transcript: its rows, and the exchange that produced them.
 
-    Two streams, one engine. The engine is single-turn, so at most one of these
-    is ever live — the split is about *reading* them apart, not about running
-    two at once.
+    Two streams, one engine. At most one of these is ever live — the split is
+    about *reading* them apart, not about running two at once.
     """
 
     rows: list[Any] = field(default_factory=list)
-    turn: Turn | None = None
+    exchange: Exchange | None = None
 
     @property
     def busy(self) -> bool:
-        return self.turn is not None and self.turn.running
+        return self.exchange is not None and self.exchange.running
 
     @property
     def pending(self) -> Decision | None:
@@ -350,7 +360,7 @@ class App:
     streams: dict[str, Stream] = field(default_factory=lambda: {t: Stream() for t in TABS})
     tab: str = CHAT
 
-    #: Turn settings, remembered between turns.
+    #: Exchange settings, remembered between exchanges.
     goal: str = ""
     model: str = ""
     effort: str | None = "low"
@@ -454,7 +464,7 @@ class App:
         return self.streams[tab or self.tab]
 
     def stream_for(self, kind: str) -> Stream:
-        """Where a turn of this kind writes."""
+        """Where an exchange of this kind writes."""
         return self.streams[TAB_FOR_KIND.get(kind, CHAT)]
 
     @property
@@ -462,12 +472,12 @@ class App:
         return self.stream().rows
 
     @property
-    def turn(self) -> Turn | None:
-        return self.stream().turn
+    def exchange(self) -> Exchange | None:
+        return self.stream().exchange
 
     @property
     def busy(self) -> bool:
-        """A turn is live **anywhere**. Starting a second would interleave two."""
+        """An exchange is live **anywhere**. Starting a second would interleave two."""
         return any(s.busy for s in self.streams.values())
 
     def focus(self, model: str) -> None:
@@ -530,7 +540,7 @@ class App:
             self.closed_folders -= {rel}
             self.open_folders |= {rel}
 
-    def start_turn(
+    def start_exchange(
         self,
         prompt: str,
         *,
@@ -539,14 +549,16 @@ class App:
         kind: str = GOAL,
         label: str = "",
     ) -> Stream:
-        """Begin a turn in the stream its kind belongs to, and show that tab.
+        """Begin an exchange in the stream its kind belongs to, and show that tab.
 
-        Switching is not a nicety: the turn is about to ask questions and request
-        writes, and a loop blocked behind a hidden tab is a loop that looks hung.
+        Switching is not a nicety: the exchange is about to ask questions and
+        request writes, and a loop blocked behind a hidden tab looks hung.
         """
         stream = self.stream_for(kind)
         stream.rows = []
-        stream.turn = Turn(prompt=prompt, model=model, effort=effort, kind=kind, label=label)
+        stream.exchange = Exchange(
+            prompt=prompt, model=model, effort=effort, kind=kind, label=label
+        )
         self.tab = TAB_FOR_KIND.get(kind, CHAT)
         return stream
 

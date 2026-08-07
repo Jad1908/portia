@@ -46,13 +46,14 @@ from portia.ui import engine, graph, state
 from portia.ui.state import (
     APP,
     BRIEF,
+    CHAT_LOG,
+    INDEX_LOG,
     KNOWLEDGE,
     MODEL,
     OUTPUT,
     RUN,
     SOURCE,
     SPEC,
-    TURN,
     UNINDEXED,
 )
 
@@ -72,7 +73,7 @@ def pane() -> None:
     batch, so a click swaps the content rather than blinking it.
 
     Nothing is given up by that. The reads here are a `.sql`, a markdown report,
-    a turn's JSONL — local files a few kilobytes long — and the heaviest thing on
+    a chat's JSONL — local files a few kilobytes long — and the heaviest thing on
     screen, the row count behind a table preview, was already being executed
     synchronously inside `c.table_preview`. The work that genuinely blocks —
     profiling a source, executing a spec — still goes to a thread in
@@ -89,8 +90,8 @@ def pane() -> None:
         _output_inspector(name)
     elif kind == RUN:
         _run_inspector(name)
-    elif kind == TURN:
-        _turn_inspector(name)
+    elif kind in (CHAT_LOG, INDEX_LOG):
+        _log_inspector(name, kind)
     elif kind == BRIEF:
         _brief_inspector()
     elif kind == KNOWLEDGE:
@@ -696,13 +697,13 @@ def _save_interpretation(name: str, summary: str, roles: dict) -> None:
 
 async def _ask_copilot(name: str, note: str) -> None:
     from portia.agent import prompts
-    from portia.ui import turn
+    from portia.ui import exchange
 
     if not (note or "").strip() or APP.busy:
         return
     APP.asking = None
     pane.refresh()
-    await turn.start(
+    await exchange.start(
         prompts.task("reinterpret", source=name, note=note.strip()),
         model=APP.model or _default_model(),
         effort=APP.effort,
@@ -863,34 +864,43 @@ def _run_inspector(name: str) -> None:
         c.markdown(engine.read_text(path))
 
 
-def _turn_inspector(name: str) -> None:
-    """A logged copilot turn, replayed (`portia/runlog.py`).
+#: What each history's replay calls itself. A chat and an indexing job read
+#: differently and the header should say which you opened, rather than making the
+#: folder it came from the only clue (`docs/CONVERSATION.md` §3).
+LOG_BLURB = {
+    CHAT_LOG: "a chat, as it happened",
+    INDEX_LOG: "an indexing job, as it happened",
+}
+
+
+def _log_inspector(name: str, kind: str) -> None:
+    """A logged chat or indexing job, replayed (`portia/runlog.py`).
 
     Here rather than in the right pane on purpose. The right pane is the *live*
-    copilot, and reading a past turn should not cost you the turn you are in the
+    copilot, and reading a past chat should not cost you the one you are in the
     middle of; this is also the widest pane, which is what a transcript wants.
 
-    The counts above it are the engine's — `engine.turn_summary`, the same
-    function `cli.runs` prints — because the day the window and the terminal
+    The counts above it are the engine's — `engine.log_summary`, the same
+    function `cli.history` prints — because the day the window and the terminal
     disagree about how many times the copilot asked, someone has to work out
     which to believe.
     """
     from portia.ui import transcript
 
-    path = engine.turn_path(APP, name)
+    path = engine.log_path(APP, name, kind)
     with _inspector_scroll():
-        _inspector_header(name, "a copilot turn, as it happened")
-        if not path.exists():
-            c.empty_note("that turn is gone")
+        _inspector_header(name, LOG_BLURB[kind])
+        if path is None:
+            c.empty_note("that one is gone")
             return
-        run = engine.read_turn(path)
-        _turn_facts(engine.turn_summary(run))
+        logged = engine.read_log(path)
+        _log_facts(engine.log_summary(logged))
         c.rule()
-        transcript.replay(run)
+        transcript.replay(logged)
 
 
-def _turn_facts(summary: dict) -> None:
-    """What the turn was and what it did — counts, in uniform badges.
+def _log_facts(summary: dict) -> None:
+    """What it was and what it did — counts, in uniform badges.
 
     Every one of these is a cost-and-behaviour descriptor and none of them is a
     verdict: "asked three times" is neither good nor bad without knowing whether
@@ -913,7 +923,7 @@ def _turn_facts(summary: dict) -> None:
             c.fact("edit_note", summary.get("approved"), "writes allowed")
             c.fact("block", summary.get("refused"), "writes refused")
             c.fact("swap_vert", _tokens(summary), "tokens in / out")
-            c.fact("payments", _turn_cost(summary), "estimated cost")
+            c.fact("payments", _exchange_cost(summary), "estimated cost")
         if summary.get("sequence"):
             c.collapsed(
                 "tools, in the order they were called",
@@ -927,7 +937,7 @@ def _tokens(summary: dict) -> str:
     return "—" if sent is None or got is None else f"{sent:,} / {got:,}"
 
 
-def _turn_cost(summary: dict) -> str:
+def _exchange_cost(summary: dict) -> str:
     cost = summary.get("cost_usd")
     return "—" if not cost else f"~${cost:.4f}"
 
@@ -1245,7 +1255,7 @@ _UNINDEXED_WHY = (
     "portia can read this file but has never profiled it, so nothing in the project "
     "knows what is in it. Indexing measures it and writes a catalog entry."
 )
-_INDEX_SCOPE = "profiling only — deterministic and free. The copilot reads it on its next turn."
+_INDEX_SCOPE = "profiling only — deterministic and free. The copilot reads it on its next exchange."
 _NOT_READ = "The copilot has not read this source yet."
 _NOT_READ_WHY = (
     "It was profiled, so the facts below are measured and real — but no one has written what "

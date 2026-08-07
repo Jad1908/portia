@@ -1,11 +1,14 @@
 # Conversation — the loop stops being one turn
 
-*Specified 2026-08-07. Not built. Read `VISION.md`'s V0 section first: it is where the single-turn
-boundary was drawn on purpose, and §11 here is the reversal.*
+*Specified 2026-08-07, partly built the same day. Read `VISION.md`'s V0 section first: it is where
+the single-turn boundary was drawn on purpose, and §11 here is the reversal.*
 
-**Status:** designed. **§12 phase 1 is done** — the SDK behaviour is measured, not assumed, and it
-**reversed §8** (see the table there; `interrupt()` cancels the parked callback and the elaborate
-resolve-first protocol this document first specified is unnecessary). Phases 2–6 are not built.
+**Status:** designed. **§12 phases 1 and 2 are done.** Phase 1 measured the SDK rather than assuming
+it and **reversed §8** (see the table there; `interrupt()` cancels the parked callback, so the
+resolve-first protocol this document first specified is unnecessary). Phase 2 shipped **§3's
+vocabulary** — `.portia/chats/` and `.portia/indexing/`, `cli/history.py`, `Exchange`, two left-pane
+lists — with no behaviour change: **the engine is still one exchange per invocation**, and every
+surface still says so. Phases 3–6 are not built.
 
 ## 1. The gap
 
@@ -108,9 +111,14 @@ Paths and names follow:
 | `runs/` (project root) | unchanged | spec-run reports, markdown |
 | `.portia/runs/` | `.portia/chats/` | copilot conversations, JSONL |
 | — | `.portia/indexing/` | indexing jobs, JSONL |
-| `state.TURN` (one list) | `state.CHAT_LOG` + `state.INDEXING` | two pinned left-pane lists |
+| `state.TURN` (one list) | `state.CHAT_LOG` + `state.INDEX_LOG` | two pinned left-pane lists |
 | `state.Turn` | `state.Exchange` | one exchange inside a chat |
-| `cli/runs.py` | `cli/chats.py` | reads both; a flag filters to one |
+| `cli/runs.py` | `cli/history.py` | reads both; a flag filters to one |
+
+*`cli/chats.py` was the first answer and is wrong: it sits one letter from `cli/chat.py`, which
+**drives** the copilot rather than reading it back, and two adjacent names for opposite jobs is the
+kind of thing this section exists to stop. `history` also covers both kinds honestly, which
+`chats` does not.*
 
 **Old logs are read, never migrated.** The new reader keeps reading `.portia/runs/`; nothing writes
 there again. It is a few lines, and it means the one real evaluation on PHQ data (`EVALUATION.md`,
@@ -319,9 +327,13 @@ Cheapest and most uncertain first, which here is the same thing.
    `ResultMessage` arrives in every case, the client survives, and the finding **reversed §8** — the
    resolve-before-interrupt protocol specified there is unnecessary, because the SDK cancels the
    parked callback itself. Nothing below is blocked.
-2. **The rename, alone, with no behaviour change** (§3). A pure vocabulary diff — directories,
-   module names, state names, docs — reviewable on its own and honest before the engine moves,
-   because a one-shot turn is a chat with one exchange.
+2. ~~**The rename, alone, with no behaviour change**~~ **Done 2026-08-07.** `.portia/chats/` and
+   `.portia/indexing/` · `cli/runs.py` → `cli/history.py` with `--kind` · `runlog.Run` →
+   `Transcript`, `state.Turn` → `Exchange`, `start_turn` → `start_exchange` · `ui/turn.py` →
+   `ui/exchange.py` · `state.TURN` → `CHAT_LOG` + `INDEX_LOG` and **two pinned left-pane lists** ·
+   pre-rename logs read and never migrated. `runlog.py` **kept its name** — the collision was in
+   what a human reads, not in an internal module name. No behaviour changed, so every surface still
+   says a chat is one shot.
 3. **The engine seam.** A `Conversation` owning the client, with `send(prompt)` yielding events to
    its `ResultMessage`. **`session.run` survives as a one-message wrapper over it** — that is what
    keeps `cli/index.py`, `cli/chat.py`'s three subcommands and `ui/turn.start` working untouched,

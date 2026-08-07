@@ -2069,7 +2069,7 @@ body.body--dark .step-card {
 
 /* An indexing or re-read turn, in the panel it shares with the chat. Uncoloured
  * on purpose — it is a different *kind* of turn, not a more important one. */
-.turn-banner {
+.exchange-banner {
   display: flex;
   flex-direction: column;
   gap: var(--sp-xxs);
@@ -2079,7 +2079,7 @@ body.body--dark .step-card {
   padding: var(--sp-sm) var(--sp-md);
 }
 
-.turn-ended {
+.chat-ended {
   display: flex;
   flex-direction: column;
   gap: var(--sp-sm);

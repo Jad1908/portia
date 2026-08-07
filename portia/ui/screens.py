@@ -1083,14 +1083,14 @@ async def _interpret_pending() -> None:
     commentary — because the running commentary is the transcript's, and the
     popup is what offers to put you in front of it.
     """
-    from portia.ui import turn
+    from portia.ui import exchange
 
     while APP.interpret and APP.pending_interpret and not APP.busy:
         names, APP.pending_interpret = APP.pending_interpret, []
         APP.indexing_status = INTERPRETING.format(n=c.count(len(names), "source"))
         _redraw_progress()
         try:
-            await turn.start(
+            await exchange.start(
                 prompts.task("index_batch", names=", ".join(repr(n) for n in names)),
                 model=APP.model or _default_model(),
                 effort=APP.effort,
@@ -1338,7 +1338,7 @@ NO_CHOOSER = (
     "Importing needs the system file chooser, which this machine does not have. "
     "Copy the files into the repo yourself, then pick the folder above."
 )
-INTERPRET_COST = "Profiling is free and always happens. This costs a model turn."
+INTERPRET_COST = "Profiling is free and always happens. This spends a model exchange."
 COPY_PART = "{n} copied in to {where}/"
 ALREADY_HERE = "{n} already in the repo"
 PROFILE_ALL = "Profiles {n} — {parts}"

@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
+import pytest
+
 from portia import runlog
 from portia.agent import events
 
@@ -28,11 +30,11 @@ def _call(tool: str, **inp) -> events.Event:
 # --- writing -----------------------------------------------------------------
 
 
-def test_a_turn_is_one_file_with_a_header_line(tmp_path):
+def test_a_chat_is_one_file_with_a_header_line(tmp_path):
     log = runlog.start(tmp_path, prompt="build me a table", model="claude-haiku-4-5", effort="low")
     _turn(log, events.Event(events.TEXT, {"text": "on it"}))
 
-    (path,) = runlog.runs_in(tmp_path)
+    (path,) = runlog.logs_in(tmp_path)
     first, second = path.read_text().splitlines()
     assert json.loads(first)["kind"] == runlog.HEADER
     assert json.loads(first)["data"]["model"] == "claude-haiku-4-5"
@@ -51,7 +53,7 @@ def test_the_header_records_what_makes_two_runs_comparable(tmp_path):
     assert "started" in header
 
 
-def test_two_turns_in_the_same_second_are_two_logs(tmp_path):
+def test_two_exchanges_in_the_same_second_are_two_logs(tmp_path):
     """`index` runs two turns back to back. Appending the second onto the first
     is exactly the run-conflation this module exists to end."""
     when = datetime(2026, 7, 29, 12, 0, 0)
@@ -59,7 +61,7 @@ def test_two_turns_in_the_same_second_are_two_logs(tmp_path):
     second = runlog.start(tmp_path, prompt="b", model="m", when=when)
 
     assert first.path != second.path
-    assert len(runlog.runs_in(tmp_path)) == 2
+    assert len(runlog.logs_in(tmp_path)) == 2
     assert runlog.read(second.path).header["prompt"] == "b"
 
 
@@ -94,10 +96,10 @@ def test_a_truncated_tail_does_not_lose_the_rest(tmp_path):
     assert run.header["prompt"] == "p"
 
 
-def test_runs_are_listed_newest_first(tmp_path):
+def test_logs_are_listed_newest_first(tmp_path):
     old = runlog.start(tmp_path, prompt="a", model="m", when=datetime(2026, 7, 1, 9, 0))
     new = runlog.start(tmp_path, prompt="b", model="m", when=datetime(2026, 7, 29, 9, 0))
-    assert runlog.runs_in(tmp_path) == [new.path, old.path]
+    assert runlog.logs_in(tmp_path) == [new.path, old.path]
 
 
 def test_a_run_is_found_by_prefix(tmp_path):
@@ -106,8 +108,8 @@ def test_a_run_is_found_by_prefix(tmp_path):
     assert runlog.find("nope", tmp_path) is None
 
 
-def test_no_runs_directory_is_an_empty_list_not_a_crash(tmp_path):
-    assert runlog.runs_in(tmp_path / "nothing-here") == []
+def test_no_log_directory_is_an_empty_list_not_a_crash(tmp_path):
+    assert runlog.logs_in(tmp_path / "nothing-here") == []
 
 
 # --- what it can answer without labels ---------------------------------------
@@ -249,3 +251,59 @@ def test_the_summary_states_no_verdict(tmp_path):
     summary = runlog.summary(runlog.read(log.path))
     forbidden = ("score", "rank", "quality", "grade", "severity", "verdict", "passed")
     assert not [key for key in summary if any(word in key for word in forbidden)]
+
+
+# --- the two histories (docs/CONVERSATION.md §3) -----------------------------
+
+
+def test_a_chat_and_an_indexing_land_in_different_folders(tmp_path):
+    """The separation is on disk, not just in the pane that draws them. A job the
+    app ran on your behalf is not a conversation you had."""
+    chat = runlog.start(tmp_path, prompt="a", model="m", kind=runlog.CHAT)
+    job = runlog.start(tmp_path, prompt="b", model="m", kind=runlog.INDEXING)
+
+    assert chat.path.parent.name == "chats"
+    assert job.path.parent.name == "indexing"
+    assert runlog.logs_in(tmp_path, runlog.CHAT) == [chat.path]
+    assert runlog.logs_in(tmp_path, runlog.INDEXING) == [job.path]
+    assert set(runlog.logs_in(tmp_path)) == {chat.path, job.path}
+
+
+def test_the_kind_is_in_the_header_and_the_summary(tmp_path):
+    job = runlog.start(tmp_path, prompt="b", model="m", kind=runlog.INDEXING)
+    transcript = runlog.read(job.path)
+    assert transcript.header["kind"] == runlog.INDEXING
+    assert transcript.kind == runlog.INDEXING
+    assert runlog.summary(transcript)["kind"] == runlog.INDEXING
+
+
+def test_an_unknown_kind_is_refused_rather_than_guessed(tmp_path):
+    with pytest.raises(ValueError, match="unknown log kind"):
+        runlog.start(tmp_path, prompt="a", model="m", kind="whatever")
+
+
+def test_logs_written_before_the_rename_are_still_read(tmp_path):
+    """`.portia/runs/` is read and never migrated — portia does not rewrite files
+    in someone's project to suit its own rename (`CONVERSATION.md` §3)."""
+    legacy = tmp_path / runlog.LEGACY_DIR
+    legacy.mkdir(parents=True)
+    path = legacy / "2026-07-29T16-32-57.jsonl"
+    path.write_text('{"kind": "header", "data": {"prompt": "old", "model": "m"}}\n')
+
+    assert runlog.logs_in(tmp_path) == [path]
+    assert runlog.logs_in(tmp_path, runlog.CHAT) == [path]
+    assert runlog.logs_in(tmp_path, runlog.INDEXING) == []
+    # No kind was recorded before the split; it reads as a chat, which is what
+    # nearly all of them were.
+    assert runlog.read(path).kind == runlog.CHAT
+
+
+def test_a_legacy_log_sorts_beside_the_new_ones(tmp_path):
+    """One history, newest first, whichever folder a log happens to live in."""
+    legacy = tmp_path / runlog.LEGACY_DIR
+    legacy.mkdir(parents=True)
+    old = legacy / "2026-07-01T09-00-00.jsonl"
+    old.write_text('{"kind": "header", "data": {"prompt": "old", "model": "m"}}\n')
+    new = runlog.start(tmp_path, prompt="new", model="m", when=datetime(2026, 7, 29, 9, 0))
+
+    assert runlog.logs_in(tmp_path) == [new.path, old]

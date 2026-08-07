@@ -296,13 +296,19 @@ adding code, and extend them rather than working around them:
       never column pairs, because a router that returns fifty things has not routed. Its tests
       need a live Neo4j and skip without one (`conftest.neo4j_session`); they are not mocked,
       because a stub answering Cypher would be a second, wrong Neo4j.
-  - `portia/runlog.py` — the **run log** (*what the copilot did*): one JSONL per turn in
-    `.portia/runs/`, one `Event` per line under a header naming model, effort, prompt and portia
-    sha. Read with `python -m portia.cli.runs`. **Project-local, with no central store and nothing
-    that prunes** — a turn only means something beside the catalog it read, so deleting a project
-    deletes its turns and nothing aggregates across them (`EVALUATION.md` → "Where the logs live").
+  - `portia/runlog.py` — the **copilot's log** (*what the copilot did*): one JSONL each in
+    `.portia/chats/` or `.portia/indexing/`, one `Event` per line under a header naming the kind,
+    model, effort, prompt and portia sha. **Two histories, never one list** — a chat is a
+    conversation you had, an indexing is a job the app ran, and `docs/CONVERSATION.md` §3 is why
+    they are apart on disk and in the left pane. `.portia/runs/` is the pre-rename folder: **read,
+    never written, never migrated.** The module keeps its old name on purpose — the collision was
+    in what a *human* reads, not in an internal module name. Read with
+    `python -m portia.cli.history` (**not** `cli/chat.py`, which drives rather than reads).
+    **Project-local, with no central store and nothing that prunes** — a chat only means something
+    beside the catalog it read, so deleting a project deletes its history and nothing aggregates
+    across them (`EVALUATION.md` → "Where the logs live").
     Two rules hold it in place. **It is teed at the
-    edges** (`cli/chat.run_and_render`, `ui/turn`) and never inside the engine — the moment
+    edges** (`cli/chat.run_and_render`, `ui/exchange`) and never inside the engine — the moment
     `events.py` writes files it stops being a seam and becomes a logging framework. And
     **`summary` counts; it never scores.** Rungs pulled, questions asked, writes refused, ops
     chosen, tokens — all cost-and-behaviour descriptors. "Asked three times" is neither good nor
@@ -333,12 +339,15 @@ adding code, and extend them rather than working around them:
     sections were hiding where every file lived and fixing the folder layout the agent may produce.
     `tree.py` imports no NiceGUI and no engine — `engine.known_files` supplies the classification
     and the identity a click hands the panes.
-  - **Runs and Turns are two artifacts, and one of them is not in the tree.** A *run* executed a
-    spec (markdown, project-root `runs/`) and is a file like any other; a *turn* was the copilot
-    deciding what the spec should say (JSONL, `.portia/runs/`, `runlog.py`), and `.portia/` is not
-    walked — so Turns is pinned below the tree, as is the **project brief** above it. Selecting a
-    turn replays it through `transcript`'s own renderers — one set of renderers, live and replayed,
-    or the window ends up with a second opinion about a turn that is already written down.
+  - **Runs, Chats and Indexing are three artifacts, and two of them are not in the tree.** A *run*
+    executed a spec (markdown, project-root `runs/`) and is a file like any other; a *chat* was the
+    conversation about what the spec should say and an *indexing* was a job the app ran (both JSONL
+    under `.portia/`, `runlog.py`), and `.portia/` is not walked — so **Chats** and **Indexing** are
+    two pinned lists below the tree, as the **project brief** is above it. They are never merged:
+    kind is not rank, and the only thing a merged list could sort on is recency, which buries the
+    conversation you had under twenty files the app profiled. Selecting either replays it through
+    `transcript`'s own renderers — one set of renderers, live and replayed, or the window ends up
+    with a second opinion about something already written down.
   - **`ui/settings.py` is the one place a preference lives**, and it holds controls, not behaviour:
     every field binds the state the surface that spends it reads, so it is a second place to
     *change* a setting and never a second setting. The theme, the project switch, the brief, the

@@ -464,7 +464,7 @@ odd finding worth carrying forward isn't lost with it.*
   authenticates off the local login and meters against the **subscription**. `PLAN.md` → "Auth
   posture" for what portia claims about it; the posture is unchanged by the good news.
 - **Run log + the metrics that need no labels** — 2026-07-29, `portia/runlog.py` +
-  `python -m portia.cli.runs`. Two surprises in `EVALUATION.md` → "The run log".
+  `python -m portia.cli.history`. Two surprises in `EVALUATION.md` → "The run log".
 - **`copilot.md` told the model something false about itself** — "You never see raw rows." It does:
   `join_findings` returns up to 12 complete rows. Fixed 2026-07-31 by naming the tool and saying
   why. *The kind of thing to look for again: the code was right and the prompt was wrong.*
@@ -512,7 +512,7 @@ odd finding worth carrying forward isn't lost with it.*
   write confirmation; the no-terminal audit in `VISION.md` passes end to end.
 - **Tool results are missing from the event stream** — fixed 2026-07-26 (`events.TOOL_RESULT`).
   `cli/chat.py` still ignores the kind **deliberately**, so terminal transcripts stay comparable
-  across runs already scored; the log stores them and `cli.runs show` renders them. Logging and
+  across runs already scored; the log stores them and `cli.history show` renders them. Logging and
   rendering are different jobs; only the second had a reason to stay still.
 - **Nothing is editable** — 2026-07-27: brief editable from the toolbar, a source's summary and
   roles editable in place or correctable by asking the copilot. Both write through

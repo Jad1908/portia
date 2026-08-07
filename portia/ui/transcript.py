@@ -32,7 +32,7 @@ from nicegui import ui
 from portia.agent import events
 from portia.ui import components as c
 from portia.ui import engine, state
-from portia.ui import turn as turn_driver
+from portia.ui import exchange as exchange_driver
 from portia.ui.state import APP, Decision
 
 #: Free text always goes through verbatim, and typing an objection is a
@@ -56,9 +56,9 @@ def pane() -> None:
             c.empty_note(_IDLE if APP.tab == state.CHAT else _IDLE_INDEX)
         for row in stream.rows:
             _row(row)
-        if stream.turn and stream.turn.ended:
+        if stream.exchange and stream.exchange.ended:
             _turn_ended(stream)
-    if stream.turn is not None:
+    if stream.exchange is not None:
         _stay_at_the_bottom(scroll)
 
 
@@ -110,8 +110,8 @@ def _index_header(stream) -> None:
     invitation to a race.
     """
     with ui.element("div").classes("p-pad stack-md"):
-        if stream.turn is not None:
-            _turn_banner(stream.turn)
+        if stream.exchange is not None:
+            _exchange_banner(stream.exchange)
             if stream.busy:
                 with ui.element("div").classes("row-gap-sm"):
                     ui.spinner(size="sm")
@@ -206,7 +206,7 @@ def _index_actions() -> None:
 
 
 async def _index_ticked() -> None:
-    """Profile the ticked files. Free, deterministic, no model turn."""
+    """Profile the ticked files. Free, deterministic, no model exchange."""
     from portia.ui import artifacts
 
     paths = [
@@ -230,14 +230,14 @@ async def _interpret_ticked() -> None:
     context has changed is a correction, not a conflict.
     """
     from portia.agent import prompts
-    from portia.ui import turn as turn_driver_module
+    from portia.ui import exchange as exchange_module
     from portia.ui.screens import _default_model
 
     names = [s.name for s in engine.source_states(APP) if s.name in APP.index_ticks and s.indexed]
     if not names:
         return
     APP.index_ticks = frozenset()
-    await turn_driver_module.start(
+    await exchange_module.start(
         prompts.task("index_batch", names=", ".join(repr(n) for n in names)),
         model=APP.model or _default_model(),
         effort=APP.effort,
@@ -264,7 +264,7 @@ def _stay_at_the_bottom(scroll: ui.element) -> None:
 
 def _goal_input(stream) -> None:
     with ui.element("div").classes("p-pad stack-md"):
-        if stream.turn is not None:
+        if stream.exchange is not None:
             _running_state(stream)
             return
 
@@ -285,7 +285,7 @@ def _running_state(stream) -> None:
             c.caption(f"the copilot is working · {_spend()}")
 
 
-def _turn_banner(turn) -> None:
+def _exchange_banner(turn) -> None:
     """What this turn is, and which half of indexing is actually running.
 
     Profiling already happened and was free; what costs a turn is the
@@ -294,7 +294,7 @@ def _turn_banner(turn) -> None:
     """
     if turn.kind == state.GOAL:
         return
-    with ui.element("div").classes("turn-banner"):
+    with ui.element("div").classes("exchange-banner"):
         with ui.element("div").classes("row-gap-sm"):
             ui.icon(_BANNER_ICON[turn.kind]).classes("fact-icon")
             ui.label(_BANNER_TITLE[turn.kind]).classes("t-body-strong c-ink")
@@ -328,7 +328,7 @@ async def _go() -> None:
     goal = (APP.goal or "").strip()
     if not goal or APP.busy:
         return
-    await turn_driver.start(goal, model=APP.model, effort=APP.effort)
+    await exchange_driver.start(goal, model=APP.model, effort=APP.effort)
 
 
 # --- one row per event ------------------------------------------------------
@@ -358,7 +358,7 @@ def _event(event: events.Event) -> None:
         elif kind == events.ERROR:
             c.text(str(event.data.get("message", "")), color="c-error")
         elif kind == events.RESULT:
-            return  # `turn-ended` states how it finished
+            return  # `chat-ended` states how it finished
 
 
 def _tool_call(data: dict) -> None:
@@ -620,9 +620,9 @@ def _asked_view(questions: list[dict]) -> None:
 
 
 def _turn_ended(stream) -> None:
-    turn = stream.turn
+    turn = stream.exchange
     assert turn is not None
-    with ui.element("div").classes("turn-ended"):
+    with ui.element("div").classes("chat-ended"):
         if turn.error:
             c.text(turn.error, color="c-error")
         c.caption(_ended_line(turn))
@@ -631,7 +631,7 @@ def _turn_ended(stream) -> None:
             c.caption(spend)
         c.caption(_NO_FOLLOW_UP)
         with ui.element("div").classes("row-gap-sm"):
-            c.button("New turn", lambda: _new_turn(stream), icon="refresh")
+            c.button("New chat", lambda: _new_chat(stream), icon="refresh")
 
 
 def _ended_line(turn: Any) -> str:
@@ -643,7 +643,7 @@ def _spend_line(turn: Any) -> str:
     """What the turn cost, in tokens — a **count**, next to the cost in money.
 
     The numbers are `runlog.token_totals`', not this panel's, so the window and
-    `cli.runs` cannot disagree about one turn. `in` is the whole input including
+    `cli.history` cannot disagree about one turn. `in` is the whole input including
     what came from cache, which on a portia turn is nearly all of it: the L0
     prompt and the L1 brief go on every request, and the SDK's raw
     `input_tokens` counts only the part that was not cached — one real run
@@ -661,8 +661,8 @@ def _spend_line(turn: Any) -> str:
     )
 
 
-def _new_turn(stream) -> None:
-    stream.turn = None
+def _new_chat(stream) -> None:
+    stream.exchange = None
     stream.rows = []
     pane.refresh()
 
@@ -680,18 +680,19 @@ _BANNER_WHY = {
 }
 
 _TAB_LABEL = {state.CHAT: "Copilot", state.INDEX: "Indexing"}
-_RUNNING = "a turn is running here"
-_WAITING = "this turn is waiting on you"
+_RUNNING = "something is running here"
+_WAITING = "this is waiting on you"
 
-_UNANSWERED = "The turn ended with this question unanswered."
+_UNANSWERED = "It ended with this question unanswered."
 
 _IDLE = "Nothing yet. Describe the goal above and press Go."
 _IDLE_INDEX = "Nothing indexed in this session."
 _NO_SOURCES = "No data in this project's folder yet. Add some from the left pane."
-_INDEX_COST = "profiling is free and deterministic · interpreting spends a model turn"
+_INDEX_COST = "profiling is free and deterministic · interpreting spends a model exchange"
 _INDEX_WHAT = "Reading a source lands here — from Add data, or from Ask the copilot on a source."
 _GOAL_PLACEHOLDER = "What do you want from this data?"
 _ANSWER_PLACEHOLDER = "…or answer in your own words"
 _NO_FOLLOW_UP = (
-    "A turn is one shot. A new one starts fresh, with the catalog and spec on disk as its memory."
+    "A chat is one shot for now. A new one starts fresh, with the catalog and spec on disk as\n"
+    "its memory."
 )

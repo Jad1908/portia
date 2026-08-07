@@ -146,9 +146,10 @@ asset.
    wrote**, and the 80M-row fan-out that inflated revenue in Run 5 is reported in 0.1 s without
    being built. **What measurement changed is the part worth reading** — §6.1, §6.3 and §13.
 
-4. **The run log** (2026-07-29, `portia/runlog.py`, `python -m portia.cli.runs`). One JSONL per
-   turn, teed at both edges, replayable in the terminal and under **Turns** in the app's left pane.
-   A copilot turn no longer dies with the window. It caught one thing worth carrying into any cost
+4. **The run log** (2026-07-29, `portia/runlog.py`, `python -m portia.cli.history`). One JSONL each,
+   teed at both edges, replayable in the terminal and under **Chats** and **Indexing** in the app's
+   left pane — two histories since 2026-08-07 (`CONVERSATION.md` §3), because a conversation you had
+   and a job the app ran are not one list. A copilot chat no longer dies with the window. It caught one thing worth carrying into any cost
    claim: the SDK's `input_tokens` excludes cached input, so a 14,651-token turn reported **17** —
    and nearly all of a portia turn's input is the pushed L0/L1 context, i.e. exactly the cached
    part. **It has not yet proved itself:** no run has been scored *using* it.
