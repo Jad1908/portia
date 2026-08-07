@@ -24,7 +24,9 @@ from portia.agent import events, prompts
 
 
 def render(event: events.Event) -> None:
-    if event.kind == events.TEXT:
+    if event.kind == events.PROMPT:
+        print(f"\n> {event.data['text']}")
+    elif event.kind == events.TEXT:
         print(f"\n{event.data['text']}\n")
     elif event.kind == events.THINKING:
         print("  · thinking…")
@@ -136,7 +138,7 @@ async def run_and_render(
     from portia.agent import session
 
     print(f"  [{model}{', effort ' + effort if effort else ''}]")
-    log = runlog.start(portia_dir, prompt=prompt, model=model, effort=effort, cwd=cwd, kind=kind)
+    log = runlog.start(portia_dir, cwd=cwd, kind=kind)
     print(f"  [logging to {log.path}]")
 
     async for event in session.run(

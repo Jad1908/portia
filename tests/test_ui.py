@@ -517,8 +517,8 @@ def test_runs_chats_and_indexing_are_three_different_lists(tmp_path):
     app = App(root=tmp_path)
     (tmp_path / "runs").mkdir()
     (tmp_path / "runs" / "2026-07-29T09-00-00.md").write_text("# a spec run")
-    chat = runlog.start(app.catalog_dir, prompt="a goal", model="m", kind=runlog.CHAT)
-    job = runlog.start(app.catalog_dir, prompt="read these", model="m", kind=runlog.INDEXING)
+    chat = runlog.start(app.catalog_dir, kind=runlog.CHAT)
+    job = runlog.start(app.catalog_dir, kind=runlog.INDEXING)
 
     assert [p.suffix for p in engine.runs_in(app)] == [".md"]
     assert engine.logs_in(app, state.CHAT_LOG) == [chat.path]
@@ -533,7 +533,8 @@ def test_a_logs_counts_come_from_the_engine_not_the_panel(tmp_path):
     from portia.ui import engine
 
     app = App(root=tmp_path)
-    log = runlog.start(app.catalog_dir, prompt="a goal", model="m")
+    log = runlog.start(app.catalog_dir)
+    log.event(events.prompt_event("a goal", model="m", effort="low"))
     log.event(events.question_event([{"question": "which grain?"}]))
 
     from portia.ui import state

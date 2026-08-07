@@ -343,6 +343,9 @@ def _row(row: Any) -> None:
 
 def _event(event: events.Event) -> None:
     kind = event.kind
+    if kind == events.PROMPT:
+        _prompt_row(event.data)
+        return
     with ui.element("div").classes("transcript-row"):
         if kind == events.TEXT:
             # The copilot writes markdown, so it is rendered as markdown. Showing
@@ -359,6 +362,25 @@ def _event(event: events.Event) -> None:
             c.text(str(event.data.get("message", "")), color="c-error")
         elif kind == events.RESULT:
             return  # `chat-ended` states how it finished
+
+
+def _prompt_row(data: dict) -> None:
+    """What the human said, opening an exchange.
+
+    Its own row kind rather than a `transcript-row`, because in a chat of six
+    messages this is the only thing separating one exchange from the next. It
+    states the model it ran on: a chat can change model mid-way, and the banner
+    above only says what the *next* one will use.
+
+    Uncoloured beyond the kind — `DESIGN.md`: prominence communicates kind, never
+    rank. A human message is not more important than the copilot's reply.
+    """
+    with ui.element("div").classes("prompt-row"):
+        c.text(str(data.get("text", "")), color="c-ink")
+        model = str(data.get("model") or "")
+        if model:
+            effort = f" · {data['effort']}" if data.get("effort") else ""
+            c.caption(f"{model.replace('claude-', '')}{effort}")
 
 
 def _tool_call(data: dict) -> None:

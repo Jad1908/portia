@@ -113,10 +113,15 @@ def render_summary(summary: dict) -> str:
     `runlog.summary`, and `CLAUDE.md` → facts vs judgment.
     """
     effort = f", effort {summary['effort']}" if summary.get("effort") else ""
+    models = summary.get("models") or []
+    # Every model it ran on, because a chat can change model mid-way and the one
+    # in the brackets is only the first (`runlog.summary`).
+    also = f"  (also {', '.join(models[1:])})" if len(models) > 1 else ""
     lines = [
-        f"{summary['name']}  [{summary.get('kind')}]  [{summary.get('model')}{effort}]",
+        f"{summary['name']}  [{summary.get('kind')}]  [{summary.get('model')}{effort}]{also}",
         f"  started   {summary.get('started')}   portia {summary.get('portia_sha') or '?'}",
-        f"  prompt    {summary.get('prompt')}",
+        f"  exchanges {count(summary.get('exchanges') or 0, 'message')}",
+        f"  opened    {summary.get('prompt')}",
         f"  tools     {count(summary['tools'], 'call')}"
         + (f"  ({_mix(summary['by_tool'])})" if summary["by_tool"] else "")
         + (f"  {summary['tool_errors']} errored" if summary["tool_errors"] else ""),
@@ -134,7 +139,12 @@ def render_replay(event: events.Event) -> None:
     The kinds the live renderer already handles go through it unchanged, so a
     replay and the thing it replays don't drift into two different-looking things.
     """
-    if event.kind == events.TOOL_RESULT:
+    if event.kind == events.PROMPT:
+        # Each exchange opens with the human. In a chat of six that is the only
+        # thing separating one from the next, so it gets the rule.
+        model = event.data.get("model") or ""
+        print(f"\n{'─' * 60}\n> {event.data.get('text', '')}  [{model}]")
+    elif event.kind == events.TOOL_RESULT:
         mark = "!" if event.data.get("is_error") else "←"
         print(f"  {mark} {_clip(event.data.get('text', ''), RESULT_CHARS)}")
     elif event.kind == events.QUESTION:
@@ -158,8 +168,8 @@ def render_replay(event: events.Event) -> None:
 
 def _header_line() -> str:
     return (
-        f"{'name':<21} {'kind':<9} {'model':<22} {'tools':>5} {'ask':>4} {'w':>4} {'ref':>4}"
-        f" {'cost':>9}  prompt"
+        f"{'name':<21} {'kind':<9} {'model':<22} {'msg':>4} {'tools':>5} {'ask':>4} {'w':>4}"
+        f" {'ref':>4} {'cost':>9}  opened with"
     )
 
 
@@ -169,7 +179,7 @@ def _list_line(summary: dict) -> str:
     cost = f"${summary['cost_usd']:.4f}" if summary.get("cost_usd") else "—"
     return (
         f"{summary['name']:<21} {summary.get('kind', ''):<9} {model[:22]:<22} "
-        f"{summary['tools']:>5} {summary['asked']:>4} "
+        f"{summary.get('exchanges', 0):>4} {summary['tools']:>5} {summary['asked']:>4} "
         f"{summary['approved']:>4} {summary['refused']:>4} {cost:>9}  "
         f"{_clip(summary.get('prompt') or '', PROMPT_CHARS)}"
     )

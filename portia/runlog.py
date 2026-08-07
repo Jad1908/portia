@@ -128,20 +128,26 @@ class Log:
 def start(
     portia_dir: str | Path = DEFAULT_DIR,
     *,
-    prompt: str,
-    model: str,
-    effort: str | None = None,
     cwd: str | Path = ".",
     kind: str = CHAT,
     when: datetime | None = None,
 ) -> Log:
-    """Open a log and write its header. ``kind`` picks which folder it lands in.
+    """Open a log for one **chat** and write its header.
 
-    The header is what makes two logs comparable: `EVALUATION.md` can only put
-    Run 6 next to Run 5 because they differ in model and effort and nothing
-    else, and that fact currently survives only in prose someone remembered to
-    write. `portia_sha` is the other half — which build of the prompts and the
-    engine this one was talking to.
+    **The unit is the chat, not the exchange** (`docs/CONVERSATION.md` §5). What
+    the header holds is therefore only what is true of the whole file: when it
+    started, which kind it is, where it ran, and which build of portia produced
+    it. The prompt, the model and the effort moved onto each exchange's `PROMPT`
+    event, because a chat can span several models and a header field that
+    changes mid-file is a lie.
+
+    `portia_sha` is what makes two logs comparable at all — which build of the
+    prompts and the engine this one was talking to.
+
+    **The session id is not here**, though §4 first said it would be: the SDK
+    hands it back with the *result*, so it does not exist when this line is
+    written. It rides on every `RESULT` event instead, which is strictly better —
+    a header could not have shown a session changing, and this can.
     """
     if kind not in DIR_FOR_KIND:
         raise ValueError(f"unknown log kind {kind!r} — expected one of {', '.join(KINDS)}")
@@ -154,9 +160,6 @@ def start(
         {
             "started": when.isoformat(timespec="seconds"),
             "kind": kind,
-            "prompt": prompt,
-            "model": model,
-            "effort": effort,
             "cwd": str(Path(cwd).resolve()),
             "portia_sha": portia_sha(),
         },
@@ -165,11 +168,11 @@ def start(
 
 
 def _free_path(directory: Path, when: datetime) -> Path:
-    """`<stamp>.jsonl`, suffixed if a turn in the same second already took it.
+    """`<stamp>.jsonl`, suffixed if something in the same second already took it.
 
-    `index` runs two turns back to back, which is exactly how a one-second stamp
-    collides — and appending a second turn's events onto the first one's log is
-    the run-conflation this module exists to end.
+    `index` runs two jobs back to back, which is exactly how a one-second stamp
+    collides — and appending one log's events onto another's is the conflation
+    this module exists to end.
     """
     stamp = when.strftime(REPORT_STAMP)
     path = directory / f"{stamp}.jsonl"
@@ -304,28 +307,45 @@ def read(path: str | Path) -> Transcript:
 
 
 def summary(run: Transcript) -> dict[str, Any]:
-    """Counts, not verdicts.
+    """Counts, not verdicts — **across the whole chat**.
 
     Every field here is something the stream states outright. There is no
-    ranking, no "quality", and no derived signal that implies one run went
+    ranking, no "quality", and no derived signal that implies one chat went
     better than another — see this module's docstring, and `CLAUDE.md` → facts
-    vs judgment.
+    vs judgment. `exchanges` is a count of messages sent, not a score: a long
+    conversation is neither better nor worse than a short one without knowing
+    what it was for.
+
+    The totals are sums across exchanges rather than the last one's. A chat that
+    spent four cents over six messages spent four cents, and reporting the last
+    message's cost would quietly understate every multi-exchange chat.
     """
+    prompts = _of(run, events.PROMPT)
     called = _of(run, events.TOOL_CALL)
     calls = [events.tool_label(str(e.data.get("name", ""))) for e in called]
     approvals = _of(run, events.APPROVAL_RESULT)
     allowed = [e for e in approvals if e.data.get("allowed")]
     questions = _of(run, events.QUESTION)
-    result = next((e for e in reversed(run.events) if e.kind == events.RESULT), None)
-    usage = (result.data.get("usage") if result else None) or {}
+    results = _of(run, events.RESULT)
+    last = results[-1] if results else None
 
     return {
         "name": run.name,
         "kind": run.kind,
         "started": run.header.get("started"),
-        "model": run.header.get("model"),
-        "effort": run.header.get("effort"),
-        "prompt": run.header.get("prompt"),
+        # One line per chat has room for one model, so this is the first one it
+        # ran on; `models` is the honest whole answer when it changed mid-chat.
+        "model": _first_model(run, prompts),
+        "effort": _first_effort(run, prompts),
+        "models": _models(run, prompts),
+        "exchanges": len(prompts) or (1 if run.events else 0),
+        # What the chat *opened* with. A later message is a follow-up and only
+        # means something beside the one before it, so the first is the only one
+        # that stands alone in a list.
+        "prompt": _first_prompt(run, prompts),
+        "session_id": next(
+            (e.data.get("session_id") for e in reversed(results) if e.data.get("session_id")), None
+        ),
         "portia_sha": run.header.get("portia_sha"),
         # Rungs pulled, in what order, and **what each one was about** — the
         # sequence *is* the finding, so it is kept whole rather than reduced to
@@ -344,14 +364,77 @@ def summary(run: Transcript) -> dict[str, Any]:
         "writes": len(approvals),
         "approved": len(allowed),
         "refused": len(approvals) - len(allowed),
-        "subtype": result.data.get("subtype") if result else None,
-        "cost_usd": result.data.get("cost_usd") if result else None,
-        **token_totals(usage),
+        # How it *ended* — the last exchange's subtype. An interrupted message
+        # in the middle of a chat that carried on is not how the chat ended.
+        "subtype": last.data.get("subtype") if last else None,
+        "cost_usd": _total_cost(results),
+        **_total_tokens(results),
     }
 
 
 def _of(run: Transcript, kind: str) -> list[events.Event]:
     return [e for e in run.events if e.kind == kind]
+
+
+# --- reading a chat's facts, with the pre-rename shape still readable --------
+#
+# A log written before `CONVERSATION.md` §5 held the prompt, model and effort in
+# its header and had no `PROMPT` events at all. Every reader below falls back to
+# the header for exactly that case, which is what makes the promise in §3 — old
+# logs are read, never migrated — true rather than aspirational.
+
+
+def _first_prompt(run: Transcript, prompts: list[events.Event]) -> str | None:
+    if prompts:
+        return str(prompts[0].data.get("text") or "")
+    return run.header.get("prompt")
+
+
+def _first_model(run: Transcript, prompts: list[events.Event]) -> str | None:
+    if prompts:
+        return prompts[0].data.get("model")
+    return run.header.get("model")
+
+
+def _first_effort(run: Transcript, prompts: list[events.Event]) -> str | None:
+    if prompts:
+        return prompts[0].data.get("effort")
+    return run.header.get("effort")
+
+
+def _models(run: Transcript, prompts: list[events.Event]) -> list[str]:
+    """Every model the chat ran on, in the order it first ran on each."""
+    seen = [str(e.data.get("model")) for e in prompts if e.data.get("model")]
+    if not seen:
+        header = run.header.get("model")
+        return [str(header)] if header else []
+    return list(dict.fromkeys(seen))
+
+
+def _total_cost(results: list[events.Event]) -> float | None:
+    """The chat's whole spend. ``None`` only when nothing reported any."""
+    costs = [e.data.get("cost_usd") for e in results]
+    reported = [float(c) for c in costs if c is not None]
+    return sum(reported) if reported else None
+
+
+def _total_tokens(results: list[events.Event]) -> dict[str, Any]:
+    """Tokens summed across every exchange, through one arithmetic (`token_totals`).
+
+    **``None`` survives as ``None``.** `token_totals` says ``None`` for usage it
+    was never given, and that is not the same claim as zero — one means nobody
+    reported, the other means nothing was sent. Coercing the first into the
+    second would put a made-up zero in the artifact that exists to measure cost.
+    """
+    names = ("input_tokens", "cached_tokens", "output_tokens")
+    totals: dict[str, Any] = dict.fromkeys(names)
+    for event in results:
+        counted = token_totals(event.data.get("usage") or {})
+        for name in names:
+            value = counted.get(name)
+            if value is not None:
+                totals[name] = (totals[name] or 0) + int(value)
+    return totals
 
 
 #: How much of one argument, and of the whole subject, a sequence entry keeps.

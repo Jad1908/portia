@@ -8,8 +8,10 @@ it and **reversed §8** (see the table there; `interrupt()` cancels the parked c
 resolve-first protocol this document first specified is unnecessary). Phase 2 shipped **§3's
 vocabulary** — `.portia/chats/` and `.portia/indexing/`, `cli/history.py`, `Exchange`, two left-pane
 lists — with no behaviour change. Phase 3 built **the seam**: `session.Conversation` holds one client
-across exchanges and `session.run` is a one-message wrapper over it, so **the engine can now hold a
-chat and no surface uses one yet**. Phases 4–6 are not built.
+across exchanges and `session.run` is a one-message wrapper over it. Phase 4 made **the log's unit
+the chat** — one file per chat, a `PROMPT` event opening each exchange, totals summed across them.
+**The engine can hold a chat and record one; no surface offers one yet.** Phases 5 and 6 are not
+built.
 
 ## 1. The gap
 
@@ -171,8 +173,18 @@ exchange they mostly say "one".
 Two consequences, both real work:
 
 - **Model and effort move out of the header onto each exchange.** `set_model` exists and a chat may
-  legitimately start on Haiku and escalate. A header field that can change mid-file is a lie.
-- **`cli/chats.py` and the app's left pane change.** A row is a chat now, not an exchange.
+  legitimately start on Haiku and escalate. A header field that can change mid-file is a lie. They
+  ride on a new **`PROMPT` event** — the human's message, in the stream rather than inserted at each
+  edge, because the log and the transcript both need it in exactly that position and two surfaces
+  agreeing to insert it is how they come to disagree.
+- **`cli/history.py` and the app's left pane change.** A row is a chat now, not an exchange.
+- **Totals are sums, not the last exchange's.** A chat that spent four cents over six messages spent
+  four cents. `subtype` is the exception and stays the *last* one: an interrupted message in the
+  middle of a chat that carried on is not how the chat ended.
+- **`session_id` cannot be in the header**, which is what this section first said. The SDK hands it
+  back with the *result*, so it does not exist when the header line is written. It rides on every
+  `RESULT` event instead — strictly better, because a header could not have shown a session
+  changing and this can.
 
 ## 6. Decision — the chat stream only
 
@@ -345,8 +357,11 @@ Cheapest and most uncertain first, which here is the same thing.
    and verified separately against the real SDK (`sandbox/spike/conversation_check.py`): four
    exchanges on one session id, exchange 2 answering from exchange 1's tool result with no tool of
    its own, an interrupt mid-tool leaving the chat open and usable.
-4. **The log.** One file per chat, `prompt` events, model and effort per exchange, `session_id` in
-   the header.
+4. ~~**The log.**~~ **Done 2026-08-07.** One file per chat · a `PROMPT` event opening each exchange,
+   carrying the model and effort · totals summed across exchanges, `subtype` from the last ·
+   `session_id` off the results rather than the header, which is where §5 first put it and where it
+   cannot go. **Pre-rename logs still summarize**, off their header, which is what makes §3's
+   promise true rather than aspirational.
 5. **The app.** `Chat` in `state.py`, the two left-pane histories, the send rule, the interrupt
    button, the end control, `busy` reworked, context usage on screen.
 6. **The prompt edit** (§10), last and alone, so it is not moving while anything else is.

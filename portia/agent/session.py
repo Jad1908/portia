@@ -219,6 +219,11 @@ class Conversation:
             raise RuntimeError("a message is already in flight; interrupt it or wait for it")
         self._sending = True
         try:
+            # The human's message opens the exchange, in the stream rather than
+            # at each edge: the log and the transcript both need it in exactly
+            # this position, and two surfaces agreeing to insert it is how they
+            # come to disagree (`CONVERSATION.md` §5).
+            yield events.prompt_event(prompt, model=self.model, effort=self.effort)
             await self._client.query(prompt)
             async for message in self._client.receive_response():
                 while self._pending:

@@ -29,6 +29,18 @@ from portia.agent import events
 from portia.ui import engine, state
 from portia.ui.state import APP, Decision
 
+#: Which history a kind of work is logged into. `GOAL` is a conversation you
+#: started; `INDEXING` and `REREAD` are jobs the app ran on your behalf, and
+#: `docs/CONVERSATION.md` §3 is why those are two folders and two lists rather
+#: than one. Mirrors `state.TAB_FOR_KIND`, which splits the same work across the
+#: right pane's two tabs — same distinction, drawn twice because one is about
+#: where a log lands and the other about which transcript is on screen.
+_LOG_KIND_FOR = {
+    state.GOAL: runlog.CHAT,
+    state.INDEXING: runlog.INDEXING,
+    state.REREAD: runlog.INDEXING,
+}
+
 #: Events the UI already represents as a `Decision`, having rendered them from
 #: inside the callback that produced them.
 _OWNED = (events.QUESTION, events.ANSWER, events.APPROVAL)
@@ -67,7 +79,7 @@ async def start(
     # The window's copy of a turn dies with the window; this is the durable one
     # (`portia/runlog.py`). Teed here, at the edge, for the same reason the CLI
     # tees in `run_turn` — the engine must not learn it is being observed.
-    log = runlog.start(APP.portia_dir, prompt=prompt, model=model, effort=effort, cwd=str(APP.root))
+    log = runlog.start(APP.portia_dir, cwd=str(APP.root), kind=_LOG_KIND_FOR.get(kind, runlog.CHAT))
 
     try:
         async for event in session.run(

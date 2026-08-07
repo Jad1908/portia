@@ -119,6 +119,21 @@ def test_two_exchanges_reuse_one_client():
     assert client.connected is False  # closed on the way out
 
 
+def test_the_exchange_opens_with_the_humans_message():
+    """§5 — the model and effort ride on the prompt, not the header, because a
+    chat can span several and a header field that changes mid-file is a lie."""
+    chat, _ = _chat([[FakeResult()]], model="claude-haiku-4-5", effort="low")
+    stream = _drain(chat, "merge otb into hotels")
+
+    opening = stream[0]
+    assert opening.kind == events.PROMPT
+    assert opening.data == {
+        "text": "merge otb into hotels",
+        "model": "claude-haiku-4-5",
+        "effort": "low",
+    }
+
+
 def test_the_session_id_is_recorded_off_the_result():
     """§4 — one field, kept from day one so reopening a chat stays an addition."""
     chat, _ = _chat([[FakeResult(session_id="abc123")]])
@@ -156,7 +171,8 @@ def test_a_second_message_is_refused_rather_than_queued():
     async def go():
         async with chat:
             stream = chat.send("first")
-            await stream.__anext__()  # in flight now
+            assert (await stream.__anext__()).kind == events.PROMPT
+            await stream.__anext__()  # past the query — genuinely in flight
             with pytest.raises(RuntimeError, match="already in flight"):
                 await chat.send("second").__anext__()
             await stream.aclose()
@@ -235,7 +251,7 @@ def test_a_question_is_yielded_before_the_message_that_follows_it():
     client._on_query = emit_a_question
     stream = _drain(chat, "merge them")
 
-    assert [e.kind for e in stream] == [events.QUESTION, events.RESULT]
+    assert [e.kind for e in stream] == [events.PROMPT, events.QUESTION, events.RESULT]
 
 
 # --- passthroughs ------------------------------------------------------------
@@ -311,6 +327,6 @@ def test_run_is_one_exchange_and_closes_behind_itself():
     finally:
         session._sdk_client = original  # type: ignore[assignment]
 
-    assert [e.kind for e in stream] == [events.RESULT]
+    assert [e.kind for e in stream] == [events.PROMPT, events.RESULT]
     assert client.sent == ["interpret otb"]
     assert client.connected is False

@@ -23,6 +23,14 @@ def _turn(log: runlog.Log, *evs: events.Event) -> None:
         log.event(event)
 
 
+def _chat(tmp_path, *evs, prompt="build me a table", model="claude-haiku-4-5", effort="low", **kw):
+    """Open a chat and write one exchange into it — the common shape."""
+    log = runlog.start(tmp_path, **kw)
+    log.event(events.prompt_event(prompt, model=model, effort=effort))
+    _turn(log, *evs)
+    return log
+
+
 def _call(tool: str, **inp) -> events.Event:
     return events.Event(events.TOOL_CALL, {"name": f"mcp__portia__{tool}", "input": inp})
 
@@ -30,44 +38,53 @@ def _call(tool: str, **inp) -> events.Event:
 # --- writing -----------------------------------------------------------------
 
 
-def test_a_chat_is_one_file_with_a_header_line(tmp_path):
-    log = runlog.start(tmp_path, prompt="build me a table", model="claude-haiku-4-5", effort="low")
-    _turn(log, events.Event(events.TEXT, {"text": "on it"}))
+def test_a_chat_is_one_file_opened_by_a_header(tmp_path):
+    _chat(tmp_path, events.Event(events.TEXT, {"text": "on it"}))
 
     (path,) = runlog.logs_in(tmp_path)
-    first, second = path.read_text().splitlines()
+    first, second, third = path.read_text().splitlines()
     assert json.loads(first)["kind"] == runlog.HEADER
-    assert json.loads(first)["data"]["model"] == "claude-haiku-4-5"
-    assert json.loads(first)["data"]["prompt"] == "build me a table"
-    assert json.loads(second) == {"kind": "text", "data": {"text": "on it"}}
+    assert json.loads(second)["kind"] == events.PROMPT
+    assert json.loads(second)["data"]["text"] == "build me a table"
+    assert json.loads(third) == {"kind": "text", "data": {"text": "on it"}}
 
 
-def test_the_header_records_what_makes_two_runs_comparable(tmp_path):
+def test_the_header_holds_only_what_is_true_of_the_whole_chat(tmp_path):
+    """§5 — the prompt, model and effort moved onto each exchange, because a chat
+    can span several models and a header field that changes mid-file is a lie."""
+    log = runlog.start(tmp_path, cwd=tmp_path)
+    header = runlog.read(log.path).header
+
+    assert set(header) == {"started", "kind", "cwd", "portia_sha"}
+
+
+def test_what_makes_two_chats_comparable_is_recorded(tmp_path):
     """Run 6 is only comparable to Run 5 because they differ in model and effort
     and nothing else — a fact that until now survived only in prose."""
-    log = runlog.start(tmp_path, prompt="p", model="m", effort="high", cwd=tmp_path)
-    header = runlog.read(log.path).header
-    assert header["model"] == "m"
-    assert header["effort"] == "high"
-    assert header["cwd"] == str(tmp_path.resolve())
-    assert "started" in header
+    log = _chat(tmp_path, prompt="p", model="m", effort="high", cwd=tmp_path)
+    logged = runlog.read(log.path)
+    facts = runlog.summary(logged)
+
+    assert (facts["model"], facts["effort"]) == ("m", "high")
+    assert logged.header["cwd"] == str(tmp_path.resolve())
+    assert "started" in logged.header
 
 
-def test_two_exchanges_in_the_same_second_are_two_logs(tmp_path):
-    """`index` runs two turns back to back. Appending the second onto the first
-    is exactly the run-conflation this module exists to end."""
+def test_two_chats_started_in_the_same_second_are_two_logs(tmp_path):
+    """`index` runs two jobs back to back. Appending one onto the other is
+    exactly the conflation this module exists to end."""
     when = datetime(2026, 7, 29, 12, 0, 0)
-    first = runlog.start(tmp_path, prompt="a", model="m", when=when)
-    second = runlog.start(tmp_path, prompt="b", model="m", when=when)
+    first = _chat(tmp_path, prompt="a", model="m", when=when)
+    second = _chat(tmp_path, prompt="b", model="m", when=when)
 
     assert first.path != second.path
     assert len(runlog.logs_in(tmp_path)) == 2
-    assert runlog.read(second.path).header["prompt"] == "b"
+    assert runlog.summary(runlog.read(second.path))["prompt"] == "b"
 
 
 def test_each_event_is_on_disk_before_the_next_one_happens(tmp_path):
     """The `^C` case: whatever the turn got to is readable, with no clean close."""
-    log = runlog.start(tmp_path, prompt="p", model="m")
+    log = runlog.start(tmp_path)
     _turn(log, _call("profile_source", name="otb"))
 
     assert len(runlog.read(log.path).events) == 1  # nothing flushed, nothing closed
@@ -75,7 +92,7 @@ def test_each_event_is_on_disk_before_the_next_one_happens(tmp_path):
 
 def test_a_payload_the_json_encoder_would_refuse_does_not_kill_the_turn(tmp_path):
     """A log line that raises mid-turn loses the transcript it exists to keep."""
-    log = runlog.start(tmp_path, prompt="p", model="m")
+    log = runlog.start(tmp_path)
     _turn(log, events.Event(events.RESULT, {"usage": {"at": datetime(2026, 7, 29)}}))
 
     (event,) = runlog.read(log.path).events
@@ -86,24 +103,24 @@ def test_a_payload_the_json_encoder_would_refuse_does_not_kill_the_turn(tmp_path
 
 
 def test_a_truncated_tail_does_not_lose_the_rest(tmp_path):
-    log = runlog.start(tmp_path, prompt="p", model="m")
+    log = _chat(tmp_path, prompt="p", model="m")
     _turn(log, events.Event(events.TEXT, {"text": "kept"}))
     with log.path.open("a") as fh:
         fh.write('{"kind": "text", "data": {"tex')  # died mid-write
 
     run = runlog.read(log.path)
-    assert [e.data["text"] for e in run.events] == ["kept"]
-    assert run.header["prompt"] == "p"
+    assert [e.data["text"] for e in run.events if e.kind == events.TEXT] == ["kept"]
+    assert runlog.summary(run)["prompt"] == "p"
 
 
 def test_logs_are_listed_newest_first(tmp_path):
-    old = runlog.start(tmp_path, prompt="a", model="m", when=datetime(2026, 7, 1, 9, 0))
-    new = runlog.start(tmp_path, prompt="b", model="m", when=datetime(2026, 7, 29, 9, 0))
+    old = _chat(tmp_path, prompt="a", model="m", when=datetime(2026, 7, 1, 9, 0))
+    new = _chat(tmp_path, prompt="b", model="m", when=datetime(2026, 7, 29, 9, 0))
     assert runlog.logs_in(tmp_path) == [new.path, old.path]
 
 
 def test_a_run_is_found_by_prefix(tmp_path):
-    log = runlog.start(tmp_path, prompt="a", model="m", when=datetime(2026, 7, 29, 9, 0))
+    log = _chat(tmp_path, prompt="a", model="m", when=datetime(2026, 7, 29, 9, 0))
     assert runlog.find("2026-07-29", tmp_path) == log.path
     assert runlog.find("nope", tmp_path) is None
 
@@ -123,7 +140,7 @@ def test_the_tool_sequence_is_kept_in_order_and_says_what_each_call_was_about(tm
     and a log recording only that it was called cannot say whether it routed
     anywhere.
     """
-    log = runlog.start(tmp_path, prompt="p", model="m")
+    log = _chat(tmp_path, prompt="p", model="m")
     _turn(
         log,
         _call("graph_lookup", table="orders"),
@@ -144,27 +161,27 @@ def test_the_tool_sequence_is_kept_in_order_and_says_what_each_call_was_about(tm
 
 def test_a_call_with_a_list_argument_is_summarised_by_how_many(tmp_path):
     """`measure_overlaps` takes pairs; how many it asked for is the fact."""
-    log = runlog.start(tmp_path, prompt="p", model="m")
+    log = _chat(tmp_path, prompt="p", model="m")
     _turn(log, _call("measure_overlaps", pairs=[{"left": "a"}, {"left": "b"}]))
     assert runlog.summary(runlog.read(log.path))["sequence"] == ["measure_overlaps(2 pairs)"]
 
 
 def test_a_call_with_no_arguments_is_just_its_name(tmp_path):
-    log = runlog.start(tmp_path, prompt="p", model="m")
+    log = _chat(tmp_path, prompt="p", model="m")
     _turn(log, _call("get_context"))
     assert runlog.summary(runlog.read(log.path))["sequence"] == ["get_context"]
 
 
 def test_a_long_argument_is_clipped_rather_than_filling_the_line(tmp_path):
     """Thirty calls have to still read as one line."""
-    log = runlog.start(tmp_path, prompt="p", model="m")
+    log = _chat(tmp_path, prompt="p", model="m")
     _turn(log, _call("set_group", name="g", context="x" * 200))
     entry = runlog.summary(runlog.read(log.path))["sequence"][0]
     assert len(entry) <= len("set_group()") + runlog.SUBJECT_CHARS
 
 
 def test_refused_writes_are_counted_separately_from_allowed_ones(tmp_path):
-    log = runlog.start(tmp_path, prompt="p", model="m")
+    log = _chat(tmp_path, prompt="p", model="m")
     _turn(
         log,
         events.approval_result_event("mcp__portia__record_step", True),
@@ -176,7 +193,7 @@ def test_refused_writes_are_counted_separately_from_allowed_ones(tmp_path):
 
 
 def test_asking_once_with_four_questions_is_not_asking_four_times(tmp_path):
-    log = runlog.start(tmp_path, prompt="p", model="m")
+    log = _chat(tmp_path, prompt="p", model="m")
     _turn(log, events.question_event([{"question": "a"}, {"question": "b"}]))
 
     summary = runlog.summary(runlog.read(log.path))
@@ -185,7 +202,7 @@ def test_asking_once_with_four_questions_is_not_asking_four_times(tmp_path):
 
 
 def test_cost_and_tokens_come_off_the_result_event(tmp_path):
-    log = runlog.start(tmp_path, prompt="p", model="m")
+    log = _chat(tmp_path, prompt="p", model="m")
     _turn(
         log,
         events.Event(
@@ -209,7 +226,7 @@ def test_the_cached_input_is_counted_as_input(tmp_path):
     input tokens for a turn that sent 14,651. The uncached field alone would
     have said a fat turn was a cheap one — in the artifact built to measure cost.
     """
-    log = runlog.start(tmp_path, prompt="p", model="m")
+    log = _chat(tmp_path, prompt="p", model="m")
     _turn(
         log,
         events.Event(
@@ -233,7 +250,7 @@ def test_the_cached_input_is_counted_as_input(tmp_path):
 
 def test_a_turn_that_never_finished_summarizes_anyway(tmp_path):
     """No `RESULT` event is the interrupted case — the reason for the log."""
-    log = runlog.start(tmp_path, prompt="p", model="m")
+    log = _chat(tmp_path, prompt="p", model="m")
     _turn(log, _call("profile_source"))
 
     summary = runlog.summary(runlog.read(log.path))
@@ -245,7 +262,7 @@ def test_a_turn_that_never_finished_summarizes_anyway(tmp_path):
 def test_the_summary_states_no_verdict(tmp_path):
     """`CLAUDE.md` → facts vs judgment. A run log that scored runs would break
     the line in the one place it would be least visible."""
-    log = runlog.start(tmp_path, prompt="p", model="m")
+    log = _chat(tmp_path, prompt="p", model="m")
     _turn(log, _call("profile_source"))
 
     summary = runlog.summary(runlog.read(log.path))
@@ -259,8 +276,8 @@ def test_the_summary_states_no_verdict(tmp_path):
 def test_a_chat_and_an_indexing_land_in_different_folders(tmp_path):
     """The separation is on disk, not just in the pane that draws them. A job the
     app ran on your behalf is not a conversation you had."""
-    chat = runlog.start(tmp_path, prompt="a", model="m", kind=runlog.CHAT)
-    job = runlog.start(tmp_path, prompt="b", model="m", kind=runlog.INDEXING)
+    chat = _chat(tmp_path, prompt="a", model="m", kind=runlog.CHAT)
+    job = _chat(tmp_path, prompt="b", model="m", kind=runlog.INDEXING)
 
     assert chat.path.parent.name == "chats"
     assert job.path.parent.name == "indexing"
@@ -270,7 +287,7 @@ def test_a_chat_and_an_indexing_land_in_different_folders(tmp_path):
 
 
 def test_the_kind_is_in_the_header_and_the_summary(tmp_path):
-    job = runlog.start(tmp_path, prompt="b", model="m", kind=runlog.INDEXING)
+    job = _chat(tmp_path, prompt="b", model="m", kind=runlog.INDEXING)
     transcript = runlog.read(job.path)
     assert transcript.header["kind"] == runlog.INDEXING
     assert transcript.kind == runlog.INDEXING
@@ -279,7 +296,7 @@ def test_the_kind_is_in_the_header_and_the_summary(tmp_path):
 
 def test_an_unknown_kind_is_refused_rather_than_guessed(tmp_path):
     with pytest.raises(ValueError, match="unknown log kind"):
-        runlog.start(tmp_path, prompt="a", model="m", kind="whatever")
+        _chat(tmp_path, prompt="a", model="m", kind="whatever")
 
 
 def test_logs_written_before_the_rename_are_still_read(tmp_path):
@@ -304,6 +321,111 @@ def test_a_legacy_log_sorts_beside_the_new_ones(tmp_path):
     legacy.mkdir(parents=True)
     old = legacy / "2026-07-01T09-00-00.jsonl"
     old.write_text('{"kind": "header", "data": {"prompt": "old", "model": "m"}}\n')
-    new = runlog.start(tmp_path, prompt="new", model="m", when=datetime(2026, 7, 29, 9, 0))
+    new = _chat(tmp_path, prompt="new", model="m", when=datetime(2026, 7, 29, 9, 0))
 
     assert runlog.logs_in(tmp_path) == [new.path, old]
+
+
+# --- a chat spans exchanges (docs/CONVERSATION.md §5) ------------------------
+
+
+def _result(cost=0.01, usage=None, session_id="s1", subtype="success"):
+    return events.Event(
+        events.RESULT,
+        {
+            "subtype": subtype,
+            "cost_usd": cost,
+            "usage": usage or {},
+            "session_id": session_id,
+        },
+    )
+
+
+def test_one_file_holds_every_exchange(tmp_path):
+    """The unit is the chat. Six files needing reassembly in the right order to
+    mean anything is the shape `runlog`'s own storage argument rejects."""
+    log = runlog.start(tmp_path)
+    log.event(events.prompt_event("merge them", model="m", effort="low"))
+    _turn(log, _call("join_findings", left="otb"), _result())
+    log.event(events.prompt_event("actually make it an inner join", model="m", effort="low"))
+    _turn(log, _call("record_step"), _result())
+
+    assert len(runlog.logs_in(tmp_path)) == 1
+    facts = runlog.summary(runlog.read(log.path))
+    assert facts["exchanges"] == 2
+    # What the chat opened with. A follow-up only means something beside the one
+    # before it, so the first is the only one that stands alone in a list.
+    assert facts["prompt"] == "merge them"
+    assert facts["sequence"] == ["join_findings(otb)", "record_step"]
+
+
+def test_totals_are_summed_across_exchanges_not_taken_from_the_last(tmp_path):
+    """A chat that spent four cents over six messages spent four cents. Reading
+    the last message's cost would understate every multi-exchange chat."""
+    log = runlog.start(tmp_path)
+    for n in (1, 2, 3):
+        log.event(events.prompt_event(f"message {n}", model="m", effort="low"))
+        log.event(_result(cost=0.02, usage={"input_tokens": 10, "output_tokens": 5}))
+
+    facts = runlog.summary(runlog.read(log.path))
+    assert facts["cost_usd"] == pytest.approx(0.06)
+    assert facts["input_tokens"] == 30
+    assert facts["output_tokens"] == 15
+
+
+def test_a_model_change_mid_chat_is_reported_rather_than_flattened(tmp_path):
+    """One line has room for one model, so `model` is the first; `models` is the
+    honest whole answer. A header field could not have said either."""
+    log = runlog.start(tmp_path)
+    log.event(events.prompt_event("start cheap", model="claude-haiku-4-5", effort="low"))
+    log.event(_result())
+    log.event(events.prompt_event("now think harder", model="claude-opus-5", effort="low"))
+    log.event(_result())
+
+    facts = runlog.summary(runlog.read(log.path))
+    assert facts["model"] == "claude-haiku-4-5"
+    assert facts["models"] == ["claude-haiku-4-5", "claude-opus-5"]
+
+
+def test_how_the_chat_ended_is_the_last_exchange_not_an_interrupted_one(tmp_path):
+    """An interrupted message in the middle of a chat that carried on is not how
+    the chat ended."""
+    log = runlog.start(tmp_path)
+    log.event(events.prompt_event("do a lot", model="m", effort="low"))
+    log.event(_result(subtype="error_during_execution"))
+    log.event(events.prompt_event("never mind, just this", model="m", effort="low"))
+    log.event(_result(subtype="success"))
+
+    assert runlog.summary(runlog.read(log.path))["subtype"] == "success"
+
+
+def test_the_session_id_is_read_off_the_results(tmp_path):
+    """§4 wanted this in the header; it cannot be, because the SDK hands it back
+    with the result. Off the events is strictly better — a header could not show
+    a session changing."""
+    log = runlog.start(tmp_path)
+    log.event(events.prompt_event("hello", model="m", effort="low"))
+    log.event(_result(session_id="sess-abc"))
+
+    assert runlog.summary(runlog.read(log.path))["session_id"] == "sess-abc"
+
+
+def test_a_pre_rename_log_still_summarizes_off_its_header(tmp_path):
+    """The promise in §3 — old logs are read, never migrated — has to survive
+    §5 too. They have no PROMPT events at all."""
+    legacy = tmp_path / runlog.LEGACY_DIR
+    legacy.mkdir(parents=True)
+    path = legacy / "2026-07-29T16-32-57.jsonl"
+    path.write_text(
+        '{"kind": "header", "data": {"prompt": "old goal", "model": "claude-haiku-4-5",'
+        ' "effort": "low", "started": "2026-07-29T16:32:57"}}\n'
+        '{"kind": "text", "data": {"text": "on it"}}\n'
+    )
+
+    facts = runlog.summary(runlog.read(path))
+    assert facts["prompt"] == "old goal"
+    assert facts["model"] == "claude-haiku-4-5"
+    assert facts["effort"] == "low"
+    assert facts["models"] == ["claude-haiku-4-5"]
+    # It predates the idea of an exchange, and read as one thing that happened.
+    assert facts["exchanges"] == 1
