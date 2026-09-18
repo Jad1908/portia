@@ -5234,6 +5234,23 @@ def test_a_provider_with_a_written_list_offers_it_before_anything_is_listed():
     assert "static_models" in inspect.getsource(c.model_effort)
 
 
+def test_a_window_that_never_switched_provider_offers_every_anthropic_model():
+    """The picker as drawn on a fresh app, nothing listed, read off the select."""
+    from portia.agent import providers
+    from portia.ui import state
+
+    fresh = state.App()
+    assert fresh.provider_models == {}
+    original, state.APP = state.APP, fresh
+    try:
+        with ui.element("div") as slot:
+            c.model_effort(fresh, lambda effort: None)
+    finally:
+        state.APP = original
+    select = next(e for e in slot.descendants() if "model-select" in e.classes)
+    assert list(select.options) == list(providers.anthropic.MODELS)
+
+
 def test_a_local_model_is_listed_with_the_vendors_own_size():
     from portia.agent import providers
 
