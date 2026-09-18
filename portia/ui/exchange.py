@@ -82,8 +82,16 @@ async def start(
     label: str = "",
     chat: Chat | None = None,
     provider: str | None = None,
+    show: bool = False,
 ) -> None:
     """Send one message, streaming its events into a chat's transcript.
+
+    ``show`` puts the chat on screen as it starts. A goal is shown anyway; this
+    is for a **job started by a press in the right pane**, which is the one
+    case where opening it is what the person asked for. A job never takes the
+    screen by itself (`CHAT_SESSIONS.md` §3.5), and it still does not: the
+    add-data screen's read starts without anyone pressing anything in this
+    pane, and passes nothing.
 
     **A goal continues a chat; a job is one-shot** (`CONVERSATION.md` §6). The
     same recording, the same callbacks, the same log tee — but a chat keeps its
@@ -120,6 +128,8 @@ async def start(
     )
     exchange = chat.exchange
     assert exchange is not None
+    if show:
+        APP.show_chat(chat)
     transcript.pane.refresh()
 
     # The window's copy dies with the window; this is the durable one
