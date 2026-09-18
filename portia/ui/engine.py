@@ -61,6 +61,7 @@ from typing import Any
 
 from portia import catalog, figures, findings, pipeline, runlog
 from portia import spec as spec_module
+from portia.agent import drawn
 from portia.cli.import_data import plan as plan_copy
 from portia.core import cancel, feedback
 from portia.core.io import connect, find_data_files, load_table, source_table, supported_suffixes
@@ -121,6 +122,9 @@ def open_project(path: str | Path, app: App) -> Path:
     """
     root = Path(path).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
+    # Whoever is drawing charts into the project being left must stop being told
+    # a window is watching it (`agent/drawn.py`).
+    drawn.withdraw(app.catalog_dir)
     os.chdir(root)
     app.root = root
     app.spec_path = None
@@ -158,6 +162,13 @@ def open_project(path: str | Path, app: App) -> Path:
     # none, so the filter was a file nothing opened.
     app.visible = remembered_view(root)
     app.card_offsets = remembered_layout(root)
+    # Charts a host drew here while no window was open, as the unsaved charts
+    # they are: listed in the gallery, and **not opened**, because forty tabs
+    # from last week is not what opening a project asks for.
+    for chart in take_drawn(app):
+        chart.closed = True
+        app.charts.append(chart)
+    drawn.announce(app.catalog_dir, app.url)
     app.previewing = None
     refresh_catalog(app)
     # A project that already has data is not being set up, so it opens on the
@@ -861,6 +872,10 @@ def artifact_stamp(app: App) -> tuple:
             if not path.is_file():
                 continue
             rel = path.relative_to(portia_dir)
+            if rel.name == drawn.WINDOW_FILE:
+                # This window's own announcement. Stamping it would have the
+                # window redraw because it said it was open.
+                continue
             if rel.parts and rel.parts[0] in _HISTORY_DIRS:
                 stamps.append((path.as_posix(), 0, 0))
             else:
@@ -1932,6 +1947,48 @@ def save_figure(app: App, chart: State.Chart, *, notes: str = "", folder: str = 
         folder=folder,
         root=app.root,
     )
+
+
+def take_drawn(app: App) -> list[State.Chart]:
+    """Stashed charts this window has not taken yet, oldest first.
+
+    `figures.stash` is where a chart goes when the process that drew it has no
+    window (`cli/serve.py`). Taken once per ``(name, mtime)``: the same name at a
+    newer mtime is the chart drawn again, and it comes back to replace the tab.
+    """
+    taken = []
+    for doc in figures.stashed(app.catalog_dir):
+        name = str(doc.get("name") or "")
+        if not name or app.drawn_seen.get(name) == doc["mtime_ns"]:
+            continue
+        app.drawn_seen[name] = doc["mtime_ns"]
+        taken.append(
+            State.Chart(
+                name=name,
+                question=str(doc.get("question") or ""),
+                vega=dict(doc.get("vega") or {}),
+                rows=list(doc.get("rows") or []),
+                columns=list(doc.get("columns") or []),
+                sql=str(doc.get("sql") or ""),
+                inputs=list(doc.get("inputs") or []),
+                stashed=True,
+            )
+        )
+    return taken
+
+
+def unstash(app: App, chart: State.Chart) -> None:
+    """A stashed chart was kept or discarded, so its file goes (`figures.unstash`)."""
+    if chart.stashed:
+        figures.unstash(chart.name, app.catalog_dir)
+        app.drawn_seen.pop(chart.name, None)
+        chart.stashed = False
+
+
+def stash_failure(app: App, chart: State.Chart) -> None:
+    """Leave a stashed chart's render failure where the process that drew it reads."""
+    if chart.stashed:
+        figures.stash_failure(chart.name, chart.error or "", app.catalog_dir)
 
 
 def load_figure(app: App, path: str) -> dict:

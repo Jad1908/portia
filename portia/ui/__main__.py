@@ -25,10 +25,13 @@ async def _close_chats() -> None:
     ``if __name__`` block runs *after* `main` has been called, so a handler
     registered from inside `main` and defined down there does not exist yet.
     """
+    from portia.agent import drawn
     from portia.agent.providers import llamacpp
     from portia.ui import exchange
 
     await exchange.close_all()
+    # A host reading `.portia/window.json` is told nobody is watching any more.
+    drawn.withdraw(APP.catalog_dir)
     # And the local server this window started (`PROVIDERS.md` §4.9): ten
     # gigabytes of model must not outlive the app that loaded them.
     llamacpp.stop()
@@ -44,6 +47,7 @@ def main() -> None:
     args = parser.parse_args()
 
     APP.portia_dir = args.dir
+    APP.url = f"http://{args.host}:{args.port}"
     if args.project:
         app.open_at_start(args.project)
 

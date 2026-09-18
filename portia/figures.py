@@ -63,7 +63,16 @@ def save(
     friction that stops people keeping things. `findings/` is where a claim goes,
     and `so` is required *there* for exactly that reason.
     """
-    doc: dict[str, Any] = {
+    directory = _dir(root) / _safe_folder(folder)
+    directory.mkdir(parents=True, exist_ok=True)
+    path = _free_path(directory, slug(chart["tab"]))
+    _write(path, _doc(chart, notes))
+    return path
+
+
+def _doc(chart: dict, notes: str = "") -> dict[str, Any]:
+    """A `handlers.plot_data` answer as the record a figure file holds."""
+    return {
         "name": chart["tab"],
         "question": chart.get("question", ""),
         "notes": notes.strip(),
@@ -75,12 +84,14 @@ def save(
         "n_rows": chart.get("n_rows", len(chart.get("rows") or [])),
         "rows": list(chart.get("rows") or []),
     }
-    directory = _dir(root) / _safe_folder(folder)
-    directory.mkdir(parents=True, exist_ok=True)
-    path = _free_path(directory, slug(chart["tab"]))
-    with open(path, "w") as f:
+
+
+def _write(path: Path, doc: dict[str, Any]) -> None:
+    """Whole or not at all: a window reading this folder must never see half a chart."""
+    partial = path.with_suffix(path.suffix + ".part")
+    with open(partial, "w") as f:
         json.dump(doc, f, ensure_ascii=False, indent=2)
-    return path
+    partial.replace(path)
 
 
 def load(path: str | Path) -> dict:
@@ -278,3 +289,75 @@ def _free_path(directory: Path, stem: str) -> Path:
         path = directory / f"{stem}-{n}{SUFFIX}"
         n += 1
     return path
+
+
+# --- charts drawn where no window could take them ----------------------------
+
+#: Under the catalog directory, not beside `figures/`. **A drawn chart is not a
+#: figure**: nobody chose to keep it. It is here because the process that drew it
+#: was not the window (`cli/serve.py`), so the rows had nowhere to go but disk,
+#: and the window picks it up from here as the unsaved chart it would have been
+#: had the two been one process. Keeping it writes a figure and removes this
+#: file, so one picture is never two artifacts (`VISUALIZATION.md` §6.4), and
+#: discarding it removes this file too. Nothing is committed from `.portia/`.
+DRAWN_DIR = "drawn"
+
+#: A render failure the window reported for a stashed chart, waiting beside it
+#: for the process that drew it to read (`agent/drawn.collect_failures`).
+FAILED_SUFFIX = ".failed"
+
+
+def stash(chart: dict, portia_dir: str | Path) -> Path:
+    """Write a drawn chart where a window will find it. **Reusing a name replaces.**
+
+    `_free_path` is deliberately not used: the tab name is the chart's identity
+    (§3.3) and a corrected chart drawn under the same name is the same chart, so
+    a second file would be the old picture surviving its own correction.
+    """
+    directory = Path(portia_dir) / DRAWN_DIR
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{slug(chart['tab'])}{SUFFIX}"
+    path.with_suffix(FAILED_SUFFIX).unlink(missing_ok=True)
+    _write(path, _doc(chart))
+    return path
+
+
+def stashed(portia_dir: str | Path) -> list[dict]:
+    """Every stashed chart, oldest first, each with its ``path`` and ``mtime_ns``."""
+    out = []
+    for path in (Path(portia_dir) / DRAWN_DIR).glob(f"*{SUFFIX}"):
+        try:
+            doc = load(path)
+            doc["mtime_ns"] = path.stat().st_mtime_ns
+        except (OSError, ValueError):
+            continue
+        doc["path"] = str(path)
+        out.append(doc)
+    return sorted(out, key=lambda doc: doc["mtime_ns"])
+
+
+def unstash(name: str, portia_dir: str | Path) -> None:
+    """The chart was kept or thrown away: its stash goes, and any failure with it."""
+    path = Path(portia_dir) / DRAWN_DIR / f"{slug(name)}{SUFFIX}"
+    path.unlink(missing_ok=True)
+    path.with_suffix(FAILED_SUFFIX).unlink(missing_ok=True)
+
+
+def stash_failure(name: str, message: str, portia_dir: str | Path) -> None:
+    """The window could not draw a stashed chart. Leave that where its author reads it."""
+    path = Path(portia_dir) / DRAWN_DIR / f"{slug(name)}{FAILED_SUFFIX}"
+    if path.parent.is_dir():
+        path.write_text(json.dumps({"tab": name, "message": message}, ensure_ascii=False))
+
+
+def take_stash_failures(portia_dir: str | Path) -> dict[str, str]:
+    """Every failure left by a window since the last call, by tab. Taken, not read."""
+    taken: dict[str, str] = {}
+    for path in (Path(portia_dir) / DRAWN_DIR).glob(f"*{FAILED_SUFFIX}"):
+        try:
+            record = json.loads(path.read_text())
+            taken[str(record["tab"])] = str(record.get("message") or "")
+        except (OSError, ValueError, KeyError):
+            pass
+        path.unlink(missing_ok=True)
+    return taken

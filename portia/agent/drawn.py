@@ -32,9 +32,12 @@ best-effort graph writes in `cli/index` — a missing surface is not a failed st
 
 from __future__ import annotations
 
+import json
+import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 
 #: Given one published chart, do something with it. Returns nothing.
 Sink = Callable[[dict], None]
@@ -208,7 +211,115 @@ def broken(tab: str) -> str | None:
 
 def reset() -> None:
     """Forget every subscriber. For tests, and for closing a project."""
+    global _audience
     _sinks.clear()
     _failures.clear()
     _broken.clear()
     _pictures.clear()
+    _audience = None
+
+
+# --- when the surface is another process -------------------------------------
+#
+# Everything above assumes the tool and the window share a process, which is true
+# in the app and false under `cli/serve.py`, where a host such as Claude Code
+# runs the tools and the window, if there is one, was started separately. The
+# three things below are the same three directions across that gap: the chart
+# goes out through a file, the window says it exists through a file, and a failed
+# render comes back through a file. `portia/figures.py` owns the files; this is
+# still only the transport.
+
+#: What a window leaves in the catalog directory while it has the project open.
+WINDOW_FILE = "window.json"
+
+#: How the receipt says a window can be opened. Shown to the model as a fact
+#: about this project, the same way `PROVIDERS.md` shows `ollama pull`: shown,
+#: never run.
+OPEN_WITH = "uv run python -m portia.ui --project ."
+
+#: Who can see a published chart, as the hosting edge reports it, or ``None``
+#: when the surface is in-process and the question does not arise.
+_audience: Callable[[], dict] | None = None
+
+
+def to_disk(portia_dir: str | Path) -> Sink:
+    """A sink that stashes each chart where a window on this project finds it."""
+    from portia import figures
+
+    def sink(chart: dict) -> None:
+        figures.stash(chart, portia_dir)
+
+    return sink
+
+
+def set_audience(report: Callable[[], dict] | None) -> None:
+    """Say how a receipt learns whether anybody can see the chart."""
+    global _audience
+    _audience = report
+
+
+def audience() -> dict | None:
+    """Whether a window is open on this project, for the receipt. ``None`` in the app.
+
+    **A field and not a silence**, for `VISUALIZATION.md` §2.5.2's reason: a
+    receipt that says nothing about who saw the chart reads as *it was seen*, and
+    the model then narrates a picture to somebody looking at a terminal.
+    """
+    return _audience() if _audience is not None else None
+
+
+def announce(portia_dir: str | Path, url: str = "") -> None:
+    """A window has this project open. Best effort: a read-only folder is not an error."""
+    try:
+        Path(portia_dir).mkdir(parents=True, exist_ok=True)
+        (Path(portia_dir) / WINDOW_FILE).write_text(json.dumps({"pid": os.getpid(), "url": url}))
+    except OSError:
+        return
+
+
+def withdraw(portia_dir: str | Path) -> None:
+    """The window left this project, if the announcement there is this process's."""
+    path = Path(portia_dir) / WINDOW_FILE
+    if (_announced(path) or {}).get("pid") == os.getpid():
+        path.unlink(missing_ok=True)
+
+
+def watching(portia_dir: str | Path) -> dict:
+    """What the receipt carries: a window is open, or it is not and here is how.
+
+    **The pid is checked, because a window that crashed withdraws nothing.** A
+    stale file would tell the model the user is looking at a chart in a window
+    that no longer exists, which is the exact silence this exists to end.
+    """
+    seen = _announced(Path(portia_dir) / WINDOW_FILE)
+    if seen and _alive(seen.get("pid")):
+        return {"window": "open", **({"url": seen["url"]} if seen.get("url") else {})}
+    return {"window": "closed", "open_with": OPEN_WITH}
+
+
+def collect_failures(portia_dir: str | Path) -> None:
+    """Bring a window's render failures across, onto the next receipt (§11.2)."""
+    from portia import figures
+
+    for tab, message in figures.take_stash_failures(portia_dir).items():
+        report_failure(tab, message)
+
+
+def _announced(path: Path) -> dict | None:
+    try:
+        seen = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    return seen if isinstance(seen, dict) else None
+
+
+def _alive(pid: object) -> bool:
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True

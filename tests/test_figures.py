@@ -62,3 +62,58 @@ def test_the_top_level_cannot_be_deleted(tmp_path):
 def test_a_folder_that_does_not_exist_is_an_error_not_a_silent_success(tmp_path):
     with pytest.raises(ValueError, match="not a folder"):
         figures.remove_folder("ghost", root=tmp_path)
+
+
+# --- the stash: charts drawn by a process with no window ---------------------
+
+
+def _drawn(tab="rates", rows=None):
+    return {
+        "tab": tab,
+        "question": "how do rates differ?",
+        "sql": "SELECT 1",
+        "inputs": ["t"],
+        "vega": {"mark": "bar"},
+        "columns": ["RISK", "rate"],
+        "n_rows": len(rows or [{"RISK": "a", "rate": 1}]),
+        "rows": rows or [{"RISK": "a", "rate": 1}],
+    }
+
+
+def test_a_stashed_chart_carries_what_a_figure_carries(tmp_path):
+    path = figures.stash(_drawn(), tmp_path)
+    assert path.parent.name == figures.DRAWN_DIR
+    (doc,) = figures.stashed(tmp_path)
+    assert doc["name"] == "rates" and doc["rows"] == [{"RISK": "a", "rate": 1}]
+    assert doc["path"] == str(path)
+
+
+def test_stashing_under_the_same_name_replaces(tmp_path):
+    """The tab name is the chart. A second file would be the old picture surviving."""
+    figures.stash(_drawn(rows=[{"RISK": "a", "rate": 1}]), tmp_path)
+    figures.stash(_drawn(rows=[{"RISK": "a", "rate": 2}]), tmp_path)
+    (doc,) = figures.stashed(tmp_path)
+    assert doc["rows"] == [{"RISK": "a", "rate": 2}]
+
+
+def test_a_stash_is_never_in_the_gallery(tmp_path):
+    figures.stash(_drawn(), tmp_path / ".portia")
+    assert figures.load_all(tmp_path) == []
+
+
+def test_unstashing_takes_the_chart_and_its_failure(tmp_path):
+    figures.stash(_drawn(), tmp_path)
+    figures.stash_failure("rates", "no such mark", tmp_path)
+    figures.unstash("rates", tmp_path)
+    assert figures.stashed(tmp_path) == []
+    assert figures.take_stash_failures(tmp_path) == {}
+
+
+def test_a_failure_is_taken_once_and_a_redraw_clears_it(tmp_path):
+    figures.stash(_drawn(), tmp_path)
+    figures.stash_failure("rates", "no such mark", tmp_path)
+    assert figures.take_stash_failures(tmp_path) == {"rates": "no such mark"}
+    assert figures.take_stash_failures(tmp_path) == {}
+    figures.stash_failure("rates", "no such mark", tmp_path)
+    figures.stash(_drawn(), tmp_path)  # drawn again: the old failure is about the old spec
+    assert figures.take_stash_failures(tmp_path) == {}

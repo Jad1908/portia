@@ -23,6 +23,11 @@ is where each piece of it is put back:
   the newest chat, which is right when one process holds one conversation. With
   the window open beside a host, or two hosts on one project, the newest log is
   not necessarily ours. This process knows its own, so it names it.
+- **Charts.** `plot_data` publishes its rows to whatever surface is listening,
+  and in this process nothing is. They are stashed under `.portia/drawn/`, a
+  window open on the project shows them as the unsaved charts they are, the
+  receipt tells the model whether such a window exists, and a render that
+  failed there comes back on the next receipt (`agent/drawn.py`).
 - **Stop.** The host cancels a request; MCP delivers that as a cancelled task,
   and a cancelled `await` does nothing to the thread a DuckDB query is on. Each
   call runs under its own `core.cancel` scope, which is what Run and Build use,
@@ -45,7 +50,7 @@ from pathlib import Path
 from typing import Any
 
 from portia import catalog, runlog
-from portia.agent import events, prompts
+from portia.agent import drawn, events, prompts
 from portia.core import cancel
 
 #: The hosts this server has been driven from. One today; the header carries the
@@ -54,6 +59,9 @@ CLAUDE_CODE = "claude-code"
 
 #: Tools whose ``chat`` argument means *which log*, and defaults to this one.
 _CHAT_SCOPED = ("review_queries", "record_finding")
+
+#: The tool whose receipt carries a window's render failures back.
+_PLOT_TOOL = "plot_data"
 
 Handler = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
 
@@ -86,6 +94,8 @@ class Session:
                     {"name": tools.qualified(name), "input": args, "id": call_id},
                 )
             )
+            if name == _PLOT_TOOL:
+                drawn.collect_failures(self.portia_dir)
             sent = dict(args)
             if name in _CHAT_SCOPED and not sent.get("chat"):
                 sent["chat"] = self.log.path.stem
@@ -185,6 +195,11 @@ def build(session: Session) -> Any:
     server = create_sdk_mcp_server(name=tools.SERVER_NAME, version="0.1.0", tools=wrapped)[
         "instance"
     ]
+    # A chart has no window to go to in this process, so it goes to disk, where
+    # a window on the project picks it up (`agent/drawn.py`), and the receipt
+    # says whether one is open.
+    drawn.subscribe(drawn.to_disk(session.portia_dir))
+    drawn.set_audience(lambda: drawn.watching(session.portia_dir))
     # Read by the host when it connects and kept in its context for the whole
     # session, which a skill is not: a skill is fetched when the model thinks to.
     server.instructions = prompts.load("headless/instructions")

@@ -166,6 +166,10 @@ def plan(root: Path, categories: tuple[str, ...]) -> Plan:
         # Saved charts, in whatever folders the user dragged them into
         # (`figures.load_all` walks the same tree).
         found["figures"] = _glob(root / figures.FIGURES_DIR, f"**/*{figures.SUFFIX}")
+        # And the charts a host drew that nobody kept (`figures.stash`): the
+        # window lists them as unsaved, so they are the last attempt's pictures
+        # as much as a saved one is.
+        found["figures"] += _existing(portia_dir / figures.DRAWN_DIR)
     if "models" in categories:
         # The compiled SQL and what the last build measured about the table it
         # produced. Both are build outputs and both are stale together — a

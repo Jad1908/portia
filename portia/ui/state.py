@@ -643,6 +643,10 @@ class Chart:
     #: that, closing destroys work, and a control you hesitate to press is not a
     #: control.
     closed: bool = False
+    #: Whether this chart arrived from `.portia/drawn/`, drawn by a process that
+    #: was not this window (`figures.stash`). The file is its only other copy, so
+    #: keeping the chart or throwing it away has to take the file with it.
+    stashed: bool = False
 
     @property
     def key(self) -> str:
@@ -751,6 +755,12 @@ class App:
     #: result that wrote nothing does not rebuild three panes under a reader —
     #: most of the copilot's calls are questions, not writes.
     artifact_stamp: tuple | None = None
+    #: Stashed charts this window has already taken, name to the file's mtime.
+    #: A name seen at a newer mtime was drawn again, which replaces (§3.3).
+    drawn_seen: dict[str, int] = field(default_factory=dict)
+    #: Where this window is served, for the announcement a host's receipt reads
+    #: (`agent/drawn.announce`). Empty when nothing launched it through `__main__`.
+    url: str = ""
     selected_step: str | None = None
     #: Bumped each time a step is picked, and rendered onto its block in the run
     #: report so the client can bring it into view **once**. The same shape as
@@ -1290,6 +1300,7 @@ class App:
         query is in that project's chat log, where the copilot can draw it again.
         """
         self.charts = []
+        self.drawn_seen = {}
         self.active = {LEFT: CANVAS, RIGHT: ""}
         self.focus_group = LEFT
         self.canvas_group = LEFT

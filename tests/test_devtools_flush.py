@@ -200,3 +200,12 @@ def test_findings_are_flushed_by_default_and_history_is_not(project):
     plan = flush.plan(project, flush.DEFAULT)
     assert [p.name for p in plan.paths.get("findings", [])] == ["f.yaml"]
     assert not plan.paths.get("history")
+
+
+def test_charts_a_host_drew_and_nobody_kept_go_with_the_figures(project):
+    """`.portia/drawn/` is where `portia-mcp` stashes a chart for the window. The
+    window lists them as unsaved, so a reset that left them opens on old pictures."""
+    (project / ".portia/drawn").mkdir()
+    (project / ".portia/drawn/rates.json").write_text("{}")
+    p = flush.plan(project, ("figures",))
+    assert "drawn" in [x.name for x in p.paths["figures"]]

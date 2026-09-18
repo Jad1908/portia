@@ -621,6 +621,9 @@ def keep(chart: Chart) -> str:
     # carries.
     chart.notes = chart.keep_notes.strip()
     APP.figure_saved(chart, str(path.relative_to(APP.root)))
+    # A chart a host drew also has a stash under `.portia/drawn/`. The figure is
+    # the picture now, and one picture is never two artifacts (§6.4).
+    engine.unstash(APP, chart)
     return ""
 
 
@@ -713,7 +716,7 @@ def render_failed(key: str, message: str) -> None:
     the same key overwrites the first rather than accumulating.
     """
     from portia.agent import drawn
-    from portia.ui import exchange
+    from portia.ui import engine, exchange
 
     chart = APP.chart(key)
     if chart is None:
@@ -721,6 +724,9 @@ def render_failed(key: str, message: str) -> None:
     chart.error = message
     chart.pending = False
     drawn.report_failure(key, message)
+    # The copilot that drew it may be in another process (`cli/serve.py`), where
+    # the line above reaches nobody. The stash carries it across.
+    engine.stash_failure(APP, chart)
     exchange.note_chart_failed(chart)
     _refresh()
 
