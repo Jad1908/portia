@@ -462,6 +462,13 @@ def model_effort(
     provider = providers.get(kind)
     app.model = app.model or provider.default_model
     listed = APP.provider_models.get(kind)
+    if listed is None and provider.static_models:
+        # Nothing lists a provider with no server when the page opens, so until
+        # 2026-09-18 Anthropic's select held the current model alone, and the
+        # other two appeared only after switching provider and back, because a
+        # switch is what asked for the list. A list written in the provider's
+        # own module costs no call, so it is drawn from the first render.
+        listed = list(provider.static_models)
     # Two groups on one row that never wraps: the provider, then the model with
     # its refresh beside it. Each group is one unit sharing one centre line, and
     # squeezed, the model group gives way first (2026-09-14, measured: as a flat
