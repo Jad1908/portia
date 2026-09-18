@@ -18,6 +18,12 @@ dependencies = [
     "pyyaml>=6.0",
 ]
 
+# `portia-mcp` serves the copilot's tools over stdio to a host that is not
+# portia, Claude Code first (`portia/cli/serve.py`). Needs the `agent` extra: the
+# tools are declared with the SDK's decorator, and the SDK brings `mcp`.
+[project.scripts]
+portia-mcp = "portia.cli.serve:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",

@@ -44,6 +44,7 @@ from typing import Any
 
 from nicegui import ui
 
+from portia import runlog
 from portia.agent import events, providers
 from portia.core import cancel, present
 from portia.ui import components as c
@@ -443,8 +444,8 @@ def _chat_row(path: Path, listing: dict) -> None:
                     ui.label(_row_meta(listing)).classes("chat-row-meta")
         if held is not None and (held.pending is not None or held.busy):
             _dot(held)
-        if legacy:
-            ui.label(_LEGACY).classes("chat-chip")
+        if legacy or listing.get("host"):
+            ui.label(_chip(listing.get("host"))).classes("chat-chip")
         with ui.element("div").classes("chat-row-actions"):
             c.button("", lambda p=path: _start_rename(p), icon="edit", micro=True).tooltip(
                 _RENAME_TIP
@@ -600,8 +601,13 @@ def _legacy_note(chat) -> None:
     """Where the composer would be: why there is none."""
     c.rule()
     with ui.element("div").classes("p-pad row-gap-sm"):
-        ui.label(_LEGACY).classes("chat-chip")
+        ui.label(_chip(chat.host)).classes("chat-chip")
         c.caption(_READ_ONLY.format(why=chat.legacy))
+
+
+def _chip(host: str | None) -> str:
+    """What a read-only chat's chip says: whose it is, or that it is old."""
+    return runlog.host_label(host).lower() if host else _LEGACY
 
 
 def _sources_view() -> None:
