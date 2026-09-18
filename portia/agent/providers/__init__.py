@@ -111,6 +111,14 @@ class Provider(ABC):
     #: offered and quietly ignored is the failure `DESIGN.md` names. A surface
     #: reads this and stops drawing the knob.
     honours_effort: bool
+    #: Whether a model from here can be handed a picture. It decides whether a
+    #: chat is offered `view_chart` (`tools.VISION_TOOLS`), because a text-only
+    #: model given an image block errors or describes a chart it never saw.
+    #: **False unless a provider says otherwise, and the local two do not yet**:
+    #: there it is a fact about one model and not about the server, and whether
+    #: a local server's Anthropic-shaped endpoint takes an image inside a tool
+    #: result is unmeasured (`docs/VISUALIZATION.md` §12.6).
+    sees_images: bool = False
     #: What to do when the provider cannot be reached, for the one kind that
     #: can be started: a sentence, or empty where nothing on this machine
     #: answers for it.

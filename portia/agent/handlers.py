@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from portia import catalog, findings, knowledge, pipeline, spec
-from portia.agent import chartspec, context, prompts
+from portia.agent import chartspec, context, drawn, prompts
 from portia.checks import profiling
 from portia.checks.join import column_overlap
 from portia.checks.join import join_findings as _join_findings
@@ -491,6 +491,52 @@ def plot_data(
         "columns": columns,
         "n_rows": n_rows,
         "rows": rows,
+    }
+
+
+def view_chart(tab: str) -> dict:
+    """The chart on ``tab`` as the window painted it. Runs nothing, writes nothing.
+
+    **The one tool whose answer is a surface's and not the engine's**
+    (`docs/VISUALIZATION.md` §12). `plot_data` hands the model a receipt and the
+    rows to the browser, so the copilot has always narrated charts it could not
+    see: it claimed a palette it had not applied (§2.9's session), and a chart
+    with every axis label overprinted reads as ``drawn`` exactly like a clean
+    one. The browser already made this picture, for its own refresh; this hands
+    it over.
+
+    **Pulled, never attached to a receipt.** A picture costs about its width
+    times its height over 750 tokens, a reply may draw nine charts, and most of
+    them need no second look.
+
+    **The picture is for the drawing.** Whether it reads, whether the palette
+    took, what to say to the user about its shape. It is never where a number
+    comes from, and nothing seen in it may enter a step, a finding, a note or an
+    interpretation: those rest on measurements, and a bar's height read off
+    pixels is one the agent authored. That rule is prose
+    (`prompts/tools/view_chart.md`) because no code can hold it, which is why the
+    measured rows ride back beside the image: the right numbers are the nearest.
+
+    Three refusals, each a different fact. The renderer refused the spec; no
+    window is open to paint anything; or a window is open and has not painted
+    this tab, which a closed tab and a name nobody drew look alike for.
+    """
+    named = (tab or "").strip()
+    if not named:
+        raise ValueError(prompts.error("view_needs_a_tab"))
+    found = drawn.picture(named)
+    if found is None:
+        if (message := drawn.broken(named)) is not None:
+            raise ValueError(prompts.error("chart_did_not_render", tab=named, message=message))
+        if not drawn.listening():
+            raise ValueError(prompts.error("chart_has_no_window", tab=named))
+        raise ValueError(prompts.error("chart_not_on_screen", tab=named))
+    return {
+        "viewed": named,
+        "width": found.width,
+        "height": found.height,
+        "image": found.image,
+        "chart": found.chart,
     }
 
 

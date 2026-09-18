@@ -32,7 +32,9 @@ best-effort graph writes in `cli/index` — a missing surface is not a failed st
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
+from dataclasses import dataclass, field
 
 #: Given one published chart, do something with it. Returns nothing.
 Sink = Callable[[dict], None]
@@ -66,11 +68,22 @@ def publish(chart: dict) -> None:
     when it did not. So each sink is called on its own and an exception stops
     that sink rather than the publication.
     """
+    # **A chart drawn again under a name is a new chart** (§3.3), so the picture
+    # and the failure held for the old one go first. `view_chart` called straight
+    # after a correction must never hand back the render being corrected.
+    named = str(chart.get("tab") or "").strip()
+    _pictures.pop(named, None)
+    _broken.pop(named, None)
     for sink in list(_sinks):
         try:
             sink(chart)
         except Exception:  # noqa: BLE001 - a broken surface is not a broken query
             continue
+
+
+def listening() -> bool:
+    """Whether any surface is subscribed, which is whether a picture can ever arrive."""
+    return bool(_sinks)
 
 
 #: Charts a surface reported failing to render, waiting to be told to the model.
@@ -98,6 +111,8 @@ def report_failure(tab: str, message: str) -> None:
     named = (tab or "").strip()
     if named:
         _failures[named] = message
+        _broken[named] = message
+        _pictures.pop(named, None)
 
 
 def take_failures() -> dict[str, str]:
@@ -112,7 +127,88 @@ def take_failures() -> dict[str, str]:
     return taken
 
 
+#: Tabs whose last render failed, and what the renderer said. **Read and not
+#: taken**, unlike :data:`_failures`: that one is a notice delivered once, this
+#: one is the state of the tab, and `view_chart` asked twice about a broken chart
+#: should hear the same answer twice. A redraw or a picture clears it.
+_broken: dict[str, str] = {}
+
+
+@dataclass(frozen=True)
+class Picture:
+    """One chart as a surface painted it (`docs/VISUALIZATION.md` §12).
+
+    **Held in memory and written nowhere.** Nothing in portia saves
+    automatically (the user's call, 2026-09-18): a picture worth keeping is kept
+    by the person who pressed *Keep this*, and that writes a figure with its
+    rows, not these pixels. Closing the project forgets every one of them.
+    """
+
+    #: The PNG, base64, as the browser encoded it. Never decoded here: it goes
+    #: to the model as an image block, which wants exactly this string.
+    image: str
+    width: int
+    height: int
+    #: The chart that was painted, as `handlers.plot_data` shaped it, so the
+    #: measured rows can be handed back beside the pixels. Empty when a surface
+    #: painted something portia has no rows for.
+    chart: dict = field(default_factory=dict)
+
+
+#: The newest picture per tab. One entry per tab and newest wins, for
+#: :data:`_failures`' reason: a tab is a chart, and two windows on one project
+#: paint it at two widths, of which the agent is shown the one painted last.
+_pictures: dict[str, Picture] = {}
+
+#: How long `picture` waits for a paint that is on its way, in seconds, and how
+#: often it looks. The copilot calls `view_chart` right after `plot_data`, and
+#: the browser needs a websocket hop and a Vega embed in between. The wait is
+#: what §11.2 refused for `plot_data` and it is right here: that tool's answer is
+#: a query's and must not hang on a renderer, this tool's answer *is* the
+#: renderer's. Bounded, and skipped whole when nothing is listening.
+PICTURE_WAIT = 3.0
+PICTURE_POLL = 0.05
+
+
+def report_picture(tab: str, picture: Picture) -> None:
+    """A surface painted a chart, and this is what it looked like.
+
+    The third direction this module carries, after rows out and failures back.
+    A chart that painted is not broken, whatever an earlier attempt said.
+    """
+    named = (tab or "").strip()
+    if named:
+        _pictures[named] = picture
+        _broken.pop(named, None)
+
+
+def picture(tab: str, *, wait: float = PICTURE_WAIT) -> Picture | None:
+    """The newest picture of ``tab``, waiting briefly for one that is coming.
+
+    Returns at once when there is a picture, when the render is known to have
+    failed, or when no surface is listening (`cli/chat.py` has no browser, and
+    waiting for one would be three seconds spent on a certainty). Called on a
+    tool's worker thread, never on the loop: the paint it waits for is reported
+    *through* the loop.
+    """
+    named = (tab or "").strip()
+    deadline = time.monotonic() + max(0.0, wait)
+    while True:
+        if named in _pictures or named in _broken or not _sinks:
+            return _pictures.get(named)
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(PICTURE_POLL)
+
+
+def broken(tab: str) -> str | None:
+    """What the renderer said when it could not draw ``tab``, if it could not."""
+    return _broken.get((tab or "").strip())
+
+
 def reset() -> None:
     """Forget every subscriber. For tests, and for closing a project."""
     _sinks.clear()
     _failures.clear()
+    _broken.clear()
+    _pictures.clear()

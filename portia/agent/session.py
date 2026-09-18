@@ -79,7 +79,7 @@ def build_system_prompt(portia_dir: str = catalog.DEFAULT_DIR) -> str:
     return f"{PROMPT_PATH.read_text()}\n\n---\n\n{context.build_brief(portia_dir)}"
 
 
-def prompt_chars(portia_dir: str = catalog.DEFAULT_DIR) -> int:
+def prompt_chars(portia_dir: str = catalog.DEFAULT_DIR, provider: str = DEFAULT_PROVIDER) -> int:
     """How long everything portia composes for the model is, in characters.
 
     The system prompt plus every tool description: what rides on every request
@@ -89,9 +89,12 @@ def prompt_chars(portia_dir: str = catalog.DEFAULT_DIR) -> int:
     is `copilot.md`. Measured here, at the one place the prompt is composed, so
     the number the preflight uses is the number the model is sent. The binary
     adds two lines of its own on top (135 characters, `docs/PROVIDERS.md`
-    §3.1) and, with `BINARY_ENV` set, nothing else.
+    §3.1) and, with `BINARY_ENV` set, nothing else. ``provider`` is asked what
+    its models can take in, because a tool that is not offered is a description
+    that is not sent (`tools.offered`).
     """
-    return len(build_system_prompt(portia_dir)) + sum(len(d) for d in tools.descriptions().values())
+    described = tools.descriptions(sees_images=providers.get(provider).sees_images)
+    return len(build_system_prompt(portia_dir)) + sum(len(d) for d in described.values())
 
 
 def build_options(
@@ -155,9 +158,12 @@ def build_options(
         # asking the prompt nicely. AskUserQuestion must be listed explicitly
         # once this array is set, or the copilot loses its ability to ask.
         tools=[ask.ASK_TOOL],
-        mcp_servers={tools.SERVER_NAME: tools.build_server()},
+        # A model that cannot take a picture is not offered the tool that
+        # returns one (`tools.VISION_TOOLS`).
+        mcp_servers={tools.SERVER_NAME: tools.build_server(sees_images=source.sees_images)},
         # Read-only checks run freely; writes fall through to `can_use_tool`
-        # so a durable artifact is never changed silently.
+        # so a durable artifact is never changed silently. Naming a tool the
+        # server does not list is harmless: this is a permission, not an offer.
         allowed_tools=[tools.qualified(t.name) for t in tools.READ_TOOLS],
         can_use_tool=can_use_tool,
         # Do not inherit this repo's CLAUDE.md or .claude/ — portia's copilot is

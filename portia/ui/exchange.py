@@ -187,13 +187,16 @@ def _open_log(chat: Chat, kind: str, prompt: str) -> None:
     if chat.log is not None:
         return
     if chat.path is not None:
-        chat.log = runlog.resume(chat.path, APP.catalog_dir)
+        chat.log = runlog.resume(chat.path, APP.catalog_dir, provider=chat.provider or None)
         return
     # The catalog dir in full, so the path this chat holds is the one the list
     # reads back through `engine.logs_in` — a relative `.portia` here and an
     # absolute one there made `App.chat_at` miss, and the row lost its dot.
     chat.log = runlog.start(
-        APP.catalog_dir, cwd=str(APP.root), kind=_LOG_KIND_FOR.get(kind, runlog.CHAT)
+        APP.catalog_dir,
+        cwd=str(APP.root),
+        kind=_LOG_KIND_FOR.get(kind, runlog.CHAT),
+        provider=chat.provider or None,
     )
     chat.path = chat.log.path
     # Off the prompt, not the listing: the `PROMPT` event is written by the

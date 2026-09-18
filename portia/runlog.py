@@ -202,6 +202,7 @@ def start(
     cwd: str | Path = ".",
     kind: str = CHAT,
     when: datetime | None = None,
+    provider: str | None = None,
 ) -> Log:
     """Open a log for one **chat** and write its header.
 
@@ -235,11 +236,13 @@ def start(
             "portia_sha": portia_sha(),
         },
     )
-    log.write(PROMPTS, prompts_read(portia_dir))
+    log.write(PROMPTS, prompts_read(portia_dir, provider))
     return log
 
 
-def resume(path: str | Path, portia_dir: str | Path = DEFAULT_DIR) -> Log:
+def resume(
+    path: str | Path, portia_dir: str | Path = DEFAULT_DIR, *, provider: str | None = None
+) -> Log:
     """Reopen a chat's log for a later process to append to.
 
     **The file is the chat** (`CONVERSATION.md` §5), so a resumed chat goes on
@@ -252,7 +255,7 @@ def resume(path: str | Path, portia_dir: str | Path = DEFAULT_DIR) -> Log:
     if not log.path.is_file():
         raise FileNotFoundError(f"no log at {log.path}")
     log.write(RESUMED, {"portia_sha": portia_sha()})
-    log.write(PROMPTS, prompts_read(portia_dir))
+    log.write(PROMPTS, prompts_read(portia_dir, provider))
     return log
 
 
@@ -262,7 +265,9 @@ def stamp(when: datetime | None = None) -> str:
     return text[: -(6 - STAMP_DIGITS)] if STAMP_DIGITS < 6 else text
 
 
-def prompts_read(portia_dir: str | Path = DEFAULT_DIR) -> dict[str, Any]:
+def prompts_read(
+    portia_dir: str | Path = DEFAULT_DIR, provider: str | None = None
+) -> dict[str, Any]:
     """What the copilot is about to be given: system prompt and tool descriptions.
 
     **Best-effort, like the graph writes** (`CLAUDE.md` → `knowledge/`): this is
@@ -275,12 +280,20 @@ def prompts_read(portia_dir: str | Path = DEFAULT_DIR) -> dict[str, Any]:
     Composed at `start`, which is when it is true: `CONVERSATION.md` §4 holds one
     client for the whole chat, so the system prompt is fixed for the file even
     though the model and the brief behind it could otherwise move.
+
+    ``provider`` decides which tools were offered (`tools.offered`): a model
+    that cannot take a picture never read `view_chart`'s description, and a log
+    saying it did would be this record being wrong about the one thing it is for.
     """
     try:
-        from portia.agent import tools
+        from portia.agent import providers, tools
         from portia.agent.session import build_system_prompt
 
-        return {"system": build_system_prompt(str(portia_dir)), "tools": tools.descriptions()}
+        sees = providers.get(provider or providers.DEFAULT_KIND).sees_images
+        return {
+            "system": build_system_prompt(str(portia_dir)),
+            "tools": tools.descriptions(sees_images=sees),
+        }
     except Exception:
         # Deliberately every exception, not ImportError: a missing extra, an
         # unreadable catalog and an SDK that changed shape all cost the same

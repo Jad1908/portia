@@ -98,6 +98,11 @@ def page() -> None:
     # `<div>` and nowhere else — not the server, not the log, not the copilot,
     # which by then held a receipt saying the chart was drawn.
     ui.on("portia:chart-failed", _chart_failed)
+    # And what a chart that *did* draw looks like (`VISUALIZATION.md` §12), for
+    # the copilot's `view_chart`. The same argument lets it round-trip: a paint
+    # is a fact about work portia did, not where somebody is looking. Zoom and
+    # pan are, and a zoomed chart is never reported.
+    ui.on("portia:chart-picture", _chart_pictured)
     # At page level for the same reason the dialogs are: built inside a
     # refreshable it would be rebuilt — and left running — on every refresh.
     # It costs one predicate a second when nothing is running (`tick_progress`).
@@ -183,6 +188,17 @@ def _chart_failed(event) -> None:
     tab = str(args.get("tab") or "")
     if tab:
         charts.render_failed(tab, str(args.get("message") or ""))
+
+
+def _chart_pictured(event) -> None:
+    """The browser painted a chart. Keep what it looks like for `view_chart`."""
+    from portia.ui import charts
+
+    args = event.args or {}
+    key, image = str(args.get("tab") or ""), args.get("image")
+    width, height = args.get("width"), args.get("height")
+    if key and isinstance(image, str) and isinstance(width, int) and isinstance(height, int):
+        charts.pictured(key, image, width, height)
 
 
 def _row_opened(event) -> None:

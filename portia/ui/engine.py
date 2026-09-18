@@ -359,7 +359,9 @@ async def preflight(app: App, kind: str, model: str) -> Any:
     provider = providers.get(kind)
     return await asyncio.to_thread(
         partial(
-            provider.preflight, model, prompt_chars=lambda: session.prompt_chars(app.portia_dir)
+            provider.preflight,
+            model,
+            prompt_chars=lambda: session.prompt_chars(app.portia_dir, kind),
         )
     )
 

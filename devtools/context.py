@@ -85,6 +85,10 @@ LADDER = {
         "beside L5",
         "The same SELECT with the rows drawn on screen instead of returned.",
     ),
+    "view_chart": (
+        "beside plot_data",
+        "A picture of a drawn chart, for judging the drawing. Vision models only.",
+    ),
     "measure_overlaps": (
         "measure",
         "Compares column pairs the agent picked, and keeps the answers.",

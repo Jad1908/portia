@@ -34,6 +34,8 @@ class Anthropic(Provider):
     label = "Anthropic"
     default_model = DEFAULT_MODEL
     honours_effort = True
+    #: Every model in `MODELS` takes images.
+    sees_images = True
     static_models = tuple(Model(name) for name in MODELS)
 
     def env(self) -> dict[str, str]:
