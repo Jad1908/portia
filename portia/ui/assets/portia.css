@@ -46,6 +46,11 @@
   --success-soft: rgba(31, 154, 99, 0.1);
   --warning: #b7791f;
   --warning-soft: rgba(183, 121, 31, 0.1);
+  /* live: work going on right now. The two ends of `p-live`'s fade, and the
+   * halo. The one blue in the app, and only the status light wears it. */
+  --live: #2f7fe0;
+  --live-deep: #1b5fc0;
+  --live-soft: rgba(47, 127, 224, 0.16);
 
   /* spacing — 8px base, 2/4 for tight inline gaps */
   --sp-xxs: 2px;
@@ -115,6 +120,9 @@ body.body--dark {
   --success-soft: rgba(95, 212, 155, 0.16);
   --warning: #ffc94d;
   --warning-soft: rgba(255, 201, 77, 0.16);
+  --live: #5aa2ff;
+  --live-deep: #8fc1ff;
+  --live-soft: rgba(90, 162, 255, 0.2);
 }
 
 /* ── base ─────────────────────────────────────────────────────────────────── */
@@ -4655,24 +4663,61 @@ body.tab-dragging .tab-drop {
   width: 100%;
 }
 
-/* A chat is running, or waiting on you (§3.5). The tab dot, on a row and on
- * the back control now. Kind, never rank: the waiting dot is the accent
- * because it is asking for you, not because it is worse; the running one
- * pulses because it is the in-flight entry of the motion vocabulary. */
-.chat-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: var(--r-full);
-  background: var(--mute);
+/* `status-light`: a small round light beside the word for a state
+ * (`components.status_light`). Four kinds and each is a kind, never a rank:
+ * nothing about it grows, counts or sorts a row.
+ *
+ *   live     work going on right now. Blue, and the one light that moves.
+ *   waiting  a chat stopped on you (§3.5). The accent, still, because it is
+ *            asking for you and not because it is worse.
+ *   on       a session that is open. Green, still.
+ *   off      one that is not. Grey, still.
+ *
+ * The halo is what makes it a light and not a bullet: a 2px ring of the same
+ * hue at low alpha, which costs no layout because a shadow takes no space. */
+.status-light {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
   flex: 0 0 auto;
-  animation: p-pulse 1.4s ease-in-out infinite;
+  border-radius: var(--r-full);
+  background: var(--stone);
 }
-.chat-dot--waiting {
+.status-light--off {
+  background: var(--ash);
+}
+.status-light--on {
+  background: var(--success);
+  box-shadow: 0 0 0 2px var(--success-soft);
+}
+.status-light--waiting {
   background: var(--accent-primary);
-  animation: none;
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+/* The fade is between two blues and a little opacity, slow on purpose: 3.2s a
+ * beat against `p-pulse`'s 1.4s. A row in a list is in the corner of the eye
+ * for minutes, and a light that blinks there is a light asking to be looked
+ * at. `--live-phase` is `--pulse-phase`'s trick: a rebuilt row starts its new
+ * light mid-fade, so a run of refreshes reads as one slow breath. */
+.status-light--live {
+  background: var(--live);
+  box-shadow: 0 0 0 2px var(--live-soft);
+  animation: p-live 3.2s ease-in-out infinite;
+  animation-delay: var(--live-phase, 0s);
+}
+@keyframes p-live {
+  0%,
+  100% {
+    background: var(--live);
+    opacity: 1;
+  }
+  50% {
+    background: var(--live-deep);
+    opacity: 0.72;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
-  .chat-dot {
+  .status-light--live {
     animation: none;
   }
 }

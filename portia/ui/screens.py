@@ -794,7 +794,7 @@ def _connection_state() -> None:
     status = APP.connection_status
     if status == state.CONNECTED:
         with ui.element("div").classes("connect-state"):
-            ui.icon("cloud_done")
+            c.status_light(c.ON)
             ui.label(CONNECTED_AS.format(name=APP.connection))
             ui.element("div").classes("flex-1")
             c.button(SWITCH_CONNECTION, open_connect_dialog, kind="secondary", micro=True)
@@ -807,7 +807,9 @@ def _connection_state() -> None:
     if status.startswith("failed"):
         c.alert(status.removeprefix("failed: "), kind="error")
     else:
-        c.caption(NOT_CONNECTED_NOTE)
+        with ui.element("div").classes("connect-state"):
+            c.status_light(c.OFF)
+            ui.label(NOT_CONNECTED_NOTE)
     with ui.element("div").classes("row-gap-sm"):
         c.button(CONNECT_GO, artifacts.connect_now, kind="primary", icon="cloud")
         c.button(SWITCH_CONNECTION, open_connect_dialog, kind="secondary", micro=True)
