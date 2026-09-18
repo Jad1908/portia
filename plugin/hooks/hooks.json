@@ -1,0 +1,13 @@
+{
+  "hooks": {
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "portia-hook stop" }] }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Read",
+        "hooks": [{ "type": "command", "command": "portia-hook guard" }]
+      }
+    ]
+  }
+}
