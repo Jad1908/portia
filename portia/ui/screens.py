@@ -945,6 +945,7 @@ async def _scope_and_interpret(names: list[str], *, in_dialog: bool = False) -> 
     finally:
         APP.indexing_status = ""
         APP.indexing_stop = None
+        _pressed_done()
         stop.close()
         _progress.refresh()
     ui.notify(_scoped_note(len(scoped), len(profiled), reading=_will_read(stop)))
@@ -1905,14 +1906,20 @@ def _actions(*, in_dialog: bool = False) -> None:
     accented Close is the accent landing on the one control that does nothing.
     """
     outstanding = len(_ticked()) + len(APP.import_plan) + len(APP.scope_ticks)
-    unit = "table" if APP.scope_ticks else "file"
+    # **A pressed Index stays where it was, busy** *(2026-09-18)*. It used to
+    # stay exactly as it was, live, for the whole of the profiling: nothing on
+    # the button said the press had landed, and a second press started a second
+    # run over the same files. The spinner in place of the label is the usual
+    # answer, and it holds the button's size, so nothing under the hand moves.
+    busy = bool(APP.indexing_pressed)
     with ui.element("div").classes("row-gap-sm"):
-        if outstanding:
+        if outstanding or busy:
             c.button(
-                f"Index {c.count(outstanding, unit)}",
+                APP.indexing_pressed or _index_label(outstanding),
                 lambda: _index_now(in_dialog=in_dialog),
                 kind="primary",
                 icon=c.INDEX_ICON,
+                busy=busy,
             )
             if APP.sources or in_dialog:
                 c.button(_leave_label(in_dialog), lambda: _leave(in_dialog), kind="secondary")
@@ -1932,6 +1939,11 @@ def _actions(*, in_dialog: bool = False) -> None:
         if not in_dialog:
             c.button("Back", _back_to_picker, kind="secondary")
     c.caption(_action_note(outstanding))
+
+
+def _index_label(outstanding: int) -> str:
+    unit = "table" if APP.scope_ticks else "file"
+    return f"Index {c.count(outstanding, unit)}"
 
 
 def _leave_label(in_dialog: bool) -> str:
@@ -2000,24 +2012,52 @@ async def _index_now(*, in_dialog: bool = False) -> None:
     The copy is first because its results join the profiling — importing three
     files and then having to tick them in a list that has just rebuilt is the
     kind of second step this screen was rewritten to remove.
+
+    **One press, one run.** The button is busy from here until the profiling
+    ends (`_pressed_done`), and a press that arrives anyway is dropped.
     """
-    copied: list[Path] = []
-    if APP.import_plan:
-        pairs, APP.import_plan = APP.import_plan, []
-        copied = await engine.import_files(pairs, APP)
-        ui.notify(f"Copied {c.count(len(copied), 'file')} into {APP.import_dir(DATA_DIR)}/.")
-    # Deduplicated by path: an import into the data folder lands in a place the
-    # ticked list was read from a moment ago, and profiling it twice would be a
-    # minute of work for one entry.
-    seen, paths = set(), []
-    for path in [*_ticked(), *copied]:
-        resolved = path.resolve()
-        if resolved not in seen:
-            seen.add(resolved)
-            paths.append(path)
-    tables = sorted(APP.scope_ticks)
-    await _index_and_interpret(paths, in_dialog=in_dialog and not tables)
-    await _scope_and_interpret(tables, in_dialog=in_dialog)
+    if APP.indexing_pressed or APP.indexing_stop is not None:
+        return
+    outstanding = len(_ticked()) + len(APP.import_plan) + len(APP.scope_ticks)
+    APP.indexing_pressed = _index_label(outstanding)
+    _actions.refresh()
+    try:
+        copied: list[Path] = []
+        if APP.import_plan:
+            pairs, APP.import_plan = APP.import_plan, []
+            copied = await engine.import_files(pairs, APP)
+            ui.notify(f"Copied {c.count(len(copied), 'file')} into {APP.import_dir(DATA_DIR)}/.")
+        # Deduplicated by path: an import into the data folder lands in a place
+        # the ticked list was read from a moment ago, and profiling it twice
+        # would be a minute of work for one entry.
+        seen, paths = set(), []
+        for path in [*_ticked(), *copied]:
+            resolved = path.resolve()
+            if resolved not in seen:
+                seen.add(resolved)
+                paths.append(path)
+        tables = sorted(APP.scope_ticks)
+        await _index_and_interpret(paths, in_dialog=in_dialog and not tables)
+        await _scope_and_interpret(tables, in_dialog=in_dialog)
+    finally:
+        # Normally a no-op: the profiling's own `finally` has let go already.
+        # This one is for the run that ended before any profiling began, a
+        # failed copy or nothing readable, which would leave the button
+        # spinning over a screen with nothing running.
+        if APP.indexing_pressed:
+            _pressed_done()
+            _actions.refresh()
+
+
+def _pressed_done() -> None:
+    """The free half is over, so the button is a button again.
+
+    Called where profiling ends and **before** the read starts. The read is a
+    model turn of a minute or more, indexing a second batch during it is an
+    ordinary thing to do here (`_interpret_pending`), and a button busy for the
+    length of it would be refusing that.
+    """
+    APP.indexing_pressed = ""
 
 
 async def _index_and_interpret(paths: list[Path], *, in_dialog: bool = False) -> None:
@@ -2055,6 +2095,7 @@ async def _index_and_interpret(paths: list[Path], *, in_dialog: bool = False) ->
     finally:
         APP.indexing_status = ""
         APP.indexing_stop = None
+        _pressed_done()
         # Made here, closed here — a cancelled scope holds a thread that goes on
         # interrupting connections the next indexing run may reuse.
         stop.close()
@@ -2110,6 +2151,15 @@ def _leave(in_dialog: bool) -> None:
     # leaving under your own steam has to take it down, or it floats over the
     # workspace pointing at a tab you are already looking at.
     dismiss_invitation()
+    # **Into the job, when one is running** *(2026-09-18, the user's call)*.
+    # This button's own caption says the copilot is reading and the docstring
+    # above promised the transcript that is running, and the workspace opened
+    # on the chat list with the job one more click away. A job still never
+    # takes the screen by itself (`CHAT_SESSIONS.md` §3.5). This is a press,
+    # on a button under a sentence about that job.
+    job = APP.live_job
+    if job is not None:
+        APP.show_chat(job)
     APP.enter_workspace()
     app_module.shell.refresh()
 

@@ -350,6 +350,7 @@ def button(
     micro: bool = False,
     split: bool = False,
     enabled: bool = True,
+    busy: bool = False,
 ) -> ui.button:
     """One button. ``kind`` is primary | secondary | tertiary.
 
@@ -367,6 +368,11 @@ def button(
     text. It is opt-in rather than automatic for every icon-plus-label button:
     most of those are ordinary buttons that merely have an icon, and a rule
     through all of them would be decoration.
+
+    ``busy`` is a press being acted on. It is Quasar's ``loading``: the button
+    keeps its place, its size and its fill, a spinner stands where the label
+    was, and no click gets through. A press that leaves the button exactly as
+    it was reads as a press that missed, and it invites a second one.
     """
     classes = f"btn btn-{kind}" + (" btn-micro" if micro else "")
     if icon and not label:
@@ -379,6 +385,8 @@ def button(
     b = ui.button(label, on_click=on_click, icon=icon, color=None).props("unelevated no-caps dense")
     b.classes(classes)
     b.set_enabled(enabled)
+    if busy:
+        b.props("loading")
     return b
 
 
