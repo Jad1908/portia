@@ -1,0 +1,4898 @@
+/* portia — the look.
+ *
+ * Every value in this file comes from DESIGN.md, which owns appearance. Tokens
+ * are mode-aware CSS custom properties: :root holds Light, body.body--dark holds
+ * Dark (Quasar sets that class, and resolves `auto` from prefers-color-scheme).
+ * Component rules below reference token names only — never a raw hex, so
+ * re-hueing the app stays a one-token change.
+ *
+ * The rule that is specific to this product: colour and prominence communicate
+ * KIND, never RANK. There is no severity scale in here, no badge that grows with
+ * its number, and nothing sorted by how bad it is.
+ */
+
+/* ── tokens ───────────────────────────────────────────────────────────────── */
+
+:root {
+  /* brand & accent */
+  --accent-primary: #0c6b61;
+  --accent-primary-pressed: #0a564e;
+  --on-accent: #ffffff;
+  --accent-text: #0c6b61;
+  --accent-soft: rgba(12, 107, 97, 0.1);
+
+  /* surface — light compresses toward white; borders carry elevation */
+  --canvas: #f4f6f9;
+  --surface: #fcfdfe;
+  --surface-elevated: #ffffff;
+  --surface-card: #ffffff;
+
+  /* borders */
+  --hairline: #e3e6ec;
+  --hairline-strong: rgba(0, 0, 0, 0.14);
+  --hairline-soft: rgba(0, 0, 0, 0.06);
+
+  /* text */
+  --ink: #0e1116;
+  --body: #3a3f47;
+  --mute: #6b7079;
+  --ash: #9aa0a8;
+  --stone: #c2c7ce;
+
+  /* status — state only, never chrome, never rank */
+  --error: #d93a45;
+  --error-soft: rgba(217, 58, 69, 0.1);
+  --success: #1f9a63;
+  --success-soft: rgba(31, 154, 99, 0.1);
+  --warning: #b7791f;
+  --warning-soft: rgba(183, 121, 31, 0.1);
+
+  /* spacing — 8px base, 2/4 for tight inline gaps */
+  --sp-xxs: 2px;
+  --sp-xs: 4px;
+  --sp-sm: 8px;
+  --sp-md: 12px;
+  --sp-lg: 16px;
+  --sp-xl: 24px;
+  --sp-xxl: 32px;
+
+  /* The most of the window the indexing list may take before it scrolls instead
+   * of growing. A share rather than a row count, because what it is competing
+   * with is the transcript under it, and the transcript is the other half of
+   * the tab rather than a fixed cost. */
+  --index-list-cap: 42vh;
+
+  /* How much of the running turn's banner the batch of source names may take.
+   * About three lines: enough to see what the turn is about, not so much that
+   * the turn itself is pushed out of the pane. */
+  --banner-names-cap: 4rem;
+
+  /* shapes */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 10px;
+  --r-xl: 16px;
+  --r-full: 9999px;
+
+  --font-sans: Inter, system-ui, sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", "Geist Mono", ui-monospace, monospace;
+
+  /* Quasar paints its own components from `--q-primary`. Pointing it at the
+   * accent means anything we haven't styled by hand still lands on portia's
+   * hue in both modes, rather than on a framework blue. */
+  --q-primary: var(--accent-primary);
+  --q-dark: var(--surface);
+  --q-dark-page: var(--canvas);
+}
+
+body.body--dark {
+  --accent-primary: #0d9488;
+  --accent-primary-pressed: #0b7d72;
+  --on-accent: #ffffff;
+  --accent-text: #2dd4bf;
+  --accent-soft: rgba(13, 148, 136, 0.18);
+
+  /* surface — dark: lighter = closer */
+  --canvas: #08090c;
+  --surface: #0d0f14;
+  --surface-elevated: #12141b;
+  --surface-card: #171922;
+
+  --hairline: #25282f;
+  --hairline-strong: rgba(255, 255, 255, 0.16);
+  --hairline-soft: rgba(255, 255, 255, 0.08);
+
+  --ink: #f3f4f7;
+  --body: #c9ccd3;
+  --mute: #969aa4;
+  --ash: #696d77;
+  --stone: #43464e;
+
+  --error: #ff6b6b;
+  --error-soft: rgba(255, 107, 107, 0.16);
+  --success: #5fd49b;
+  --success-soft: rgba(95, 212, 155, 0.16);
+  --warning: #ffc94d;
+  --warning-soft: rgba(255, 201, 77, 0.16);
+}
+
+/* ── base ─────────────────────────────────────────────────────────────────── */
+
+/* `html body` rather than `body`: Tailwind's preflight is generated in the
+ * browser and lands after this file, so the base rules need the extra
+ * specificity to survive it. */
+html,
+html body {
+  height: 100%;
+  overflow: hidden;
+  margin: 0;
+  background: var(--canvas);
+  color: var(--body);
+  font-family: var(--font-sans);
+  /* ss03 is part of the identity — do not omit it (DESIGN.md → Typography). */
+  font-feature-settings: "calt", "kern", "liga", "ss03";
+  -webkit-font-smoothing: antialiased;
+}
+
+.nicegui-content {
+  padding: 0;
+  gap: 0;
+  height: 100%;
+  width: 100%;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--hairline-strong);
+  border-radius: var(--r-full);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+/* ── typography ───────────────────────────────────────────────────────────── */
+
+.t-display {
+  font-size: 32px;
+  font-weight: 600;
+  line-height: 1.15;
+  color: var(--ink);
+}
+.t-heading-lg {
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--ink);
+}
+.t-heading-md {
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: 0.2px;
+  color: var(--ink);
+}
+.t-heading-sm {
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: 0.2px;
+  color: var(--ink);
+}
+.t-body {
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+.t-body-strong {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+  letter-spacing: 0.1px;
+}
+.t-caption {
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.4;
+  letter-spacing: 0.2px;
+}
+.t-mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.55;
+  font-feature-settings: normal;
+}
+.t-mono-sm {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.5;
+  font-feature-settings: normal;
+}
+
+.c-ink {
+  color: var(--ink);
+}
+.c-body {
+  color: var(--body);
+}
+.c-mute {
+  color: var(--mute);
+}
+.c-ash {
+  color: var(--ash);
+}
+.c-stone {
+  color: var(--stone);
+}
+.c-accent {
+  color: var(--accent-text);
+}
+.c-error {
+  color: var(--error);
+}
+.c-warning {
+  color: var(--warning);
+}
+.c-success {
+  color: var(--success);
+}
+
+.pre-wrap {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── window & panes ───────────────────────────────────────────────────────── */
+
+.p-window {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  background: var(--canvas);
+}
+
+/* Thin on purpose. It holds the mark, the session name and the settings gear —
+ * everything that used to make it worth 48px moved onto the pane it acts on or
+ * into the settings panel, so the bar should cost the panes as little height as
+ * it can while still reading as a bar. */
+.p-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  height: 32px;
+  flex: 0 0 32px;
+  padding: 0 var(--sp-md);
+  background: var(--canvas);
+  border-bottom: 1px solid var(--hairline);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.p-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.p-pane {
+  display: flex;
+  flex-direction: column;
+  /* Fill the panel rather than shrinking to content. Without this the graph
+   * canvas ended where the graph did, leaving dead space below it that looked
+   * like the pane but wasn't — nothing to pan on, and no grid drawn.
+   *
+   * `width: 100%` is not redundant with `flex: 1 1 auto`, which only governs the
+   * main axis — and this is a column, so the main axis is height. A splitter panel
+   * does not stretch its children, so the pane was as wide as its widest in-flow
+   * child. That was survivable while the graph sat in the flow and dragged the
+   * pane out to its own width; the moment the canvas started positioning its
+   * content absolutely the pane collapsed to the width of the header row, and
+   * every card past the second one was clipped away. */
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* Every pane is drag-resizable, so widths come from the splitter rather than
+ * from a flex-basis here. What stays is which surface each pane sits on. */
+.p-pane-left,
+.p-pane-mid,
+.p-pane-right {
+  flex: 1 1 auto;
+  /* explicit, not inherited: inside a splitter panel these otherwise shrink to
+   * fit their content, and a graph two nodes wide would size the whole pane */
+  width: 100%;
+  height: 100%;
+}
+
+/* Backstop for the splitter's own limits: whatever a drag does, a pane never
+ * renders narrower than the width at which it stops being readable. */
+.p-pane-left {
+  background: var(--canvas);
+  min-width: 150px;
+}
+
+.p-pane-mid {
+  background: var(--surface);
+  min-width: 320px;
+  /* The split drop zone is absolutely positioned inside it (`.tab-drop`), which
+   * needs the pane to be what it is positioned against. */
+  position: relative;
+  /* A size container: the graph header's controls collapse their labels on the
+   * *pane's* width (→ Layout stability), and a media query only knows the
+   * window's. Safe because a splitter panel sets this pane's width; its content
+   * never does. */
+  container-type: inline-size;
+}
+
+.p-pane-right {
+  background: var(--surface);
+  min-width: 260px;
+}
+
+/* The four run actions, on the pane they act on. Right-aligned to the middle
+ * pane's own edge rather than the window's: from the far corner of the toolbar
+ * they floated above the transcript, which is the one pane they have nothing to
+ * do with. Drawn inside the pane, they track its edge through any drag — which
+ * chrome above the panes could not do, since a dragged pane's width is never
+ * reported to the server. */
+.p-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-sm);
+  flex: 0 0 auto;
+  padding: var(--sp-xs) var(--sp-md);
+  background: var(--surface);
+  border-bottom: 1px solid var(--hairline);
+}
+
+/* Shorter than a form button. These sit on top of the pane you are reading, so
+ * every pixel they take is a pixel of graph or report — and they are pressed a
+ * handful of times a session, not typed into. */
+.p-actions .btn.q-btn {
+  min-height: 26px;
+  padding: 2px var(--sp-sm);
+}
+.p-actions .btn.q-btn .q-btn__content {
+  font-size: 12px;
+}
+.p-actions .btn.q-btn .q-icon {
+  font-size: 15px;
+}
+.p-actions .btn.q-btn.btn-icon {
+  min-width: 26px;
+  padding: 2px;
+}
+
+/* What the pane is doing, at the far end of the bar from the buttons that
+ * started it. `margin-right: auto` rather than a place in the flex-end run:
+ * inserted beside them it would shove all four left the moment you pressed one,
+ * and a row that moves under the pointer that just pressed it is worse than a
+ * row that says nothing. */
+.p-actions .in-flight {
+  margin-right: auto;
+}
+
+/* The one mark that says *this is happening now* — a pulsing dot and a word,
+ * shared by the action bar and the run report so the app has one way of saying
+ * it. The dot is `.tool-pulse`, the same one a running tool card carries. */
+.in-flight {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  min-width: 0;
+}
+
+/* A pane and the rail beside it, inside a splitter panel. Distinct from
+ * `.p-body` — that one is the window's own row and gets its height from
+ * `.p-window`'s flex column, where an explicit `height: 100%` would resolve
+ * against the viewport and swallow the toolbar. This one has a splitter panel
+ * above it, which does not stretch its children at all, so it has to say both
+ * dimensions itself. */
+.p-pane-row {
+  display: flex;
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* A closed pane, as the strip of edge it left behind. Not a sliver of the pane
+ * itself — 28px of a file tree reads as a rendering failure, where a rail reads
+ * as a thing you press. Sits on the canvas like the left pane does, with the
+ * hairline on the side the pane will come back from. */
+.p-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-xs);
+  flex: 0 0 auto;
+  width: 32px;
+  padding-top: var(--sp-sm);
+  background: var(--canvas);
+  border-left: 1px solid var(--hairline);
+  border-right: 1px solid var(--hairline);
+}
+
+/* Which pane it brings back. The arrow above says which way; this says what. */
+.p-rail-icon {
+  color: var(--stone);
+  font-size: 16px;
+}
+
+/* The same idea lying down: a closed **run report** leaves a strip at the foot of
+ * the workflow pane, naming the spec it would report on. Horizontal rather than a
+ * second vocabulary — one idea of *closed* in this window, whichever edge it
+ * closed against. */
+.p-rail-bottom {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 0 var(--sp-md);
+  background: var(--canvas);
+  border-top: 1px solid var(--hairline);
+  cursor: pointer;
+}
+.p-rail-bottom:hover {
+  background: var(--surface-elevated);
+}
+
+.p-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.p-pad {
+  padding: var(--sp-lg);
+}
+
+.p-section-header {
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: var(--mute);
+  text-transform: uppercase;
+  padding: var(--sp-md) var(--sp-md) var(--sp-xs);
+}
+
+.p-rule {
+  height: 1px;
+  background: var(--hairline);
+  width: 100%;
+}
+
+.p-rule-strong {
+  height: 1px;
+  background: var(--hairline-strong);
+  width: 100%;
+}
+
+/* the middle pane's horizontal split: graph over report */
+.p-split-top {
+  flex: 0 0 auto;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.p-split-bottom {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Width behaviour lives in `app.py` and `state.py`, not here — see
+ * `assets/viewport.js`. This file used to hold three media queries for it and
+ * every one of them was inert: a Quasar splitter sets an inline pixel width on
+ * its panel, so `flex` or `position` on the pane *inside* that panel changes
+ * nothing about the space reserved beside it. Below 1024 the left pane duly went
+ * `position: absolute` to "overlay" and its splitter panel went on holding 260px
+ * of layout next to it, which is not an overlay, it is a gap. */
+
+/* ── buttons ──────────────────────────────────────────────────────────────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-xs);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  letter-spacing: 0.2px;
+  padding: 6px 14px;
+  min-height: 32px;
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-primary {
+  background: var(--accent-primary);
+  color: var(--on-accent);
+}
+.btn-primary:active {
+  background: var(--accent-primary-pressed);
+}
+
+.btn-secondary {
+  background: transparent;
+  color: var(--ink);
+}
+
+.btn-tertiary {
+  background: var(--surface-elevated);
+  color: var(--ink);
+  border-color: var(--hairline);
+}
+
+.btn:disabled,
+.btn-disabled {
+  background: var(--surface-elevated);
+  color: var(--ash);
+  border-color: transparent;
+  cursor: default;
+}
+
+.btn-micro {
+  min-height: 24px;
+  padding: 2px 8px;
+  border-radius: var(--r-sm);
+  font-size: 11px;
+  letter-spacing: 0.2px;
+}
+
+/* Quasar's own button chrome, flattened. Two classes so these beat `.q-btn`. */
+.btn.q-btn {
+  text-transform: none;
+  box-shadow: none;
+  min-height: 32px;
+  padding: 6px 14px;
+}
+.btn.q-btn .q-btn__content {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  /* Quasar stacks the icon over the label once the bar gets tight; a toolbar
+   * button should get narrower, not taller. */
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+.btn.q-btn .q-icon {
+  font-size: 16px;
+}
+.btn.q-btn.btn-micro {
+  min-height: 24px;
+  padding: 2px 8px;
+}
+.btn.q-btn.btn-micro .q-btn__content {
+  font-size: 11px;
+}
+.btn.q-btn.btn-micro .q-icon {
+  font-size: 14px;
+}
+.btn.q-btn.q-btn--disabled {
+  background: var(--surface-elevated);
+  color: var(--ash);
+  border-color: transparent;
+  opacity: 1;
+}
+
+/* An icon with no label. Square rather than a text button with the text taken
+ * out — the asymmetric 6px/14px padding is there to sit around a word, and
+ * around a 16px glyph it reads as a button that lost something. What the button
+ * says lives in its tooltip, which is the deal an icon button makes. */
+.btn.q-btn.btn-icon {
+  padding: 6px;
+  min-width: 32px;
+}
+.btn.q-btn.btn-icon.btn-micro {
+  padding: 4px;
+  min-width: 24px;
+}
+.btn.q-btn.btn-icon .q-btn__content {
+  /* Quasar reserves label space even when there is none, which pushes the glyph
+   * off centre by a few pixels — enough to be visible in a row of four. */
+  gap: 0;
+}
+
+/* An icon ruled off from its word. The rule is `currentColor` rather than a
+ * hairline token because this variant appears on both fills — the accent one
+ * where the foreground is white, and the tertiary one where it is ink — and a
+ * fixed border colour would be invisible on one of them. */
+.btn.q-btn.btn-split .q-btn__content > .q-icon:first-child {
+  padding-right: var(--sp-sm);
+  margin-right: var(--sp-sm);
+  border-right: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+}
+
+/* ── inputs (Quasar chrome, flattened to hairlines) ───────────────────────── */
+
+.p-field .q-field__control {
+  background: var(--surface-elevated);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  padding: 0 var(--sp-md);
+  min-height: 32px;
+}
+.p-field .q-field__control:before,
+.p-field .q-field__control:after {
+  display: none;
+}
+.p-field .q-field__native,
+.p-field .q-field__input,
+.p-field textarea {
+  color: var(--body);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.p-field .q-field__native::placeholder,
+.p-field textarea::placeholder {
+  color: var(--stone);
+  opacity: 1;
+}
+.p-field.q-field--focused .q-field__control {
+  background: var(--accent-soft);
+  border-color: var(--accent-primary);
+}
+.p-field .q-field__marginal,
+.p-field .q-icon {
+  color: var(--mute);
+}
+/* a path, a column, a key: mono in, mono on screen */
+.p-field-mono .q-field__native,
+.p-field-mono .q-field__input,
+.p-field-mono textarea {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-feature-settings: normal;
+}
+.p-editor .q-field__control {
+  padding-top: var(--sp-sm);
+  padding-bottom: var(--sp-sm);
+}
+
+/* The brief: a box you are meant to write a paragraph into, so it opens at the
+ * size of the answer rather than growing into it. Every other `p-editor` is an
+ * `autogrow` one-liner and must stay one.
+ *
+ * **The height goes on the bordered control, not on the field.** Quasar's
+ * `q-field` root is a wrapper the border does not follow, so a `min-height` out
+ * there — which is where an inline `.style()` put it, and a size does not belong
+ * in Python anyway — stretched the wrapper and left the drawn box the height of
+ * its rows, the difference showing as dead space under a border that had already
+ * ended. */
+.p-editor--tall .q-field__control {
+  min-height: 200px;
+  align-items: stretch;
+}
+.p-editor--tall .q-field__control-container,
+.p-editor--tall textarea {
+  height: 100%;
+}
+
+/* segmented control — the selected segment is a soft accent wash, not a solid
+ * fill; the solid one belongs to the single primary action per view. */
+.btn.seg-active,
+.btn.q-btn.seg-active {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  border-color: var(--accent-primary);
+}
+.p-segmented .q-btn__content {
+  font-weight: 500;
+}
+
+.p-toggle .q-toggle__inner--truthy .q-toggle__track {
+  background: var(--accent-primary) !important;
+  opacity: 0.35;
+}
+.p-toggle .q-toggle__inner--truthy .q-toggle__thumb:after {
+  background: var(--accent-primary) !important;
+}
+.p-toggle .q-toggle__label {
+  font-size: 13px;
+  color: var(--body);
+}
+
+/* ── chips & badges ───────────────────────────────────────────────────────── */
+
+.type-chip {
+  display: inline-block;
+  background: var(--surface-elevated);
+  color: var(--mute);
+  border: 1px solid var(--hairline);
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  padding: 2px 6px;
+  border-radius: var(--r-xs);
+  white-space: nowrap;
+}
+
+/* Uniform size regardless of the number behind it. A badge never grows, never
+ * reorders, and never carries a severity score. */
+.flag-badge {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  font-feature-settings: normal;
+  padding: 2px 6px;
+  border-radius: var(--r-xs);
+  background: var(--surface-elevated);
+  color: var(--mute);
+  border: 1px solid var(--hairline);
+  white-space: nowrap;
+}
+.flag-badge--blocking {
+  background: var(--error-soft);
+  color: var(--error);
+  border-color: transparent;
+}
+.flag-badge--drift {
+  background: var(--warning-soft);
+  color: var(--warning);
+  border-color: transparent;
+}
+.flag-badge--ack {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  border-color: transparent;
+}
+
+.keycap {
+  display: inline-block;
+  background: var(--surface-card);
+  color: var(--body);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 1px 6px;
+  border-radius: var(--r-xs);
+  border: 1px solid var(--hairline);
+}
+
+/* ── opening a project ────────────────────────────────────────────────────── */
+
+.p-centered {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  width: 100vw;
+  background: var(--canvas);
+  overflow-y: auto;
+}
+
+.p-centered-column {
+  width: 100%;
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-lg);
+  padding: var(--sp-xl);
+}
+.p-centered-column > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* A floating panel, not a page — the shape every first-run surface takes.
+ *
+ * Add data was the first to need it and the brief is the second, so it is one
+ * card with one set of region classes rather than each screen growing its own:
+ * they are the same thing, a transient surface you finish and leave. As a
+ * full-height column either of them read as a web page, with the heading and the
+ * button drifting to opposite ends of the window.
+ *
+ * One soft shadow, which is the exception `DESIGN.md` allows for transient
+ * overlays and nowhere else — the hairline and the surface ladder do this work
+ * on everything persistent. */
+.p-panel {
+  width: 100%;
+  /* Wide, for the panel that holds two side-by-side questions and a list of
+   * repo-relative paths: at 560px it was a tall column of things wrapping, a
+   * shape that made a short form feel long. Falls back to the viewport on a
+   * narrow window rather than overflowing it. */
+  max-width: min(880px, calc(100vw - 2 * var(--sp-xxl)));
+  /* Bounded, so it always floats clear of the top and bottom edges. Content
+   * beyond that scrolls inside; the card never grows to meet it.
+   *
+   * The reserve is deliberately generous. At `100vh - 64px` on a 800px window
+   * the card came out 736px — capped, technically floating, and reading as a
+   * page with a hairline round it. A panel has to be visibly smaller than the
+   * window it is over or it is not a panel. */
+  max-height: min(680px, calc(100vh - 96px));
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+}
+body.body--dark .p-panel {
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+/* One question and one text box. The wide card is shaped around a file list;
+ * a paragraph set 880px across is a paragraph nobody finishes reading. */
+.p-panel--prose {
+  max-width: min(620px, calc(100vw - 2 * var(--sp-xxl)));
+}
+
+/* Quasar's minimized dialog caps its child at 560px, which is why the panel
+ * used to carry an inline width. `div.p-panel` out-specifies that rule
+ * without an `!important`, so the card's own width now holds in the dialog
+ * exactly as it does on the canvas — one width, declared once, in the file
+ * that owns the look. */
+.q-dialog__inner > div.p-panel,
+.q-dialog__inner--minimized > div.p-panel {
+  max-width: min(880px, 92vw);
+}
+
+/* What you are doing. Pinned, so it survives a long list. */
+.p-panel-head {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+  padding: var(--sp-lg);
+  border-bottom: 1px solid var(--hairline);
+}
+
+/* The only region that scrolls. */
+.p-panel-body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-md);
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-lg);
+}
+
+/* Add data's body is the one that uses the width.
+ *
+ * `auto-fit` rather than a media query: the card's own width is already capped
+ * against the viewport, so what decides one column or two is how much room the
+ * card ended up with — which is a question about this element, not about the
+ * window. Two columns whenever 340px each will fit, one below that. */
+.add-data-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  align-items: start;
+  gap: var(--sp-lg);
+}
+.add-data-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-lg);
+  min-width: 0;
+}
+/* Indexing is about the whole panel, not about one of its columns. */
+.add-data-progress {
+  grid-column: 1 / -1;
+}
+
+/* What finishes it. Pinned for the same reason the head is: a primary action
+ * below the fold is one that looks like it did nothing when you press it. The
+ * region's own top border is the divider — a rule inside a bordered footer is
+ * two lines a pixel apart. */
+.p-panel-actions {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-sm);
+  padding: var(--sp-lg);
+  border-top: 1px solid var(--hairline);
+  background: var(--surface);
+}
+
+/* A file a surface writes, as a path. The name identifies it and the folders
+ * say where it sits, so the name is `{colors.ink}` and the folders are quiet —
+ * and the folders are what truncates, because the end of a path is the half you
+ * were reading. Boxed at `{colors.surface-elevated}` so it reads as a fact about
+ * this card and not as a fifth line of guidance. */
+.path-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  align-self: flex-start;
+  max-width: 100%;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+  background: var(--surface-elevated);
+}
+.path-row-icon {
+  font-size: 14px;
+  color: var(--stone);
+  flex: 0 0 auto;
+}
+.path-row-dir {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--stone);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.path-row-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+/* Indexing says what it is doing. A spinner on its own is the thing this
+ * replaces: it told you something was happening and nothing about what. */
+.indexing-status {
+  align-items: center;
+}
+
+/* The mark is a cut-out, so it sits on the canvas rather than in a tile. */
+.p-logo {
+  width: 96px;
+  height: 96px;
+  flex: 0 0 auto;
+  object-fit: contain;
+}
+/* Sized to the thin toolbar it sits in, not the other way round. */
+.p-logo-sm {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  object-fit: contain;
+}
+
+/* The open directory's name. A label saying where you are — it used to be a
+ * button that was also the only way out of the project, which is two statements
+ * in one control. Leaving lives in Settings now. */
+.p-session-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+/* One tab's worth of settings. The panel is a list of controls and nothing
+ * else, so the only structure it needs is a gap — and a floor, so switching to
+ * a short tab doesn't resize the dialog under the pointer that switched it. */
+/* The settings panel: a section list beside one section's settings
+ * (`ui/settings.py`). Wider than the other dialogs because it is two columns,
+ * and a fixed body height so the dialog does not change size between sections
+ * — the list is what says where you are, and it must not move. The height is
+ * **fixed, not a floor**: `min-height: 300px` held only while every section
+ * was shorter than 300px, and the day the Copilot section outgrew it the
+ * dialog was back to resizing under the pointer that switched it — measured
+ * at 412px → 557px between Project and Copilot, and again when picking a
+ * provider *inside* Copilot. A section taller than the box scrolls in
+ * `settings-body`; the frame never moves (DESIGN.md → Layout stability). */
+.settings-panel {
+  width: 720px;
+  max-width: 92vw;
+}
+.settings-layout {
+  display: flex;
+  gap: var(--sp-lg);
+  height: min(480px, 70vh);
+}
+.settings-nav {
+  flex: 0 0 168px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-right: var(--sp-md);
+  border-right: 1px solid var(--hairline-soft);
+}
+.settings-nav .artifact-row {
+  margin: 0;
+}
+.settings-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-lg);
+  padding-top: var(--sp-xs);
+  overflow-y: auto;
+}
+.settings-foot {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* One setting: a title, what it does, and the control under them
+ * (`c.setting`). The description is `{colors.mute}` because it is a fact about
+ * the setting and not the setting; the control is what you act on. */
+.setting {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-sm);
+}
+.setting-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.setting-why {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--mute);
+  margin-top: calc(-1 * var(--sp-xs));
+}
+
+/* The tabs run edge to edge inside the panel, so their underline is a rule
+ * across it rather than a line ending in the middle of nowhere. */
+
+
+.row-gap-md {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-md);
+  flex-wrap: wrap;
+}
+
+.p-empty-panel {
+  border-radius: var(--r-xl);
+  background: var(--accent-soft);
+  padding: var(--sp-xl);
+}
+
+/* ── add data ─────────────────────────────────────────────────────────────────
+ *
+ * The screen asks two unrelated questions — *which folder in this repo is the
+ * data* and *is there anything outside it* — and for a day the only thing
+ * dividing them was `p-section-header`, an 11px uppercase label built for the
+ * left pane. At 560px that is not a division, it is a caption above a stack.
+ *
+ * So each route is a **bordered section with a real heading**, and the rows
+ * inside are drawn for a form rather than borrowed from the tree: `artifact-row`
+ * is 12px mono with hover as its only affordance, which is right in a 260px pane
+ * and reads as indented text here. What says "you can click this" is a chevron,
+ * a hairline between rows, and a hit target the height of a control. */
+
+/* Body size, not caption: it is the one sentence explaining the screen, and at
+ * 11px it sat below the section hints it is meant to introduce. */
+.p-panel-sub {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--mute);
+}
+
+/* One route, as a card. */
+.add-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-md);
+  min-width: 0;
+  padding: var(--sp-lg);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+/* The folding one owns its own padding, on the header row, so the whole row is
+ * the hit target rather than a word inside a padded box. */
+.add-section--folding {
+  padding: 0;
+  gap: 0;
+}
+/* The cost block is a footnote to both routes rather than a third route, so it
+ * is a section with no title and a quieter fill. */
+.add-section--cost {
+  gap: var(--sp-sm);
+  background: transparent;
+}
+
+.add-section-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* `heading-sm` — the same size the app gives an artifact-row title. A section of
+ * a form is not a pane label and must not be set like one. */
+.add-section-title {
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: 0.2px;
+  color: var(--ink);
+}
+.add-section-hint {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--mute);
+}
+
+.add-section-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  flex-wrap: wrap;
+}
+
+/* ── the folder picker ─────────────────────────────────────────────────────── */
+
+/* A bordered list, so the rows inside are visibly a set of choices and not a
+ * paragraph that happens to have icons in it. */
+.picker {
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--surface-elevated);
+  overflow: hidden;
+}
+
+/* Where you are, as a path. The segment you are *in* is not a link — it was one,
+ * which offered a trip to where you already stood and made the trail read as a
+ * row of chips instead of a path. */
+.picker-crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: var(--sp-sm) var(--sp-md);
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface);
+  min-width: 0;
+}
+.crumb {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--accent-text);
+  padding: 2px 6px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background-color 120ms ease-out;
+}
+.crumb:hover {
+  background: var(--accent-soft);
+}
+.crumb--current,
+.crumb--current:hover {
+  color: var(--ink);
+  background: transparent;
+  cursor: default;
+}
+.crumb-sep {
+  font-size: 14px;
+  color: var(--stone);
+  flex: 0 0 auto;
+}
+
+/* A folder you can open. 40px of row, a trailing chevron that says where it
+ * goes, and a hairline under every row but the last. */
+.picker-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  min-width: 0;
+  min-height: 40px;
+  padding: var(--sp-xs) var(--sp-md);
+  border-bottom: 1px solid var(--hairline-soft);
+  cursor: pointer;
+  transition: background-color 120ms ease-out;
+}
+.picker-row:last-child {
+  border-bottom: none;
+}
+.picker-row:hover {
+  background: var(--surface-card);
+}
+.picker-row-icon {
+  font-size: 16px;
+  color: var(--mute);
+  flex: 0 0 auto;
+}
+.picker-row-name {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--ink);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A count of files. Never sized or coloured by how big it is (`DESIGN.md`). */
+.picker-row-meta {
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: var(--mute);
+  flex: 0 0 auto;
+}
+.picker-row-go {
+  font-size: 16px;
+  color: var(--stone);
+  flex: 0 0 auto;
+}
+.picker-row:hover .picker-row-go {
+  color: var(--accent-text);
+}
+.picker-empty {
+  padding: var(--sp-md);
+}
+
+/* ── the folder once it is chosen ─────────────────────────────────────────── */
+
+.chosen-folder {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  min-width: 0;
+  padding: var(--sp-md);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+}
+.chosen-folder-icon {
+  font-size: 18px;
+  color: var(--accent-text);
+  flex: 0 0 auto;
+}
+.chosen-folder-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.chosen-folder-name {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chosen-folder-meta {
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: var(--mute);
+}
+
+/* ── which files to profile ───────────────────────────────────────────────── */
+
+.pick-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+}
+.pick-head-label {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.1px;
+  color: var(--ink);
+  flex: 1 1 auto;
+}
+
+.pick-list {
+  width: 100%;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--surface-elevated);
+}
+.pick-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  min-width: 0;
+  min-height: 34px;
+  padding: var(--sp-xs) var(--sp-md);
+  border-bottom: 1px solid var(--hairline-soft);
+}
+.pick-row:last-child {
+  border-bottom: none;
+}
+.pick-row:hover {
+  background: var(--surface-card);
+}
+/* Already in the catalog: a statement, not an offer. Recessed rather than
+ * hidden — it is still part of "what is under this folder". */
+.pick-row--done .q-checkbox__label {
+  color: var(--mute);
+}
+.pick-row-note {
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: var(--mute);
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* The path is the checkbox's own label, so the whole row is one hit target
+ * rather than a 15px box beside some text you cannot click.
+ *
+ * **The label wraps, and the row grows.** A real extract's path is long enough
+ * to run past the note beside it, and a nowrap label neither shrinks nor pushes:
+ * it overprints. Truncating would take the tail, which on
+ * `AQN_OUTPUT_READING_DETAILS_DUPLICATES.parquet` is the whole of what
+ * tells one file from the next. */
+.p-check {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.p-check .q-checkbox__inner {
+  color: var(--mute);
+  font-size: 30px;
+}
+.p-check .q-checkbox__inner--truthy {
+  color: var(--accent-primary);
+}
+.p-check .q-checkbox__label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--body);
+  padding-left: var(--sp-xs);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ── importing, folded ────────────────────────────────────────────────────── */
+
+/* The header row is the section title, at the section title's size, and the
+ * caret sits next to the word rather than at the far edge of a 560px form.
+ *
+ * **Both class names, deliberately.** `c.collapsed` also carries `p-expansion`,
+ * whose rule sets an 11px, zero-padding, 24px-high row — right for a tool result
+ * in the transcript, and what this looked like for an afternoon. Same
+ * specificity and later in the file, so it won on order alone. Naming both
+ * classes on the one element settles it by specificity instead, which does not
+ * depend on where either block sits. */
+.add-section-toggle.p-expansion .q-expansion-item__container > .q-item {
+  min-height: 0;
+  padding: var(--sp-lg);
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: 0.2px;
+  border-radius: var(--r-lg);
+  transition: background-color 120ms ease-out;
+}
+.add-section-toggle.p-expansion .q-expansion-item__container > .q-item:hover {
+  background: var(--surface-card);
+}
+/* Quasar renders the toggle icon as the row's trailing side section. `order`
+ * moves it in front of the label without reaching into the component. */
+.add-section-toggle.p-expansion .q-item__section--side {
+  order: -1;
+  padding: 0 var(--sp-sm) 0 0;
+  min-width: 0;
+  color: var(--mute);
+}
+.add-section-toggle.p-expansion .q-item__section--side .q-icon {
+  font-size: 20px;
+}
+.import-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-md);
+  padding: 0 var(--sp-lg) var(--sp-lg);
+  min-width: 0;
+}
+
+.cost-controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-sm);
+  align-items: flex-start;
+}
+
+/* A list of files: what a folder holds, or what an import is about to copy.
+ * Capped and scrolling, because thirty files is a list you skim rather than a
+ * list that pushes the button off the bottom of the screen. */
+.added-list {
+  width: 100%;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+.added-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  min-width: 0;
+  padding: var(--sp-xs) var(--sp-md);
+  border-bottom: 1px solid var(--hairline);
+}
+.added-row:last-child {
+  border-bottom: none;
+}
+
+/* ── left pane — the project tree ─────────────────────────────────────────── */
+
+/* One row type for a folder and for a file, at two settings: `--depth` indents
+ * it and a caret appears when it can be opened. Two components that had to be
+ * kept looking alike would drift the first time either was touched. */
+/* How far one level of the tree steps in, and where its guide line is drawn.
+ * One number, used by both, so a guide can never drift off the indent it marks.
+ * 14px was too tight to read as containment — a nested file looked like a
+ * sibling that happened to start slightly later. */
+:root {
+  --indent: 20px;
+  --indent-guide: 13px;
+}
+
+.artifact-row {
+  display: flex;
+  align-items: center;
+  /* A flex item's default `min-width: auto` lets one long unbroken path push
+   * the whole row past its container. Paths are exactly what this row holds. */
+  min-width: 0;
+  max-width: 100%;
+  gap: var(--sp-sm);
+  padding: var(--sp-sm) var(--sp-md);
+  padding-left: calc(var(--sp-md) + var(--depth, 0) * var(--indent));
+  margin: 0 var(--sp-sm);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  min-width: 0;
+
+  /* One faint vertical rule per ancestor level, so a file reads as being
+   * *inside* the folder above it rather than merely further right. The rows are
+   * siblings in the DOM — a tree of nested elements would nest the hover and the
+   * selection with it — so the guides are drawn as a repeating background across
+   * the row's own indent, one stripe every `--indent`, stopping where the
+   * content starts.
+   *
+   * `background-color` and not `background`: the hover and selected rules below
+   * set a colour, and the shorthand would wipe the guides out with it. */
+  background-color: transparent;
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--hairline-soft) 0 1px,
+    transparent 1px var(--indent)
+  );
+  background-repeat: no-repeat;
+  background-position: var(--indent-guide) 0;
+  background-size: calc(var(--depth, 0) * var(--indent)) 100%;
+}
+.artifact-row .artifact-caret {
+  color: var(--ash);
+  font-size: 16px;
+  flex: 0 0 auto;
+  /* Pulled tight against the folder icon: the caret and the icon are one
+   * affordance, not two things in a row. */
+  margin-right: calc(-1 * var(--sp-xs));
+}
+.artifact-row .artifact-icon {
+  color: var(--mute);
+  font-size: 16px;
+  flex: 0 0 auto;
+}
+.artifact-row .artifact-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+.artifact-row .artifact-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.artifact-row .artifact-note {
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: var(--mute);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.artifact-row .artifact-meta {
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: var(--mute);
+  flex: 0 0 auto;
+}
+/* `background-color`, never the `background` shorthand — that would take the
+ * indent guides with it. Eased rather than instant: a tree is a list you run the
+ * pointer down, and an unanimated fill snapping on and off every row on the way
+ * past is the flicker that made this pane feel twitchy. 120ms is short enough
+ * to feel like a response and long enough that a row you crossed on the way
+ * somewhere else never fully lights up. */
+.artifact-row {
+  transition: background-color 120ms ease-out;
+}
+.artifact-row:hover {
+  background-color: var(--surface-card);
+}
+.artifact-row--selected,
+.artifact-row--selected:hover {
+  background-color: var(--accent-soft);
+}
+.artifact-row--selected .artifact-name,
+.artifact-row--selected .artifact-icon {
+  color: var(--accent-text);
+}
+
+.empty-note {
+  color: var(--mute);
+  font-size: 13px;
+  line-height: 1.5;
+  padding: var(--sp-xs) var(--sp-md) var(--sp-sm);
+}
+
+/* ── middle pane, top — the graph ─────────────────────────────────────────── */
+
+/* A dot grid, the way a node canvas reads everywhere: it says "this space is
+ * navigable" before you touch it, and gives the eye something to judge panning
+ * against. Faint enough that the cards still carry the contrast.
+ *
+ * The canvas clips and the content inside it is transformed (see `canvas.js`).
+ * It used to scroll instead, which had two consequences and both were bugs: a
+ * graph that fitted its pane had nothing to scroll, so dragging did nothing at
+ * all; and `background-attachment` defaults to `scroll`, which pins the grid to
+ * the *element* rather than to its contents — so on the one graph big enough to
+ * pan, the nodes slid under a stationary grid and the canvas read as dead.
+ * Driving both off `--pan-x`/`--pan-y` is what keeps them in step. */
+.graph-canvas {
+  --pan-x: 0px;
+  --pan-y: 0px;
+  --zoom: 1;
+  --grid: 20px;
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  cursor: grab;
+  background-image: radial-gradient(var(--hairline-strong) 1.5px, transparent 1.5px);
+  /* The grid scales with the content, so zooming out shows *more* grid rather
+   * than a coarser one — it stays a texture the eye can judge movement against
+   * instead of becoming a second, contradictory sense of scale. */
+  background-size: calc(var(--grid) * var(--zoom)) calc(var(--grid) * var(--zoom));
+  background-position: calc(var(--pan-x) - 1px) calc(var(--pan-y) - 1px);
+}
+.graph-canvas.is-panning {
+  cursor: grabbing;
+  user-select: none;
+}
+/* A card on the move. The same cursor as a pan, because it is the same gesture
+ * applied to one card instead of all of them; the card lifts by one shadow so
+ * the eye keeps it apart from the ones it passes over, and it is on top for the
+ * duration — a shut card dragged across an open one would otherwise slide
+ * underneath it. */
+.graph-canvas.is-moving-card {
+  cursor: grabbing;
+  user-select: none;
+}
+.graph-canvas.is-moving-card .graph-node,
+.graph-canvas.is-moving-card .graph-hit {
+  pointer-events: none;
+}
+.graph-node--moving {
+  z-index: 2;
+}
+.graph-node--moving .model-card,
+.graph-node--moving .source-node {
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+}
+/* Over another card. Two cards never stack: dropped here it goes back where it
+ * came from, and the dashed border says so before the drop — the same mark a
+ * ghost carries, for the same reason: *not a real place*. Not a colour, so it
+ * cannot be read as an error. */
+.graph-node--blocked .model-card,
+.graph-node--blocked .source-node {
+  border-style: dashed;
+  opacity: 0.72;
+}
+
+/* **The glide is tweened in JavaScript, not here** (`assets/canvas.js`). NiceGUI
+ * replaces this element on every pane refresh, so a CSS transition would be
+ * destroyed mid-animation and the replacement would have no previous value to
+ * travel from — it would animate out of the origin every time. The comment is
+ * here because this is where anyone would look for it first. */
+
+/* The laid-out graph. Absolute, so it can be translated past the canvas edge in
+ * either direction — the pane is a window onto the graph, not a box the graph
+ * has to fit inside. Inset by the pane padding, because an absolute child is
+ * positioned against the padding box and would otherwise sit in the corner. */
+.graph-content {
+  position: absolute;
+  top: var(--sp-lg);
+  left: var(--sp-lg);
+  /* `transform-origin: 0 0` so the scale happens about the content's own corner
+   * and `canvas.js` can do the arithmetic that keeps the point under the cursor
+   * still. With the default centre origin, zooming walks whatever you were
+   * looking at off the screen. */
+  transform-origin: 0 0;
+  transform: translate(var(--pan-x), var(--pan-y)) scale(var(--zoom));
+}
+
+.graph-edges {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+.graph-edges path {
+  fill: none;
+  stroke: var(--hairline-strong);
+  stroke-width: 1;
+}
+.graph-edges polygon {
+  fill: var(--hairline-strong);
+}
+
+/* The path into the selected table, **alive and moving toward it.**
+ *
+ * `--flow-period` is one beat of the animation and `--flow-hop` is how much later
+ * each hop upstream starts it. Both live here so the cards and the arrows cannot
+ * drift out of step: they run one rhythm, offset by `--hop`, which Python puts on
+ * each element as its distance from the table you picked (`graph.upstream_hops`).
+ * The **delay is negative** — `calc(var(--hop) * -1 * var(--flow-hop))` — so every
+ * element is already mid-cycle when it appears rather than waiting its turn to
+ * begin, which is what makes the flow read as continuous instead of as a queue
+ * starting up.
+ *
+ * **This is direction, not rank.** Every lit element gets the same animation at
+ * the same amplitude; only its phase differs. Nothing grows, nothing is dimmed,
+ * and nothing is louder for being nearer — the movement says which way the data
+ * travels, which is a fact about the pipeline (DESIGN.md's product rule). */
+.graph-canvas {
+  --flow-period: 1.6s;
+  --flow-hop: 0.18s;
+}
+
+/* An arrow on the path. Colour names a kind, so everything else stays exactly as
+ * bright as it was — dimming the rest would be the canvas deciding the rest
+ * matters less. Still a hairline; the ink changes and the dashes travel. */
+.graph-edges path.is-lit,
+.graph-edges polygon.is-lit {
+  stroke: var(--accent-primary);
+}
+.graph-edges polygon.is-lit {
+  fill: var(--accent-primary);
+}
+
+/* The dashes run **from the source toward the target**, because the path is
+ * drawn that way (`Edge.path`) and a falling `stroke-dashoffset` walks along it.
+ * A long gap and a short dash, so it reads as one travelling mark rather than as
+ * a dotted line. */
+.graph-edges path.is-lit {
+  stroke-dasharray: 7 11;
+  animation: flow-dash var(--flow-period) linear infinite;
+  animation-delay: calc(var(--hop, 0) * -1 * var(--flow-hop));
+}
+@keyframes flow-dash {
+  from {
+    stroke-dashoffset: 18;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* The arrowhead breathes on the same beat, so an edge arrives rather than just
+ * crawling. */
+.graph-edges polygon.is-lit {
+  animation: flow-head var(--flow-period) ease-in-out infinite;
+  animation-delay: calc(var(--hop, 0) * -1 * var(--flow-hop));
+}
+@keyframes flow-head {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* The clickable half of an arrow: a fat transparent stroke over the hairline.
+ * Invisible on purpose — an arrow you can hit is not the same thing as an arrow
+ * that shouts, and widening the visible line would have made every edge on the
+ * canvas louder to make one of them clickable. */
+.graph-edges path.graph-hit {
+  stroke: transparent;
+  /* Wide enough to hit on a curve at any zoom. Selector-qualified because
+   * `.graph-edges path` above sets the hairline and would otherwise win on
+   * specificity — which it silently did, leaving a 1px click target. */
+  stroke-width: 12;
+  fill: none;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+.graph-edges {
+  pointer-events: none;
+}
+
+.graph-node {
+  position: absolute;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+
+/* Another spec's table — something portia built, with a spec behind it you can
+ * open. A source is a file that arrived; this is a decision that produced a
+ * table. They drew identically until the pipeline overhaul, which meant the
+ * graph could not say which of its inputs it was responsible for.
+ *
+ * The layer rides in the header as a plain `type-chip` with the layer's name and
+ * no colour of its own. staging/intermediate/mart is build order, and it is the
+ * one thing on this card that nothing measured — so it says what kind of table
+ * this is, and never makes one card louder than another. */
+.model-card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-card);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+/* **The card you are watching** — the spec picked on the left. Louder than a
+ * lit ancestor on purpose, and it is the one place on this canvas where more
+ * prominence is correct: it marks *where you are*, which is a fact about the
+ * session and not a claim about the table. A full-strength border, a ring
+ * outside it so the edge reads at any zoom, and a faint wash. Still no fill of
+ * its own and still the same size — nothing here grows. */
+.model-card--selected {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-primary) 22%, transparent);
+  background: color-mix(in srgb, var(--accent-primary) 5%, var(--surface-card));
+}
+.model-card--selected .model-head {
+  border-bottom-color: color-mix(in srgb, var(--accent-primary) 30%, transparent);
+}
+
+/* **A card that is not on the canvas**, drawn to say what picking a spec would
+ * need. Translucent and dashed: transparency says *not quite here* and the dash
+ * says *not a real edge*, and neither is a colour, so this cannot be read as a
+ * severity. It is the one thing on this canvas that is deliberately harder to
+ * read than its neighbours — being hard to read is the message. */
+.model-card--ghost,
+.source-node--ghost {
+  opacity: 0.42;
+  border-style: dashed;
+  cursor: pointer;
+}
+.model-card--ghost:hover,
+.source-node--ghost:hover {
+  opacity: 0.72;
+}
+/* Its arrows too, or a solid edge would arrive at a card that is not there. */
+.graph-edges path.is-ghost,
+.graph-edges polygon.is-ghost {
+  opacity: 0.35;
+  stroke-dasharray: 4 3;
+}
+
+/* On the path into the selected table. The same statement the lit arrows make,
+ * and the same rule: it says *this is the flow you asked about* and nothing
+ * about importance, so it is a border and never a fill, a shadow or a size.
+ *
+ * The contour **travels**: the border brightens and fades on the shared beat,
+ * phased by the card's distance from the table you picked, so the pulse leaves
+ * the files and arrives at it. Only `border-color` and one inset shadow animate —
+ * both are paint, so there is no layout and no reflow, on at most a dozen cards. */
+.graph-node--lit .model-card,
+.graph-node--lit .source-node {
+  border-color: color-mix(in srgb, var(--accent-primary) 45%, transparent);
+  animation: flow-edge var(--flow-period) ease-in-out infinite;
+  animation-delay: calc(var(--hop, 0) * -1 * var(--flow-hop));
+}
+@keyframes flow-edge {
+  0%,
+  100% {
+    border-color: color-mix(in srgb, var(--accent-primary) 28%, transparent);
+    box-shadow: 0 0 0 0 transparent;
+  }
+  45% {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-primary) 20%, transparent);
+  }
+}
+
+/* **The card you are watching never pulses.** It is where the flow arrives, and
+ * a destination that blinks along with the path reads as one more stop on it.
+ * Its own treatment (`model-card-selected`) is the statement. */
+.graph-node--lit .model-card--selected {
+  animation: none;
+}
+
+/* Nobody's canvas should move if they have asked it not to. The path still
+ * lights — the statement survives; only the motion goes. */
+@media (prefers-reduced-motion: reduce) {
+  .graph-node--lit .model-card,
+  .graph-node--lit .source-node,
+  .graph-edges path.is-lit,
+  .graph-edges polygon.is-lit {
+    animation: none;
+  }
+}
+
+.model-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  min-width: 0;
+  height: 48px;
+  flex: 0 0 48px;
+  padding: 0 var(--sp-md);
+  cursor: pointer;
+}
+.model-head:hover {
+  background: var(--surface-elevated);
+}
+.model-card--open .model-head {
+  border-bottom: 1px solid var(--hairline);
+}
+.model-caret {
+  font-size: 16px;
+  color: var(--mute);
+  flex: 0 0 auto;
+}
+.model-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* **The name is the only thing on a card that shrinks.**
+ *
+ * A card is a fixed width — one card, one size, whatever it has to say
+ * (DESIGN.md) — so a long table name has to give way somewhere, and the name is
+ * the right place because it is the one part with an ellipsis and a tooltip
+ * carrying the whole of it. Everything beside it is short, fixed and unreadable
+ * at less than its natural width: without this, a 44-character model name
+ * squeezed `staging` to 39px and `2 steps` to 17px, and both broke across lines
+ * inside a 24px row. That is the "horrible line-breaks" — the name was fine and
+ * its neighbours were not.
+ *
+ * `flex-shrink: 0` on the metadata, and `min-width: 0` on the name so it may
+ * shrink below its content width at all, which a flex item does not do by
+ * default. */
+.model-head > .type-chip,
+.model-head > .t-caption,
+.model-head > .model-caret,
+.model-row > .type-chip,
+.model-row > .t-caption,
+.model-row > .model-caret,
+.model-row > .model-step-n,
+.model-row > .flag-badge {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* An open card's two halves: what it reads, and how it is built. Both are lists
+ * of rows rather than a second canvas of cards — a step compiles to a named block
+ * inside one SQL file and never becomes a table, so the sequence is the whole of
+ * the relationship between two steps and an arrow between them would be drawing
+ * the numbering twice (`ui/graph.py`, 2026-08-15). */
+.model-body {
+  position: relative;
+  padding: var(--sp-sm) var(--sp-md);
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+.model-section {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--mute);
+  height: 24px;
+  display: flex;
+  align-items: center;
+}
+.model-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  height: 24px;
+  padding: 0 var(--sp-xs);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  min-width: 0;
+}
+.model-row:hover {
+  background: var(--surface-elevated);
+}
+.model-row-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+/* The step's position in the sequence. Fixed width so the names line up: the
+ * order is the recorded order of decisions and reads as a list, not as a set of
+ * rows that happen to have numbers on them. */
+.model-step-n {
+  flex: 0 0 16px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.model-step--selected {
+  background: var(--accent-soft);
+}
+/* A zero the run hit. The one thing on this canvas that may use the error
+ * colour, and it colours the row it happened on — never a roll-up, never a
+ * count on the card's header, because a card that got louder with its flags
+ * would be size and colour standing in for rank. */
+.model-step--blocked {
+  background: var(--error-soft);
+}
+/* One column, and the column it came from. Indented under the input it belongs
+ * to, quieter than the rows above it — this is the detail you unfolded, not a
+ * third list competing with the two headings. */
+.model-column {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  height: 24px;
+  padding-left: calc(var(--sp-md) + var(--sp-sm));
+  min-width: 0;
+}
+/* `this column ← that column`: both names may ellipsize, the arrow and the step
+ * pointer never do. Two shrinkable items rather than one, because which of the
+ * pair is long is not something the card gets to assume. */
+.model-column > .t-mono-sm {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.model-column > .model-from,
+.model-column > .t-caption {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.model-from {
+  font-size: 12px;
+  color: var(--mute);
+  flex: 0 0 auto;
+}
+/* The line about columns with no single origin underneath them. One row unit
+ * tall like everything else in this body — `_body_rows` counts rows and
+ * `graph.open_height` reserves them, so a child of another height is a card that
+ * does not fit what it drew. */
+.model-note {
+  padding-left: var(--sp-xs);
+  height: 24px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The caret that says a button opens a menu rather than doing something. Tight
+ * against the label and in the muted ink, so it reads as a mark on the control
+ * and not as a second glyph beside the first. */
+.btn-caret {
+  font-size: 16px;
+  margin-left: -2px;
+  margin-right: -4px;
+  opacity: 0.7;
+}
+
+/* The visibility menu. A list of the project's tables with a tick each, and the
+ * one control on this canvas that changes *what is drawn* rather than what is
+ * highlighted. Kept plain: it is a set of checkboxes, not a panel — the moment it
+ * grows a summary or a count per row it starts implying which table is worth
+ * looking at. */
+.p-menu-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 260px;
+  max-width: 340px;
+  max-height: 380px;
+}
+
+/* **The list scrolls; the toggle above it does not.** On a forty-table project
+ * `Select all` would otherwise be the first thing pushed off the top of the
+ * menu, which is the row you most want to reach when the list is long. */
+.p-menu-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+  flex: 1 1 auto;
+  padding: var(--sp-xs) 0;
+}
+
+/* One table in the visibility menu. **The tint is the state** — accent at low
+ * opacity across the whole row when the canvas is drawing it, nothing at all
+ * when it is not. That is a *kind* of statement DESIGN.md allows: on and off are
+ * two states, not a ranking, and no row is louder than another for being more
+ * important. A column of checkboxes said the same thing with nine widgets. */
+.menu-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  height: 30px;
+  padding: 0 var(--sp-md);
+  cursor: pointer;
+  min-width: 0;
+}
+.menu-row:hover {
+  background: var(--surface-elevated);
+}
+.menu-row--on {
+  background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
+}
+.menu-row--on:hover {
+  background: color-mix(in srgb, var(--accent-primary) 18%, transparent);
+}
+/* A fixed lead-in so every name starts at the same x whether or not the row
+ * carries a glyph — the eye reads the column of names, not the marks. */
+.menu-row-mark {
+  flex: 0 0 16px;
+  font-size: 16px;
+  color: var(--mute);
+}
+.menu-row-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.menu-row > .type-chip {
+  flex: 0 0 auto;
+}
+/* The select-all toggle. Ruled off below rather than tinted: it is a control
+ * about the list, not a member of it. */
+/* A menu of actions rather than of names: prose, in the sans face. */
+.menu-row-text {
+  font-size: 13px;
+  color: var(--ink);
+  line-height: 1.35;
+  min-width: 0;
+}
+/* Action rows wrap rather than truncate: these are the sentences the decision
+ * is made on, and *Allow, and stop asking about source summari…* is not one. */
+.p-menu-actions {
+  min-width: 220px;
+  padding: var(--sp-xs) 0;
+}
+.p-menu-actions .menu-row {
+  height: auto;
+  padding: 6px var(--sp-md);
+  align-items: flex-start;
+}
+.p-menu-actions .menu-row-mark {
+  margin-top: 1px;
+}
+
+/* A primary action with the wider scopes under a caret beside it (the write
+ * card's Allow). One control, two halves: the word does the thing, the caret
+ * opens the ways to stop being asked. The halves share the fill and split the
+ * radius, so it reads as one button rather than two that happen to touch. */
+.btn-group {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 1px;
+}
+.btn-group .btn:first-child {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.btn-group .btn-group-more {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  padding: 0 2px;
+  min-width: 24px;
+}
+
+/* The mode picker in the composer bar and in Settings (`c.approval_mode`).
+ * A field, like the model select beside it, in the sans face because a mode is
+ * a word and not an identifier. */
+.approval-mode .q-field__control {
+  min-height: 28px;
+}
+.approval-mode .q-field__native {
+  font-size: 12px;
+}
+
+.menu-row--head {
+  border-bottom: 1px solid var(--hairline);
+  flex: 0 0 auto;
+}
+.menu-row--head .menu-row-name {
+  font-family: var(--font-sans);
+  color: var(--body);
+}
+
+/* Deliberately the quietest thing on the canvas: a file is what arrived, not
+ * what was decided. */
+.source-node {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  background: var(--canvas);
+  border: 1px solid var(--hairline-soft);
+  border-radius: var(--r-sm);
+  padding: var(--sp-sm) var(--sp-md);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--mute);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.source-node:hover {
+  border-color: var(--hairline-strong);
+  color: var(--body);
+}
+
+/* ── middle pane, bottom — the run report ─────────────────────────────────── */
+
+.report-block {
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  padding: var(--sp-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-sm);
+}
+.report-block--selected {
+  border-color: color-mix(in srgb, var(--accent-primary) 60%, transparent);
+}
+
+/* The whole head opens the block, and only the head. It used to be the whole
+ * block, so opening the table preview inside one shut the block you opened it
+ * in. The caret leads, as it does on every disclosure in this app. */
+.report-block-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  cursor: pointer;
+  min-width: 0;
+}
+.report-caret {
+  font-size: 16px;
+  color: var(--ash);
+  flex: 0 0 auto;
+}
+
+/* The four groups stay visually separate — they answer different questions and
+ * collapsing them into one status is the mistake this project spent three runs
+ * unlearning. The rule is what makes that legible at a glance. */
+.report-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+  padding-top: var(--sp-sm);
+  border-top: 1px solid var(--hairline-soft);
+}
+.report-group-label {
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: var(--mute);
+  text-transform: uppercase;
+}
+
+/* The journal under the steps: what was asked on the way to this table
+ * (`workflow._journal_section`). **One list, folded twice** *(2026-09-07)*: the
+ * journal is a disclosure whose head is the word and a count; open, one row per
+ * finding whose head is the *question*; open that, the record. The first draw
+ * was two headed lists of fully open cards under the step blocks, and it read
+ * as a wall. */
+.journal-head,
+.journal > .q-expansion-item__container > .q-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  padding-top: var(--sp-sm);
+  border-top: 1px solid var(--hairline-soft);
+}
+.journal > .q-expansion-item__container > .q-expansion-item__content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+  padding-top: var(--sp-xs);
+}
+
+/* One finding. Shut, it is its question, the stale mark when there is one, and
+ * the date; open, every field the record holds and none cut. `--surface-card`
+ * rather than the report block's `--surface`: a finding is a different kind of
+ * thing from a step, and the two sit in one column. The tables it is about are
+ * `type-chip`s, because *about* is a kind and never a rank; a table that moved
+ * since is a plain `flag-badge`, a fact, uncoloured. */
+.finding {
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--surface-card);
+  padding: var(--sp-xs) var(--sp-md);
+  min-width: 0;
+}
+.finding > .q-expansion-item__container > .q-item {
+  align-items: flex-start;
+  gap: var(--sp-sm);
+  padding: var(--sp-xs) 0;
+}
+.finding > .q-expansion-item__container > .q-item > .p-disclosure-caret {
+  margin-top: 2px;
+}
+.finding-question {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.45;
+  letter-spacing: 0.1px;
+  color: var(--ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.finding-when,
+.finding > .q-expansion-item__container > .q-item > .flag-badge {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  margin-top: 1px;
+}
+.finding-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-sm);
+  padding: var(--sp-xs) 0 var(--sp-sm) calc(14px + var(--sp-sm));
+}
+.finding-grid {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: var(--sp-md);
+  row-gap: var(--sp-xs);
+  align-items: baseline;
+}
+.finding-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-xs);
+  min-width: 0;
+}
+.finding-queries {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+  padding-top: var(--sp-xs);
+  border-top: 1px solid var(--hairline-soft);
+}
+
+/* One label column for the whole block, so the numbers line up. Ragged labels
+ * put every value at a different indent, which is most of what made the first
+ * run report unreadable. */
+.kv-list {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: var(--sp-md);
+  row-gap: var(--sp-xxs);
+  align-items: baseline;
+}
+.kv-key {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-feature-settings: normal;
+  color: var(--mute);
+  white-space: nowrap;
+}
+.kv-value,
+.kv-value-slot {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--body);
+  min-width: 0;
+  word-break: break-word;
+}
+
+/* one row per column, not one card — a thirty-column source is the normal case */
+.column-list {
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+/* aligned columns: name · type · role · null · distinct · flags */
+.column-row {
+  display: grid;
+  /* Every row is its own grid, so the tracks must be **content-independent** or
+   * each row sizes its own `auto` columns and nothing lines up with the heading.
+   * Fixed widths for the short facts, fractions for the text. */
+  grid-template-columns:
+    minmax(0, 1.4fr) 84px minmax(0, 1fr)
+    56px 72px minmax(0, 1.8fr);
+  align-items: center;
+  gap: var(--sp-md);
+  padding: var(--sp-xs) var(--sp-md);
+  border-bottom: 1px solid var(--hairline-soft);
+  min-width: 0;
+}
+.column-row > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.column-row:last-child {
+  border-bottom: none;
+}
+.column-row:not(.column-head):hover {
+  background: var(--surface-card);
+}
+.column-row .column-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+/* The rest of the columns, one click away. Outside `.column-list` so the list's
+ * rounded border still closes under the last row it is showing. */
+.column-more {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  padding-top: var(--sp-xs);
+}
+
+/* Nobody has read this source yet, said as a state rather than left to be
+ * inferred from prose that only restates the profile. */
+.not-read {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-sm);
+}
+.not-read-icon {
+  font-size: 18px;
+  color: var(--mute);
+  flex: 0 0 auto;
+}
+
+/* one note per row: the date in the margin, the sentence beside it. Order is
+   the order it was learned, and nothing here is emphasised over anything. */
+.note-row {
+  display: grid;
+  grid-template-columns: 6.5em 1fr;
+  gap: var(--sp-sm);
+  align-items: baseline;
+  padding: 2px 0;
+}
+
+/* the words, once, at the top — the icons below are what the eye tracks */
+.column-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-elevated);
+  border-bottom: 1px solid var(--hairline-strong);
+}
+.column-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: var(--mute);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* a measured value as a small icon plus the number; the tooltip names the fact */
+.fact {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  min-width: 0;
+}
+.fact-icon {
+  font-size: 14px;
+  color: var(--stone);
+  flex: 0 0 auto;
+}
+.fact-value {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-feature-settings: normal;
+  color: var(--body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drift-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-sm);
+  background: var(--warning-soft);
+  border-radius: var(--r-sm);
+  padding: var(--sp-xs) var(--sp-sm);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--body);
+}
+
+/* The most important component in the app. It never collapses, never truncates,
+ * and never sits below the fold of its step (DESIGN.md; EVALUATION.md → Run 5). */
+.ack-banner {
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent-text) 40%, transparent);
+  border-radius: var(--r-md);
+  padding: var(--sp-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+}
+
+.table-preview {
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  overflow: auto;
+  max-height: 320px;
+}
+.table-preview table {
+  border-collapse: collapse;
+  width: max-content;
+  min-width: 100%;
+}
+.table-preview th {
+  background: var(--surface-elevated);
+  text-align: left;
+  padding: var(--sp-xs) var(--sp-sm);
+  border-bottom: 1px solid var(--hairline-strong);
+  position: sticky;
+  top: 0;
+  white-space: nowrap;
+}
+.table-preview th .col-name {
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: var(--mute);
+  display: block;
+}
+.table-preview th .col-dtype {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--stone);
+  display: block;
+  font-feature-settings: normal;
+}
+.table-preview td {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--body);
+  padding: var(--sp-xs) var(--sp-sm);
+  border-bottom: 1px solid var(--hairline-soft);
+  white-space: nowrap;
+  font-feature-settings: normal;
+}
+.table-preview td.numeric {
+  text-align: right;
+}
+.table-preview td .null {
+  color: var(--stone);
+}
+
+/* ── right pane — the copilot ─────────────────────────────────────────────── */
+
+.transcript-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xxs);
+  padding: var(--sp-sm) 0;
+}
+
+/* the copilot's prose, as it writes it — restrained to the type scale */
+.p-markdown > *:first-child {
+  margin-top: 0;
+}
+.p-markdown > *:last-child {
+  margin-bottom: 0;
+}
+.p-markdown p,
+.p-markdown li {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--body);
+}
+.p-markdown p {
+  margin: 0 0 var(--sp-sm);
+}
+.p-markdown ul,
+.p-markdown ol {
+  margin: 0 0 var(--sp-sm);
+  padding-left: var(--sp-lg);
+  list-style: disc;
+}
+.p-markdown ol {
+  list-style: decimal;
+}
+.p-markdown strong {
+  font-weight: 500;
+  color: var(--ink);
+}
+.p-markdown h1,
+.p-markdown h2,
+.p-markdown h3,
+.p-markdown h4 {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  color: var(--ink);
+  margin: var(--sp-md) 0 var(--sp-xs);
+}
+.p-markdown code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-feature-settings: normal;
+  color: var(--ink);
+}
+.p-markdown pre {
+  background: var(--surface-card);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  padding: var(--sp-md);
+  overflow-x: auto;
+}
+.p-markdown a {
+  color: var(--accent-text);
+}
+
+/* ── one tool call, as a card ──────────────────────────────────────────────
+ *
+ * The call and its result are one act and are one card — drawn as two, every
+ * transcript carried a bare `result` line whose only clue about what it was the
+ * result *of* was the row above it.
+ *
+ * Shut, the head answers three questions in one line: which tool (icon + name),
+ * what about (the subject, in ink), and where it got to (right-aligned). It was
+ * a bare line of mono that ran `describe_source(source='shipments', portia_dir=
+ * '.portia')` together in one colour, where the only part anyone was reading was
+ * the tool and its object.
+ *
+ * Kind, never rank: every card is the same fill, the same border and the same
+ * icon size whatever the tool did. Only `error` takes a colour. */
+.tool-card {
+  /* One notch up the ladder from the pane, which is what makes it read as a
+   * card in dark mode; in light the hairline is doing that job, exactly as
+   * DESIGN.md's elevation table says. */
+  background: var(--surface-elevated);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  /* The head and the body carry the padding, not the card: the head is a hit
+   * target and has to fill the card's width. */
+  padding: 0;
+  transition: border-color 120ms ease-out;
+}
+.tool-card:hover {
+  border-color: var(--hairline-strong);
+}
+
+/* **The head's own rules, and the selector has to be compound to win.**
+ *
+ * Two things about Quasar make this fiddly, and both bit on the first build:
+ *
+ * 1. `.p-expansion .q-expansion-item__container > .q-item` — 24px tall, no
+ *    padding — has *exactly* the same specificity as a descendant
+ *    `.tool-card ...` version and sits later in this file, so it won. The head
+ *    came out 24px with its content jammed against the top edge. `.p-expansion`
+ *    is on the same element, so the fix is to compound rather than to nest:
+ *    `.p-expansion.tool-card` is one class more specific and cannot be lost to
+ *    source order. Same shape of bug as `add-section-toggle`, one rule further
+ *    down — worth remembering as a *kind* of bug, not a one-off.
+ * 2. A custom `header` slot puts its content **directly inside `.q-item`**, not
+ *    inside a `.q-item__section--main`. So the row's gap and vertical centring
+ *    have to be set here; the `.p-disclosure` rule for that section matches
+ *    nothing on these rows, and without this the icon sat flush against the
+ *    tool name with no space at all between them. */
+.p-expansion.tool-card .q-expansion-item__container > .q-item,
+.p-expansion.thinking-row .q-expansion-item__container > .q-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  min-height: 0;
+}
+.p-expansion.tool-card .q-expansion-item__container > .q-item {
+  /* 8px either side of a 15px icon and 12px mono: a ~34px head, which is a card
+   * you can hit rather than a line you can. */
+  padding: var(--sp-sm) var(--sp-md);
+  gap: var(--sp-sm);
+  /* **One line while the three answers fit, two when they don't.** The tool
+   * name, the subject and the state are each `nowrap` and none may be dropped:
+   * which tool, about what, and where it got to are the whole of what a shut
+   * card says. Below ~380px they stop fitting side by side, and the choice is
+   * between wrapping and painting `queued` outside the card — which is what a
+   * `nowrap` row did. Truncating instead was tried and is worse: flex shrinks
+   * proportionally rather than in priority order, so *every* candidate lost a
+   * sub-pixel and ellipsed a character, and the head went to `apply_s…` at a
+   * width where there was room for the word. */
+  flex-wrap: wrap;
+  row-gap: var(--sp-xxs);
+  min-width: 0;
+}
+.p-expansion.thinking-row .q-expansion-item__container > .q-item {
+  padding: var(--sp-xs) 0;
+}
+/* The body lines up under the head rather than under the border. */
+.p-expansion.tool-card .q-expansion-item__content {
+  padding: 0 var(--sp-md);
+}
+/* A folded run of finished calls. It carries `.tool-card` too, so it inherits
+ * the head geometry, the hover and the body padding — it *is* a card, holding
+ * cards, and giving it its own box would be a second card style for the same
+ * kind of thing.
+ *
+ * **No treatment that says "these are less important".** The run is folded
+ * because it is long, not because it went well, and a dimmer or smaller row
+ * would be the pane ranking a stretch of work it knows nothing about
+ * (DESIGN.md → colour and prominence communicate kind, never rank). The only
+ * difference from a single card is the dashed edge, which says the same thing
+ * `--queued` uses it for: what is inside is not one thing. */
+.tool-group {
+  border-style: dashed;
+}
+/* Nested cards need air from the group's own head and from each other, and the
+ * gap is the only thing separating them — they keep their own borders, so a
+ * folded run opens onto exactly what it would have drawn unfolded. */
+.tool-group-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+  padding-bottom: var(--sp-md);
+}
+
+/* The call in flight is the one thing on screen that is *happening*, so its
+ * edge takes the accent — the same statement the composer's focus ring makes,
+ * for the same reason: this is where the app is right now. */
+.tool-card--running {
+  border-color: color-mix(in srgb, var(--accent-primary) 45%, transparent);
+}
+.tool-card--queued {
+  border-style: dashed;
+}
+.tool-card--errored {
+  border-color: color-mix(in srgb, var(--error) 45%, transparent);
+}
+.tool-card .tool-card-icon {
+  font-size: 15px;
+  color: var(--mute);
+  flex: 0 0 auto;
+}
+.tool-card .tool-card-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-feature-settings: normal;
+  color: var(--ink);
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+/* What the call is *about*. Its own treatment, because on a pane you are
+ * scanning it is the word that tells one `profile_source` from the next — and
+ * for that reason it does **not** shrink with the rest of the line: it is
+ * capped at 45% of the head and the arguments beside it are what give way. It
+ * came out as `shipme…` next to a full `right=orders · on=['order_id']`, which
+ * is the head truncating the half a reader is actually using. */
+.tool-card .tool-card-subject {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-feature-settings: normal;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-xs);
+  padding: 0 var(--sp-xs);
+  white-space: nowrap;
+  flex: 0 0 auto;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Everything else the call carried. It is the first thing to give way: the pane
+ * has a 260px floor and the tool and its subject are what must survive it.
+ *
+ * **`flex-basis: 0`, and that is what makes it give way rather than push.** On
+ * `auto` its base size is the whole argument string — a few thousand pixels on
+ * an `apply_sql` — which is the width the row is laid out at before anything
+ * shrinks, so on a wrapping head it was the args that took a second line while
+ * the state stayed behind. From zero it only ever takes the space the other
+ * three left, and truncates into it. */
+.tool-card .tool-card-args {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-feature-settings: normal;
+  color: var(--mute);
+  min-width: 0;
+  flex: 1 1 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Where the call got to. `queued` and `running` are two things happening, not
+ * two rungs of a ladder — same size, same weight, neither coloured against the
+ * other. A finished card says how much came back, which is a count. */
+.tool-state {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: var(--sp-sm);
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: var(--mute);
+  white-space: nowrap;
+}
+.tool-state--running {
+  color: var(--accent-text);
+}
+.tool-state--error {
+  color: var(--error);
+}
+.tool-state .tool-state-icon {
+  font-size: 13px;
+  color: var(--stone);
+}
+/* How long the call has been running, or took. In the state slot's own type
+ * and one shade quieter than the word beside it, so it is read only when you
+ * go looking for it; tabular figures so a ticking number does not jitter the
+ * head. A count, never a verdict: nothing sizes or colours by it. */
+.tool-state .tool-clock {
+  color: var(--stone);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The in-flight half of the app's motion (DESIGN.md → Motion): a fade that
+ * says one thing — this is happening now. The other half is `p-enter`, below.
+ *
+ * **`--pulse-phase` is what makes it one pulse rather than many.** NiceGUI
+ * replaces a refreshable's elements, so every event of a live exchange destroys
+ * this dot and builds another — and a CSS animation on a new element starts at
+ * 0%, snapping back to full opacity at whatever rate the stream arrives.
+ * `components.pulse` states where in the beat the replacement should start, as
+ * a negative delay, so a run of rebuilds reads as one continuous pulse.
+ *
+ * The fallback is `0s`, which is the old behaviour: a dot drawn by something
+ * that has not been given a phase still animates, it just starts at the top. */
+.tool-pulse {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: var(--r-full);
+  background: var(--accent-primary);
+  animation: p-pulse 1.4s ease-in-out infinite;
+  animation-delay: var(--pulse-phase, 0s);
+}
+
+@keyframes p-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+/* ── arrival ──────────────────────────────────────────────────────────────
+ *
+ * The entrance half of the app's motion (DESIGN.md → Motion, reversed
+ * 2026-09-05): a thing that was not on screen fades in and settles 4px, once.
+ * The old rule here was "no entry animation, ever", and its reason was
+ * mechanical — NiceGUI replaces a refreshable's elements, so a CSS animation
+ * on new elements re-fired on every element on every event. `motion.js` is
+ * what removed that reason: the server keys what arrives (`data-enter`, via
+ * `components.enters`/`enter_slot`), the client remembers which keys it has
+ * seen, and only a first appearance gets the class below. A rebuilt element
+ * stays exactly still.
+ *
+ * One entrance, at one size and one pace, for everything that arrives — a tool
+ * call, a chart, a table on the canvas, a file landing in the tree. Kind,
+ * never rank: nothing arrives bigger, brighter or sooner for mattering more,
+ * and a stagger orders by arrival alone. The duration is mirrored in
+ * `motion.js` (DURATION_MS), which is what removes the class afterwards.
+ *
+ * `.p-enter` is the keyed wrapper for content with no single element to key —
+ * `display: contents`, so the transcript's stack gap runs between the rows
+ * inside it as if it were not there, and the animation lands on its children
+ * (a box that generates no box cannot animate). `backwards` fill is what makes
+ * a stagger read as a sequence rather than a flicker: a delayed element waits
+ * hidden instead of appearing and then dipping. */
+.p-enter {
+  display: contents;
+}
+
+@keyframes p-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+.p-entering,
+.p-enter.p-entering > * {
+  animation: p-enter 220ms cubic-bezier(0.2, 0.7, 0.3, 1) backwards;
+  animation-delay: var(--enter-delay, 0s);
+}
+
+/* The statement survives — the thing is on screen — and only the movement
+ * goes, the same trade the canvas's flow makes. */
+@media (prefers-reduced-motion: reduce) {
+  .p-entering,
+  .p-enter.p-entering > * {
+    animation: none;
+  }
+}
+
+/* Hover eases on every surface a pointer crosses, at `artifact-row`'s 120ms —
+ * that rule was written for one pane ("a list you run the pointer down") and
+ * the reason never stopped at the tree's edge. An instant fill on each row you
+ * pass on the way somewhere else is flicker, not feedback. Colour only:
+ * background, border, ink. Nothing here travels. */
+.btn.q-btn,
+.pane-tab,
+.menu-row,
+.index-row,
+.option-row,
+.model-head,
+.model-step,
+.model-row {
+  transition:
+    background-color 120ms ease-out,
+    border-color 120ms ease-out,
+    color 120ms ease-out;
+}
+
+/* Opened: what was asked, then what came back. Two labelled sections rather
+ * than one dump, because they are two different things and the arguments are a
+ * decision the copilot made. */
+/* The `min-width: 0` on both is what lets a column that is *told* to be the
+ * card's width actually be it: a flex item's automatic minimum is its content,
+ * and a `code-block` holding one unbroken 900-character line has a content
+ * minimum the width of the line. Zero hands the constraint down to the block,
+ * which scrolls — which is what its `overflow-x: auto` was always for. */
+.tool-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-md);
+  padding: 0 0 var(--sp-md);
+  min-width: 0;
+}
+.tool-card-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+  min-width: 0;
+}
+.tool-card-section-label {
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+  color: var(--mute);
+}
+
+/* ── the queue ─────────────────────────────────────────────────────────────
+ *
+ * The model asks for several tools in one message and the results come back one
+ * at a time. This is the report of that: what is running, and what is lined up
+ * behind it. It exists only while something is in flight — there is no idle
+ * state — and it answers "is this hung?" without scrolling back up through the
+ * evidence to find the card that never returned. */
+.tool-queue {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-sm);
+  padding: var(--sp-sm) var(--sp-md);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--surface-elevated);
+}
+.tool-queue-now {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-feature-settings: normal;
+  color: var(--ink);
+}
+.tool-queue-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-xs);
+  min-width: 0;
+}
+/* Queued calls, in arrival order. Nothing here is sorted or sized by anything
+ * measured — the SDK decides what runs next, and this reports it. */
+.tool-queue-chip {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-feature-settings: normal;
+  color: var(--mute);
+  background: var(--surface);
+  border: 1px dashed var(--hairline-strong);
+  border-radius: var(--r-xs);
+  padding: 1px var(--sp-xs);
+  white-space: nowrap;
+}
+
+/* ── thinking ──────────────────────────────────────────────────────────────
+ *
+ * One quiet line, shut. The reasoning is worth keeping — it is why a question
+ * got asked the way it did — and it is not what the pane is for: printed in
+ * full it pushed the copilot's own sentences, and the two components the loop
+ * stops on, off the bottom of the screen.
+ *
+ * While the exchange is live the dots fade in turn. It is the one row that has
+ * to say *something is happening* in a pane that can otherwise sit still for a
+ * minute mid-profile. */
+.thinking-row .thinking-word {
+  font-size: 12px;
+  letter-spacing: 0.2px;
+  color: var(--mute);
+}
+.thinking-row .thinking-dots {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 1px;
+}
+.thinking-row .thinking-dots span {
+  width: 3px;
+  height: 3px;
+  border-radius: var(--r-full);
+  background: var(--stone);
+}
+/* Only the live row animates. A finished one keeps its three dots as the
+ * ellipsis they are — the word without them read as a heading. */
+.thinking-row--live .thinking-dots span {
+  background: var(--mute);
+  animation: p-pulse 1.4s ease-in-out infinite;
+  animation-delay: var(--pulse-phase, 0s);
+}
+/* The stagger is **subtracted** from the phase rather than added to it, so the
+ * delay stays negative whatever the phase is. Added, a phase of -0.1s would put
+ * the third dot at +0.3s — a third of a second of nothing before the ellipsis
+ * starts, on the row whose whole job is to say something is happening. */
+.thinking-row--live .thinking-dots span:nth-child(2) {
+  animation-delay: calc(var(--pulse-phase, 0s) - 0.2s);
+}
+.thinking-row--live .thinking-dots span:nth-child(3) {
+  animation-delay: calc(var(--pulse-phase, 0s) - 0.4s);
+}
+
+/* A disclosure whose header is drawn rather than labelled. Quasar's `header`
+ * slot replaces the caret along with everything else, so the caret is ours; it
+ * turns on the expanded class, which is a swap and not a motion.
+ *
+ * **A custom `header` slot has no `.q-item__section--main`** — its content lands
+ * as direct children of `.q-item`. A rule for that section stood here doing
+ * nothing, and the row it was supposed to lay out had no gap at all: the tool
+ * icon sat flush against the tool name. The layout belongs on the `.q-item`,
+ * which is what the two rules below now do. */
+.p-disclosure .q-expansion-item__container > .q-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  padding: var(--sp-xs) 0;
+  min-height: 0;
+}
+/* Quasar's `header` slot turned out to replace the header's *content* and not
+ * its toggle, so the row came out with two carets — ours at the name and
+ * Quasar's out at the right margin. Ours stays: a disclosure marker belongs
+ * against the thing it opens, not at the far end of a line whose length depends
+ * on how long the arguments were. */
+.p-disclosure .q-expansion-item__toggle-icon {
+  display: none;
+}
+.p-disclosure-caret {
+  font-size: 14px;
+  color: var(--stone);
+  flex: 0 0 auto;
+}
+.q-expansion-item--expanded > .q-expansion-item__container .p-disclosure-caret {
+  transform: rotate(90deg);
+}
+
+.code-block {
+  background: var(--surface-card);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  padding: var(--sp-md);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--body);
+  overflow-x: auto;
+  white-space: pre;
+  font-feature-settings: normal;
+}
+
+.p-expansion .q-expansion-item__container > .q-item {
+  padding: 0;
+  min-height: 24px;
+  color: var(--mute);
+  font-size: 11px;
+  letter-spacing: 0.2px;
+}
+/* **The caret leads.** Quasar's default puts it at the far right of the row,
+ * which on `→ describe_source(source='shipments')` is a marker half a pane away
+ * from the word it opens, at a distance that depends on how long the arguments
+ * were. `add-data`'s folding section had already moved its own for the same
+ * reason; this is that decision made once, for every disclosure in the app. */
+.p-expansion .q-item__section--side {
+  order: -1;
+  padding-right: var(--sp-xs);
+  padding-left: 0;
+  min-width: 0;
+  color: var(--mute);
+}
+.p-expansion .q-expansion-item__content {
+  padding-top: var(--sp-xs);
+}
+/* **What an opened disclosure holds is as wide as the disclosure, and no wider.**
+ *
+ * NiceGUI's expansion body is a flex column with `align-items: flex-start`, so
+ * every child is sized to *its own content* rather than to the pane. A tool
+ * card holding a page of SQL — `white-space: pre`, and so 6000px of min-content
+ * — therefore drew a 6000px-wide body inside a 418px card, and the evidence ran
+ * out through the card's right edge and across the pane. The `code-block`'s own
+ * `overflow-x: auto` could not help: it was never asked to be narrower than its
+ * content. Stretching is the fix, and it belongs here rather than on
+ * `.tool-card-body`, because every disclosure in the app has the same body. */
+.p-expansion .nicegui-expansion-content {
+  align-items: stretch;
+}
+
+/* ── the two cards the loop stops on ───────────────────────────────────────
+ *
+ * Both open on a named head — an icon, what kind of moment this is, and a pill
+ * saying what it wants. They used to open on a lone mute caption, which reads
+ * as a note *about* the thing under it rather than as the thing itself.
+ *
+ * The pill takes the accent on a question and stays uncoloured on a write. Kind
+ * and not rank: a question is the loop waiting on a sentence from you, a write
+ * is the loop offering to make something durable, and neither is worse than the
+ * other. */
+.decision-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+}
+.decision-head-icon {
+  font-size: 16px;
+  color: var(--mute);
+  flex: 0 0 auto;
+}
+.decision-head-title {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  color: var(--ink);
+}
+.decision-pill {
+  margin-left: auto;
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: var(--mute);
+  background: var(--surface-elevated);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-full);
+  padding: 1px var(--sp-sm);
+  white-space: nowrap;
+}
+/* The accent as a *foreground* on a soft wash — the accent-badge job it is
+ * already allowed, not a fourth place the solid fill appears. */
+.decision-pill--accent {
+  color: var(--accent-text);
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent-primary) 35%, transparent);
+}
+
+/* The only element on screen with a live accent border, so the eye finds it
+ * without a colour-coded alarm. Never a modal. */
+.question-form {
+  background: var(--surface-card);
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 60%, transparent);
+  border-radius: var(--r-md);
+  padding: var(--sp-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-md);
+}
+
+/* The options, ruled off from each other inside one box rather than floating as
+ * separate cards. Four bordered rectangles stacked with a gap read as four
+ * things to consider; one list reads as one question. */
+.option-list {
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: var(--surface-elevated);
+}
+
+.option-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-sm);
+  padding: var(--sp-sm) var(--sp-md);
+  border-top: 1px solid var(--hairline-soft);
+  cursor: pointer;
+}
+.option-row:first-child {
+  border-top: none;
+}
+.option-row:hover {
+  background: var(--surface-card);
+}
+.option-row--selected {
+  background: var(--accent-soft);
+}
+
+.option-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xxs);
+  min-width: 0;
+}
+
+/* The question and its option descriptions are markdown — the copilot writes a
+ * column name as `code`, and a plain label showed the backticks. The wrappers
+ * are what keep the type: a markdown paragraph is `body-md` by default, and
+ * these two are a heading and a caption-weight line. */
+.question-head .p-markdown p,
+.question-head .p-markdown {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  line-height: 1.3;
+  color: var(--ink);
+  margin: 0;
+}
+.option-description .p-markdown p {
+  color: var(--mute);
+  margin: 0;
+}
+.option-description .p-markdown p + p {
+  margin-top: var(--sp-xs);
+}
+
+/* Whether an option is picked, and how many may be — a circle for one, a box for
+ * several. Selection used to be a border colour and a wash, which is the same
+ * signal a focused input uses and is invisible at a glance on a list of four. */
+.option-mark {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  margin-top: 3px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--r-full);
+  background: var(--surface);
+}
+.option-row--multi .option-mark {
+  border-radius: var(--r-xs);
+}
+.option-row--selected .option-mark {
+  border-color: var(--accent-primary);
+  background: var(--accent-primary);
+  box-shadow: inset 0 0 0 3px var(--surface);
+}
+.option-row--multi.option-row--selected .option-mark {
+  box-shadow: inset 0 0 0 2px var(--surface);
+}
+
+/* The free-text box is a peer of the options, not a second form. It stays
+ * always — typing an objection is a first-class action — and reads quietly
+ * until it is focused. */
+.answer-field .q-field__control {
+  background: transparent;
+}
+
+.write-confirm {
+  background: var(--surface-card);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--r-md);
+  padding: var(--sp-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-md);
+}
+
+.write-confirm-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xxs);
+}
+
+/* What settles the decision, ruled off from what is being decided. The same
+ * footer in both components, because both are the loop stopping for a human and
+ * two that had to be kept looking alike would drift. Right-aligned: the eye
+ * leaves a form at its end, and that is where the thing that closes it goes. */
+.decision-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-sm);
+  padding-top: var(--sp-md);
+  border-top: 1px solid var(--hairline-soft);
+  /* **Wraps rather than truncates**, the same trade the tool card's head makes
+   * and for the same reason. A catalog write offers a third action whose label
+   * names the tool it would stop asking about — that scope is the honest thing
+   * to say and it is long, so on a narrow pane the row becomes two lines. The
+   * alternative was a shorter label, and every short one was ambiguous about
+   * whether it meant this write or this tool. Nothing here may be dropped or
+   * ellipsed: these are the buttons the loop is stopped on. */
+  flex-wrap: wrap;
+  row-gap: var(--sp-xs);
+}
+
+/* The right pane's tab strip. The active tab takes the accent as *foreground*
+ * plus a rule beneath it — a selected label, which the accent is allowed to be.
+ * No soft fill: that is reserved for the selected step card, the selected
+ * artifact row and the focused input, and nowhere else. */
+.pane-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface);
+}
+
+.pane-tab {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  padding: var(--sp-md) var(--sp-lg);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.1px;
+  color: var(--mute);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  white-space: nowrap;
+}
+.pane-tab:hover {
+  color: var(--body);
+}
+.pane-tab--active {
+  color: var(--accent-text);
+  border-bottom-color: var(--accent-primary);
+}
+
+/* A turn is live here, or waiting on you. Kind, not rank: the waiting dot is
+ * the accent because it is asking for you, not because it is worse. */
+.pane-tab-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: var(--mute);
+  flex: 0 0 auto;
+}
+.pane-tab-dot--waiting {
+  background: var(--accent-primary);
+}
+
+/* What the human said, opening an exchange — a block on the elevated surface,
+ * which is a statement of *kind* (who said this) and never of rank. It was a
+ * rule across the pane with the message set exactly like the copilot's reply
+ * underneath it; a horizontal line says "new section", and what actually
+ * separates one exchange from the next is that a message has an author.
+ *
+ * **It named four tokens that do not exist** (`--space-sm`, `--space-xs`,
+ * `--c-hairline`), so it had no padding, no gap, and a border-top that fell back
+ * to `currentColor` — a body-coloured rule, heavier than any divider in the app,
+ * above every message in the chat. */
+.prompt-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+  background: var(--surface-elevated);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  padding: var(--sp-sm) var(--sp-md);
+  margin-top: var(--sp-md);
+}
+
+/* The first exchange has nothing above it to stand off from. */
+.prompt-row:first-child {
+  margin-top: 0;
+}
+
+.exchange-banner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xxs);
+  background: var(--surface-elevated);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  padding: var(--sp-sm) var(--sp-md);
+  min-height: 0;
+}
+
+/* Which sources the running turn is about. Capped at a few lines and scrolled,
+   because the turn itself is what you are watching and the batch it names is a
+   reference you glance at — a twenty-three source list given its natural height
+   pushes the thing you are waiting for off the screen. */
+.exchange-banner-names {
+  max-height: var(--banner-names-cap);
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.chat-ended {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-sm);
+  padding-top: var(--sp-md);
+  border-top: 1px solid var(--hairline-strong);
+}
+
+/* ── the composer ─────────────────────────────────────────────────────────── */
+
+/* **One box, not four stacked rows.** The field, what the message will be spent
+ * on, and the button that sends it were three controls in a column under a rule,
+ * which is the same information laid out as a form to fill in rather than a
+ * place to type. The box is the control here: the textarea is borderless inside
+ * it and the settings and the send sit on a bar along its foot.
+ *
+ * The focus wash lands on the box rather than the field — one of the accent's
+ * three jobs, and the whole composer is what is focused. */
+.composer {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-elevated);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  /* A size container, so the effort control below can switch layout on the
+   * *pane's* width — a media query only knows the window's. Safe here because
+   * the composer is a block whose width is the pane's, never its content's. */
+  container-type: inline-size;
+}
+.composer:focus-within {
+  border-color: var(--accent-primary);
+}
+
+.composer-field .q-field__control {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: var(--sp-sm) var(--sp-md) 0;
+  min-height: 0;
+}
+.composer-field .q-field__control:before,
+.composer-field .q-field__control:after {
+  display: none;
+}
+.composer-field textarea {
+  color: var(--body);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  /* Long enough to be worth typing into, short enough to leave the transcript
+   * the pane. `autogrow` takes it from here. */
+  max-height: 200px;
+}
+.composer-field textarea::placeholder {
+  color: var(--stone);
+  opacity: 1;
+}
+
+.composer-bar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--sp-sm);
+  padding: var(--sp-xs) var(--sp-sm) var(--sp-sm);
+  min-width: 0;
+}
+.composer-spend,
+.composer-send,
+.composer-meta-facts {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  min-width: 0;
+}
+/* What is spent gives way; what sends never does. This pane's floor is 260px
+ * and the model name is the longest string in the bar — left to share the room
+ * evenly, it wrapped the word Stop down the middle.
+ *
+ * **It wraps rather than truncating**, because before a chat is open it holds
+ * five effort segments as well as the model, which is wider than a 400px pane
+ * however hard the two are squeezed. Clipped, the segments overprinted the
+ * model name; on their own line they are the same control, one row lower. */
+.composer-spend {
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  row-gap: var(--sp-xs);
+}
+.composer-spend > * {
+  min-width: 0;
+}
+.composer-spend .t-caption {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.composer-send {
+  flex: 0 0 auto;
+}
+/* The preflight line ("loading qwen3:8b…") reports; it does not reflow the bar
+ * it reports into. Capped, because it shares the bar with the spend controls
+ * and a long model name would squeeze them mid-wait. */
+.composer-send .t-caption {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The model picker sits *inside* the box, so it drops its own. A bordered field
+ * on a bordered bar inside a bordered composer is three boxes for one word.
+ * 220, up from 170: with the filter input no longer reserving width the cap is
+ * what actually limits a local model's name, and `deepseek-r1:1.5b · 2.2 GB`
+ * needs more than 170 at the mono 12px. The row still caps it lower on a
+ * narrow pane. */
+.composer-bar .p-field {
+  max-width: 220px;
+}
+.composer-bar .p-field .q-field__control {
+  background: transparent;
+  border-color: transparent;
+  padding: 0 var(--sp-xs);
+  min-height: 24px;
+}
+.composer-bar .p-field .q-field__native {
+  font-size: 11px;
+  color: var(--mute);
+}
+.composer-bar .p-field .q-field__append {
+  padding-left: 0;
+}
+.composer-bar .p-field.q-field--focused .q-field__control {
+  background: var(--accent-soft);
+}
+
+/* What the chat has cost and how full it is, under the box it belongs to.
+ * Counts, never a verdict — nothing here says a chat is too long or too
+ * expensive, which would need a goal this panel has no way to know. */
+.composer-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-sm);
+  min-width: 0;
+}
+
+/* ── misc ─────────────────────────────────────────────────────────────────── */
+
+.stack-xs > * + * {
+  margin-top: var(--sp-xs);
+}
+.stack-sm > * + * {
+  margin-top: var(--sp-sm);
+}
+.stack-md > * + * {
+  margin-top: var(--sp-md);
+}
+.stack-lg > * + * {
+  margin-top: var(--sp-lg);
+}
+
+.row-gap-sm {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  flex-wrap: wrap;
+}
+.row-gap-xs {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  flex-wrap: wrap;
+}
+
+.q-notification {
+  border-radius: var(--r-md);
+}
+
+/* Draggable dividers: between the three panes, and between graph and report.
+ * A hairline at rest — it is a pane edge first and a control second — and it
+ * takes the accent only while you are actually dragging it. */
+.p-splitter .q-splitter__separator {
+  background: var(--hairline);
+}
+.p-splitter .q-splitter__separator:hover,
+.p-splitter.q-splitter--active .q-splitter__separator {
+  background: var(--accent-primary);
+}
+.p-splitter .q-splitter__separator > div {
+  opacity: 0;
+}
+.p-splitter .q-splitter__panel {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.q-spinner {
+  color: var(--mute);
+}
+
+/* Quasar's dialog scales in from `scale(0)`, driven by transition classes that
+ * are swapped on the next animation frame — so a tab that isn't animating
+ * shows an open overlay with nothing visible in it. Those classes stay dead.
+ * What changed (2026-09-05, DESIGN.md → Motion) is what replaces them: a fade
+ * portia owns, as a keyframe animation rather than a class swap, so it depends
+ * on no frame firing — if animations never run, the panel's natural state is
+ * fully visible, which is the failure mode the original fix was for. */
+.q-dialog .q-transition--scale-enter-from,
+.q-dialog .q-transition--scale-enter-active,
+.q-dialog .q-transition--scale-leave-active,
+.q-dialog .q-transition--scale-leave-to {
+  transform: none !important;
+  opacity: 1 !important;
+  transition: none !important;
+}
+.q-dialog__inner > div {
+  animation: p-dialog 160ms ease-out;
+}
+/* A dialog hangs from a fixed top edge rather than floating at the centre
+ * (DESIGN.md → Layout stability). Quasar centres vertically, so any change of
+ * height moved the whole panel half the difference — switching Settings
+ * sections slid the row just clicked 73px up the screen, measured. Anchored,
+ * a panel that grows grows downward and the title, the section list and the
+ * control under the pointer stay exactly where they are. */
+.q-dialog__inner--minimized {
+  align-items: flex-start;
+  padding-top: 9vh;
+}
+@keyframes p-dialog {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .q-dialog__inner > div {
+    animation: none;
+  }
+}
+
+/* transient overlays are the one place a shadow is allowed */
+.q-dialog__inner > div {
+  background: var(--surface);
+  border-radius: var(--r-lg);
+}
+.q-menu,
+.q-dialog__inner > div {
+  background: var(--surface);
+  color: var(--body);
+}
+.q-menu .q-item {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--body);
+}
+.q-tooltip {
+  background: var(--surface-card);
+  color: var(--body);
+  border: 1px solid var(--hairline);
+  font-size: 11px;
+  border-radius: var(--r-sm);
+}
+
+/* The zoom readout between the − and + buttons. Written by `canvas.js`, because
+ * the zoom level is client state — see that file's header. Tabular width so the
+ * buttons do not shift as it goes 100% → 80%. */
+.zoom-level {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-feature-settings: "tnum";
+  color: var(--mute);
+  min-width: 38px;
+  text-align: center;
+}
+
+/* The canvas header wraps at its one group boundary or not at all (DESIGN.md →
+ * Layout stability). Flat, a pane drag re-slotted its controls one at a time —
+ * Recenter changed lines while Reset stayed, moving the canvas 32px per
+ * re-slot. Each side is now a unit; when the pane is too narrow for both, the
+ * view group's buttons drop their labels first (the tooltips already carry the
+ * names), and only past that does the group move to a second line, whole. */
+.graph-header-side {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.view-controls {
+  flex-wrap: nowrap;
+}
+@container (max-width: 560px) {
+  /* Collapse the labels with `font-size: 0`, not `display: none`: Quasar owns
+   * the label span's `display` with a rule specificity `!important` cannot
+   * beat, but `font-size` and the icon's margin are ours. The button becomes
+   * its glyph, the tooltip already carries the name. */
+  .view-controls .btn .q-btn__content > .block {
+    font-size: 0 !important;
+    margin: 0 !important;
+  }
+  .view-controls .btn .q-icon.on-left {
+    margin-right: 0;
+  }
+}
+
+/* A generated .sql that no longer matches its spec. Drift, not a blocking zero:
+ * nothing is broken, the file is describing an older version of the decision
+ * record. Same colour the drift badge uses, for the same reason. */
+.stale-banner {
+  background: var(--warning-soft);
+  border: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
+  border-radius: var(--r-md);
+  padding: var(--sp-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+}
+
+/* The knowledge explorer's canvas. vis-network draws into it and owns
+   everything inside; all this does is give it a surface and a border that
+   matches the panes around it. */
+.p-knowledge {
+  width: 100%;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+/* A picker row for a folder with nothing readable under it. Dimmed and
+   un-clickable, because it is not a thing you can pick — a *kind*, which is
+   what prominence is allowed to say (DESIGN.md), and not a rank. */
+.picker-row.is-empty {
+  cursor: default;
+  opacity: 0.45;
+}
+.picker-row.is-empty:hover {
+  background: transparent;
+}
+
+/* The eligible files under the folder you are looking at, listed before you
+   commit to it: the count said how many and never which. */
+.picker-files {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xxs);
+  padding: var(--sp-sm) var(--sp-md);
+  border-top: 1px solid var(--hairline-soft);
+}
+.picker-file {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+}
+.picker-file-icon {
+  font-size: 14px;
+  color: var(--ash);
+}
+.picker-file-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--mute);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The indexing tab's source list: what portia knows about each file, and what
+   you can do next. Three states, and the middle one — profiled but never read —
+   is the one a two-state list cannot show. Colour says *kind*, never rank: a
+   source nobody has read is not worse than one that has been, it is at a
+   different point in the same sequence (DESIGN.md). */
+/* The header is a flex column that is allowed to *shrink*, which is what stops
+   a long list running off the bottom of the pane. `flex: 0 1 auto` with
+   `min-height: 0` means it keeps its natural height while there is room and
+   gives way when there is not — no breakpoint, no measured height, and nothing
+   that has to know how many sources a project has. The transcript below it
+   keeps `flex: 1 1 auto` and is unaffected. */
+/* The banner state: its natural height, and it does not give. The banner is
+   bounded already — the batch of names is capped and scrolls — so there is
+   nothing here worth squeezing, and squeezing it is what put the source names
+   through the transcript underneath. `overflow: hidden` is the backstop: a flex
+   item shrunk below its content still *paints* that content, so without it the
+   failure is silent and reads as a rendering bug rather than a layout one. */
+.index-header {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  overflow: hidden;
+}
+
+/* The list state, which is the one that has to give: `min-height: 0` lets the
+   header go below its content height so the rows inside can scroll rather than
+   run off the bottom of the pane. */
+.index-header--list {
+  flex: 0 1 auto;
+  min-height: 0;
+}
+
+/* Only the rows scroll. The select-all row above and the actions below stay
+   put, because the actions are where the free half and the paid half are told
+   apart, and a control you have to scroll to find is one you press by accident.
+
+   So the list is the part that gives: `min-height: 0` lets it shrink past its
+   content whenever the fixed rows would otherwise be pushed out of the pane.
+   A hard floor here was tried first and was wrong in exactly that way — at a
+   620px window it held its four rows and shoved the model picker 13px off the
+   bottom, which is the bug this whole change is about, moved down one element. */
+.index-list-scroll {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: var(--index-list-cap);
+}
+.index-select-all {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  flex: 0 0 auto;
+}
+.index-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.index-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  padding: var(--sp-xs) var(--sp-sm);
+  border-bottom: 1px solid var(--hairline-soft);
+}
+.index-row:last-child {
+  border-bottom: none;
+}
+.index-row-icon {
+  font-size: 15px;
+  color: var(--ash);
+}
+.index-row.is-interpreted .index-row-icon {
+  color: var(--success);
+}
+.index-row.is-unread .index-row-icon {
+  color: var(--warning);
+}
+.index-row-name {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.index-row-state {
+  font-size: 11px;
+  color: var(--mute);
+}
+/* A built table's row in the indexing list: the compiled model's glyph beside
+ * the name. Kind, never rank — the same size as the state icon, in the same
+ * quiet colour, and the row is not moved for it. */
+.index-row-kind {
+  font-size: 14px;
+  color: var(--mute);
+}
+.index-row-stale {
+  font-size: 11px;
+  color: var(--warning);
+}
+.index-actions {
+  display: flex;
+  gap: var(--sp-sm);
+  margin-top: var(--sp-sm);
+  flex: 0 0 auto;
+}
+
+/* What the paid action will spend, on the same row as what it costs. */
+.index-cost {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-md);
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+
+/* ---------------------------------------------------------------------------
+ * The middle pane's tab strip (docs/VISUALIZATION.md §3).
+ *
+ * It reuses `.pane-tabs` and `.pane-tab` from the transcript rather than
+ * growing a third tab style — §3.1 turned down the narrower design partly for
+ * introducing one. What is added here is what a *chart* tab has that a
+ * transcript tab does not: an icon saying which kind of tab it is, a name that
+ * can be long enough to need truncating, and a close control.
+ *
+ * The icon names a **kind** and never a rank (DESIGN.md): tab zero is the
+ * pipeline, a chart is a chart, a failed one failed. None of the three is drawn
+ * as better than another, nothing here scales with a number, and the strip is
+ * in the order the charts were drawn rather than in any order we chose.
+ * ------------------------------------------------------------------------- */
+.chart-strip {
+  /* Sideways when there are more tabs than fit. Scrolling is the honest
+   * failure: shrinking every tab until the names are unreadable makes a full
+   * strip useless, and dropping tabs off the end hides work the copilot did.
+   * Nothing caps how many charts may exist (§2.7). */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+/* A chart tab gives way before the strip scrolls. At the transcript's padding
+ * five tabs were 1037px in a 740px pane, so the fourth was clipped and the
+ * fifth — the one the copilot had just drawn and focused — was off screen. A
+ * tab shrinks to its floor first, as an editor's do, and only past that does
+ * the strip scroll. The floor is an icon, a few characters and the close. */
+.chart-strip .pane-tab {
+  flex: 0 1 auto;
+  min-width: 96px;
+  padding-left: var(--sp-md);
+  padding-right: var(--sp-sm);
+}
+.chart-strip .chart-tab-name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.chart-tab-icon {
+  font-size: 15px;
+  color: var(--mute);
+  flex: 0 0 auto;
+}
+.pane-tab--active .chart-tab-icon {
+  color: var(--accent-text);
+}
+.chart-tab-icon--failed {
+  color: var(--error);
+}
+
+.chart-tab-name {
+  /* A chart's name is a sentence the agent wrote, so it can be long. The tab
+   * truncates and the tooltip carries the question in full. */
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chart-tab-close {
+  font-size: 14px;
+  color: var(--mute);
+  opacity: 0;
+  border-radius: var(--r-sm);
+  flex: 0 0 auto;
+}
+/* Shown on hover and on the tab you are in, so a strip of six tabs is not six
+ * close buttons demanding to be read. */
+.pane-tab:hover .chart-tab-close,
+.pane-tab--active .chart-tab-close {
+  opacity: 1;
+}
+.chart-tab-close:hover {
+  color: var(--body);
+  background: var(--hairline-soft);
+}
+
+/* A preview tab: opened by one click, replaced by the next (§3.8). Italic, which
+ * is the editor convention and is a statement of **kind** — this one is
+ * temporary — rather than of rank. Nothing about it is dimmer or smaller: the
+ * figure you are skimming is often the one that matters. */
+.pane-tab--preview .chart-tab-name {
+  font-style: italic;
+}
+
+/* Where a dragged tab would land. A line between two tabs, not a highlight on
+ * one: the question the drag is asking is *before or after this*, and colouring
+ * a whole tab answers a different one. */
+.pane-tab--drop {
+  box-shadow: inset 2px 0 0 var(--accent-primary);
+}
+
+/* Each half of the middle pane: its own strip, its own content (§3.7). */
+.split-half {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+}
+.split-half--right {
+  border-left: 1px solid var(--hairline);
+}
+
+/* Which half a new chart opens in. A hairline under the strip, in the accent —
+ * the same "this one is selected" the window uses everywhere, at the smallest
+ * size that still says it. Without it there is no way to tell where the copilot
+ * is about to draw. */
+.chart-strip--focus {
+  box-shadow: inset 0 -2px 0 var(--accent-soft, var(--hairline));
+}
+
+/* The rest of the strip, past the last tab. It is a drop target — *put it at the
+ * end* needs somewhere to land that is not a tab — and it is what pushes the
+ * close-this-half control to the right. */
+.chart-strip-rest {
+  flex: 1 1 auto;
+  min-width: var(--sp-lg);
+}
+
+/* Always visible, unlike a tab's close: it is the only way back to one pane, and
+ * a control you have to hover to discover is one you have to be told about. */
+.split-close {
+  opacity: 1;
+  cursor: pointer;
+  margin-right: var(--sp-sm);
+  align-self: center;
+}
+
+/* Where a dragged tab lands (`assets/tabs.js`). The right half of the middle
+ * pane **below the strip**, and only while a drag is happening — a zone standing
+ * open over half the pane the rest of the time is chrome asking to be explained.
+ * `top` is set by `tabs.js` at the press, to the strip's own height: from 0 it
+ * covered the strip, and a tab in the strip's right half went under the overlay
+ * the moment it was picked up. */
+.tab-drop {
+  display: none;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 50%;
+  z-index: 20;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-sm);
+  border-left: 1px dashed var(--accent-primary);
+  background: var(--surface);
+  opacity: 0.82;
+  color: var(--mute);
+}
+body.tab-dragging .tab-drop {
+  display: flex;
+}
+/* Under the cursor. The same soft accent wash a dragged figure's folder takes,
+ * because a drop target *is* a selection for the length of the gesture. */
+.tab-drop--over {
+  background: var(--accent-soft, var(--hairline-soft));
+  color: var(--accent-text);
+}
+.tab-drop-icon {
+  font-size: 22px;
+}
+.tab-drop-label {
+  font-size: 12px;
+  letter-spacing: 0.2px;
+}
+
+/* Where `assets/chart.js` draws.
+ *
+ * **It fills the pane** *(2026-09-03)*. It was 340px tall whatever the window
+ * was doing, which left a tall pane mostly empty and made the picture the
+ * smallest thing on a screen that exists to show it. The scroll region is a flex
+ * column, so the figure takes what the header, the note and the query leave — and
+ * a min-height, because a chart shorter than its own axis labels is not a chart.
+ *
+ * Not an aspect ratio: the pane is drag-resizable and an aspect-ratio figure in a
+ * narrow pane collapses to a strip too short to read an axis off. */
+.chart-scroll {
+  display: flex;
+  flex-direction: column;
+}
+/* A flex column stretches its children, which is what the figure wants and what
+ * a button does not: *Keep this* came out 708px wide. Only the picture fills. */
+.chart-scroll > button,
+.chart-scroll > .chart-kept {
+  align-self: flex-start;
+}
+
+.chart-figure {
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 260px;
+}
+
+/* A height the user dragged to. It stops filling and holds that number, which is
+ * the whole point of having grabbed it. */
+.chart-figure--fixed {
+  flex: 0 0 auto;
+}
+
+/* The handle under a chart. It is drawn as the same hairline the splitters use,
+ * because it is the same gesture: a divider you drag. Wider hit area than line,
+ * which is the rule every draggable edge in this window follows. */
+.chart-grip {
+  flex: 0 0 auto;
+  height: 10px;
+  margin-top: 2px;
+  cursor: ns-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.chart-grip::after {
+  content: "";
+  width: 44px;
+  height: 3px;
+  border-radius: var(--r-full);
+  background: var(--hairline);
+}
+.chart-grip:hover::after,
+.chart-grip--dragging::after {
+  background: var(--accent-primary);
+}
+
+/* A spec Vega-Lite refused. The agent wrote it, so it is reported in words where
+ * the picture would have been rather than as an empty box. */
+.chart-broken {
+  font-size: 12px;
+  color: var(--error);
+  padding: var(--sp-md);
+  white-space: pre-wrap;
+}
+
+/* The rows, parked in the DOM for `assets/chart.js` to read. Hidden rather than
+ * absent: it is the payload, not a caption, and `display: none` keeps it out of
+ * the layout while leaving `textContent` readable. */
+.chart-data {
+  display: none;
+}
+
+/* Where `vegaEmbed` mounts. It clears whatever container it is given, so it may
+ * not be `.chart-figure` itself — that holds the `<script>` carrying the rows,
+ * and a redraw has to still find them (`assets/chart.js`). */
+.chart-mount,
+.chart-mount .vega-embed,
+.chart-mount .vega-embed canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* The last-drawn picture, standing in while Vega embeds (`assets/chart.js`).
+ * A pane refresh replaces the figure element, the canvas dies with it, and the
+ * embed is async — so a rebuilt chart used to blank and repaint however
+ * identical it was. The ghost is a snapshot of the previous canvas, painted
+ * over the mount until the real render lands; on an unchanged chart the swap
+ * is invisible. `contain` rather than `fill`: mid-resize the box and the
+ * snapshot disagree about aspect, and a stretched chart lies about its data
+ * where a letterboxed one only shrinks. */
+.chart-figure {
+  position: relative;
+}
+.chart-ghost {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+}
+
+/* The pinned rows above the file tree — the brief, the canvas, the knowledge
+ * graph and this session's charts (`ui/artifacts._pinned`).
+ *
+ * They are things portia knows that are **not files**, and none of them is
+ * anywhere the tree below could walk to. Loose above it they read as four odd
+ * files, so the band says *different kind of thing*. It says nothing about
+ * importance: DESIGN.md's rule is that colour and prominence communicate kind
+ * and never rank, and this is the first half of that being used deliberately
+ * rather than the second half being broken. No row here is larger, bolder or
+ * higher-contrast than a row in the tree. */
+.p-pinned {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-elevated);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+  padding: var(--sp-xs) 0;
+  margin-bottom: var(--sp-sm);
+}
+
+/* Keeping a chart (`ui/charts._keep`, docs/VISUALIZATION.md §6). A panel inside
+ * the tab rather than a dialog: what you are writing about is the picture above
+ * it, and an overlay would cover the one thing you need to look at while
+ * writing. */
+.chart-keep {
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+  background: var(--surface-elevated);
+  padding: var(--sp-lg);
+}
+
+.chart-keep-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+}
+
+/* Where it went, replacing the control that put it there — there is no second
+ * press, which is what stops one chart becoming two findings. Not coloured as a
+ * success: writing a finding is a thing that happened, not a thing that went
+ * well (DESIGN.md — kind, never rank). */
+.chart-kept {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+}
+.chart-kept-icon {
+  font-size: 15px;
+  color: var(--mute);
+}
+
+/* The gallery — saved figures in the folders the user arranged them into
+ * (`ui/artifacts._figures_section`, docs/VISUALIZATION.md §6). It sits inside
+ * `.p-pinned` because a saved figure is a file this project has and `figures/`
+ * is not walked by the tree below.
+ *
+ * It is drawn whether or not it holds anything: a heading that only appears
+ * after you have used a feature cannot tell you the feature is there. */
+.p-gallery {
+  display: flex;
+  flex-direction: column;
+}
+
+.gallery-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  padding: var(--sp-xs) var(--sp-md);
+  cursor: pointer;
+}
+.gallery-head:hover {
+  background: var(--hairline-soft);
+}
+
+/* The per-row controls: new folder, move, delete. Hidden until the row is
+ * hovered, so a gallery of twelve figures is not thirty-six icons demanding to
+ * be read. */
+.gallery-add {
+  font-size: 15px;
+  color: var(--mute);
+  opacity: 0;
+  border-radius: var(--r-sm);
+  flex: 0 0 auto;
+  padding: 2px;
+}
+.gallery-head:hover .gallery-add,
+.artifact-row:hover .gallery-add {
+  opacity: 1;
+}
+.gallery-add:hover {
+  color: var(--body);
+  background: var(--hairline-soft);
+}
+
+.gallery-new {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  padding: var(--sp-xs) var(--sp-md);
+}
+
+/* An unsaved chart, in the gallery beside the files. It says the word rather
+ * than being drawn dimmer: dim reads as *less important*, and the chart nobody
+ * has kept yet is often the most important row in the list (DESIGN.md — kind,
+ * never rank). Neutral, not a warning: not having saved something yet is a
+ * state, not a problem. */
+.gallery-pill {
+  font-size: 10px;
+  line-height: 1.4;
+  letter-spacing: 0.3px;
+  color: var(--mute);
+  background: var(--hairline-soft);
+  border-radius: var(--r-full);
+  padding: 1px var(--sp-sm);
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* Dragging a figure into a folder (`assets/gallery.js`). The row being dragged
+ * fades; the folder under the cursor takes the soft accent wash, which is the
+ * same "this is the one" the selected row uses — a drop target *is* a selection
+ * for the length of the gesture. */
+.gallery-dragging {
+  opacity: 0.45;
+}
+.gallery-drop-into {
+  background: var(--accent-soft, var(--hairline-soft));
+  outline: 1px solid var(--accent-primary);
+  outline-offset: -1px;
+  border-radius: var(--r-sm);
+}
+
+/* The naming field, indented to sit where the folder it creates will appear. */
+.gallery-new {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  padding: var(--sp-xs) var(--sp-md);
+  padding-left: calc(var(--sp-md) + var(--depth, 0) * 14px);
+}
+
+/* The question under a folder whose delete would take figures with it. Laid
+ * out like the naming field and indented the same way, because it opens in the
+ * same place for the same reason; the sentence wraps, since a pane this narrow
+ * cannot promise one line. The buttons are two plain micro buttons: a delete is
+ * not the action the loop waits on, so it does not get the fill. */
+.gallery-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+  padding: var(--sp-xs) var(--sp-md);
+  padding-left: calc(var(--sp-md) + var(--depth, 0) * 14px);
+}
+.gallery-confirm .t-caption {
+  white-space: normal;
+}
+.gallery-confirm-actions {
+  display: flex;
+  gap: var(--sp-xs);
+}
+
+/* Where a figure will be saved. Shut it is one line stating a fact; open it is
+ * the folders that exist plus a box for one that does not. It is deliberately
+ * not shaped like the notes box above it — two identical fields where one takes
+ * a sentence and the other a path is a form you have to stop and parse. */
+.chart-where {
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+}
+.chart-where-line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  padding: var(--sp-sm) var(--sp-md);
+  cursor: pointer;
+}
+.chart-where-line:hover {
+  background: var(--hairline-soft);
+}
+.chart-where-icon {
+  font-size: 15px;
+  color: var(--mute);
+}
+.chart-where-body {
+  padding: 0 var(--sp-md) var(--sp-md);
+  border-top: 1px solid var(--hairline);
+  padding-top: var(--sp-md);
+}
+
+/* The gallery's own disclosure, on the right of its row. On the left it would be
+ * `artifact_row`'s `caret`, which indents the icon behind it — and put `Figures`
+ * out of line with the three rows above it, none of which discloses anything.
+ * Always visible, unlike `.gallery-add`: it is the control that says whether the
+ * section is empty, so it may not be a thing you have to hover to find. */
+.gallery-caret {
+  font-size: 16px;
+  color: var(--mute);
+  flex: 0 0 auto;
+}
+
+/* --- Fields, alerts and choice cards (docs/CONNECTOR.md, 2026-09-04) --------
+ *
+ * `field` is a labelled input that says up front whether it is required. The
+ * box is `p-input`: 30px, hairline, the accent wash on focus — Quasar's 56px
+ * default under `.p-field` read as a form from someone else's kit. */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xxs);
+  min-width: 0;
+}
+.field-label {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-xs);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink);
+}
+/* Lower case, at caption size: the word is a fact beside the label, not a
+ * badge. Small caps read as shouting once every label carried one. */
+.field-required,
+.field-optional {
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.1px;
+}
+.field-required {
+  color: var(--accent-text);
+}
+.field-optional {
+  color: var(--stone);
+}
+.field-hint {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--mute);
+}
+.p-input .q-field__control {
+  min-height: 30px;
+  height: 30px;
+  padding: 0 var(--sp-sm);
+  border-radius: var(--r-md);
+}
+.p-input .q-field__native,
+.p-input .q-field__input {
+  padding: 0;
+  min-height: 28px;
+  line-height: 28px;
+}
+.p-input .q-field__append {
+  height: 28px;
+}
+.p-input.q-field--dense .q-field__control {
+  height: 30px;
+}
+.field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-md);
+}
+@media (max-width: 640px) {
+  .field-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* A sentence not to miss. Kind, never rank: three tints, one size. */
+.p-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-sm);
+  padding: var(--sp-sm) var(--sp-md);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--r-md);
+  background: var(--surface-elevated);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+.p-alert-icon {
+  font-size: 16px;
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+.p-alert-text {
+  min-width: 0;
+  word-break: break-word;
+}
+.p-alert--error {
+  border-color: var(--error);
+  background: var(--error-soft);
+}
+.p-alert--error .p-alert-icon {
+  color: var(--error);
+}
+.p-alert--warning {
+  border-color: var(--warning);
+  background: var(--warning-soft);
+}
+.p-alert--warning .p-alert-icon {
+  color: var(--warning);
+}
+.p-alert--info .p-alert-icon {
+  color: var(--accent-text);
+}
+
+/* One question, a few large answers. */
+.choice-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-md);
+}
+.choice-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-sm);
+  padding: var(--sp-lg);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+.choice-card:hover {
+  border-color: var(--accent-primary);
+  background: var(--accent-soft);
+}
+.choice-card-icon {
+  font-size: 24px;
+  color: var(--accent-text);
+}
+.choice-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.choice-card-why {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--mute);
+}
+
+/* The connect dialog's own rows: the sign-in picker, the state, the saved list. */
+.connect-auth {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+}
+.connect-state {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  font-size: 12.5px;
+  color: var(--mute);
+}
+
+/* Saved connections as rows to pick one of (2026-09-06). A row is the name, who
+ * into what account in the mono face, and how it signs in. The picked row takes
+ * the accent wash, `artifact-row--selected`'s idiom; the last row starts a new
+ * connection and is the same row with a plus, because it is one of the choices
+ * rather than an action on them. */
+.connect-pick {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.connect-pick-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  min-height: 36px;
+  padding: 0 var(--sp-md);
+  font-size: 12.5px;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background-color 120ms ease-out;
+}
+.connect-pick-row + .connect-pick-row {
+  border-top: 1px solid var(--hairline);
+}
+/* The project's half of the connect dialog: where Build writes and whether
+   the copilot may. Below either view, set off by a hairline rather than a
+   box, because it is not a second form — two fields that are the project's. */
+.connect-project {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-sm);
+  margin-top: var(--sp-md);
+  padding-top: var(--sp-md);
+  border-top: 1px solid var(--hairline);
+}
+.connect-pick-row:hover {
+  background-color: var(--surface-card);
+}
+.connect-pick-row--selected,
+.connect-pick-row--selected:hover {
+  background-color: var(--accent-soft);
+}
+.connect-pick-row--selected .connect-pick-name,
+.connect-pick-row--selected .connect-pick-icon {
+  color: var(--accent-text);
+}
+.connect-pick-icon {
+  font-size: 16px;
+  color: var(--mute);
+  flex: 0 0 auto;
+}
+.connect-pick-name {
+  font-weight: 500;
+  flex: 0 0 auto;
+}
+.connect-pick-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--mute);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.connect-pick-auth {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--stone);
+}
+.connect-pick-row--new .connect-pick-name {
+  font-weight: 400;
+  color: var(--mute);
+}
+
+/* ── the chat list (docs/CHAT_SESSIONS.md §3.2) ─────────────────────────── */
+
+/* The right pane's home state: every chat and job, newest first, grouped by
+ * day. Time order ranks nothing. One row shape for a chat, a job and the
+ * pinned Sources row; the glyph tells them apart, and nothing is coloured,
+ * sized or ordered by anything measured (`DESIGN.md`). */
+.chat-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--sp-sm) 0;
+}
+.chat-group {
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+  color: var(--mute);
+  padding: var(--sp-md) var(--sp-lg) var(--sp-xs);
+}
+.chat-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  min-width: 0;
+  margin: 0 var(--sp-sm);
+  padding: var(--sp-sm) var(--sp-md);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background-color 120ms ease-out;
+}
+.chat-row:hover {
+  background-color: var(--surface-card);
+}
+.chat-row--pinned {
+  margin-bottom: var(--sp-xs);
+}
+.chat-row-icon {
+  color: var(--mute);
+  font-size: 16px;
+  flex: 0 0 auto;
+}
+.chat-row-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+.chat-row-title {
+  font-size: 13px;
+  color: var(--body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.chat-row-meta {
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: var(--mute);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Rename and delete, revealed by the pointer. Hidden rather than absent so a
+ * row's height does not change when they appear. */
+.chat-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex: 0 0 auto;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+.chat-row:hover .chat-row-actions,
+.chat-row:focus-within .chat-row-actions {
+  opacity: 1;
+}
+.chat-rename {
+  font-size: 13px;
+  width: 100%;
+}
+
+/* A chat is running, or waiting on you (§3.5). The tab dot, on a row and on
+ * the back control now. Kind, never rank: the waiting dot is the accent
+ * because it is asking for you, not because it is worse; the running one
+ * pulses because it is the in-flight entry of the motion vocabulary. */
+.chat-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: var(--mute);
+  flex: 0 0 auto;
+  animation: p-pulse 1.4s ease-in-out infinite;
+}
+.chat-dot--waiting {
+  background: var(--accent-primary);
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-dot {
+    animation: none;
+  }
+}
+
+/* `legacy`: a chat that cannot be continued, and the composer's place says why.
+ * A chip, in the caption size, on the hairline — the quiet treatment. */
+.chat-chip {
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: var(--mute);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--r-xs);
+  padding: 0 var(--sp-xs);
+  flex: 0 0 auto;
+}
+
+/* ── inside a chat: the header ──────────────────────────────────────────── */
+
+.chat-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: var(--sp-sm) var(--sp-md);
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface);
+}
+.chat-back {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  flex: 0 0 auto;
+  color: var(--mute);
+  cursor: pointer;
+  border-radius: var(--r-sm);
+  padding: var(--sp-xs) var(--sp-sm) var(--sp-xs) var(--sp-xs);
+  transition: color 120ms ease-out;
+}
+.chat-back:hover {
+  color: var(--body);
+}
+.chat-back-icon {
+  font-size: 16px;
+}
+.chat-back-label {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.1px;
+}
+.chat-header-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── provider glyphs (docs/PROVIDERS.md §5) ──────────────────────────────────
+ * One mark per provider, as a CSS mask over its SVG so it takes currentColor
+ * like every other icon and follows the theme. Kind, never rank: the picked
+ * segment gets the soft accent wash a segment already gets, and the same mark
+ * sits on a prompt row and a chat row at the caption's ink. */
+.provider-glyph {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  background-color: currentColor;
+  color: var(--mute);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+}
+.provider-glyph-anthropic {
+  -webkit-mask-image: url(/portia-assets/providers/anthropic.svg);
+  mask-image: url(/portia-assets/providers/anthropic.svg);
+}
+.provider-glyph-ollama {
+  -webkit-mask-image: url(/portia-assets/providers/ollama.svg);
+  mask-image: url(/portia-assets/providers/ollama.svg);
+}
+.provider-glyph-llamacpp {
+  -webkit-mask-image: url(/portia-assets/providers/llamacpp.svg);
+  mask-image: url(/portia-assets/providers/llamacpp.svg);
+}
+.provider-segments .btn .provider-glyph {
+  color: inherit;
+}
+.provider-segments .btn.seg-active .provider-glyph {
+  color: var(--accent-text);
+}
+/* The picker keeps one shape whatever it says (DESIGN.md → Layout stability).
+ * A q-field is 100% wide by default, so the select claimed its line and pushed
+ * the refresh button onto a row of its own — on Ollama only, because only that
+ * provider draws one, which is how switching provider moved the composer. The
+ * width is the row's now, never the model name's: a longer name ellipsizes
+ * inside it, and the full name is in the dropdown.
+ *
+ * **`nowrap`, because a wrapping flex line wraps before it shrinks**: items go
+ * to the next line on their base size, so a shrinkable select still wrapped
+ * its slot at the default pane width. On one line the select gives way
+ * instead, down to its floor, which turns the pane-edge drag from a reshuffle
+ * into a resize. */
+.spend-row {
+  flex-wrap: nowrap;
+  align-items: center;
+}
+/* One group per thing picked: the provider, the model with its refresh. A
+ * group never wraps inside itself, and everything in it shares one centre
+ * line, so the glyph, the name and the button read as one row whatever the
+ * pane's width does to the row as a whole (2026-09-14). The provider group
+ * never gives way; the model group shrinks first. */
+.spend-group {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+.spend-provider {
+  flex: 0 0 auto;
+}
+/* The model group takes the room the row has; squeezed, this row's order of
+ * surrender is the select down to its floor, then the slot — measured before
+ * this, the last 40px of a pane drag folded the provider marks into a column,
+ * bouncing the row's height per pixel. */
+.spend-model {
+  flex: 1 1 auto;
+}
+.spend-group .p-field .q-field__control,
+.spend-group .p-field .q-field__native {
+  min-height: 24px;
+  height: 24px;
+  padding-top: 0;
+  padding-bottom: 0;
+  line-height: 24px;
+}
+.spend-group .p-field.q-field--auto-height .q-field__control,
+.spend-group .p-field.q-field--auto-height .q-field__native {
+  min-height: 24px;
+}
+.spend-group .p-field .q-field__prepend,
+.spend-group .p-field .q-field__append {
+  height: 24px;
+}
+/* Closed, the provider select is its glyph and the arrow; the blank display
+ * value keeps the native slot from reserving a word's width. */
+.provider-select .q-field__native {
+  min-width: 0;
+  width: 0;
+  padding: 0;
+}
+.provider-select .q-field__prepend {
+  padding-right: 0;
+}
+.provider-select .q-field__prepend .provider-glyph {
+  color: var(--body);
+}
+.spend-row .model-select {
+  /* Grow to the room the row has, never to the name: the width tracks the
+   * pane, so a longer selection changes nothing and a narrower pane shrinks
+   * the select smoothly. The cap keeps the caret near the text on a wide
+   * settings body. */
+  flex: 1 1 auto;
+  min-width: 64px;
+  max-width: 340px;
+}
+.spend-row .model-select .q-field__native {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.spend-row .model-select .q-field__native > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* One slot for the listing spinner and the refresh button, drawn whether or
+ * not either is: the indicator changes, the controls around it stay put. It
+ * may shrink away in the last few pixels before the pane's floor closes the
+ * pane — the one thing on this row that can give way after the select has. */
+.spend-slot {
+  flex: 0 1 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  min-width: 0;
+  height: 24px;
+  overflow: hidden;
+}
+/* The effort segments, the parked chat's "effort low", or — on a provider that
+ * ignores effort — nothing, at the same height. The second row is part of the
+ * control's shape, so picking a provider never changes the height of the
+ * composer under the message being written. */
+.spend-detail {
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+  min-width: 0;
+  /* A full line even when empty: a zero-width flex item shares its line with
+   * whatever follows, which put the approval picker a row higher on Ollama
+   * than on Anthropic — the exact jump the reserved row exists to prevent. */
+  flex: 1 0 100%;
+}
+/* The five effort segments never re-wrap one button at a time. Wide, they are
+ * one line; below the width where five fit, they are a 3 + 2 grid — one
+ * discrete change at one breakpoint, with every button in a fixed cell. Flex
+ * wrap gave the same band a *migrating* split (low medium high xhigh / max,
+ * then low medium high / xhigh max, …), so a pane drag re-slotted buttons per
+ * pixel and staircased the composer's height under the textarea. */
+.spend-detail .segmented-control {
+  flex-wrap: nowrap;
+}
+@container (max-width: 358px) {
+  .spend-detail .segmented-control {
+    display: grid;
+    grid-template-columns: repeat(3, max-content);
+    row-gap: var(--sp-xs);
+  }
+}
+.prompt-row-spend,
+.chat-row-spend {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  min-width: 0;
+}
+.add-model-line {
+  align-items: center;
+  flex-wrap: wrap;
+}
+/* A refused preflight sits inside the composer, above the bar: it is about the
+ * message that did not go, and no exchange happened to give it a row. */
+.composer-alert {
+  padding: 0 var(--sp-sm) var(--sp-xs);
+}

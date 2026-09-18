@@ -1,0 +1,93 @@
+[project]
+name = "portia"
+version = "0.0.1"
+description = "Agent-assisted data harmonization copilot — deterministic engine first."
+requires-python = ">=3.11"
+readme = "README.md"
+license = "AGPL-3.0-only"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Jad Aouad" }]
+dependencies = [
+    "duckdb>=1.5.5",
+    "pandas>=2.0",
+    # DuckDB needs it to hand a TIMESTAMP WITH TIME ZONE back to python, and
+    # says so only by raising when it meets one. Real data met one immediately:
+    # an AQN extract with a tz-aware column made every sample and every preview
+    # of that table fail. Small, pure python, and not optional in practice.
+    "pytz>=2024.1",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "mypy>=1.10",
+    "pre-commit>=3.7",
+]
+agent = [
+    "claude-agent-sdk>=0.2.128",
+]
+ui = [
+    "nicegui>=2.0",
+]
+# The knowledge graph (docs/KNOWLEDGE_GRAPH.md). Optional on purpose, §6.6: a
+# stopped container must not break the product, so nothing outside
+# `portia/knowledge/store.py` imports the driver.
+graph = [
+    "neo4j>=5.0",
+    # Reads a `sql` step's output columns and where they came from, which the
+    # spec cannot say (docs/SQL_LINEAGE.md). Optional for the same reason the
+    # driver is: without it a hatch step is unresolved exactly as it was before,
+    # and the build says which columns that cost. Pure python, no dependencies.
+    "sqlglot>=25.0",
+]
+# The Snowflake connector (docs/CONNECTOR.md). Optional like the graph, and for
+# the same reason: nothing outside `portia/connectors/` imports the driver, so a
+# local project never pays for it. `secure-local-storage` is the keyring the
+# connector caches the SSO token in, which is what makes the browser popup
+# per token lifetime rather than per connect (§2.4).
+snowflake = [
+    "snowflake-connector-python[secure-local-storage]>=3.12",
+    # The parse check that replaces the sandbox on a remote connection (§2.8):
+    # every table a `sql` step names has to be a declared input, and only a
+    # parser can say which tables a statement names.
+    "sqlglot>=25.0",
+]
+# The BigQuery connector (docs/CONNECTORS.md §8). Same argument, same shape:
+# the driver stays behind `portia/connectors/bigquery.py`, and sqlglot is the
+# parse check. No pyarrow: results are read as rows, only ever behind a LIMIT.
+bigquery = [
+    "google-cloud-bigquery>=3.20",
+    "sqlglot>=25.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["portia"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# Deliberately not the whole catalogue — the useful, low-noise core:
+# pyflakes (F), pycodestyle (E/W), import sorting (I), pyupgrade (UP),
+# bugbear (B, catches real footguns). No docstring/annotation mandates.
+select = ["E", "W", "F", "I", "UP", "B"]
+ignore = ["E501"]  # line length is the formatter's job, not a lint error
+
+[tool.mypy]
+# No python_version pin — mypy uses the running interpreter, so it parses the
+# installed numpy/pandas stubs (which use 3.12+ syntax) without choking.
+# Lenient on purpose: type things where it helps, don't fight pandas.
+ignore_missing_imports = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+# Not enabled (kept un-strict): disallow_untyped_defs, strict, etc.

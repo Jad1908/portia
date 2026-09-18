@@ -1,0 +1,42 @@
+# The knowledge graph's database (docs/KNOWLEDGE_GRAPH.md §3).
+#
+#   docker compose up -d neo4j
+#   NEO4J_PASSWORD=portia-dev python -m portia.cli.knowledge --write
+#
+# §3.3 weighs what this costs: portia stops being one command, and that was the
+# trade taken deliberately — a container is a one-time setup cost, where owning
+# a graph engine, a query layer and a graph UI is a permanent one.
+#
+# The browser at http://localhost:7474 is the visual layer for now; §6.9 records
+# why drawing the graph inside portia's own canvas is a separate purchase, and
+# the layout question it has to answer first.
+services:
+  neo4j:
+    image: neo4j:5-community
+    ports:
+      - "7474:7474" # http — the browser
+      - "7687:7687" # bolt — the driver
+    environment:
+      # Development only, and it is the same string the tests look for. Nothing
+      # in here is data: the graph holds metadata *about* the data (§6.3).
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-portia-dev}
+    volumes:
+      - neo4j-data:/data
+
+  # A second, disposable one for the test suite. Not fussiness: `conftest`
+  # empties the database it connects to, so pointing the tests at the working
+  # graph deletes the project you were looking at and leaves fixture nodes in it
+  # — which is exactly how `data/orders.csv` turned up in a project that has no
+  # such file. Neo4j Community allows one user database per server, so a second
+  # database is not an option and a second server is.
+  neo4j-test:
+    image: neo4j:5-community
+    ports:
+      - "7475:7474"
+      - "7688:7687"
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-portia-dev}
+    # No volume: nothing in here is worth keeping between runs.
+
+volumes:
+  neo4j-data:

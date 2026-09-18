@@ -1,0 +1,80 @@
+{
+  "keys": {
+    "left": [
+      "city"
+    ],
+    "right": [
+      "city_name"
+    ]
+  },
+  "left": {
+    "n_rows": 5,
+    "n_null_keys": 0,
+    "n_distinct_keys": 3,
+    "n_duplicated_keys": 2,
+    "max_key_multiplicity": 2,
+    "unique_keys": false
+  },
+  "right": {
+    "n_rows": 7,
+    "n_null_keys": 0,
+    "n_distinct_keys": 5,
+    "n_duplicated_keys": 2,
+    "max_key_multiplicity": 2,
+    "unique_keys": false
+  },
+  "key_dtypes": {
+    "left": [
+      "string"
+    ],
+    "right": [
+      "string"
+    ]
+  },
+  "key_dtype_match": true,
+  "relationship": "many:many",
+  "overlap": {
+    "n_shared_keys": 3,
+    "n_left_only_keys": 0,
+    "n_right_only_keys": 2,
+    "left_coverage": 1.0,
+    "right_coverage": 0.7143,
+    "sample_left_only": [],
+    "sample_right_only": [
+      " paris",
+      "Lyon"
+    ]
+  },
+  "fan_out": {
+    "max_left_to_right": 2,
+    "max_right_to_left": 2,
+    "result_per_matched_left": 1.6
+  },
+  "joins": {
+    "inner": {
+      "result_rows": 8,
+      "left_dropped": 0,
+      "right_dropped": 2
+    },
+    "left": {
+      "result_rows": 8,
+      "left_dropped": 0,
+      "right_dropped": 2
+    },
+    "right": {
+      "result_rows": 10,
+      "left_dropped": 0,
+      "right_dropped": 0
+    },
+    "outer": {
+      "result_rows": 10,
+      "left_dropped": 0,
+      "right_dropped": 0
+    }
+  },
+  "flags": [
+    "many_to_many",
+    "fan_out",
+    "right_rows_dropped"
+  ]
+}

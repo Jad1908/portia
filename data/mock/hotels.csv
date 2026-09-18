@@ -1,0 +1,6 @@
+hotel_id,hotel_name,city,country,rooms
+H001,Grand Riverside,Paris,FR,220
+H002,Le Petit Nord,Paris,FR,85
+H003,Marina Bay Suites,Barcelona,ES,310
+H004,Old Town Inn,Amsterdam,NL,64
+H005,Canal View,Amsterdam,NL,120

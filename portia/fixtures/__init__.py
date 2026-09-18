@@ -1,0 +1,54 @@
+"""Kept mock data + the registry that writes it to disk.
+
+Add a new fixture: write its builder in a module here and register it in
+``_FIXTURES``. `python -m portia.fixtures` regenerates them all.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from pathlib import Path
+
+import pandas as pd
+
+from portia.fixtures.customers import messy_customers
+from portia.fixtures.hotels import city_events, hotels, reservations
+from portia.fixtures.sales import sales_customers, sales_orders
+
+# Repo-root/data/mock — kept on disk (see .gitignore). parents[2] = repo root
+# from portia/fixtures/__init__.py.
+DEFAULT_DIR = Path(__file__).resolve().parents[2] / "data" / "mock"
+
+# name -> builder. The single place fixtures are registered.
+_FIXTURES: dict[str, Callable[[], pd.DataFrame]] = {
+    "messy_customers": messy_customers,
+    "sales_customers": sales_customers,
+    "sales_orders": sales_orders,
+    # the hotel forecasting project — see portia/fixtures/hotels.py
+    "hotels": hotels,
+    "reservations": reservations,
+    "city_events": city_events,
+}
+
+__all__ = [
+    "DEFAULT_DIR",
+    "city_events",
+    "hotels",
+    "messy_customers",
+    "reservations",
+    "sales_customers",
+    "sales_orders",
+    "write_fixtures",
+]
+
+
+def write_fixtures(directory: Path | str = DEFAULT_DIR) -> list[Path]:
+    """Generate the mock CSVs and keep them on disk. Returns written paths."""
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    written = []
+    for name, builder in _FIXTURES.items():
+        path = directory / f"{name}.csv"
+        builder().to_csv(path, index=False)
+        written.append(path)
+    return written

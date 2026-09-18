@@ -1,0 +1,417 @@
+"""The catalog indexes sources and preserves human judgment across re-index."""
+
+import time
+from pathlib import Path
+
+import pytest
+import yaml
+
+from portia.catalog import (
+    index_source,
+    init_project,
+    is_stale,
+    load_catalog,
+    remove_source,
+    set_data_dir,
+    set_group,
+    set_interpretation,
+)
+from portia.fixtures import messy_customers
+
+
+def _write_source(tmp_path):
+    csv = tmp_path / "customers.csv"
+    messy_customers().to_csv(csv, index=False)
+    return csv
+
+
+def test_init_project_stores_context(tmp_path):
+    d = tmp_path / ".portia"
+    init_project("we run EU events and reconcile vendor data", portia_dir=d)
+    proj = yaml.safe_load((d / "project.yaml").read_text())
+    assert proj["project"].startswith("we run EU events")
+    assert proj["groups"] == [] and proj["sources"] == {}
+
+
+def test_index_source_builds_two_layer_entry(tmp_path):
+    csv = _write_source(tmp_path)
+    d = tmp_path / ".portia"
+    src_file = index_source(csv, portia_dir=d)
+    entry = yaml.safe_load(src_file.read_text())
+
+    # Layer 1: a prose summary (auto-drafted, mentions the key facts).
+    assert "40 rows" in entry["summary"]
+    assert "8 columns" in entry["summary"]  # shape, not a nominated key
+    # Layer 2: per-column detail with a role slot + facts.
+    col = next(c for c in entry["columns"] if c["name"] == "signup_amount")
+    assert col["role"] is None
+    assert "numeric_stored_as_text" in col["flags"]
+    # registered in the project file
+    proj = yaml.safe_load((d / "project.yaml").read_text())
+    assert proj["sources"]["customers"] == "sources/customers.yaml"
+
+
+def test_reindex_preserves_judgment_refreshes_facts(tmp_path):
+    csv = _write_source(tmp_path)
+    d = tmp_path / ".portia"
+    src_file = index_source(csv, portia_dir=d)
+
+    # simulate user edits: a semantic summary + a column role
+    data = yaml.safe_load(src_file.read_text())
+    data["summary"] = "MY READ: the master EU customer list"
+    next(c for c in data["columns"] if c["name"] == "customer_id")["role"] = "identifier"
+    src_file.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    # re-index the same file
+    index_source(csv, portia_dir=d)
+    after = yaml.safe_load(src_file.read_text())
+
+    assert after["summary"] == "MY READ: the master EU customer list"  # prose preserved
+    cid = next(c for c in after["columns"] if c["name"] == "customer_id")
+    assert cid["role"] == "identifier"  # role preserved
+    assert cid["n_distinct"] and cid["null_rate"] == 0.0  # facts still refreshed
+
+
+def test_set_interpretation_writes_judgment_and_leaves_facts_alone(tmp_path):
+    csv = _write_source(tmp_path)
+    d = tmp_path / ".portia"
+    src_file = index_source(csv, portia_dir=d)
+    before = yaml.safe_load(src_file.read_text())
+
+    set_interpretation(
+        "customers",
+        summary="The master EU customer list, one row per signup.",
+        roles={"customer_id": "identifier", "signup_amount": "measure"},
+        portia_dir=d,
+    )
+    after = yaml.safe_load(src_file.read_text())
+
+    assert after["summary"] == "The master EU customer list, one row per signup."
+    roles = {c["name"]: c["role"] for c in after["columns"]}
+    assert roles["customer_id"] == "identifier"
+    assert roles["signup_amount"] == "measure"
+
+    # every fact is byte-identical — only `role` moved
+    for old, new in zip(before["columns"], after["columns"], strict=True):
+        assert {k: v for k, v in old.items() if k != "role"} == {
+            k: v for k, v in new.items() if k != "role"
+        }
+
+
+def test_set_interpretation_leaves_omitted_fields_untouched(tmp_path):
+    csv = _write_source(tmp_path)
+    d = tmp_path / ".portia"
+    src_file = index_source(csv, portia_dir=d)
+
+    set_interpretation("customers", summary="A first read.", portia_dir=d)
+    set_interpretation("customers", roles={"customer_id": "identifier"}, portia_dir=d)
+    after = yaml.safe_load(src_file.read_text())
+
+    assert after["summary"] == "A first read."  # not clobbered by the roles-only call
+    assert next(c for c in after["columns"] if c["name"] == "customer_id")["role"] == "identifier"
+
+
+def test_set_interpretation_rejects_unknown_source_and_column(tmp_path):
+    csv = _write_source(tmp_path)
+    d = tmp_path / ".portia"
+    index_source(csv, portia_dir=d)
+
+    with pytest.raises(ValueError, match="no catalog entry"):
+        set_interpretation("nope", summary="x", portia_dir=d)
+    with pytest.raises(ValueError, match="no such column"):
+        set_interpretation("customers", roles={"nope": "identifier"}, portia_dir=d)
+
+
+def test_load_catalog_bundles_project_and_sources(tmp_path):
+    csv = _write_source(tmp_path)
+    d = tmp_path / ".portia"
+    init_project("reconciliation project", portia_dir=d)
+    index_source(csv, portia_dir=d)
+
+    catalog = load_catalog(d)
+    assert catalog["project"] == "reconciliation project"
+    assert "customers" in catalog["sources"]
+    assert catalog["sources"]["customers"]["columns"]
+
+
+# --- forgetting a source -----------------------------------------------------
+
+
+def test_removing_a_source_drops_its_entry_and_its_registration(tmp_path):
+    frame = messy_customers()
+    frame.to_csv(tmp_path / "customers.csv", index=False)
+    d = tmp_path / ".portia"
+    index_source(tmp_path / "customers.csv", portia_dir=d)
+
+    remove_source("customers", portia_dir=d)
+
+    assert not (d / "sources" / "customers.yaml").exists()
+    assert load_catalog(d)["sources"] == {}
+
+
+def test_removing_a_source_leaves_the_data_file_alone(tmp_path):
+    """Un-indexing says "stop knowing about this", not "delete my CSV"."""
+    csv = tmp_path / "customers.csv"
+    messy_customers().to_csv(csv, index=False)
+    d = tmp_path / ".portia"
+    index_source(csv, portia_dir=d)
+
+    remove_source("customers", portia_dir=d)
+
+    assert csv.exists()
+
+
+def test_removing_a_source_takes_it_out_of_its_groups(tmp_path):
+    """A group listing a source that no longer exists is a broken reference."""
+    for name in ("a", "b"):
+        messy_customers().to_csv(tmp_path / f"{name}.csv", index=False)
+        index_source(tmp_path / f"{name}.csv", portia_dir=tmp_path / ".portia")
+    set_group("pair", sources=["a", "b"], portia_dir=tmp_path / ".portia")
+
+    remove_source("a", portia_dir=tmp_path / ".portia")
+
+    assert load_catalog(tmp_path / ".portia")["groups"][0]["sources"] == ["b"]
+
+
+def test_removing_something_that_was_never_indexed_is_not_an_error(tmp_path):
+    init_project("x", portia_dir=tmp_path / ".portia")
+    assert remove_source("ghost", portia_dir=tmp_path / ".portia") is None
+
+
+# --- no copy: indexing reads the file where it is --------------------------
+
+
+def test_indexing_copies_nothing(tmp_path):
+    """`docs/PIPELINE.md` §2.7 — portia keeps no second copy of the user's data.
+
+    This used to ingest into `.portia/store.duckdb` eagerly. Two things retired
+    it: the hot paths went to the file anyway, and portia now sources only from
+    inside the repo, where a hidden duplicate is a worse trade than a re-parse.
+    """
+    csv = _write_source(tmp_path)
+    d = tmp_path / ".portia"
+    index_source(csv, portia_dir=d)
+
+    assert not (d / "store.duckdb").exists()
+    assert [p.name for p in d.iterdir()] != []  # the catalog itself is still written
+
+
+def test_the_entry_records_the_path_relative_to_the_project(tmp_path):
+    """An absolute path pins a project to one laptop; the spec has to travel."""
+    csv = _write_source(tmp_path)
+    entry = yaml.safe_load(index_source(csv, portia_dir=tmp_path / ".portia").read_text())
+
+    assert entry["source"] == "customers.csv"
+    assert not Path(entry["source"]).is_absolute()
+
+
+def test_indexing_refuses_a_file_outside_the_project(tmp_path):
+    """Not a warning — an outside path is not an option (§2.7)."""
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    stray = outside / "customers.csv"
+    messy_customers().to_csv(stray, index=False)
+    project = tmp_path / "project"
+    (project / ".portia").mkdir(parents=True)
+
+    with pytest.raises(ValueError, match="outside this project"):
+        index_source(stray, portia_dir=project / ".portia")
+
+
+def test_the_entry_records_what_the_file_looked_like_when_indexed(tmp_path):
+    """So a file that changed on disk afterwards is detectable, not silently stale."""
+    csv = _write_source(tmp_path)
+    entry = yaml.safe_load(index_source(csv, portia_dir=tmp_path / ".portia").read_text())
+
+    assert entry["indexed"]["size"] == csv.stat().st_size
+    assert entry["indexed"]["at"]
+    assert not is_stale(entry, portia_dir=tmp_path / ".portia")
+
+
+def test_a_source_whose_file_changed_reads_as_stale(tmp_path):
+    csv = _write_source(tmp_path)
+    d = tmp_path / ".portia"
+    index_source(csv, portia_dir=d)
+    time.sleep(0.01)
+    messy_customers(n=30).to_csv(csv, index=False)
+
+    entry = yaml.safe_load((d / "sources" / "customers.yaml").read_text())
+    assert is_stale(entry, portia_dir=d)
+
+
+def test_reindexing_refreshes_the_facts_and_keeps_the_judgment(tmp_path):
+    """The update rule: facts refresh, judgment survives."""
+    csv = _write_source(tmp_path)
+    d = tmp_path / ".portia"
+    index_source(csv, portia_dir=d)
+    set_interpretation("customers", summary="our CRM export", portia_dir=d)
+
+    messy_customers(n=30).to_csv(csv, index=False)
+    entry = yaml.safe_load(index_source(csv, portia_dir=d).read_text())
+
+    assert entry["summary"] == "our CRM export"  # judgment preserved
+    assert not is_stale(entry, portia_dir=d)  # fact refreshed
+
+
+def test_forgetting_a_source_leaves_the_file_alone(tmp_path):
+    """Un-indexing is a statement about the catalog, never about someone's disk."""
+    csv = _write_source(tmp_path)
+    d = tmp_path / ".portia"
+    index_source(csv, portia_dir=d)
+    remove_source("customers", portia_dir=d)
+
+    assert not (d / "sources" / "customers.yaml").exists()
+    assert csv.exists()
+
+
+# --- bringing outside data in ----------------------------------------------
+
+
+def test_import_plans_the_copy_before_making_it(tmp_path):
+    """The confirmation shows the real thing, and a clash is found before any bytes move."""
+    from portia.cli.import_data import plan
+
+    root = tmp_path / "project"
+    (root / "data").mkdir(parents=True)
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    stray = outside / "customers.csv"
+    messy_customers().to_csv(stray, index=False)
+
+    pairs = plan([stray], root / "data", root)
+    assert pairs == [(stray, root / "data" / "customers.csv")]
+    assert stray.exists()  # planning copies nothing
+
+    (root / "data" / "customers.csv").write_text("already here")
+    with pytest.raises(ValueError, match="refusing to overwrite"):
+        plan([stray], root / "data", root)
+
+
+def test_import_refuses_a_destination_outside_the_project(tmp_path):
+    from portia.cli.import_data import plan
+
+    root = tmp_path / "project"
+    root.mkdir()
+    with pytest.raises(ValueError, match="must be inside the project"):
+        plan([], tmp_path / "somewhere-else", root)
+
+
+# --- the project's data folder ----------------------------------------------
+
+
+def test_the_data_folder_is_recorded_beside_the_brief(tmp_path):
+    """Which part of the repo is this project's data is a durable project fact,
+    so it lives in `project.yaml` where it is read in a diff beside the brief."""
+    d = tmp_path / ".portia"
+    init_project("a project", portia_dir=d)
+
+    set_data_dir("warehouse/raw", portia_dir=d)
+
+    assert load_catalog(d)["data_dir"] == "warehouse/raw"
+    assert load_catalog(d)["project"] == "a project", "the brief is untouched"
+
+
+def test_an_unset_data_folder_reads_as_empty_not_missing(tmp_path):
+    """Every project written before the field has none, and the honest answer for
+    one nobody has told is "" — which the tree reads as the whole repo."""
+    d = tmp_path / ".portia"
+    init_project("a project", portia_dir=d)
+
+    assert load_catalog(d)["data_dir"] == ""
+
+
+def test_the_data_folder_is_stored_relative_and_stripped(tmp_path):
+    """Relative like every other path portia writes, so the setting survives the
+    project being cloned somewhere else."""
+    d = tmp_path / ".portia"
+    init_project("a project", portia_dir=d)
+
+    set_data_dir("  data/raw/  ", portia_dir=d)
+
+    assert load_catalog(d)["data_dir"] == "data/raw"
+
+
+def test_setting_the_data_folder_does_not_disturb_the_indexed_sources(tmp_path, monkeypatch):
+    """It is a scope, not a re-home: nothing moves and no entry is rewritten."""
+    d = tmp_path / ".portia"
+    monkeypatch.chdir(tmp_path)
+    init_project("a project", portia_dir=d)
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "orders.csv").write_text("a,b\n1,2\n")
+    index_source(tmp_path / "data" / "orders.csv", portia_dir=d)
+
+    set_data_dir("data", portia_dir=d)
+
+    entry = load_catalog(d)["sources"]["orders"]
+    assert entry["source"] == "data/orders.csv"
+    assert (tmp_path / "data" / "orders.csv").exists()
+
+
+def test_an_untouched_file_does_not_go_stale_on_the_clock(tmp_path, monkeypatch):
+    """`indexed` records *when we looked* beside the file's own facts, and for a
+    while `is_stale` compared that too — so a source went stale one second after
+    it was indexed, with an identical size and an identical mtime.
+
+    Nothing user-facing read it yet, which is why it survived; the tests hid it
+    because each finished inside the same wall-clock second as its own index.
+    """
+    monkeypatch.chdir(tmp_path)
+    csv = _write_source(tmp_path)
+    d = tmp_path / ".portia"
+    entry = yaml.safe_load(index_source(csv, portia_dir=d).read_text())
+
+    # The one thing that moves without the file moving.
+    entry["indexed"]["at"] = "1999-01-01T00:00:00+00:00"
+
+    assert not is_stale(entry, portia_dir=d)
+
+
+# --- notes: what a chat learned, appended and never rewritten ----------------
+#
+# `docs/COPILOT.md` §2. The summary is one paragraph replaced whole; a note is
+# one dated sentence kept in order, so what one chat learned about a table is
+# in front of the next one before it builds on it.
+
+
+def test_a_note_is_appended_dated_and_leaves_the_read_alone(tmp_path):
+    csv = _write_source(tmp_path)
+    d = tmp_path / ".portia"
+    src_file = index_source(csv, portia_dir=d)
+    set_interpretation("customers", summary="A first read.", portia_dir=d)
+
+    set_interpretation("customers", note="signup_amount is in cents, not euros.", portia_dir=d)
+    set_interpretation("customers", note="  customer_id repeats across years.  ", portia_dir=d)
+    after = yaml.safe_load(src_file.read_text())
+
+    assert after["summary"] == "A first read."
+    assert [n["text"] for n in after["notes"]] == [
+        "signup_amount is in cents, not euros.",
+        "customer_id repeats across years.",
+    ]
+    assert all(n["at"] for n in after["notes"])
+    assert list(after).index("notes") > list(after).index("columns"), "the margin, after the facts"
+
+
+def test_a_note_survives_a_reindex_and_an_empty_one_is_refused(tmp_path):
+    csv = _write_source(tmp_path)
+    d = tmp_path / ".portia"
+    src_file = index_source(csv, portia_dir=d)
+    set_interpretation("customers", note="the id is a legacy code", portia_dir=d)
+
+    index_source(csv, portia_dir=d)
+    after = yaml.safe_load(src_file.read_text())
+    assert [n["text"] for n in after["notes"]] == ["the id is a legacy code"]
+
+    with pytest.raises(ValueError, match="say something"):
+        set_interpretation("customers", note="   ", portia_dir=d)
+    untouched = yaml.safe_load(src_file.read_text())
+    assert "notes" not in untouched or len(untouched["notes"]) == 1
+
+
+def test_an_entry_without_notes_has_no_notes_key(tmp_path):
+    """Absent, not empty: a silence on every source of every project costs nothing."""
+    csv = _write_source(tmp_path)
+    d = tmp_path / ".portia"
+    src_file = index_source(csv, portia_dir=d)
+    set_interpretation("customers", summary="A read.", portia_dir=d)
+    assert "notes" not in yaml.safe_load(src_file.read_text())

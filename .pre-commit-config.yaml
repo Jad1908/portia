@@ -1,0 +1,45 @@
+# Lenient code-quality gate. Fast, auto-fixing where safe, no style zealotry.
+# Install once:  uv run pre-commit install
+# Run manually:  uv run pre-commit run --all-files
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^data/          # don't rewrite the kept mock CSVs
+      - id: end-of-file-fixer
+        exclude: ^data/
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+
+  # ruff + mypy run from our own env (uv) so versions match pyproject/uv.lock
+  # exactly — no second, drifting copy pinned in this file.
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff (lint, autofix)
+        entry: uv run ruff check --fix
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+      - id: ruff-format
+        name: ruff (format)
+        entry: uv run ruff format
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+      # Runs only where the private checker exists (it is gitignored); a no-op for everyone else.
+      - id: private-names
+        name: no private names in public files
+        entry: bash -c '[ ! -f sandbox/scrub/scrub.py ] || uv run python sandbox/scrub/scrub.py check'
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: mypy
+        name: mypy (portia only)
+        entry: uv run mypy portia
+        language: system
+        pass_filenames: false
+        types: [python]

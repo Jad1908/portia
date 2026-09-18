@@ -1,0 +1,94 @@
+"""apply_join must materialize the table the report predicted."""
+
+import pandas as pd
+import pytest
+
+from portia.fixtures import sales_customers, sales_orders
+from portia.ops import apply_join
+
+
+@pytest.mark.parametrize(
+    "how,expected_rows", [("inner", 8), ("left", 10), ("right", 9), ("outer", 11)]
+)
+def test_result_matches_prediction(how, expected_rows, table):
+    res = apply_join(table(sales_orders()), table(sales_customers()), how=how, on="customer_id")
+    assert res.table.count() == expected_rows
+    assert res.provenance["result_rows"] == expected_rows
+    assert res.provenance["predicted_rows"] == expected_rows
+    assert res.provenance["matches_prediction"] is True
+
+
+def test_left_join_keeps_every_left_row(table):
+    res = apply_join(table(sales_orders()), table(sales_customers()), how="left", on="customer_id")
+    # all 8 order_ids survive a left join (fan-out can only add rows)
+    assert set(res.table.head(100)["order_id"]) == set(sales_orders()["order_id"])
+    assert res.provenance["left_dropped"] == 0
+
+
+def test_provenance_is_json_serializable(table):
+    import json
+
+    res = apply_join(table(sales_orders()), table(sales_customers()), how="inner", on="customer_id")
+    assert json.loads(json.dumps(res.provenance))["op"] == "join"
+
+
+def test_bad_how_raises():
+    with pytest.raises(ValueError, match="how must be one of"):
+        apply_join(pd.DataFrame({"k": [1]}), pd.DataFrame({"k": [1]}), how="cross", on="k")
+
+
+def test_provenance_keys_declaration_matches_reality(table):
+    """The declaration a spec's `expect` is validated against must not rot.
+
+    `agent.handlers` rejects an expectation on a field this op never reports, so
+    a stale declaration would either allow a forever-drifting expectation or
+    reject a valid one. Both are silent; this test isn't.
+    """
+    from portia.ops.join import PROVENANCE_KEYS
+
+    result = apply_join(
+        table(sales_orders()), table(sales_customers()), on="customer_id", how="left"
+    )
+    assert set(result.provenance) == set(PROVENANCE_KEYS)
+
+
+def test_join_columns_names_match_the_table_it_builds(table):
+    """The naming rule and the built table must agree — they are one function.
+
+    `join_columns` is what `knowledge/build.py` reads a model's column lineage
+    off, statically, without a connection. If it ever disagreed with what
+    `apply_join` actually produces, the graph would describe a table that doesn't
+    exist. So the two are pinned together the way compilation and execution are
+    (`tests/test_pipeline.py`).
+    """
+    from portia.ops.join import join_columns
+
+    left, right = table(sales_orders()), table(sales_customers())
+    result = apply_join(left, right, on="customer_id")
+    declared = join_columns(
+        left.columns, right.columns, ["customer_id"], ["customer_id"], shared_names=True
+    )
+    assert [c.name for c in declared] == result.table.columns
+
+
+def test_a_shared_key_reads_both_sides(table):
+    """The one output column with two origins — `coalesce(l.k, r.k)`."""
+    from portia.ops.join import join_columns
+
+    columns = join_columns(["k", "a"], ["k", "b"], ["k"], ["k"], shared_names=True)
+    key = next(c for c in columns if c.name == "k")
+    assert (key.left, key.right) == ("k", "k")
+    assert [c.name for c in columns] == ["k", "a", "b"]
+
+
+def test_a_collision_is_suffixed_on_both_sides(table):
+    """`_x`/`_y` say which side a column came from — the attribution `outcome` uses."""
+    from portia.ops.join import join_columns
+
+    columns = join_columns(["lk", "note"], ["rk", "note"], ["lk"], ["rk"], shared_names=False)
+    assert [(c.name, c.left, c.right) for c in columns] == [
+        ("lk", "lk", None),
+        ("note_x", "note", None),
+        ("rk", None, "rk"),
+        ("note_y", None, "note"),
+    ]

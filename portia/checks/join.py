@@ -1,0 +1,668 @@
+"""Join/merge check — the unsuppressable drop report.
+
+Diagnoses what a join between two tables *would* do, without materializing it.
+The result size, dropped rows, and fan-out are computed from the **key columns
+alone** (set operations + multiplicity counts), so the report is honest at scale:
+we can say a join explodes 50M rows to 2B without ever building it (docs/PLAN.md,
+"schemas + samples, never full data").
+
+That claim was aspirational while the implementation was pandas — the counts were
+honest, but getting them still meant holding both frames in memory. The SQL
+implementation is the one that delivers it: an 80M-row fan-out is *counted* in a
+GROUP BY and a sum, and never built.
+
+This is diagnosis only — read-only, mutates nothing. It surfaces **facts** for a
+reasoning agent to judge; it never ranks, prioritizes, or recommends — that is
+the agent's job, with context the engine can't have (see CLAUDE.md, facts vs
+judgment). `join_findings` layers row-level examples on top of the report so the
+agent can weigh materiality from real rows, not just counts.
+
+The exact result-row formula, per join type, from key multiplicities:
+    inner  = Σ_{k in shared}  mult_left[k] * mult_right[k]
+    left   = inner + (left rows whose key is unmatched or null)
+    right  = inner + (right rows whose key is unmatched or null)
+    outer  = inner + both of the above
+
+**Two implementations, one set of rules**, as in `checks.profiling`: everything
+that turns measurements into a report — `_assemble`, `_relationship`, `_flags` —
+takes plain numbers and is shared, so the tiers cannot drift into two subtly
+different reports.
+"""
+
+from __future__ import annotations
+
+from difflib import get_close_matches
+from typing import Any
+
+from portia.checks.profiling import BOOLEAN, DATETIME, NUMERIC_KINDS, kind_of
+from portia.core import dialect as dialects
+from portia.core.dialect import Dialect
+from portia.core.serialize import round_float, to_jsonable
+from portia.core.table import Table
+
+SAMPLE_KEYS = 5  # example unmatched keys shown per side
+SAMPLE_ROWS = 3  # example rows shown per anomaly in join_findings
+#: Non-key columns carried by one example row. **Rows were always capped; width
+#: never was**, and width is what refused the call: `join_findings` on the
+#: 191-column AQN extract returned 51,402 characters, of which 37,754 were six
+#: example rows at ~6,200 each (`docs/EVALUATION.md`, the AQN build run). Cutting
+#: to one row would still have been 12,000 characters of the same thing.
+SAMPLE_ROW_COLUMNS = 5
+LOW_COVERAGE = 0.5  # left match rate below this -> "low_overlap"
+
+
+def join_report(
+    left: Table,
+    right: Table,
+    on: str | list[str] | None = None,
+    *,
+    left_on: str | list[str] | None = None,
+    right_on: str | list[str] | None = None,
+) -> dict:
+    """:func:`join_report`, measured in SQL. Nothing is materialized.
+
+    Both tables must live on the same connection — a join is between two things
+    the database can see at once.
+    """
+    lkeys, rkeys = resolve_keys(on, left_on, right_on)
+    # As each side spells them (`dialect.resolve_columns`): the keys are typed
+    # by the agent and the columns are named by the engine, and on a warehouse
+    # those disagree about case for every unquoted alias.
+    lkeys = dialects.resolve_columns(lkeys, left.columns)
+    rkeys = dialects.resolve_columns(rkeys, right.columns)
+    _require_columns(left.columns, lkeys, "left")
+    _require_columns(right.columns, rkeys, "right")
+
+    L = _table_side(left, lkeys)
+    R = _table_side(right, rkeys)
+    comparable = L["kinds"] == R["kinds"]
+
+    exprs = _overlap_exprs(dialects.of(left.con))
+    select = ", ".join(exprs.values())
+    row = left.con.execute(
+        f"{_key_ctes(left, lkeys, right, rkeys, comparable)} SELECT {select} "
+        f"FROM l FULL OUTER JOIN r ON {_match(len(lkeys))}"
+    ).fetchone()
+
+    return _assemble(
+        lkeys,
+        rkeys,
+        L,
+        R,
+        {name: int(value or 0) for name, value in zip(exprs, row, strict=True)},
+        sample_left_only=_unmatched_keys(left, lkeys, right, rkeys, comparable),
+        sample_right_only=_unmatched_keys(right, rkeys, left, lkeys, comparable),
+    )
+
+
+# --- the rules, shared by both implementations ------------------------------
+
+
+def _assemble(
+    lkeys: list[str],
+    rkeys: list[str],
+    L: dict,
+    R: dict,
+    ov: dict,
+    *,
+    sample_left_only: list,
+    sample_right_only: list,
+) -> dict:
+    """One report, from measurements taken either way."""
+    # A left row is dropped by an inner join if its key is null or matches nothing.
+    dropped_left = L["null_rows"] + ov["left_only_rows"]
+    dropped_right = R["null_rows"] + ov["right_only_rows"]
+    inner_rows, matched_left, matched_right = (
+        ov["inner_rows"],
+        ov["matched_left"],
+        ov["matched_right"],
+    )
+
+    report: dict[str, Any] = {
+        "keys": {"left": lkeys, "right": rkeys},
+        "left": _side_summary(L),
+        "right": _side_summary(R),
+        "key_dtypes": {"left": L["kinds"], "right": R["kinds"]},
+        "key_dtype_match": L["kinds"] == R["kinds"],
+        "relationship": _relationship(L["unique"], R["unique"]),
+        "overlap": {
+            "n_shared_keys": ov["n_shared_keys"],
+            "n_left_only_keys": ov["n_left_only_keys"],
+            "n_right_only_keys": ov["n_right_only_keys"],
+            "left_coverage": round_float(matched_left / L["n_rows"]) if L["n_rows"] else 0.0,
+            "right_coverage": round_float(matched_right / R["n_rows"]) if R["n_rows"] else 0.0,
+            "sample_left_only": sample_left_only,
+            "sample_right_only": sample_right_only,
+        },
+        "fan_out": {
+            "max_left_to_right": ov["max_left_to_right"],
+            "max_right_to_left": ov["max_right_to_left"],
+            "result_per_matched_left": round_float(inner_rows / matched_left)
+            if matched_left
+            else 0.0,
+        },
+        # Row conservation across every join type — the drop report. left/right
+        # dropped = distinct rows from that side that don't survive the join.
+        "joins": {
+            "inner": {
+                "result_rows": inner_rows,
+                "left_dropped": dropped_left,
+                "right_dropped": dropped_right,
+            },
+            "left": {
+                "result_rows": inner_rows + dropped_left,
+                "left_dropped": 0,
+                "right_dropped": dropped_right,
+            },
+            "right": {
+                "result_rows": inner_rows + dropped_right,
+                "left_dropped": dropped_left,
+                "right_dropped": 0,
+            },
+            "outer": {
+                "result_rows": inner_rows + dropped_left + dropped_right,
+                "left_dropped": 0,
+                "right_dropped": 0,
+            },
+        },
+    }
+    report["flags"] = _flags(
+        report,
+        dropped_left=dropped_left,
+        dropped_right=dropped_right,
+        inner_rows=inner_rows,
+        null_keys=L["null_rows"] + R["null_rows"],
+        max_fanout=max(ov["max_left_to_right"], ov["max_right_to_left"]),
+    )
+    return report
+
+
+def _side_summary(side: dict) -> dict:
+    return {
+        "n_rows": side["n_rows"],
+        "n_null_keys": side["null_rows"],
+        "n_distinct_keys": side["n_distinct"],
+        "n_duplicated_keys": side["n_duplicated"],
+        "max_key_multiplicity": side["max_mult"],
+        "unique_keys": side["unique"],
+    }
+
+
+def _relationship(left_unique: bool, right_unique: bool) -> str:
+    if left_unique and right_unique:
+        return "1:1"
+    if left_unique:
+        return "1:many"
+    if right_unique:
+        return "many:1"
+    return "many:many"
+
+
+def _flags(report, *, dropped_left, dropped_right, inner_rows, null_keys, max_fanout) -> list[str]:
+    flags: list[str] = []
+    if not report["key_dtype_match"]:
+        flags.append("key_dtype_mismatch")  # most severe: likely zero real matches
+    if inner_rows == 0:
+        flags.append("no_matches")
+    if report["relationship"] == "many:many":
+        flags.append("many_to_many")
+    if dropped_left > 0:
+        flags.append("left_rows_dropped")
+    if max_fanout > 1:
+        flags.append("fan_out")
+    if null_keys > 0:
+        flags.append("null_keys")
+    if report["overlap"]["left_coverage"] < LOW_COVERAGE:
+        flags.append("low_overlap")
+    if dropped_right > 0:
+        flags.append("right_rows_dropped")
+    return flags
+
+
+def resolve_keys(on, left_on, right_on) -> tuple[list[str], list[str]]:
+    """A step's key fields as two equal-length lists — one form, one place.
+
+    ``on`` is the shared-name form (both sides call the key the same thing);
+    ``left_on``/``right_on`` is the form where they don't. Either may be a bare
+    string. Public because it is the only statement of that rule, and the
+    knowledge graph reads a join step's keys off a spec without running it
+    (`portia/knowledge/build.py`).
+    """
+    if on is not None:
+        keys = [on] if isinstance(on, str) else list(on)
+        return keys, keys
+    if left_on is not None and right_on is not None:
+        lk = [left_on] if isinstance(left_on, str) else list(left_on)
+        rk = [right_on] if isinstance(right_on, str) else list(right_on)
+        if len(lk) != len(rk):
+            raise ValueError(f"left_on ({lk}) and right_on ({rk}) must have equal length")
+        return lk, rk
+    raise ValueError("provide `on`, or both `left_on` and `right_on`")
+
+
+def _require_columns(columns, keys: list[str], side: str) -> None:
+    missing = [k for k in keys if k not in list(columns)]
+    if missing:
+        raise ValueError(f"{side} table is missing key column(s): {missing}")
+
+
+def _key_value(key) -> Any:
+    """One key as evidence: a scalar for a single key, a **list** for a composite.
+
+    A list rather than pandas' stringified tuple. ``"('H001', '2026-06-12')"`` is
+    a repr of an implementation detail — it is not JSON, the components cannot be
+    read out of it, and SQL has no reason to produce it. Changed deliberately
+    when the SQL tier landed; `docs/DUCKDB_MIGRATION.md` §6.3 records it with the
+    other evidence changes.
+    """
+    if isinstance(key, tuple):
+        return [to_jsonable(v) for v in key]
+    return to_jsonable(key)
+
+
+# --- the SQL implementation -------------------------------------------------
+
+
+def _key_kind(dtype: str) -> str:
+    """Coarse structural kind for key comparison. int vs float both 'numeric'
+    (they join fine); string vs numeric do not (the '123' != 123 silent miss)."""
+    kind = kind_of(dtype)
+    if kind in NUMERIC_KINDS:
+        return "numeric"
+    if kind in (BOOLEAN, DATETIME):
+        return kind
+    return "string"
+
+
+def _table_side(table: Table, keys: list[str]) -> dict:
+    d = table.dialect
+    quoted = [d.quote(k) for k in keys]
+    not_null = " AND ".join(f"{q} IS NOT NULL" for q in quoted)
+    grouped = (
+        f"SELECT count(*) AS n FROM ({table.query}) WHERE {not_null} GROUP BY {', '.join(quoted)}"
+    )
+    n_rows, null_rows = table.con.execute(
+        f"SELECT count(*), {d.count_where(f'NOT ({not_null})')} FROM ({table.query})"
+    ).fetchone()
+    n_distinct, n_duplicated, max_mult = table.con.execute(
+        f"SELECT count(*), {d.count_where('n > 1')}, coalesce(max(n), 0) FROM ({grouped})"
+    ).fetchone()
+    dtypes = table.dtypes
+    return {
+        "n_rows": int(n_rows),
+        "null_rows": int(null_rows),
+        "n_distinct": int(n_distinct),
+        "n_duplicated": int(n_duplicated),
+        "max_mult": int(max_mult),
+        "unique": int(max_mult) <= 1,
+        "kinds": [_key_kind(dtypes[k]) for k in keys],
+    }
+
+
+def _key_exprs(
+    keys: list[str], comparable: bool, dialect: Dialect, qualifier: str = ""
+) -> list[str]:
+    """The key columns as the join compares them, optionally table-qualified.
+
+    When the two sides' kinds already agree, the raw columns — DuckDB matches
+    ``BIGINT`` to ``DOUBLE`` exactly as pandas aligns int and float indexes.
+
+    When they do **not** agree, both sides are read as text. Not cosmetic:
+    DuckDB implements ``BIGINT = VARCHAR`` by casting the text to a number and
+    *raising* when it won't convert, so a report on a mismatched key would crash
+    rather than report the mismatch — which is the one thing it most needs to
+    say. Comparing as text can never raise, and it agrees with what DuckDB's own
+    join does in the cases where that join doesn't blow up.
+    """
+    prefix = f"{qualifier}." if qualifier else ""
+    return [
+        f"CAST({prefix}{dialect.quote(k)} AS {dialect.text})"
+        if not comparable
+        else f"{prefix}{dialect.quote(k)}"
+        for k in keys
+    ]
+
+
+#: The whole join diagnosis, as aggregates over one ``FULL OUTER JOIN`` of the two
+#: sides' key multiplicities. This is the query the module docstring's claim rests
+#: on: an 80M-row fan-out is `sum(ln * rn)`, so it is *counted* rather than built.
+#: Named rather than positional so adding a measurement can't silently shift the
+#: meaning of the one next to it.
+_SHARED = "l.ln IS NOT NULL AND r.rn IS NOT NULL"
+_LEFT_ONLY = "r.rn IS NULL"
+_RIGHT_ONLY = "l.ln IS NULL"
+
+
+def _overlap_exprs(d: Dialect = dialects.DUCKDB) -> dict[str, str]:
+    return {
+        "inner_rows": f"coalesce({d.sum_where('l.ln * r.rn', _SHARED)}, 0)",
+        "matched_left": f"coalesce({d.sum_where('l.ln', _SHARED)}, 0)",
+        "matched_right": f"coalesce({d.sum_where('r.rn', _SHARED)}, 0)",
+        "n_shared_keys": d.count_where(_SHARED),
+        "n_left_only_keys": d.count_where(_LEFT_ONLY),
+        "n_right_only_keys": d.count_where(_RIGHT_ONLY),
+        "left_only_rows": f"coalesce({d.sum_where('l.ln', _LEFT_ONLY)}, 0)",
+        "right_only_rows": f"coalesce({d.sum_where('r.rn', _RIGHT_ONLY)}, 0)",
+        "max_left_to_right": f"coalesce({d.max_where('r.rn', _SHARED)}, 0)",
+        "max_right_to_left": f"coalesce({d.max_where('l.ln', _SHARED)}, 0)",
+    }
+
+
+def _match(n_keys: int) -> str:
+    return " AND ".join(f"l.lk{i} = r.rk{i}" for i in range(n_keys))
+
+
+def _key_ctes(left: Table, lkeys: list[str], right: Table, rkeys: list[str], comparable) -> str:
+    """``WITH l AS (…), r AS (…)`` — each side reduced to one row per distinct key.
+
+    This is the whole reason the report scales: after these, everything downstream
+    is arithmetic over *keys*, and the number of keys is the answer's size rather
+    than the input's.
+    """
+    return (
+        f"WITH l AS ({_key_counts(left, lkeys, comparable, 'lk', 'ln')}), "
+        f"r AS ({_key_counts(right, rkeys, comparable, 'rk', 'rn')})"
+    )
+
+
+def _key_counts(table: Table, keys: list[str], comparable: bool, prefix: str, count: str) -> str:
+    exprs = _key_exprs(keys, comparable, table.dialect)
+    select = ", ".join(f"{e} AS {prefix}{i}" for i, e in enumerate(exprs))
+    not_null = " AND ".join(f"{e} IS NOT NULL" for e in exprs)
+    ordinals = ", ".join(str(i + 1) for i in range(len(keys)))
+    return (
+        f"SELECT {select}, count(*) AS {count} FROM ({table.query}) "
+        f"WHERE {not_null} GROUP BY {ordinals}"
+    )
+
+
+def _anti_join_where(this: Table, keys: list[str], other: Table, other_keys: list[str], comparable):
+    """``WHERE`` clause selecting this side's rows whose key is absent from the other."""
+    mine = _key_exprs(keys, comparable, this.dialect, "__t")
+    theirs = _key_exprs(other_keys, comparable, this.dialect, "__o")
+    not_null = " AND ".join(f"{e} IS NOT NULL" for e in mine)
+    match = " AND ".join(f"{t} = {m}" for t, m in zip(theirs, mine, strict=True))
+    return f"{not_null} AND NOT EXISTS (SELECT 1 FROM ({other.query}) AS __o WHERE {match})"
+
+
+def _unmatched_keys(this: Table, keys: list[str], other: Table, other_keys: list[str], comparable):
+    """Distinct keys on this side that match nothing on the other, smallest first.
+
+    The values come back in **their own type**, not the text the comparison used,
+    so a numeric key still reads as a number in the evidence.
+    """
+    quoted = ", ".join(this.dialect.quote(k) for k in keys)
+    where = _anti_join_where(this, keys, other, other_keys, comparable)
+    order = this.dialect.order_by_all(len(keys))
+    rows = this.con.execute(
+        f"SELECT {quoted} FROM ({this.query}) AS __t WHERE {where} "
+        f"GROUP BY {quoted} {order} LIMIT {SAMPLE_KEYS}"
+    ).fetchall()
+    return [_key_value(row[0] if len(row) == 1 else tuple(row)) for row in rows]
+
+
+# --- one column against one column ------------------------------------------
+
+
+def column_overlap(left: Table, left_column: str, right: Table, right_column: str) -> dict:
+    """Do these two columns share values, and how far — compact enough for many pairs.
+
+    The measurement the knowledge graph's `OVERLAPS` edge carries
+    (`docs/KNOWLEDGE_GRAPH.md` §4.3). It lives here, in the module that already
+    knows how to compare two sets of values at scale, rather than in a second
+    implementation next to the graph: the CTEs, the type-kind rule and the
+    coverage arithmetic are all the same, and two of those drifting apart is how
+    the terminal and the graph end up disagreeing about one number.
+
+    **Deliberately not `join_findings`** (§9.3). That one is heavy by design and
+    returns example rows for a single pair; this returns numbers for a pair the
+    agent is asking about among several. It costs the same single scan-and-group
+    per side either way, so the saving is in what comes back, not in the query.
+
+    **Two coverages, because overlap is not symmetric** (§4.3): 98% of orders'
+    customer ids may exist in customers while only 40% of customers appear in
+    orders. Both are reported and neither is ranked.
+
+    **A zero here means no shared values. It does not mean unrelated** (§4.4) —
+    `France` and `FRA` measure zero and are the same thing after a mapping. That
+    reading is the agent's, which is why the edge carries the reason it asked.
+    """
+    (left_column,) = dialects.resolve_columns([left_column], left.columns)
+    (right_column,) = dialects.resolve_columns([right_column], right.columns)
+    _require_columns(left.columns, [left_column], "left")
+    _require_columns(right.columns, [right_column], "right")
+
+    L = _table_side(left, [left_column])
+    R = _table_side(right, [right_column])
+    comparable = L["kinds"] == R["kinds"]
+
+    exprs = _overlap_exprs(dialects.of(left.con))
+    row = left.con.execute(
+        f"{_key_ctes(left, [left_column], right, [right_column], comparable)} "
+        f"SELECT {', '.join(exprs.values())} FROM l FULL OUTER JOIN r ON {_match(1)}"
+    ).fetchone()
+    ov = {name: int(value or 0) for name, value in zip(exprs, row, strict=True)}
+
+    return {
+        "left": _column_side(left, left_column, L),
+        "right": _column_side(right, right_column, R),
+        "n_shared_values": ov["n_shared_keys"],
+        "n_left_only_values": ov["n_left_only_keys"],
+        "n_right_only_values": ov["n_right_only_keys"],
+        # Share of *rows* whose value is present on the other side — the same
+        # definition `join_report` uses, so the two can never disagree.
+        "left_coverage": round_float(ov["matched_left"] / L["n_rows"]) if L["n_rows"] else 0.0,
+        "right_coverage": round_float(ov["matched_right"] / R["n_rows"]) if R["n_rows"] else 0.0,
+        # A false here is why a zero can be meaningless rather than informative:
+        # text against a number never matches, whatever the values say.
+        "comparable_types": comparable,
+    }
+
+
+def _column_side(table: Table, column: str, side: dict) -> dict:
+    return {
+        "table": table.name,
+        "column": column,
+        "n_rows": side["n_rows"],
+        "n_null": side["null_rows"],
+        "n_distinct": side["n_distinct"],
+        "type": side["kinds"][0],
+    }
+
+
+def render_overlap(overlap: dict) -> str:
+    """One measured pair, for a human. Numbers, never a verdict."""
+    left, right = overlap["left"], overlap["right"]
+    return (
+        f"{left['table']}.{left['column']} ↔ {right['table']}.{right['column']}  "
+        f"{overlap['n_shared_values']} shared value(s); "
+        f"{overlap['left_coverage']:.0%} of left rows, "
+        f"{overlap['right_coverage']:.0%} of right rows match"
+        + ("" if overlap["comparable_types"] else "   ⚑ different types, compared as text")
+    )
+
+
+def join_findings(
+    left: Table,
+    right: Table,
+    on: str | list[str] | None = None,
+    *,
+    left_on: str | list[str] | None = None,
+    right_on: str | list[str] | None = None,
+    left_columns: list[str] | None = None,
+    right_columns: list[str] | None = None,
+) -> dict:
+    """:func:`join_findings`, measured in SQL.
+
+    ``left_columns`` and ``right_columns`` are named per side because the two
+    sides are two schemas — in the AQN run the left had 191 columns and the right
+    had 4 — and they mirror ``left_on``/``right_on``, which is the vocabulary this
+    tool already uses for the same reason. Omit them and each row carries its
+    keys plus :data:`SAMPLE_ROW_COLUMNS` more; see :func:`example_columns`.
+    """
+    lkeys, rkeys = resolve_keys(on, left_on, right_on)
+    report = join_report(left, right, on=on, left_on=left_on, right_on=right_on)
+    comparable = report["key_dtype_match"]
+    lcols = example_columns(left, lkeys, left_columns)
+    rcols = example_columns(right, rkeys, right_columns)
+
+    evidence = {
+        "unmatched_left_rows": _unmatched_rows(left, lkeys, right, rkeys, comparable, lcols),
+        "unmatched_right_rows": _unmatched_rows(right, rkeys, left, lkeys, comparable, rcols),
+        "null_key_left_rows": _null_key_rows(left, lkeys, lcols),
+        "null_key_right_rows": _null_key_rows(right, rkeys, rcols),
+        "fan_out_examples": _table_fan_out(left, lkeys, right, rkeys, comparable),
+        # **What a row is, stated rather than left to be inferred.** Three rows
+        # of six columns off a 191-column table look like a six-column table, and
+        # a reader who counts them has been told something false about the source.
+        "example_row_columns": {"left": lcols, "right": rcols},
+    }
+    return {"report": report, "evidence": evidence}
+
+
+def _rows_as_records(con, sql: str, columns: list[str]) -> list[dict]:
+    return [
+        {col: to_jsonable(value) for col, value in zip(columns, row, strict=True)}
+        for row in con.execute(sql).fetchall()
+    ]
+
+
+def example_columns(table: Table, keys: list[str], named: list[str] | None) -> list[str]:
+    """The columns one example row carries: the key columns, then context.
+
+    **The keys come first because they are the answer.** A row arriving in schema
+    order buries them: on the AQN extract the join key was field 133 of 191, so
+    the one column that explains why the row did not match was the hardest thing
+    in the payload to find.
+
+    Then :data:`SAMPLE_ROW_COLUMNS` more, in the table's own order. Schema order
+    rather than the non-null ones first, which is denser (151 of those 191 fields
+    were null) and costs the thing that makes three rows worth printing together:
+    every row shows the same columns, so they read down as a table. A sample
+    where row 2 and row 3 describe different columns is three unrelated
+    fragments.
+
+    ``named`` overrides the cap. The keys are still prepended — a row without the
+    key it failed to match on is nearly useless, and requiring the caller to
+    remember that would make forgetting cost a round trip — and deduplicated, so
+    naming a key column does not print it twice.
+    """
+    if named is None:
+        rest = [c for c in table.columns if c not in keys][:SAMPLE_ROW_COLUMNS]
+    else:
+        named = dialects.resolve_columns(named, table.columns)
+        missing = [c for c in named if c not in table.columns]
+        if missing:
+            close = get_close_matches(missing[0], table.columns, n=3)
+            suggestion = f" — closest: {', '.join(close)}" if close else ""
+            raise ValueError(
+                f"no column {missing[0]!r} in {table.name!r}{suggestion}. "
+                f"{len(missing)} of {len(named)} requested are not there."
+            )
+        rest = [c for c in named if c not in keys]
+    return [*keys, *rest]
+
+
+def _example_rows(this: Table, columns: list[str], where: str) -> list[dict]:
+    """Example rows, projected to ``columns``.
+
+    ``ORDER BY ALL`` keeps the same run answering with the same rows. It now
+    orders by the projection rather than by the whole table, so the key leads the
+    sort — which is a change in *which* three rows come back, not in how many.
+    Neither ordering picks the rows covering the most data; that is `BACKLOG.md`
+    → Checks, *"every sample list is alphabetical, never by frequency"*.
+    """
+    projection = ", ".join(this.dialect.quote(c) for c in columns)
+    order = this.dialect.order_by_all(len(columns))
+    sql = (
+        f"SELECT {projection} FROM ({this.query}) AS __t WHERE {where} {order} LIMIT {SAMPLE_ROWS}"
+    )
+    return _rows_as_records(this.con, sql, columns)
+
+
+def _unmatched_rows(
+    this: Table, keys: list[str], other: Table, other_keys: list[str], comparable, columns
+):
+    where = _anti_join_where(this, keys, other, other_keys, comparable)
+    return _example_rows(this, columns, where)
+
+
+def _null_key_rows(this: Table, keys: list[str], columns: list[str]) -> list[dict]:
+    any_null = " OR ".join(f"{this.dialect.quote(k)} IS NULL" for k in keys)
+    return _example_rows(this, columns, any_null)
+
+
+def _table_fan_out(left: Table, lkeys, right: Table, rkeys, comparable) -> list[dict]:
+    """Shared keys duplicated on either side — the source of row multiplication.
+
+    Worst first, ties broken by the key so the answer is the same every run.
+    """
+    keyout = ", ".join(f"l.lk{i}" for i in range(len(lkeys)))
+    rows = left.con.execute(
+        f"{_key_ctes(left, lkeys, right, rkeys, comparable)} "
+        f"SELECT {keyout}, l.ln, r.rn FROM l JOIN r ON {_match(len(lkeys))} "
+        f"WHERE l.ln > 1 OR r.rn > 1 "
+        f"ORDER BY l.ln * r.rn DESC, {keyout} LIMIT {SAMPLE_KEYS}"
+    ).fetchall()
+    n = len(lkeys)
+    return [
+        {
+            "key": _key_value(row[0] if n == 1 else tuple(row[:n])),
+            "n_left": int(row[n]),
+            "n_right": int(row[n + 1]),
+        }
+        for row in rows
+    ]
+
+
+def render_text(report: dict) -> str:
+    """Human-readable rendering for playing with the check."""
+    lk = ", ".join(report["keys"]["left"])
+    rk = ", ".join(report["keys"]["right"])
+    key_desc = lk if lk == rk else f"{lk} = {rk}"
+    lines = [
+        f"join on [{key_desc}]  —  {report['relationship']}",
+        f"  left  {report['left']['n_rows']} rows, "
+        f"{report['left']['n_distinct_keys']} distinct keys "
+        f"({report['left']['n_null_keys']} null)",
+        f"  right {report['right']['n_rows']} rows, "
+        f"{report['right']['n_distinct_keys']} distinct keys "
+        f"({report['right']['n_null_keys']} null)",
+        "",
+        f"  key coverage: {report['overlap']['left_coverage']:.0%} of left, "
+        f"{report['overlap']['right_coverage']:.0%} of right match",
+        f"  fan-out: 1 left row -> up to {report['fan_out']['max_left_to_right']} right",
+        "",
+        "  result rows / dropped, by join type:",
+    ]
+    for jt, j in report["joins"].items():
+        lines.append(
+            f"    {jt:<6} {j['result_rows']:>6} rows   "
+            f"(left dropped {j['left_dropped']}, right dropped {j['right_dropped']})"
+        )
+    if report["overlap"]["sample_left_only"]:
+        lines.append(f"  keys only in left:  {report['overlap']['sample_left_only']}")
+    if report["overlap"]["sample_right_only"]:
+        lines.append(f"  keys only in right: {report['overlap']['sample_right_only']}")
+    if report["flags"]:
+        lines.append("")
+        lines.append(f"  ⚑ {', '.join(report['flags'])}")
+    return "\n".join(lines)
+
+
+def render_findings(findings: dict) -> str:
+    """Human-readable findings for the CLI: the report, then example rows."""
+    lines = [render_text(findings["report"]), ""]
+    ev = findings["evidence"]
+    for title, key in [
+        ("unmatched left rows", "unmatched_left_rows"),
+        ("unmatched right rows", "unmatched_right_rows"),
+        ("null-key left rows", "null_key_left_rows"),
+        ("null-key right rows", "null_key_right_rows"),
+    ]:
+        if ev[key]:
+            lines.append(f"  {title} (sample):")
+            lines += [f"    {row}" for row in ev[key]]
+    if ev["fan_out_examples"]:
+        lines.append(f"  fan-out keys (n_left × n_right): {ev['fan_out_examples']}")
+    return "\n".join(lines)
