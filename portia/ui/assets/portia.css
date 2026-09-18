@@ -552,6 +552,15 @@ html body {
   cursor: default;
 }
 
+/* `button-busy`: the press landed and is being acted on. The button's own
+ * fill and label at reduced opacity, so it reads as the same control stepped
+ * back, and `pointer-events: none` so a second press goes nowhere. */
+.btn.btn-busy {
+  opacity: 0.5;
+  pointer-events: none;
+  cursor: default;
+}
+
 .btn-micro {
   min-height: 24px;
   padding: 2px 8px;

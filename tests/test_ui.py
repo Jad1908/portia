@@ -395,9 +395,16 @@ def test_a_pressed_index_is_busy_until_profiling_ends_and_takes_one_press(tmp_pa
     monkeypatch.setattr(screens, "_ticked", lambda: [tmp_path / "orders.csv"])
     monkeypatch.setattr(screens._actions, "refresh", lambda *a, **k: None)
 
+    # A press arrives inside the pressed button's slot. `asyncio.run` starts a
+    # task with an empty slot stack, so the test's own client is entered by hand.
+    from nicegui import context
+
+    client = context.client
+
     async def press() -> None:
         monkeypatch.setattr(core, "loop", asyncio.get_running_loop())
-        await screens._index_now()
+        with client:
+            await screens._index_now()
 
     with _as_app(screens, app):
         asyncio.run(press())
@@ -407,10 +414,52 @@ def test_a_pressed_index_is_busy_until_profiling_ends_and_takes_one_press(tmp_pa
     assert app.indexing_pressed == ""
 
 
-def test_a_busy_button_is_quasars_loading_state():
+def test_a_busy_button_keeps_its_fill_and_its_words():
+    """Quasar's `loading` hid the label and muddied the accent. Busy is the
+    same button washed out, and the CSS is what stops the second press."""
+    import re
+    from pathlib import Path
+
+    with ui.element("div"):
+        busy = c.button("Index 3 files", kind="primary", busy=True)
+    assert "btn-busy" in busy.classes and "btn-primary" in busy.classes
+    assert busy.text == "Index 3 files"
+    assert "loading" not in busy.props
+    css = (Path(c.__file__).parent / "assets" / "portia.css").read_text()
+    rule = re.search(r"\n\.btn\.btn-busy \{(.*?)\}", css, re.S).group(1)
+    assert "pointer-events: none" in rule and "background" not in rule
+
+
+def test_the_index_press_holds_its_client_before_it_redraws_its_own_button():
+    """The first build refreshed `_actions` from inside the button's handler
+    and then notified through the deleted slot. The run died at its first
+    toast with the button busy for good (2026-09-18, found by the user)."""
     import inspect
 
-    assert 'props("loading")' in inspect.getsource(c.button)
+    from portia.ui import screens
+
+    source = inspect.getsource(screens._index_now)
+    held, redraw, entered = (
+        source.index("client = context.client"),
+        source.index("_actions.refresh()"),
+        source.index("with client:"),
+    )
+    assert held < redraw < entered
+    assert "_actions.refresh()" in inspect.getsource(screens._pressed_done)
+    assert source.index("finally:") < source.rindex("_pressed_done()")
+
+
+def test_a_running_index_always_offers_the_way_out():
+    """It was offered only once the project had a source, so a first index that
+    hung held the screen with nothing but Back."""
+    import inspect
+
+    from portia.ui import screens
+
+    source = inspect.getsource(screens._actions.func)
+    branch = source[source.index("if outstanding or busy:") : source.index("elif APP.sources")]
+    assert "_leave_label(in_dialog)" in branch
+    assert "if APP.sources or in_dialog:" not in branch
 
 
 def test_opening_the_workspace_lands_in_the_job_that_is_running(monkeypatch):
