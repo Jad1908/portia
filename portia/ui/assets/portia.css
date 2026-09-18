@@ -4586,8 +4586,25 @@ body.tab-dragging .tab-drop {
 .chat-row:hover {
   background-color: var(--surface-card);
 }
+/* The pinned Sources row: **a card, where every row under it is a line**
+ * *(2026-09-18, the user's call)*. It is not a chat and it is not history. It
+ * is where indexing is set up and started, and as one more row above the day
+ * groups it read as the oldest chat in the list. The outline is `.p-pinned`'s
+ * idiom from the left pane, used for the same statement: *a different kind of
+ * thing*. Kind, never rank. It is no bigger, bolder or brighter than a chat
+ * row, and the chevron says it opens a view where a chat row opens a thread. */
 .chat-row--pinned {
-  margin-bottom: var(--sp-xs);
+  margin-bottom: var(--sp-sm);
+  background-color: var(--surface-elevated);
+  /* `hairline-strong`, where `.p-pinned` takes `hairline`: that band sits on
+   * the canvas grey and this card sits on a white pane, where the plain
+   * hairline all but vanished (seen in the browser). */
+  border: 1px solid var(--hairline-strong);
+}
+.chat-row-open {
+  color: var(--ash);
+  font-size: 18px;
+  flex: 0 0 auto;
 }
 .chat-row-icon {
   color: var(--mute);
