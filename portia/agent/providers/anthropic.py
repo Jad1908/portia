@@ -34,6 +34,7 @@ class Anthropic(Provider):
     label = "Anthropic"
     default_model = DEFAULT_MODEL
     honours_effort = True
+    static_models = tuple(Model(name) for name in MODELS)
 
     def env(self) -> dict[str, str]:
         return {}
@@ -42,7 +43,7 @@ class Anthropic(Provider):
         return Status(reachable=None)
 
     def models(self) -> list[Model]:
-        return [Model(name) for name in MODELS]
+        return list(self.static_models)
 
     def preflight(self, model: str, *, prompt_chars: Callable[[], int]) -> Preflight:
         return Preflight(ok=True)

@@ -5233,6 +5233,60 @@ def test_the_picker_draws_the_providers_list_and_never_lists_on_the_loop():
     assert ".models()" not in source
 
 
+def test_a_provider_with_a_written_list_offers_it_before_anything_is_listed():
+    """Anthropic has no server to ask, so nothing listed it when the page
+    opened and the select held one model until a provider switch asked."""
+    import inspect
+
+    from portia.agent import providers
+
+    anthropic = providers.get("anthropic")
+    assert [m.name for m in anthropic.static_models] == list(providers.anthropic.MODELS)
+    assert anthropic.models() == list(anthropic.static_models)
+    assert all(
+        not providers.get(kind).static_models for kind in providers.KINDS if kind != "anthropic"
+    )
+    assert "static_models" in inspect.getsource(c.model_effort)
+
+
+def test_a_window_that_never_switched_provider_offers_every_anthropic_model():
+    """The picker as drawn on a fresh app, nothing listed, read off the select."""
+    from portia.agent import providers
+    from portia.ui import state
+
+    fresh = state.App()
+    assert fresh.provider_models == {}
+    original, state.APP = state.APP, fresh
+    try:
+        with ui.element("div") as slot:
+            c.model_effort(fresh, lambda effort: None)
+    finally:
+        state.APP = original
+    select = next(e for e in slot.descendants() if "model-select" in e.classes)
+    assert list(select.options) == list(providers.anthropic.MODELS)
+
+
+def test_a_server_with_no_models_offers_none_and_says_nothing_about_effort():
+    """The select showed the provider's default name over a line saying nothing
+    is installed, and under it a sentence about a control that is not there."""
+    from portia.ui import state
+
+    fresh = state.App(provider="ollama")
+    fresh.provider_models["ollama"] = []
+    original, state.APP = state.APP, fresh
+    try:
+        with ui.element("div") as slot:
+            c.model_effort(fresh, lambda effort: None)
+    finally:
+        state.APP = original
+    drawn = list(slot.descendants())
+    select = next(e for e in drawn if "model-select" in e.classes)
+    assert select.value == "" and list(select.options.values()) == ["no models"]
+    assert not select.enabled
+    detail = next(e for e in drawn if "spend-detail" in e.classes)
+    assert not list(detail.descendants()), "the row is reserved, and empty"
+
+
 def test_a_local_model_is_listed_with_the_vendors_own_size():
     from portia.agent import providers
 

@@ -207,8 +207,7 @@ def _copilot() -> None:
     second place to *change* the setting and never a second setting.
     """
     with c.setting(SPEND_WHAT, SPEND_WHY):
-        # `model_effort` states in effort's own row when a provider ignores it,
-        # so nothing is said twice here.
+        # `model_effort` draws no effort control on a provider that ignores it.
         c.model_effort(
             APP,
             _set_effort,

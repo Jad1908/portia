@@ -131,6 +131,11 @@ class Provider(ABC):
     #: (Ollama) and for a remote API. A surface reads this and offers the start
     #: panel where the remedy would otherwise be a command to type.
     starts: bool = False
+    #: The models this provider can name without asking anyone: a list written
+    #: in its own module. Empty where the list is the server's, which is every
+    #: local provider. A picker may draw these in a render, where `models` is
+    #: a network call and may not be (`docs/PROVIDERS.md` §4.3).
+    static_models: tuple[Model, ...] = ()
 
     @abstractmethod
     def env(self) -> dict[str, str]:
