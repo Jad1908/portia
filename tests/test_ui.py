@@ -1827,6 +1827,23 @@ def test_every_connection_button_says_what_it_opens():
     )
 
 
+def test_the_sources_row_is_a_card_with_a_chevron_and_no_bigger_than_a_chat_row():
+    """It read as the oldest chat in the list. The outline says *a different
+    kind of thing*, and nothing about it is larger or bolder than a chat row."""
+    import inspect
+    import re
+    from pathlib import Path
+
+    from portia.ui import transcript
+
+    assert "chat-row-open" in inspect.getsource(transcript._pinned_sources_row)
+    assert len(transcript._SOURCES_META) <= 40, "one line, and it is cut with an ellipsis"
+    css = (Path(c.__file__).parent / "assets" / "portia.css").read_text()
+    rule = re.search(r"\n\.chat-row--pinned \{(.*?)\n\}", css, re.S).group(1)
+    assert "border: 1px solid var(--hairline-strong)" in rule
+    assert not re.search(r"font-size|font-weight|padding|--accent", rule), "kind, never rank"
+
+
 def test_a_written_path_shows_its_name_apart_from_its_folders():
     """`path-row`: the name identifies the file, the folders say where it sits,
     and `$HOME` is a third of the string that tells the reader nothing."""

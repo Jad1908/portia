@@ -385,6 +385,8 @@ def _pinned_sources_row() -> None:
         job = APP.live_job
         if job is not None:
             _dot(job)
+        # It opens a view, where every row under it opens a thread.
+        ui.icon("chevron_right").classes("chat-row-open")
 
 
 def _day_label(started: str | None, today: date) -> str:
@@ -2534,8 +2536,11 @@ _TODAY = "Today"
 _YESTERDAY = "Yesterday"
 _UNDATED = "Undated"
 _UNTITLED = "Untitled chat"
-_SOURCES_TITLE = "Sources"
-_SOURCES_META = "what portia knows about each one, and indexing"
+_SOURCES_TITLE = "Sources and indexing"
+#: Short on purpose: the row's meta is one line with an ellipsis, and a sentence
+#: of 69 characters was cut at the pane's default width (measured, 372px of
+#: text in 308).
+_SOURCES_META = "Set up and start indexing runs"
 _LEGACY = "legacy"
 _READ_ONLY = "Read-only: {why}."
 _PICKED_UP = "picked up here"
