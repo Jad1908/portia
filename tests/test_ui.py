@@ -119,6 +119,30 @@ def test_a_job_gets_its_own_chat_and_never_takes_the_screen():
     assert mine.rows == [] and job.rows == []
 
 
+def test_a_job_started_from_the_sources_view_opens_in_it():
+    """The sources view draws a running job's banner and none of its rows, so a
+    read started there looked like a thread with no tool calls."""
+    import inspect
+
+    from portia.ui import exchange, transcript
+
+    assert "show=True" in inspect.getsource(transcript._interpret_ticked)
+    start = inspect.getsource(exchange.start)
+    assert start.index("if show:") < start.index("transcript.pane.refresh()")
+    assert "show" not in inspect.getsource(
+        __import__("portia.ui.screens").ui.screens._interpret_pending
+    )
+
+
+def test_the_allow_caret_has_no_tooltip_and_keeps_its_words():
+    import inspect
+
+    from portia.ui import transcript
+
+    source = inspect.getsource(transcript._allow_controls)
+    assert "more.tooltip(" not in source and "aria-label" in source
+
+
 def test_a_turn_anywhere_makes_the_app_busy():
     """The engine is single-turn: a chat turn must block an indexing one."""
     app = App()

@@ -867,6 +867,11 @@ async def _interpret_ticked() -> None:
         provider=APP.provider,
         kind=state.INDEXING,
         label=", ".join(names),
+        # The press was made in this pane, so the job opens in it. The sources
+        # view draws a job's banner and no rows, and it looked like a thread
+        # with no tool calls until you went back to the list and opened the
+        # job from there (the user, 2026-09-18).
+        show=True,
     )
 
 
@@ -2272,7 +2277,11 @@ def _allow_controls(decision: Decision, name: str) -> None:
     with ui.element("div").classes("btn-group"):
         c.button("Allow", lambda: _resolve_write(decision, True), kind="primary")
         more = c.button("", None, icon="arrow_drop_down", kind="primary").classes("btn-group-more")
-        more.tooltip(_ALLOW_MORE_TIP)
+        # No tooltip *(2026-09-18, the user's call)*. It popped a box over the
+        # card on the way to a menu whose two rows say what they do, which is
+        # `artifact_row`'s finding about a tooltip repeating its own line. The
+        # words stay where a screen reader finds them.
+        more.props(f"aria-label={c.prop_value(_ALLOW_MORE_TIP)}")
         with more, ui.menu().classes("p-menu"):
             with ui.element("div").classes("p-menu-panel p-menu-actions"):
                 if name in state.AUTO_ALLOWABLE:
