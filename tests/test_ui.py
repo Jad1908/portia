@@ -5459,3 +5459,27 @@ def test_the_pickers_one_control_reads_start_or_stop_by_state_and_always_opens_t
     assert source.count("on_start(kind)") == 2, "both labels open the same panel"
     assert not providers.get("anthropic").started() and not providers.get("ollama").started()
     assert not llamacpp.PROVIDER.started()
+
+
+def test_a_status_light_is_a_closed_list_of_kinds_and_only_live_moves():
+    """Four kinds, none of them a rank. The fade's period is written twice, in
+    the CSS that runs it and in the Python that phases it, so they are pinned."""
+    import inspect
+    from pathlib import Path
+
+    from portia.ui import artifacts, settings, transcript
+
+    assert c.LIGHTS == ("live", "waiting", "on", "off")
+    with pytest.raises(ValueError, match="unknown status light"):
+        c.status_light("urgent")
+
+    css = (Path(c.__file__).parent / "assets" / "portia.css").read_text()
+    for kind in c.LIGHTS:
+        assert f".status-light--{kind}" in css
+    assert f"animation: p-live {c.LIVE_PERIOD}s" in css
+    assert css.count("animation: p-live") == 1, "one light moves"
+    assert ".chat-dot" not in css, "the grey dot it replaced is gone, not kept beside it"
+
+    assert "c.LIVE" in inspect.getsource(transcript._dot)
+    for module in (artifacts, settings):
+        assert "c.ON if APP.connected else c.OFF" in inspect.getsource(module)

@@ -452,15 +452,18 @@ def _row_meta(listing: dict) -> str:
 
 
 def _dot(chat) -> None:
-    """Running, or waiting on you. `DESIGN.md`'s tab dot, on a row now.
+    """Running, or waiting on you: a `status-light` on the row (`DESIGN.md`).
 
-    Kind, never rank: the waiting dot takes the accent because it is asking for
-    you, not because it is worse than anything else on screen.
+    Kind, never rank: the waiting light takes the accent because it is asking
+    for you, not because it is worse than anything else on screen. The running
+    one is blue and fades between two shades of it *(2026-09-18, the user's
+    call)*. It was a grey 6px dot pulsing on opacity, which in a list of grey
+    glyphs was easy to miss and read as a row loading.
     """
     if chat.pending is not None:
-        ui.element("div").classes("chat-dot chat-dot--waiting").tooltip(_WAITING)
+        c.status_light(c.WAITING, _WAITING)
     elif chat.busy:
-        ui.element("div").classes("chat-dot").tooltip(_RUNNING)
+        c.status_light(c.LIVE, _RUNNING)
 
 
 def _open_row(path: Path) -> None:

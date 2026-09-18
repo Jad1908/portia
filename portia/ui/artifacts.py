@@ -160,6 +160,10 @@ def _warehouse_section() -> None:
         name=APP.connection,
         icon=WAREHOUSE_ICON,
         meta=_connection_word(),
+        # Green while the session is open, grey the rest of the time. The word
+        # beside it still carries the state; the light is what you catch
+        # without reading (2026-09-18, the user's call).
+        light=c.ON if APP.connected else c.OFF,
         on_click=_toggle_warehouse,
     )
     with row:

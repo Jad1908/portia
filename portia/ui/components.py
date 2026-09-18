@@ -221,6 +221,41 @@ def pulse() -> ui.element:
     return ui.element("div").classes("tool-pulse").style(pulse_phase())
 
 
+#: One beat of `p-live`, the status light's fade. Matches `assets/portia.css`,
+#: for `PULSE_PERIOD`'s reason.
+LIVE_PERIOD = 3.2
+
+#: What a status light can say. A closed list, and each entry is a kind: the
+#: light never grows, never counts and never sorts a row.
+LIVE = "live"
+WAITING = "waiting"
+ON = "on"
+OFF = "off"
+LIGHTS = (LIVE, WAITING, ON, OFF)
+
+
+def status_light(kind: str, tip: str = "") -> ui.element:
+    """A small round light beside the word for a state (`DESIGN.md` → `status-light`).
+
+    ``live`` is work going on right now: blue, fading slowly between two
+    shades of it, and the one light that moves. ``waiting`` is the accent and
+    still, a chat stopped on you. ``on`` is green and ``off`` is grey, for a
+    session that is open or is not. The word beside it carries the state and
+    the light repeats it, so nothing is said in colour alone.
+
+    The live light resumes mid-fade, for `pulse`'s reason: a rebuilt row
+    builds a new element, and a CSS animation on a new element starts at 0%.
+    """
+    if kind not in LIGHTS:
+        raise ValueError(f"unknown status light {kind!r}; one of {', '.join(LIGHTS)}")
+    light = ui.element("span").classes(f"status-light status-light--{kind}")
+    if kind == LIVE:
+        light.style(f"--live-phase: {-(time.monotonic() % LIVE_PERIOD):.2f}s")
+    if tip:
+        light.tooltip(tip)
+    return light
+
+
 def pulse_phase() -> str:
     """``--pulse-phase``: where in the beat an element built *now* should start.
 
@@ -881,8 +916,13 @@ def artifact_row(
     on_click: Callable[..., Any] | None = None,
     pick: str | None = None,
     opens: str | None = None,
+    light: str = "",
 ) -> ui.element:
     """One file portia knows about. Selected is one of the accent's three jobs.
+
+    ``light`` draws a `status_light` of that kind before the meta word, for the
+    one row whose meta is a state that changes while you watch: the warehouse
+    connection.
 
     ``depth`` indents it inside the left tree and ``caret`` gives it a disclosure
     triangle, so a folder and a file are **one row type at two settings** rather
@@ -920,6 +960,8 @@ def artifact_row(
                 # meant every row in the tree popped a box saying what the row
                 # already said, on the way past to somewhere else.
                 ui.label(note).classes("artifact-note")
+        if light:
+            status_light(light)
         if meta:
             ui.label(meta).classes("artifact-meta")
     if on_click is not None:

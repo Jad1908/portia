@@ -248,7 +248,9 @@ def _data() -> None:
         c.button(DATA_OPEN, _add_data, icon="add")
     with c.setting(WAREHOUSE_WHAT, WAREHOUSE_WHY):
         if APP.connection:
-            c.mono(f"{APP.connection}  ·  {APP.connection_status}")
+            with ui.element("div").classes("row-gap-sm"):
+                c.status_light(c.ON if APP.connected else c.OFF)
+                c.mono(f"{APP.connection}  ·  {APP.connection_status}")
             switch = ui.switch(AGENT_WRITES_LABEL).classes("p-toggle")
             switch.value = APP.agent_writes
             switch.on_value_change(lambda e: _set_agent_writes(bool(e.value)))
