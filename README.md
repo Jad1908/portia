@@ -74,7 +74,9 @@ project to `sandbox/demo` and `devtools/demodata/DEMO.md` says what is planted i
 - **Profiling and join diagnosis.** Null rates, distinct counts, key coverage and fan-out, measured
   before any join is run.
 - **Charts in the conversation.** Ask to be shown something and the chart opens in a tab beside the
-  chat.
+  chat. On a model that takes images, the copilot can look at the chart your window painted, to
+  check that it reads before telling you it does. The picture is never saved, and no number or
+  decision comes from it.
 - **Specs and compiled SQL.** A spec holds the decision, the rationale and the predicted outcome.
   Re-running it reports drift. `build --check` fails CI when a `.sql` no longer matches its spec.
 - **A gate on zeros.** An empty result, a non-unique grain or a column that came out all null is
