@@ -226,7 +226,6 @@ def project_context() -> None:
         with ui.element("div").classes("p-panel p-panel--prose"):
             with ui.element("div").classes("p-panel-head"):
                 ui.label("What is this project?").classes("t-heading-md")
-                ui.label(CONTEXT_WHY).classes("p-panel-sub")
 
             with ui.element("div").classes("p-panel-body"):
                 box = (
@@ -235,6 +234,9 @@ def project_context() -> None:
                     .props("borderless autofocus")
                 )
                 box.bind_value(APP, "goal")  # reused as scratch until it is saved
+                if APP.editing_brief and not APP.goal:
+                    # Back from a later screen: the brief as it was saved.
+                    box.value = APP.project_context
                 context_guidance()
 
             with ui.element("div").classes("p-panel-actions"):
@@ -257,6 +259,23 @@ def context_guidance() -> None:
     c.caption(CONTEXT_SHAPE, color="c-stone")
 
 
+def _back_to_brief() -> None:
+    """One screen back from *where is the data* or from add data: the brief.
+
+    Both screens' Back went to the project picker *(until 2026-09-18, the
+    user's report)*, which closed the project to fix a typo in it. The brief
+    had no way back to it at all until the workspace was open. The shell draws
+    the brief while `editing_brief` is set, Continue saves and clears it, and
+    the screen after it is whichever one this project was already on: where
+    the data is has been answered and is kept.
+    """
+    from portia.ui import app as app_module
+
+    APP.editing_brief = True
+    APP.goal = APP.project_context
+    app_module.shell.refresh()
+
+
 def _back_to_picker() -> None:
     """Return to the project picker without writing anything.
 
@@ -268,6 +287,7 @@ def _back_to_picker() -> None:
 
     APP.opened = False
     APP.goal = ""
+    APP.editing_brief = False
     app_module.shell.refresh()
 
 
@@ -279,6 +299,7 @@ def _save_context(text: str) -> None:
         return
     engine.set_context(text, APP)
     APP.goal = ""
+    APP.editing_brief = False
     app_module.shell.refresh()
 
 
@@ -716,7 +737,7 @@ def choose_data() -> None:
                     )
             with ui.element("div").classes("p-panel-actions"):
                 with ui.element("div").classes("row-gap-sm"):
-                    c.button("Back", _back_to_picker, kind="secondary")
+                    c.button("Back", _back_to_brief, kind="secondary")
 
 
 def _choose(mode: str) -> None:
@@ -763,12 +784,15 @@ CONNECTING_GO = "Connecting…"
 CONNECT_CANCEL = "Cancel"
 CONNECTED_AS = "Connected through {name}."
 CONNECTING_NOTE = "Connecting through {name}… a browser window may open."
-NOT_CONNECTED_NOTE = "Not connected yet."
+NOT_CONNECTED_TO = "Not connected to {name} yet."
+NO_CONNECTION = "This project names no connection yet."
+CONNECT_TO = "Connect to {name}"
+ADD_CONNECTION = "Add connection"
+USE_EXISTING = "Use existing connection"
 SCOPE_LOADING = "Listing…"
 SCOPE_EMPTY = "Nothing here the role can see."
 IN_SCOPE_NOTE = "in scope"
 BUILT_NOTE = "built by this project as {model}"
-SWITCH_CONNECTION = "Use another connection"
 NO_CONNECT_DIALOG = "The connect dialog did not load. Reload the page."
 
 
@@ -797,7 +821,9 @@ def _connection_state() -> None:
             c.status_light(c.ON)
             ui.label(CONNECTED_AS.format(name=APP.connection))
             ui.element("div").classes("flex-1")
-            c.button(SWITCH_CONNECTION, open_connect_dialog, kind="secondary", micro=True)
+            c.button(
+                USE_EXISTING, lambda: open_connect_dialog(new=False), kind="secondary", micro=True
+            )
         return
     if status == state.CONNECTING:
         with ui.element("div").classes("connect-state"):
@@ -809,10 +835,31 @@ def _connection_state() -> None:
     else:
         with ui.element("div").classes("connect-state"):
             c.status_light(c.OFF)
-            ui.label(NOT_CONNECTED_NOTE)
+            ui.label(
+                NOT_CONNECTED_TO.format(name=APP.connection) if APP.connection else NO_CONNECTION
+            )
+    # **Every button says what it opens** *(2026-09-18, the user: "what am I
+    # connecting to, nothing is shown?")*. It was *Connect* and *Use another
+    # connection* whether or not the project named a connection. With none
+    # named, Connect had nothing to connect to and *another* had nothing to be
+    # other than. Now *Connect to <name>* exists only when there is a name, and
+    # the other two open the dialog on the view their words promise.
     with ui.element("div").classes("row-gap-sm"):
-        c.button(CONNECT_GO, artifacts.connect_now, kind="primary", icon="cloud")
-        c.button(SWITCH_CONNECTION, open_connect_dialog, kind="secondary", micro=True)
+        if APP.connection:
+            c.button(
+                CONNECT_TO.format(name=APP.connection),
+                artifacts.connect_now,
+                kind="primary",
+                icon="cloud",
+            )
+        c.button(
+            ADD_CONNECTION,
+            lambda: open_connect_dialog(new=True),
+            kind="secondary" if APP.connection else "primary",
+            icon="add",
+        )
+        if engine.connection_suggestions():
+            c.button(USE_EXISTING, lambda: open_connect_dialog(new=False), kind="secondary")
 
 
 def _scope_picker() -> None:
@@ -1002,8 +1049,13 @@ def build_connect_dialog() -> None:
     _CONNECT_DIALOG = dialog
 
 
-def open_connect_dialog(note: str = "") -> None:
+def open_connect_dialog(note: str = "", *, new: bool | None = None) -> None:
     """Show it, on the saved list when there is one, with the project's connection picked.
+
+    ``new`` is for a button that names its view: ``True`` opens on the list of
+    providers, a new connection, and ``False`` on the saved ones. Unset, the
+    dialog picks (`_initial_view`). With nothing saved it is the form whatever
+    was asked, because an empty list is a view of nothing.
 
     ``note`` is the sentence an action opens it with, drawn *in the window it
     sends you to*: a toast that vanished while the dialog drew once left a
@@ -1015,6 +1067,8 @@ def open_connect_dialog(note: str = "") -> None:
         return
     names = [s["name"] for s in engine.connection_suggestions()]
     APP.connect_new, APP.connect_pick = _initial_view(names, APP.connection)
+    if new and not APP.connect_new:
+        APP.connect_new, APP.connect_pick = True, ""
     APP.connect_form = _blank_form() if APP.connect_new else {}
     APP.connect_agent_writes = APP.agent_writes
     APP.connect_note = note
@@ -1932,7 +1986,7 @@ def _actions(*, in_dialog: bool = False) -> None:
             # place to stand, and Add data waits in the left pane.
             c.button("Skip for now", lambda: _leave(in_dialog), kind="secondary")
         if not in_dialog:
-            c.button("Back", _back_to_picker, kind="secondary")
+            c.button("Back", _back_to_brief, kind="secondary")
     c.caption(_action_note(outstanding))
 
 
@@ -2350,7 +2404,6 @@ def _default_model() -> str:
 _OPEN_SUBTITLE = "Open a project directory. A path that does not exist is created."
 _OPEN_NEW = "Type a path instead"
 
-CONTEXT_WHY = "The copilot measures the files. It cannot know what the project is for."
 CONTEXT_PLACEHOLDER = "The project in a few sentences…"
 #: The shape of a brief, in one line. It was four, plus a worked example from
 #: another industry, and together they were longer than most briefs anyone would

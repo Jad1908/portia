@@ -1627,7 +1627,45 @@ def test_the_brief_teaches_its_shape_in_one_line_and_shows_no_example():
 
     assert isinstance(screens.CONTEXT_SHAPE, str), "the shape is one line, not a list of them"
     assert not hasattr(screens, "CONTEXT_EXAMPLE"), "no example — people edit one instead of it"
-    assert "engineer" not in screens.CONTEXT_WHY, "who else would read it is not the question"
+    assert not hasattr(screens, "CONTEXT_WHY"), "the sentence over the box went on 2026-09-18"
+
+
+def test_back_on_a_first_run_screen_goes_to_the_brief_and_keeps_the_project_open(monkeypatch):
+    """Both screens' Back closed the project, and nothing led back to the brief."""
+    import inspect
+
+    from portia.ui import app as app_module
+    from portia.ui import screens
+    from portia.ui.state import App
+
+    monkeypatch.setattr(app_module.shell, "refresh", lambda *a, **k: None)
+    app = App(catalog={"project": "Harmonise three booking feeds."}, opened=True)
+    with _as_app(screens, app):
+        screens._back_to_brief()
+        assert app.opened and app.editing_brief
+        assert app.goal == "Harmonise three booking feeds.", "the box opens on the saved brief"
+    assert "or APP.editing_brief" in inspect.getsource(app_module.shell.func)
+    assert "APP.editing_brief = False" in inspect.getsource(screens._save_context)
+    for screen in (screens.choose_data, screens._actions.func):
+        source = inspect.getsource(screen)
+        assert "_back_to_brief" in source and "_back_to_picker" not in source
+
+
+def test_every_connection_button_says_what_it_opens():
+    """*Connect* and *Use another connection* were drawn with no connection
+    named: nothing to connect to, and nothing to be other than."""
+    import inspect
+
+    from portia.ui import screens
+
+    assert screens._initial_view(["work"], None) == (False, "")
+    source = inspect.getsource(screens._connection_state)
+    assert source.index("if APP.connection:") < source.index("CONNECT_TO.format")
+    assert "open_connect_dialog(new=True)" in source and "open_connect_dialog(new=False)" in source
+    assert (screens.ADD_CONNECTION, screens.USE_EXISTING) == (
+        "Add connection",
+        "Use existing connection",
+    )
 
 
 def test_a_written_path_shows_its_name_apart_from_its_folders():

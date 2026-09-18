@@ -222,7 +222,7 @@ def shell() -> None:
     """Which of the four screens is showing. The context panel is the one gate."""
     if not APP.opened:
         screens.project_open()
-    elif not engine.has_context(APP):
+    elif not engine.has_context(APP) or APP.editing_brief:
         screens.project_context()
     elif APP.needs_data_choice:
         screens.choose_data()

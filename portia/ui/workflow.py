@@ -2034,7 +2034,6 @@ def _brief_inspector() -> None:
 
     with _inspector_scroll():
         _inspector_header("Project brief", str(APP.catalog_dir / "project.yaml"))
-        c.text(screens.CONTEXT_WHY, color="c-mute")
         box = (
             ui.textarea(placeholder=screens.CONTEXT_PLACEHOLDER, value=APP.project_context)
             .classes("p-field p-editor p-editor--tall w-full")
