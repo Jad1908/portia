@@ -338,14 +338,22 @@ def panel(*, in_dialog: bool = False) -> None:
     list gets — a panel where the primary action is somewhere below the fold is a
     panel that looks like it did nothing when you press it.
     """
+    if not APP.data_mode:
+        # The dialog's copy of *where is the data*. The first-run screen asks it
+        # as a screen of its own (`choose_data`); from the workspace the panel
+        # is all there is, and **Change** in the head below lands here.
+        _choice_in_panel(in_dialog=in_dialog)
+        return
     remote = APP.data_mode == state.WAREHOUSE_DATA
-    with ui.element("div").classes("p-panel-head"):
-        ui.label("Add data").classes("t-heading-md")
-        ui.label(
-            ADD_WHY_WAREHOUSE.format(name=APP.connection or "a warehouse")
-            if remote
-            else ADD_WHY.format(formats=_formats())
-        ).classes("p-panel-sub")
+    with ui.element("div").classes("p-panel-head p-panel-head--split"):
+        with ui.element("div").classes("p-panel-head-text"):
+            ui.label("Add data").classes("t-heading-md")
+            ui.label(
+                ADD_WHY_WAREHOUSE.format(name=APP.connection or "a warehouse")
+                if remote
+                else ADD_WHY.format(formats=_formats())
+            ).classes("p-panel-sub")
+        _data_kind(remote)
     with ui.element("div").classes("p-panel-body add-data-body"):
         # Two columns where there is room for two: the question you are almost
         # always answering on the left, the one you are usually not on the right.
@@ -367,6 +375,60 @@ def panel(*, in_dialog: bool = False) -> None:
         # No rule: the region's own top border is the divider, and two lines a
         # pixel apart is what a rule inside a bordered footer looks like.
         _actions(in_dialog=in_dialog)
+
+
+def _data_kind(remote: bool) -> None:
+    """Which kind of data this project reads, and the way to answer differently.
+
+    **The answer was final from the press of a card** *(until 2026-09-18, the
+    user's report)*: Back skipped the question and went to the brief, and the
+    Settings row that said *Connect a warehouse* opened the file panel. It is
+    open until something is indexed (`engine.can_change_data`), because a
+    project reads from one place and the first source is what would have to be
+    mixed with. After that the chip stays and the button is not drawn.
+    """
+    with ui.element("div").classes("data-kind"):
+        ui.icon("cloud" if remote else "folder").classes("data-kind-icon")
+        ui.label(CHOOSE_WAREHOUSE if remote else CHOOSE_LOCAL).classes("data-kind-name")
+        if engine.can_change_data(APP):
+            c.button("Change", _reopen_choice, kind="secondary", micro=True)
+
+
+def _reopen_choice() -> None:
+    from portia.ui import app as app_module
+
+    engine.reopen_data_choice(APP)
+    if APP.on_add_data:
+        app_module.shell.refresh()
+    else:
+        _refresh()
+
+
+def _choice_cards() -> None:
+    with ui.element("div").classes("choice-grid"):
+        c.choice_card(
+            CHOOSE_LOCAL,
+            CHOOSE_LOCAL_WHY,
+            icon="folder",
+            on_click=lambda: _choose(state.LOCAL_DATA),
+        )
+        c.choice_card(
+            CHOOSE_WAREHOUSE,
+            CHOOSE_WAREHOUSE_WHY.format(providers=_providers_sentence()),
+            icon="cloud",
+            on_click=lambda: _choose(state.WAREHOUSE_DATA),
+        )
+
+
+def _choice_in_panel(*, in_dialog: bool) -> None:
+    with ui.element("div").classes("p-panel-head"):
+        ui.label(CHOOSE_TITLE).classes("t-heading-md")
+        ui.label(CHOOSE_WHY).classes("p-panel-sub")
+    with ui.element("div").classes("p-panel-body"):
+        _choice_cards()
+    with ui.element("div").classes("p-panel-actions"):
+        with ui.element("div").classes("row-gap-sm"):
+            c.button(_leave_label(in_dialog), lambda: _leave(in_dialog), kind="secondary")
 
 
 def _refresh() -> None:
@@ -498,11 +560,17 @@ def _tree_rows(view: _TreeView, items: tuple[picktree.Item, ...], depth: int = 0
                     .classes("tree-row tree-row--empty")
                     .style(f"--depth: {depth + 1}")
                 ):
-                    c.caption(SCOPE_EMPTY if view.unit == "table" else NOTHING_UNDER)
+                    ui.label(SCOPE_EMPTY if view.unit == "table" else NOTHING_UNDER).classes(
+                        "tree-row-meta"
+                    )
 
 
 def _tree_node(view: _TreeView, item: picktree.Item, depth: int, opened: bool) -> None:
-    """A container: a caret, a box with three states, the name, and the count.
+    """A container: a twistie, a box with three states, the glyph, the name, the count.
+
+    **The whole row unfolds it**, as a row does in an editor's file tree: the
+    twistie is where the eye goes and 16px is not where a hand should have to.
+    The box is the one part that does something else, so its click stops there.
 
     The box is ``None`` for *some*, which Quasar draws as the dash, and a press
     on a dash ticks the rest. It is disabled only when a fully listed container
@@ -511,49 +579,60 @@ def _tree_node(view: _TreeView, item: picktree.Item, depth: int, opened: bool) -
     """
     shown = picktree.tally(item, view.ticks)
     total = picktree.tally(picktree.find(view.whole, item.key) or item, view.ticks)
-    with ui.element("div").classes("tree-row").style(f"--depth: {depth}"):
+    with ui.element("div").classes("tree-row tree-row--node").style(f"--depth: {depth}") as row:
         if view.loading == item.key:
-            ui.spinner(size="xs").classes("tree-caret")
+            ui.spinner(size="12px").classes("tree-twistie")
         else:
-            c.button(
-                "",
-                lambda k=item.key: view.toggle(k),
-                icon="expand_more" if opened else "chevron_right",
-                micro=True,
-            ).classes("tree-caret")
-        box = ui.checkbox(value=_BOX_VALUE[shown.state]).classes("p-check p-check--bare")
-        box.props("dense")
+            ui.icon("chevron_right").classes("tree-twistie" + (" is-open" if opened else ""))
+        box = _tree_box(_BOX_VALUE[shown.state])
         box.set_enabled(_offers(shown))
         _on_press(box, _pressing(view.tick_under, item.key))
         ui.icon(_TREE_ICONS[item.kind]).classes("tree-row-icon")
-        name = ui.label(item.name).classes("tree-row-name")
-        name.on("click", lambda k=item.key: view.toggle(k))
+        ui.label(item.name).classes("tree-row-name")
         meta = ui.label(_tally_text(total, view.unit, view.fixed_word)).classes("tree-row-meta")
+    row.on("click", lambda k=item.key: view.toggle(k))
     _drawn(view, item.key, box, meta)
 
 
 def _tree_leaf(view: _TreeView, item: picktree.Item, depth: int) -> None:
     """One file or table to take, or one already in.
 
-    **The name is the checkbox's own label**, so the whole row is one hit target
-    rather than a 15px box beside some text you cannot click. That is also why
-    it is not a row-with-a-click-handler: the handler and the box would both
-    fire on the box and cancel each other out.
+    **The whole row is the hit target**, not a 15px box beside text you cannot
+    click. It was the checkbox's own label until the row got a glyph between
+    the two; now the row takes the press and the box stops its own click, or
+    both would fire on the box and cancel each other out.
 
     A leaf that is already in keeps its place, because it is still part of what
-    is under this container, but its box is disabled: the row states a fact
-    instead of offering an action.
+    is under this container, but its box is disabled and the row takes no
+    press: it states a fact instead of offering an action.
     """
-    classes = "pick-row tree-leaf" + (" pick-row--done" if item.fixed else "")
-    with ui.element("div").classes(classes).style(f"--depth: {depth}"):
-        label = f"{item.name}  ({item.detail})" if item.detail else item.name
-        box = ui.checkbox(label, value=item.fixed or item.key in view.ticks).classes("p-check")
-        box.props("dense disable" if item.fixed else "dense")
+    classes = "tree-row tree-row--leaf" + (" tree-row--done" if item.fixed else "")
+    with ui.element("div").classes(classes).style(f"--depth: {depth}") as row:
+        ui.element("span").classes("tree-twistie")
+        box = _tree_box(item.fixed or item.key in view.ticks)
+        ui.icon(_LEAF_ICONS.get(item.detail or item.kind, "table_chart")).classes("tree-row-icon")
+        ui.label(item.name).classes("tree-row-name")
         if item.fixed:
-            ui.label(item.note).classes("pick-row-note")
+            box.props("disable")
+            ui.label(item.note).classes("tree-row-meta")
         else:
+            if item.detail:
+                ui.label(item.detail).classes("tree-row-meta")
             _on_press(box, _pressing(view.tick_leaf, item.key))
+            row.on("click", lambda k=item.key, b=box: view.tick_leaf(k, not b.value))
     _drawn(view, item.key, box)
+
+
+#: The glyph per leaf, by its own kind where it has one (a view) and by what it
+#: is otherwise. A file of rows and a table are the same glyph on purpose.
+_LEAF_ICONS = {"view": "table_view", picktree.FILE: "table_chart", picktree.TABLE: "table_chart"}
+
+
+def _tree_box(value: bool | None) -> ui.checkbox:
+    """A row's box: small, label-less, and deaf to the row's own click handler."""
+    box = ui.checkbox(value=value).classes("p-check tree-box").props("dense")
+    box.on("click.stop", js_handler="() => {}")
+    return box
 
 
 def _tally_text(total: picktree.Tally, unit: str, fixed_word: str) -> str:
@@ -583,6 +662,8 @@ def _tree_filter(value: str, on_change: Callable[[str], Any]) -> None:
     box = ui.input(value=value, placeholder=FILTER_PLACEHOLDER)
     box.classes("p-field p-input w-full tree-filter")
     box.props("dense borderless hide-bottom-space clearable debounce=200")
+    with box.add_slot("prepend"):
+        ui.icon("search").classes("tree-filter-icon")
     box.on_value_change(lambda e: on_change(str(e.value or "")))
 
 
@@ -976,8 +1057,8 @@ def choose_data() -> None:
     One or the other, never both on one screen (`state.LOCAL_DATA`). The screen
     that offered a folder picker beside a connection form read as two half-forms
     and asked the reader to work out which one applied. Choosing sends you to a
-    screen about that place only; the other kind stays reachable later from
-    Settings, which is where a decision this durable belongs.
+    screen about that place only, and the answer can be changed from that
+    screen's head until something is indexed (`_data_kind`).
     """
     with ui.element("div").classes("p-centered"):
         with ui.element("div").classes("p-panel p-panel--prose"):
@@ -985,19 +1066,7 @@ def choose_data() -> None:
                 ui.label(CHOOSE_TITLE).classes("t-heading-md")
                 ui.label(CHOOSE_WHY).classes("p-panel-sub")
             with ui.element("div").classes("p-panel-body"):
-                with ui.element("div").classes("choice-grid"):
-                    c.choice_card(
-                        CHOOSE_LOCAL,
-                        CHOOSE_LOCAL_WHY,
-                        icon="folder",
-                        on_click=lambda: _choose(state.LOCAL_DATA),
-                    )
-                    c.choice_card(
-                        CHOOSE_WAREHOUSE,
-                        CHOOSE_WAREHOUSE_WHY.format(providers=_providers_sentence()),
-                        icon="cloud",
-                        on_click=lambda: _choose(state.WAREHOUSE_DATA),
-                    )
+                _choice_cards()
             with ui.element("div").classes("p-panel-actions"):
                 with ui.element("div").classes("row-gap-sm"):
                     c.button("Back", _back_to_brief, kind="secondary")
@@ -1007,7 +1076,12 @@ def _choose(mode: str) -> None:
     from portia.ui import app as app_module
 
     engine.choose_data(mode, APP)
-    app_module.shell.refresh()
+    if APP.on_add_data:
+        app_module.shell.refresh()
+    else:
+        # From the workspace the question was asked inside the add-data dialog,
+        # and redrawing the shell would rebuild the window behind it.
+        _refresh()
     if mode == state.WAREHOUSE_DATA and not APP.connection:
         open_connect_dialog()
 
@@ -2339,7 +2413,10 @@ def _actions(*, in_dialog: bool = False) -> None:
             # place to stand, and Add data waits in the left pane.
             c.button("Skip for now", lambda: _leave(in_dialog), kind="secondary")
         if not in_dialog:
-            c.button("Back", _back_to_brief, kind="secondary")
+            # One step back. That is the question before this screen while it
+            # can still be answered differently, and the brief once it cannot.
+            back = _reopen_choice if engine.can_change_data(APP) else _back_to_brief
+            c.button("Back", back, kind="secondary")
     c.caption(_action_note(outstanding))
 
 

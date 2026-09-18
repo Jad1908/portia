@@ -256,7 +256,10 @@ def _data() -> None:
             c.caption(AGENT_WRITES_WHY)
         else:
             c.mono(NO_WAREHOUSE)
-            c.button(WAREHOUSE_OPEN, _add_data, icon="cloud")
+            # Drawn only while it can do what it says. It used to open the file
+            # panel whatever the project held (2026-09-18).
+            if engine.can_change_data(APP):
+                c.button(WAREHOUSE_OPEN, _connect_warehouse, icon="cloud")
     with c.setting(INTERPRET_WHAT, INTERPRET_WHY):
         ui.switch(INTERPRET_LABEL).classes("p-toggle").bind_value(APP, "interpret")
 
@@ -390,6 +393,14 @@ def _set_agent_writes(on: bool) -> None:
 def _add_data() -> None:
     _close()
     screens.open_add_dialog()
+
+
+def _connect_warehouse() -> None:
+    """Answer *where is the data* with a warehouse, then connect to one."""
+    _close()
+    engine.choose_data(state.WAREHOUSE_DATA, APP)
+    screens.open_add_dialog()
+    screens.open_connect_dialog()
 
 
 def _close() -> None:

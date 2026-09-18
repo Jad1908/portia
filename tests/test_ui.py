@@ -1808,6 +1808,45 @@ def test_back_on_a_first_run_screen_goes_to_the_brief_and_keeps_the_project_open
     for screen in (screens.choose_data, screens._actions.func):
         source = inspect.getsource(screen)
         assert "_back_to_brief" in source and "_back_to_picker" not in source
+    # One step back from add data is the question before it, while it is open.
+    assert "_reopen_choice if engine.can_change_data(APP)" in inspect.getsource(
+        screens._actions.func
+    )
+
+
+def test_where_the_data_is_can_be_answered_again_until_something_is_indexed(tmp_path, monkeypatch):
+    """The answer was final from the press of a card (the user, 2026-09-18):
+    Back skipped the question, and Settings' *Connect a warehouse* opened the
+    file panel. It is open until a source pins the project, because a project
+    reads from one place, and choosing files un-names a connection nothing
+    has scoped a table through."""
+    from portia.ui import app as app_module
+    from portia.ui import engine, screens
+    from portia.ui.state import App
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(app_module.shell, "refresh", lambda *a, **k: None)
+    monkeypatch.setattr(engine, "install_backend", lambda _app: None)
+    catalog.init_project("Three feeds.", portia_dir=".portia")
+    catalog.set_connection("work", portia_dir=".portia")
+    app = App(root=tmp_path, portia_dir=".portia", catalog=catalog.load_catalog(".portia"))
+    app.data_mode, app.left_add_data = state.WAREHOUSE_DATA, False
+    assert app.connection == "work" and engine.can_change_data(app)
+
+    with _as_app(screens, app):
+        screens._reopen_choice()
+        assert app.data_mode == "" and app.needs_data_choice
+        screens._choose(state.LOCAL_DATA)
+    assert app.data_mode == state.LOCAL_DATA
+    assert not app.connection, "or the next open would put the project back on the warehouse"
+
+    app.catalog = {**app.catalog, "sources": {"ORDERS": {"source": "data/ORDERS.csv"}}}
+    assert not engine.can_change_data(app)
+    with pytest.raises(ValueError, match="one place"):
+        engine.reopen_data_choice(app)
+    with _as_app(screens, app), ui.element("div") as slot:
+        screens._data_kind(remote=False)
+    assert not [e for e in slot.descendants() if e.tag == "q-btn"], "no Change once pinned"
 
 
 def test_every_connection_button_says_what_it_opens():
@@ -4510,12 +4549,20 @@ def test_the_picker_will_not_scope_a_table_this_project_built(monkeypatch):
 
     with _as_app(screens, app), ui.element("div") as slot:
         screens._scope_tree()
+    done = [row for row in slot.descendants() if "tree-row--done" in getattr(row, "classes", [])]
     notes = [
-        str(e.text) for e in slot.descendants() if "pick-row-note" in getattr(e, "classes", [])
+        str(e.text)
+        for row in done
+        for e in row.descendants()
+        if "tree-row-meta" in getattr(e, "classes", [])
     ]
     assert notes == [screens.IN_SCOPE_NOTE, screens.BUILT_NOTE.format(model="stg_x")]
     leaves = [
-        e for e in slot.descendants() if e.tag == "q-checkbox" and "p-check--bare" not in e.classes
+        box
+        for row in slot.descendants()
+        if "tree-row--leaf" in getattr(row, "classes", [])
+        for box in row.descendants()
+        if box.tag == "q-checkbox"
     ]
     assert [bool(b._props.get("disable", False)) for b in leaves] == [True, False, True]
 
@@ -4524,7 +4571,7 @@ def _node_boxes(slot) -> dict[str, object]:
     """Each container's box value, by the name drawn beside it."""
     boxes = {}
     for row in slot.descendants():
-        if "tree-row" not in getattr(row, "classes", []):
+        if "tree-row--node" not in getattr(row, "classes", []):
             continue
         inside = list(row.descendants())
         box = [e for e in inside if e.tag == "q-checkbox"]
@@ -4532,6 +4579,16 @@ def _node_boxes(slot) -> dict[str, object]:
         if box and name:
             boxes[str(name[0].text)] = box[0].value
     return boxes
+
+
+def _node_counts(slot) -> list[str]:
+    return [
+        str(e.text)
+        for row in slot.descendants()
+        if "tree-row--node" in getattr(row, "classes", [])
+        for e in row.descendants()
+        if "tree-row-meta" in getattr(e, "classes", [])
+    ]
 
 
 def test_a_schema_row_says_what_is_ticked_under_it_without_being_opened(monkeypatch):
@@ -4555,10 +4612,7 @@ def test_a_schema_row_says_what_is_ticked_under_it_without_being_opened(monkeypa
         screens._scope_tree()
 
     assert _node_boxes(slot) == {"DB": None, "STG_A": None, "STG_B": True}
-    counts = [
-        str(e.text) for e in slot.descendants() if "tree-row-meta" in getattr(e, "classes", [])
-    ]
-    assert counts == ["2 of 3", "1 of 2", "1 of 1"]
+    assert _node_counts(slot) == ["2 of 3", "1 of 2", "1 of 1"]
 
 
 def test_ticking_a_schema_lists_it_and_ticks_the_tables_there_now(monkeypatch):
@@ -4614,8 +4668,7 @@ def test_a_folder_box_unticks_every_file_under_it(tmp_path, monkeypatch):
 
         screens._tick("data/2023/B.csv", True)
         assert _node_boxes(slot) == {"2023": None, "2024": True}
-        counts = [str(e.text) for e in slot.descendants() if "tree-row-meta" in e.classes]
-        assert counts == ["1 of 2", "1 of 1"]
+        assert _node_counts(slot) == ["1 of 2", "1 of 1"]
 
 
 # --- a scoped table has two axes: read, and profiled (2026-09-07) ----------------

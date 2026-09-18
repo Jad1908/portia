@@ -184,10 +184,41 @@ def open_project(path: str | Path, app: App) -> Path:
 
 
 def choose_data(mode: str, app: App) -> None:
-    """The first-run answer to *where is the data*. Session state until the project says."""
+    """The answer to *where is the data*. Session state until the project says.
+
+    **Choosing files on a project that names a connection un-names it**, which is
+    the one durable half of changing your mind: `open_project` reads the kind
+    back off ``connection``, so a name left in ``project.yaml`` would put the
+    project back on the warehouse at the next open. Only reachable while
+    `can_change_data`, so there is no scoped table to strand.
+    """
     if mode not in (State.LOCAL_DATA, State.WAREHOUSE_DATA):
         raise ValueError(f"unknown data mode {mode!r}")
+    if mode == State.LOCAL_DATA and app.connection and can_change_data(app):
+        catalog.set_connection(None, portia_dir=app.portia_dir)
+        refresh_catalog(app)
+        install_backend(app)
     app.data_mode = mode
+
+
+def can_change_data(app: App) -> bool:
+    """Whether *where is the data* can still be answered differently.
+
+    A project reads from one place (`CONNECTOR.md` §2.2): a file cannot be
+    joined to a warehouse table without one side crossing the wire. So the
+    answer is open until something is indexed and held after, because the
+    first source is what would have to be mixed with. Until 2026-09-18 it was
+    held from the moment a card was pressed, with nothing indexed and no way
+    back to the cards.
+    """
+    return not app.sources
+
+
+def reopen_data_choice(app: App) -> None:
+    """Back to the two cards. Refused once a source pins the project."""
+    if not can_change_data(app):
+        raise ValueError("this project already has sources, and a project reads from one place")
+    app.data_mode = ""
 
 
 def needs_secret(app: App) -> bool:
