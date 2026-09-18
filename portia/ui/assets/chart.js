@@ -471,8 +471,27 @@ window.portiaChart = (function () {
       }, SETTLE_MS);
     }
 
+    // **Every ancestor is lifted with it.** A `position: fixed` box covers the
+    // window's rectangle and still paints inside its own stacking context, and
+    // each splitter panel is one (`position: relative; z-index: 0`). So the
+    // filled chart sat under the right pane, which is a later sibling of the
+    // panel it lives in (the user, 2026-09-18; the first browser check had
+    // that pane shut). A z-index on a box that makes no stacking context does
+    // nothing, so marking the whole chain is harmless where it is not needed.
+    function lift(on) {
+      document
+        .querySelectorAll(".chart-full-host")
+        .forEach((host) => host.classList.remove("chart-full-host"));
+      if (!on) return;
+      for (let host = element.parentElement; host && host !== document.body; ) {
+        host.classList.add("chart-full-host");
+        host = host.parentElement;
+      }
+    }
+
     function fill(on) {
       looking.full = on;
+      lift(on);
       element.classList.toggle("chart-figure--full", on);
       full.firstChild.textContent = on ? "close_fullscreen" : "open_in_full";
       full.title = on ? "Back to the pane (Esc)" : "Fill the window";

@@ -838,3 +838,11 @@ def test_a_zoomed_mount_cannot_make_its_own_figure_taller():
     assert rule, "a bare `.chart-mount` ties with vega-embed's own rule and loses on order"
     assert "position: absolute" in rule.group(1)
     assert re.search(r"\n\.chart-mount canvas \{\s*display: block;", css)
+
+
+def test_a_filled_chart_lifts_its_ancestors_over_the_other_panes():
+    """Fixed covers the window and still paints inside its stacking context, so
+    the right pane drew over a filled chart until the chain was lifted."""
+    js, css = _asset("chart.js"), _asset("portia.css")
+    assert 'host.classList.add("chart-full-host")' in js
+    assert ".chart-full-host {\n  z-index: 5000 !important;" in css

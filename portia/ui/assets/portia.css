@@ -4205,6 +4205,12 @@ body.tab-dragging .tab-drop {
 .chart-figure--full .chart-tools {
   opacity: 1;
 }
+/* The filled figure's ancestors, marked by `chart.js`. Fixed covers the
+ * window's rectangle and still paints inside its own stacking context, and a
+ * splitter panel is one, so without this the right pane drew over the chart. */
+.chart-full-host {
+  z-index: 5000 !important;
+}
 
 /* The last-drawn picture, standing in while Vega embeds (`assets/chart.js`).
  * A pane refresh replaces the figure element, the canvas dies with it, and the
