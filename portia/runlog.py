@@ -141,6 +141,16 @@ CHART_FAILED = "chart_failed"
 #: changed since — which is also why a fresh :data:`PROMPTS` record follows it.
 RESUMED = "resumed"
 
+#: The header field naming whoever drove the conversation when it was not portia
+#: (`cli/serve.py`). Absent on every log the app or `cli/chat` wrote, which is
+#: what absent means: portia held the loop, so the prose, the tokens and the
+#: session id are all in the file. A hosted log has **tool calls and nothing
+#: else**, because those are the only moments of somebody else's conversation
+#: that pass through portia, and it cannot be continued from here: the session
+#: it belongs to is the host's. The field carries the host's name rather than a
+#: flag so the surface can say where the chat goes on.
+HOSTED = "host"
+
 #: Where a renamed chat keeps its name: one small file beside the logs rather
 #: than a field in each log. Line one of a log is written once and read as one
 #: line (`read_header`), and rewriting a multi-megabyte JSONL to change a
@@ -203,8 +213,14 @@ def start(
     kind: str = CHAT,
     when: datetime | None = None,
     provider: str | None = None,
+    host: str | None = None,
+    prompts: dict[str, Any] | None = None,
 ) -> Log:
     """Open a log for one **chat** and write its header.
+
+    ``host`` and ``prompts`` are for a conversation portia does not drive
+    (:data:`HOSTED`): who does, and what portia gave *that* model to read, which
+    is not the system prompt `prompts_read` composes for its own.
 
     **The unit is the chat, not the exchange** (`docs/CONVERSATION.md` §5). What
     the header holds is therefore only what is true of the whole file: when it
@@ -227,16 +243,16 @@ def start(
     directory = Path(portia_dir) / DIR_FOR_KIND[kind]
     directory.mkdir(parents=True, exist_ok=True)
     log = Log(_free_path(directory, when))
-    log.write(
-        HEADER,
-        {
-            "started": when.isoformat(timespec="seconds"),
-            "kind": kind,
-            "cwd": str(Path(cwd).resolve()),
-            "portia_sha": portia_sha(),
-        },
-    )
-    log.write(PROMPTS, prompts_read(portia_dir, provider))
+    header = {
+        "started": when.isoformat(timespec="seconds"),
+        "kind": kind,
+        "cwd": str(Path(cwd).resolve()),
+        "portia_sha": portia_sha(),
+    }
+    if host:
+        header[HOSTED] = host
+    log.write(HEADER, header)
+    log.write(PROMPTS, prompts_read(portia_dir, provider) if prompts is None else prompts)
     return log
 
 
@@ -454,7 +470,8 @@ def read_listing(path: str | Path, portia_dir: str | Path | None = None) -> dict
     belong to the chat's own footer, once it is open.
 
     ``title`` is the human's name for it when one was given (`set_title`),
-    else the first prompt, else the file's stem. ``legacy`` is whether it was
+    else the first prompt, else the host's name for a hosted log, else the
+    file's stem. ``legacy`` is whether it was
     written before the rename (`LEGACY_DIR`) — read-only in any surface that
     can continue a chat, and the surface says why.
     """
@@ -472,6 +489,10 @@ def read_listing(path: str | Path, portia_dir: str | Path | None = None) -> dict
             kind, data = record.get("kind"), record.get("data") or {}
             if kind == HEADER:
                 header = data
+                # A hosted log has no prompt to find, and reading on for one
+                # would parse the whole file for every row of the list.
+                if header.get(HOSTED):
+                    break
             elif kind == events.PROMPT:
                 opened = data
                 break
@@ -488,9 +509,27 @@ def read_listing(path: str | Path, portia_dir: str | Path | None = None) -> dict
         # the Anthropic default by whoever draws it, because it was.
         "provider": opened.get("provider"),
         "prompt": prompt,
-        "title": given or first_line(prompt) or path.stem,
+        "title": given or first_line(prompt) or _hosted_title(header) or path.stem,
         "legacy": path.parent.name == LEGACY_DIR,
+        # Who drove it, when that was not portia (:data:`HOSTED`). Read-only
+        # here like a legacy log, and for a different reason the surface states.
+        "host": header.get(HOSTED),
     }
+
+
+#: What a hosted chat is called until somebody renames it. It has no first
+#: prompt to be named after: the prompt went to the host and never came here.
+HOST_LABELS = {"claude-code": "Claude Code"}
+
+
+def host_label(host: str | None) -> str:
+    """A host's name as a human writes it, or the raw value for one we never met."""
+    return HOST_LABELS.get(host or "", host or "")
+
+
+def _hosted_title(header: dict[str, Any]) -> str:
+    host = header.get(HOSTED)
+    return f"{host_label(host)} session" if host else ""
 
 
 def first_line(text: str) -> str:

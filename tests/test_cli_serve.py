@@ -1,0 +1,235 @@
+"""`portia-mcp` — the tools served to a host that is not portia.
+
+Driven through a real MCP client over an in-memory pair, not by calling the
+wrapped handlers: what a host receives is the listing and the results as the
+protocol carries them, and the first drive of anything in this repo has found
+bugs in exactly that seam. What is pinned is what the app did around the tools
+and a host does not: the log, which chat a review reads, and Stop.
+"""
+
+import asyncio
+import json
+import time
+
+import pytest
+
+pytest.importorskip("claude_agent_sdk")
+
+from mcp.shared.memory import create_connected_server_and_client_session as connect  # noqa: E402
+
+from portia import findings, runlog  # noqa: E402
+from portia.agent import events, tools  # noqa: E402
+from portia.catalog import index_source, init_project  # noqa: E402
+from portia.cli import serve  # noqa: E402
+from portia.fixtures import sales_customers, sales_orders  # noqa: E402
+
+
+@pytest.fixture
+def sales(tmp_path, monkeypatch):
+    """Two indexed sources, one column upper case, in a project at ``tmp_path``."""
+    monkeypatch.chdir(tmp_path)
+    sales_orders().rename(columns={"order_id": "ORDER_ID"}).to_csv("orders.csv", index=False)
+    sales_customers().to_csv("customers.csv", index=False)
+    d = tmp_path / ".portia"
+    init_project("order reconciliation", portia_dir=d)
+    index_source("orders.csv", portia_dir=d)
+    index_source("customers.csv", portia_dir=d)
+    return str(d)
+
+
+def drive(portia_dir, script):
+    """Run ``script(client, session)`` against a served project."""
+
+    async def go():
+        session = serve.Session(portia_dir)
+        async with connect(serve.build(session)) as client:
+            return await script(client, session)
+
+    return asyncio.run(go())
+
+
+def count(client, question="how many orders are there?"):
+    return client.call_tool(
+        "query_data",
+        {"sql": "SELECT count(*) AS n FROM orders", "inputs": ["orders"], "question": question},
+    )
+
+
+def test_a_host_is_offered_the_tools_the_app_is(sales):
+    """Same names, same descriptions, same schemas: one server, two transports.
+
+    One exception, on purpose: the app's `get_context` says the brief is already
+    in the system prompt, and for a host that is false.
+    """
+
+    async def both(client, session):
+        served = (await client.list_tools()).tools
+        async with connect(tools.build_server()["instance"]) as in_app:
+            return served, (await in_app.list_tools()).tools
+
+    served, in_app = drive(sales, both)
+    assert [t.name for t in served] == [t.name for t in in_app]
+    differing = [a.name for a, b in zip(served, in_app, strict=True) if a != b]
+    assert differing == [serve.BRIEF_TOOL]
+    (brief,) = (t for t in served if t.name == serve.BRIEF_TOOL)
+    assert "CALL THIS FIRST" in brief.description
+    assert "ALREADY HAVE" not in brief.description
+
+
+def test_the_brief_a_host_pulls_is_the_brief_the_app_pushes(sales):
+    from portia.agent import context
+
+    async def pull(client, session):
+        return (await client.call_tool(serve.BRIEF_TOOL, {})).content[0].text
+
+    assert drive(sales, pull) == context.build_brief(sales)
+
+
+def test_the_instructions_arrive_with_the_connection(sales):
+    async def instructions(client, session):
+        return (await client.initialize()).instructions
+
+    assert "get_context" in drive(sales, instructions)
+
+
+def test_a_session_that_calls_nothing_leaves_no_log(sales):
+    async def listing_only(client, session):
+        await client.list_tools()
+
+    drive(sales, listing_only)
+    assert runlog.logs_in(sales, kind=runlog.CHAT) == []
+
+
+def test_a_call_and_its_result_are_in_the_log_as_the_app_writes_them(sales):
+    async def one(client, session):
+        result = await count(client)
+        return result.content[0].text, session.log.path
+
+    text, path = drive(sales, one)
+    logged = runlog.read(path)
+    call, result = (e for e in logged.events if e.kind in (events.TOOL_CALL, events.TOOL_RESULT))
+    assert events.tool_label(call.data["name"]) == "query_data"
+    assert call.data["input"]["question"] == "how many orders are there?"
+    assert result.data == {"id": call.data["id"], "text": text, "is_error": False}
+    assert json.loads(text)["rows"][0]["n"] == len(sales_orders())
+
+
+def test_the_header_names_the_host_and_the_listing_stops_there(sales):
+    async def one(client, session):
+        await count(client)
+        return session.log.path
+
+    path = drive(sales, one)
+    assert runlog.read_header(path)[runlog.HOSTED] == serve.CLAUDE_CODE
+    listing = runlog.read_listing(path, sales)
+    assert listing["host"] == serve.CLAUDE_CODE
+    assert listing["title"] == "Claude Code session"
+
+
+def test_what_the_log_says_was_read_is_what_this_host_was_given(sales):
+    async def one(client, session):
+        await count(client)
+        return session.log.path
+
+    read = runlog.read(drive(sales, one)).prompts
+    assert "get_context" in read["system"]
+    assert "You have no filesystem" not in read["system"]  # the app's prompt, not sent here
+    assert read["tools"].keys() == tools.descriptions().keys()
+    assert "CALL THIS FIRST" in read["tools"][serve.BRIEF_TOOL]
+
+
+def test_a_review_reads_this_sessions_log_and_not_the_newest(sales, tmp_path):
+    """The window open beside a host: the newest chat is somebody else's."""
+
+    async def ask_then_review(client, session):
+        await count(client)
+        # A chat the window started afterwards, holding a question of its own.
+        other = runlog.start(sales, cwd=str(tmp_path))
+        other.event(
+            events.Event(
+                events.TOOL_CALL,
+                {
+                    "name": tools.qualified("query_data"),
+                    "id": "x",
+                    "input": {"sql": "SELECT 1", "question": "not ours"},
+                },
+            )
+        )
+        assert findings.review(sales, root=tmp_path)[0]["question"] == "not ours"
+        reviewed = await client.call_tool("review_queries", {})
+        return json.loads(reviewed.content[0].text), session.log.path
+
+    reviewed, path = drive(sales, ask_then_review)
+    assert [q["question"] for q in reviewed["queries"]] == ["how many orders are there?"]
+    assert reviewed["chat"] == path.stem
+
+
+def test_a_finding_rests_on_a_query_out_of_the_hosted_log(sales, tmp_path):
+    """The whole point: the journal works with no app around it."""
+
+    async def keep(client, session):
+        await count(client)
+        kept = await client.call_tool(
+            "record_finding",
+            {
+                "question": "how many orders are there?",
+                "answer": "every order is one row",
+                "so": "orders is the grain to build on",
+                "about": ["orders"],
+                "from": [1],
+            },
+        )
+        return kept.isError, kept.content[0].text
+
+    failed, text = drive(sales, keep)
+    assert not failed, text
+    (finding,) = findings.load_all(tmp_path)
+    assert finding["queries"][0]["sql"] == "SELECT count(*) AS n FROM orders"
+    assert json.loads(finding["queries"][0]["result"])["rows"][0]["n"] == len(sales_orders())
+
+
+def test_a_refused_call_is_logged_as_refused(sales):
+    async def bad(client, session):
+        result = await client.call_tool(
+            "query_data", {"sql": "DROP TABLE orders", "inputs": ["orders"], "question": "?"}
+        )
+        return result.isError, session.log.path
+
+    failed, path = drive(sales, bad)
+    assert failed
+    (result,) = (e for e in runlog.read(path).events if e.kind == events.TOOL_RESULT)
+    assert result.data["is_error"]
+
+
+def test_a_cancelled_request_stops_the_query_and_not_only_the_wait(sales):
+    """Stop has to reach the database. A cancelled `await` leaves its thread running."""
+    slow = {
+        "sql": "SELECT sum(a.range * b.range) AS n FROM range(10000000) a, range(1000000) b",
+        "inputs": ["orders"],
+        "question": "how long can this take?",
+    }
+    ended = {}
+
+    async def timed(args):
+        try:
+            return await tools.query_data.handler(args)
+        finally:
+            ended["at"] = time.monotonic()
+
+    async def press():
+        session = serve.Session(sales)
+        task = asyncio.ensure_future(session.wrap("query_data", timed)(slow))
+        await asyncio.sleep(0.5)
+        pressed = time.monotonic()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        while "at" not in ended:
+            assert time.monotonic() - pressed < 10, "the query outlived the cancel"
+            await asyncio.sleep(0.05)
+        return session.log.path
+
+    path = asyncio.run(press())
+    (result,) = (e for e in runlog.read(path).events if e.kind == events.TOOL_RESULT)
+    assert result.data["is_error"]
+    assert "Stop" in result.data["text"]
