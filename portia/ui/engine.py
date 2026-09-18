@@ -142,7 +142,8 @@ def open_project(path: str | Path, app: App) -> Path:
     # which files were ticked are statements about the last project's directory,
     # and a half-planned import into it must not follow you into this one.
     app.browse_at = ""
-    app.unpicked = frozenset()
+    app.unpicked = app.pick_closed = frozenset()
+    app.pick_filter = ""
     app.repicking = False
     app.import_open = False
     app.import_to_data_dir = True
@@ -168,7 +169,8 @@ def open_project(path: str | Path, app: App) -> Path:
     # browser (`docs/CONNECTOR.md` §2.4).
     app.warehouse_closed = frozenset()
     app.connect_form, app.connect_error, app.connect_secret = {}, "", ""
-    app.scope_at, app.scope_listing, app.scope_ticks = "", {}, frozenset()
+    app.scope_open, app.scope_listing, app.scope_ticks = frozenset(), {}, frozenset()
+    app.scope_filter, app.scope_loading = "", None
     install_backend(app)
     # Where the data is, when the project has already said (`state.data_mode`).
     if app.connection:
@@ -452,11 +454,13 @@ def set_agent_writes(on: bool, app: App) -> None:
     connectors.set_agent_writes(app.agent_writes)
 
 
-async def browse_remote(app: App, at: str) -> list:
+async def browse_remote(app: App, at: str, on_start: Callable[[], Any] | None = None) -> list:
     """List what is at ``at`` — databases, a database's schemas, a schema's tables.
 
     Cached per place on `App`: a browse is a query on the warehouse, and the
-    picker redraws far more often than a schema changes.
+    picker redraws far more often than a schema changes. ``on_start`` is called
+    once the place is marked as loading and before the query goes, which is how
+    the row being listed gets its spinner; a cached place never calls it.
     """
     if at in app.scope_listing:
         return app.scope_listing[at]
@@ -470,13 +474,33 @@ async def browse_remote(app: App, at: str) -> list:
             return con.schemas(parts[0])
         return con.tables(parts[0], parts[1])
 
-    app.scope_loading = True
+    app.scope_loading = at
+    if on_start is not None:
+        on_start()
     try:
         listing = await asyncio.to_thread(ask)
     finally:
-        app.scope_loading = False
+        app.scope_loading = None
     app.scope_listing[at] = listing
     return listing
+
+
+async def list_under(app: App, at: str, on_start: Callable[[], Any] | None = None) -> None:
+    """List ``at`` and every database or schema below it that nothing has listed.
+
+    What ticking a schema or a database needs first (`picktree.unlisted`): a
+    tick is a statement about tables, and an unlisted schema has none to make
+    it about. One place at a time through `browse_remote`, so every answer
+    lands in the cache the tree is drawn from. Metadata only: a whole database
+    is one listing per schema and no scan.
+    """
+    parts = [p for p in at.split(".") if p]
+    if len(parts) >= 3:
+        return
+    below = await browse_remote(app, at, on_start)
+    if len(parts) < 2:
+        for name in below:
+            await list_under(app, f"{at}.{name}".strip("."), on_start)
 
 
 async def scope(

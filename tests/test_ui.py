@@ -4495,22 +4495,127 @@ def test_the_indexing_list_carries_the_tables_the_project_built(tmp_path, monkey
     assert rows.state == engine.INTERPRETED
 
 
-def test_the_picker_will_not_scope_a_table_this_project_built():
-    from portia.ui import screens
+def test_the_picker_will_not_scope_a_table_this_project_built(monkeypatch):
+    from portia.ui import engine, screens
 
-    with _as_app(screens, App()), ui.element("div") as slot:
-        screens._scope_table_row(
-            "p.staging.stg_x", "stg_x", "table", set(), {"p.staging.stg_x": "stg_x"}
-        )
-        screens._scope_table_row(
-            "p.raw.orders", "orders", "table", set(), {"p.staging.stg_x": "stg_x"}
-        )
+    app = App(catalog={"scope": ["p.raw.CUSTOMERS"]})
+    app.scope_listing = {
+        "": ["p"],
+        "p": ["raw", "staging"],
+        "p.raw": [("CUSTOMERS", "table"), ("orders", "table")],
+        "p.staging": [("stg_x", "table")],
+    }
+    app.scope_open = frozenset({"p", "p.raw", "p.staging"})
+    monkeypatch.setattr(engine, "written_tables", lambda _app: {"p.staging.stg_x": "stg_x"})
+
+    with _as_app(screens, app), ui.element("div") as slot:
+        screens._scope_tree()
     notes = [
         str(e.text) for e in slot.descendants() if "pick-row-note" in getattr(e, "classes", [])
     ]
-    assert notes == [screens.BUILT_NOTE.format(model="stg_x")]
-    boxes = [e for e in slot.descendants() if e.tag == "q-checkbox"]
-    assert [b._props.get("disable", False) for b in boxes] == [True, False]
+    assert notes == [screens.IN_SCOPE_NOTE, screens.BUILT_NOTE.format(model="stg_x")]
+    leaves = [
+        e for e in slot.descendants() if e.tag == "q-checkbox" and "p-check--bare" not in e.classes
+    ]
+    assert [bool(b._props.get("disable", False)) for b in leaves] == [True, False, True]
+
+
+def _node_boxes(slot) -> dict[str, object]:
+    """Each container's box value, by the name drawn beside it."""
+    boxes = {}
+    for row in slot.descendants():
+        if "tree-row" not in getattr(row, "classes", []):
+            continue
+        inside = list(row.descendants())
+        box = [e for e in inside if e.tag == "q-checkbox"]
+        name = [e for e in inside if "tree-row-name" in getattr(e, "classes", [])]
+        if box and name:
+            boxes[str(name[0].text)] = box[0].value
+    return boxes
+
+
+def test_a_schema_row_says_what_is_ticked_under_it_without_being_opened(monkeypatch):
+    """The complaint (2026-09-18): tick tables in one schema, go to another,
+    and nothing on screen says the first ticks exist. A shut schema now carries
+    a box and a count, and so does the database above it."""
+    from portia.ui import engine, screens
+
+    app = App()
+    app.scope_listing = {
+        "": ["DB"],
+        "DB": ["STG_A", "STG_B"],
+        "DB.STG_A": [("ORDERS", "table"), ("lines", "table")],
+        "DB.STG_B": [("SHIFTS", "table")],
+    }
+    app.scope_open = frozenset({"DB"})
+    app.scope_ticks = frozenset({"DB.STG_A.ORDERS", "DB.STG_B.SHIFTS"})
+    monkeypatch.setattr(engine, "written_tables", lambda _app: {})
+
+    with _as_app(screens, app), ui.element("div") as slot:
+        screens._scope_tree()
+
+    assert _node_boxes(slot) == {"DB": None, "STG_A": None, "STG_B": True}
+    counts = [
+        str(e.text) for e in slot.descendants() if "tree-row-meta" in getattr(e, "classes", [])
+    ]
+    assert counts == ["2 of 3", "1 of 2", "1 of 1"]
+
+
+def test_ticking_a_schema_lists_it_and_ticks_the_tables_there_now(monkeypatch):
+    """A snapshot, never a rule: the press takes the names the listing returned,
+    leaves out what is already in scope, and writes table names, not a pattern."""
+    import asyncio
+
+    from portia.ui import engine, screens
+
+    app = App(catalog={"scope": ["DB.STG_A.ORDERS"]})
+    app.scope_listing = {"": ["DB"], "DB": ["STG_A"]}
+    asked = []
+
+    async def browse(app_, at, on_start=None):
+        asked.append(at)
+        app_.scope_listing[at] = [("ORDERS", "table"), ("lines", "table"), ("V_X", "view")]
+        return app_.scope_listing[at]
+
+    monkeypatch.setattr(engine, "browse_remote", browse)
+    monkeypatch.setattr(engine, "written_tables", lambda _app: {})
+    monkeypatch.setattr(screens, "_redraw_scope", lambda: None)
+
+    with _as_app(screens, app), ui.element("div"):
+        asyncio.run(screens._tick_schema("DB.STG_A", True))
+        assert asked == ["DB.STG_A"]
+        assert app.scope_ticks == {"DB.STG_A.lines", "DB.STG_A.V_X"}
+
+        app.scope_filter = "v_"
+        asyncio.run(screens._tick_schema("DB.STG_A", False))
+    assert app.scope_ticks == {"DB.STG_A.lines"}, "a filtered press takes the rows on screen"
+
+
+def test_a_folder_box_unticks_every_file_under_it(tmp_path, monkeypatch):
+    from portia.ui import screens
+
+    (tmp_path / "data" / "2023").mkdir(parents=True)
+    (tmp_path / "data" / "2024").mkdir()
+    for rel in ("2023/a.csv", "2023/B.csv", "2024/c.csv", "orders.csv"):
+        (tmp_path / "data" / rel).write_text("a\n1\n")
+    app = App(root=tmp_path, catalog={"data_dir": "data"})
+    monkeypatch.setattr(screens._actions, "refresh", lambda: None)
+
+    with _as_app(screens, app):
+        screens._seed_ticks()
+        with ui.element("div") as slot:
+            screens._file_tree()
+        assert _node_boxes(slot) == {"2023": True, "2024": True}
+
+        screens._tick_folder("data/2023", False)
+        assert sorted(p.name for p in screens._ticked()) == ["c.csv", "orders.csv"]
+        # Told in place: the same elements, no redraw, now saying what is ticked.
+        assert _node_boxes(slot) == {"2023": False, "2024": True}
+
+        screens._tick("data/2023/B.csv", True)
+        assert _node_boxes(slot) == {"2023": None, "2024": True}
+        counts = [str(e.text) for e in slot.descendants() if "tree-row-meta" in e.classes]
+        assert counts == ["1 of 2", "1 of 1"]
 
 
 # --- a scoped table has two axes: read, and profiled (2026-09-07) ----------------

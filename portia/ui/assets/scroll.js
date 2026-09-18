@@ -55,7 +55,18 @@
     "scroll",
     (e) => {
       const key = keyOf(e.target);
-      if (key) remembered.set(key, { top: e.target.scrollTop, foot: atFoot(e.target) });
+      if (!key) return;
+      // **A jump to 0 in a frame that also changed the DOM is a clamp, not a
+      // person** (2026-09-18). A container that survives while its rows are
+      // replaced is thrown to the top by the browser, and that fires this event
+      // *before* the frame's `restore()` runs: scroll events are dispatched
+      // ahead of animation-frame callbacks. Recording it overwrote the offset
+      // `keep` was about to put back, so its second branch could never fire.
+      // Found on the add-data tree, where a tick redraws 400 rows inside a
+      // region that stays.
+      const was = remembered.get(key);
+      if (queued && e.target.scrollTop === 0 && was && was.top > 0) return;
+      remembered.set(key, { top: e.target.scrollTop, foot: atFoot(e.target) });
     },
     true,
   );

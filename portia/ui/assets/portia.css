@@ -1317,14 +1317,6 @@ body.body--dark .p-panel {
   flex: 1 1 auto;
 }
 
-.pick-list {
-  width: 100%;
-  max-height: 240px;
-  overflow-y: auto;
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-md);
-  background: var(--surface-elevated);
-}
 .pick-row {
   display: flex;
   align-items: center;
@@ -1379,6 +1371,83 @@ body.body--dark .p-panel {
   padding-left: var(--sp-xs);
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* ── the tick tree: folders and files, or a warehouse ─────────────────────── */
+
+/* One bordered, scrolling list for both routes (`picktree.py`). The flat
+ * list's box, taller, because a tree unfolds: several schemas open at once is the
+ * point of drawing it as a tree. A tick rebuilds no row; an unfold or a filter
+ * keystroke does, and the scroll offset is the client's, by key
+ * (`c.scroll_area`), so either leaves you where you were. */
+.pick-tree {
+  width: 100%;
+  max-height: 340px;
+  overflow-y: auto;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--surface-elevated);
+}
+/* A container: caret, box, glyph, name, count. One step of indent per level. */
+.tree-row {
+  --indent: calc(var(--depth, 0) * 18px);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  min-width: 0;
+  min-height: 34px;
+  padding: var(--sp-xs) var(--sp-md) var(--sp-xs) calc(var(--sp-sm) + var(--indent));
+  border-bottom: 1px solid var(--hairline-soft);
+  transition: background-color 120ms ease-out;
+}
+.tree-row:hover {
+  background: var(--surface-card);
+}
+.tree-row--empty {
+  padding-left: calc(var(--sp-sm) + var(--indent) + 26px);
+}
+.tree-caret {
+  flex: 0 0 22px;
+  width: 22px;
+  color: var(--stone);
+}
+.tree-row-icon {
+  font-size: 16px;
+  color: var(--mute);
+  flex: 0 0 auto;
+}
+.tree-row-name {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--ink);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+/* A count of things. Never sized or coloured by how big it is (`DESIGN.md`). */
+.tree-row-meta {
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: var(--mute);
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+/* A leaf sits under its container's box, past the caret's width. */
+.pick-row.tree-leaf {
+  padding-left: calc(var(--sp-sm) + var(--depth, 0) * 18px + 26px);
+}
+/* A container's box has no label, so it takes its own width and no more. */
+.p-check.p-check--bare {
+  flex: 0 0 auto;
+}
+/* Some, not all: Quasar's dash, in the accent like a tick. */
+.p-check .q-checkbox__inner--indet {
+  color: var(--accent-primary);
+}
+.tree-filter {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 /* ── importing, folded ────────────────────────────────────────────────────── */
