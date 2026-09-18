@@ -24,6 +24,7 @@ go use dbt instead. That sentence was buried in a decorator argument.
 | `errors/<name>.md` | what a **refused** tool call says back — and what a held reply is told (`review_before_reply.md`, via the `Stop` hook in `agent/session.py`) | when the engine blocks a write, or holds a reply |
 | `headless/instructions.md` | what a **host that is not portia** is told when it connects to `portia-mcp` (`cli/serve.py`): read the skill, read the brief, and the four rules that have to hold whether or not the skill was fetched | every request, in Claude Code |
 | `headless/get_context.md` | `get_context` as a host is offered it: *call this first*, where the app's says *you already have this* | in the tool list, in Claude Code |
+| `errors/hand_edit.md`, `errors/raw_read.md` | what Claude Code's file tools are told when `portia-hook guard` refuses them (`cli/hook.py`): which portia tool owns the file, or which check answers the question | when a host's model edits a portia file or opens indexed data |
 
 `errors/` exists because a refusal is read at the exact moment the model is choosing what to do
 next, which makes its wording as load-bearing as any tool description — and the two refusals here
