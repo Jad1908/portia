@@ -1000,6 +1000,9 @@ class App:
     #: arrived. Leaving is now a decision — `Continue` — so the screen can show
     #: what it added and you can add another batch before moving on.
     left_add_data: bool = False
+    #: Back was pressed on a first-run screen, so the shell draws the brief
+    #: again over a project that already has one. Cleared by Continue.
+    editing_brief: bool = False
     show_transcript: bool = True
     show_files: bool = True
     #: How wide the window is, reported by `assets/viewport.js`. Layout only — the
