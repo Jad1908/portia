@@ -628,6 +628,59 @@ def listen_for_charts() -> None:
     drawn.subscribe(on_chart)
 
 
+def watch_project() -> None:
+    """Notice what another process did to this project, once a tick.
+
+    Until a host could drive portia's tools (`cli/serve.py`), everything that
+    changed a project's files while the window was open was the window's own
+    doing, and `_sync_artifacts` after each tool result was enough. With Claude
+    Code recording steps, saving findings and drawing charts into the same
+    folder, nothing in this process knows to look. So it looks: the same stamp,
+    the same redraw-only-if-it-moved, on a timer.
+
+    **Not while this window is working.** An exchange of its own already syncs
+    after every result, and a run or a build writes files by the dozen and
+    redraws when it ends; a tick in the middle of either would rebuild panes
+    under the progress mark for nothing.
+
+    A chart that arrives this way **takes focus**, as one drawn in a chat here
+    does (`state.App.show_chart`): somebody just asked for it, in the other
+    window.
+    """
+    from portia.ui import artifacts, workflow
+
+    if APP.live is not None or APP.running:
+        return
+    if APP.artifact_stamp is None:
+        # The first look after a project opens. Everything on screen was just
+        # drawn from these files, so there is nothing to redraw, only a stamp to
+        # start comparing against.
+        APP.artifact_stamp = engine.artifact_stamp(APP)
+    arrived = engine.take_drawn(APP)
+    for chart in arrived:
+        APP.show_chart(chart)
+    moved = _sync_artifacts()
+    if arrived and not moved:
+        workflow.pane.refresh()
+        artifacts.pane.refresh()
+    if moved and APP.right == state.LIST and not _typing_a_first_message():
+        # A host's session is a new row in the chat list, and nothing else in
+        # this process would ever say so.
+        from portia.ui import transcript
+
+        transcript.pane.refresh()
+
+
+def _typing_a_first_message() -> bool:
+    """Whether the list's composer holds text whose caret a redraw would throw away.
+
+    The text itself is bound to `APP.goal` and would survive; the focus and the
+    caret would not, which is the bug `transcript.stream_view` was split out to
+    stop. The new row waits for the next redraw, which sending the message is.
+    """
+    return bool((APP.goal or "").strip())
+
+
 def note_chart_failed(chart: state.Chart) -> None:
     """Put a failed render in the chat's log (`VISUALIZATION.md` §11.2).
 
@@ -647,8 +700,11 @@ def note_chart_failed(chart: state.Chart) -> None:
     chat.log.write(runlog.CHART_FAILED, {"tab": chart.key, "message": chart.error or ""})
 
 
-def _sync_artifacts() -> None:
+def _sync_artifacts() -> bool:
     """Re-read what the copilot may have just written — and redraw only if it did.
+
+    Returns whether anything had moved, for `watch_project`, which has panes of
+    its own to decide about.
 
     **The stamp is what keeps the window still.** This runs after every tool
     result, and most of the copilot's calls are questions: a `query_data`, a
@@ -659,7 +715,6 @@ def _sync_artifacts() -> None:
     files those panes draw from; when it has not moved, nothing has, and the
     panes are left exactly as the reader has them.
     """
-    from portia.ui import app as app_module
     from portia.ui import artifacts, workflow
 
     # The stamp first *(2026-09-07)*. It is a walk of stat calls; the catalog
@@ -669,7 +724,7 @@ def _sync_artifacts() -> None:
     # so an unchanged stamp means there is nothing to reload.
     stamp = engine.artifact_stamp(APP)
     if stamp == APP.artifact_stamp:
-        return
+        return False
     APP.artifact_stamp = stamp
     engine.refresh_catalog(APP)
     if APP.spec_path is None:
@@ -679,5 +734,10 @@ def _sync_artifacts() -> None:
     else:
         engine.reload_spec(APP)
     artifacts.pane.refresh()
+    # The run controls are drawn *by* the middle pane (`workflow._workflow`), so
+    # this rebuilds them. Refreshing them as well asked NiceGUI to clear a
+    # container the line above had just deleted, which it reports as *an element
+    # has been deleted but is still being used*. Found once `watch_project` made
+    # this run with nobody in a chat.
     workflow.pane.refresh()
-    app_module.run_controls.refresh()
+    return True

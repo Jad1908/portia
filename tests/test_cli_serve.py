@@ -197,6 +197,70 @@ def test_a_finding_rests_on_a_query_out_of_the_hosted_log(sales, tmp_path):
     assert json.loads(finding["queries"][0]["result"])["rows"][0]["n"] == len(sales_orders())
 
 
+CHART = {
+    "question": "how many orders per customer?",
+    "tab": "orders per customer",
+    "sql": "SELECT customer_id, count(*) AS n FROM orders GROUP BY 1",
+    "inputs": ["orders"],
+    "vega": {"mark": "bar", "encoding": {"x": {"field": "customer_id"}, "y": {"field": "n"}}},
+}
+
+
+@pytest.fixture
+def no_listeners():
+    from portia.agent import drawn
+
+    drawn.reset()
+    yield drawn
+    drawn.reset()
+
+
+def test_a_chart_goes_to_disk_and_the_receipt_says_nobody_is_looking(sales, no_listeners):
+    from portia import figures
+
+    async def draw(client, session):
+        return json.loads((await client.call_tool("plot_data", CHART)).content[0].text)
+
+    receipt = drive(sales, draw)
+    assert receipt["shown"] == {"window": "closed", "open_with": no_listeners.OPEN_WITH}
+    (doc,) = figures.stashed(sales)
+    assert doc["name"] == CHART["tab"] and doc["rows"], "the rows are what the window draws"
+
+
+def test_the_receipt_says_a_window_is_open_when_one_is(sales, no_listeners):
+    no_listeners.announce(sales, "http://127.0.0.1:8080")
+
+    async def draw(client, session):
+        return json.loads((await client.call_tool("plot_data", CHART)).content[0].text)
+
+    assert drive(sales, draw)["shown"] == {"window": "open", "url": "http://127.0.0.1:8080"}
+
+
+def test_a_window_that_died_without_saying_so_is_not_open(sales, no_listeners, tmp_path):
+    (tmp_path / ".portia" / no_listeners.WINDOW_FILE).write_text(
+        '{"pid": 999999999, "url": ""}', encoding="utf-8"
+    )
+    assert no_listeners.watching(sales)["window"] == "closed"
+
+
+def test_a_render_the_window_refused_comes_back_on_the_next_receipt(sales, no_listeners):
+    from portia import figures
+
+    async def draw_twice(client, session):
+        await client.call_tool("plot_data", CHART)
+        figures.stash_failure(CHART["tab"], "Unrecognized mark", sales)  # the window's half
+        other = {**CHART, "tab": "a second chart"}
+        return json.loads((await client.call_tool("plot_data", other)).content[0].text)
+
+    assert drive(sales, draw_twice)["render_failures"] == {CHART["tab"]: "Unrecognized mark"}
+
+
+def test_the_apps_receipt_is_unchanged(sales, no_listeners):
+    """`shown` is a fact about another process. In the app the window drew it."""
+    receipt = tools._draw({**CHART, "portia_dir": sales})
+    assert "shown" not in receipt
+
+
 def test_a_refused_call_is_logged_as_refused(sales):
     async def bad(client, session):
         result = await client.call_tool(

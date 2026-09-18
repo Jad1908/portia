@@ -47,6 +47,11 @@ TITLE = "portia"
 #: than it can change is a refresh nobody sees.
 TICK_SECONDS = 1.0
 
+#: How often the window looks at the project's files for changes it did not
+#: make. Two seconds: a chart drawn in a terminal should be on screen by the time
+#: the eye has moved to the window, and the look is a walk of `stat` calls.
+WATCH_SECONDS = 2.0
+
 
 def _stop_local_server() -> None:
     """Stop the llama.cpp server this window started (`PROVIDERS.md` §4.9).
@@ -142,6 +147,10 @@ def page() -> None:
     from portia.ui import exchange
 
     exchange.listen_for_charts()
+    # And what reaches the project from outside this process: a host driving
+    # portia's tools writes specs, findings and charts here with no event to say
+    # so (`exchange.watch_project`). One stat walk a tick when nothing moved.
+    ui.timer(WATCH_SECONDS, exchange.watch_project)
     # A project opened from `--project` names its warehouse before the loop
     # exists; the session is opened once it does (`docs/CONNECTOR.md` §2.4).
     ui.timer(0.2, artifacts.connect_in_background, once=True)
