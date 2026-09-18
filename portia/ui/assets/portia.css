@@ -922,6 +922,15 @@ body.body--dark .p-panel {
   color: var(--body);
 }
 
+/* One caption made of runs, so one word in it can take the accent
+ * (`screens._note_line`). A label is a block; here it is a run of text. */
+.note-line > * {
+  display: inline;
+}
+.note-line > .c-accent {
+  font-weight: 500;
+}
+
 /* The only region that scrolls. */
 .p-panel-body {
   flex: 1 1 auto;

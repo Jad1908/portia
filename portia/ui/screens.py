@@ -345,14 +345,12 @@ def panel(*, in_dialog: bool = False) -> None:
         _choice_in_panel(in_dialog=in_dialog)
         return
     remote = APP.data_mode == state.WAREHOUSE_DATA
+    # **A title and no line under it** *(2026-09-18, the user's call)*. Both
+    # routes carried a sentence here restating what the sections below already
+    # say in their own heads, and the panel opened on a paragraph.
     with ui.element("div").classes("p-panel-head p-panel-head--split"):
         with ui.element("div").classes("p-panel-head-text"):
             ui.label("Add data").classes("t-heading-md")
-            ui.label(
-                ADD_WHY_WAREHOUSE.format(name=APP.connection or "a warehouse")
-                if remote
-                else ADD_WHY.format(formats=_formats())
-            ).classes("p-panel-sub")
         _data_kind(remote)
     with ui.element("div").classes("p-panel-body add-data-body"):
         # Two columns where there is room for two: the question you are almost
@@ -2417,7 +2415,26 @@ def _actions(*, in_dialog: bool = False) -> None:
             # can still be answered differently, and the brief once it cannot.
             back = _reopen_choice if engine.can_change_data(APP) else _back_to_brief
             c.button("Back", back, kind="secondary")
-    c.caption(_action_note(outstanding))
+    metadata_only = bool(outstanding and APP.scope_ticks and not APP.profile_on_add)
+    _note_line(_action_note(outstanding), accent=METADATA_WORD if metadata_only else "")
+
+
+def _note_line(note: str, *, accent: str = "") -> None:
+    """The caption under the actions, with one word in the accent when asked.
+
+    The word is *metadata*, on the press that adds tables without scanning
+    them (the user's call, 2026-09-18). It replaced a second sentence, *Free;
+    nothing is scanned*, and says the same thing in the place the eye already
+    is: which of the two kinds of press this one is. Kind, never rank.
+    """
+    before, word, after = note.partition(accent) if accent else (note, "", "")
+    if not word:
+        c.caption(note)
+        return
+    with ui.element("div").classes("t-caption c-mute note-line"):
+        ui.label(before)
+        ui.label(word).classes("c-accent")
+        ui.label(after)
 
 
 def _index_label(outstanding: int) -> str:
@@ -2918,13 +2935,6 @@ CONTEXT_PLACEHOLDER = "The project in a few sentences…"
 #: rather than by explaining at length what an answer is not.
 CONTEXT_SHAPE = "The goal, how you model it, and roughly what data you have."
 
-ADD_WHY_WAREHOUSE = (
-    "Tables from {name}, read where they are. A ticked table arrives as metadata; the switches "
-    "say whether it is profiled and read too."
-)
-ADD_WHY = (
-    "portia reads {formats}. Choose the data folder in this repo, or import files from outside it."
-)
 IN_REPO_HEADING = "Data in this repo"
 IN_REPO_WHY = "Choose the folder that holds this project's data."
 NO_SUBFOLDERS = "No subfolders with readable data."
@@ -2962,8 +2972,10 @@ PROFILE_OFF_COST = (
     "Profile later from the Indexing tab or the table itself."
 )
 PROFILE_ON_COST = "On: each table is scanned once on the warehouse. That is on its meter."
-SCOPE_ALL = "Adds {n} as metadata. Free; nothing is scanned."
-SCOPE_PROFILE_ALL = "Adds and profiles {n}. Each is scanned once on the warehouse."
+SCOPE_ALL = "Adds {n} as metadata."
+SCOPE_PROFILE_ALL = "Adds and profiles {n}."
+#: The word `_note_line` draws in the accent on a metadata-only press.
+METADATA_WORD = "metadata"
 SCOPE_ACROSS = "{n} across {schemas}"
 SCOPED_METADATA = "Added {n} as metadata."
 SCOPED_PROFILED = "Added {n}, {profiled} profiled."

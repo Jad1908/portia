@@ -601,6 +601,28 @@ def test_the_breakdown_partitions_the_button_and_does_not_double_count(tmp_path)
     assert "1 copied in to data/" in note and "1 already in the repo" in note
 
 
+def test_a_metadata_press_says_so_in_one_sentence_with_the_word_in_the_accent():
+    """*Free; nothing is scanned* and *Each is scanned once on the warehouse*
+    are gone (the user, 2026-09-18). What tells the two presses apart is the
+    word *metadata*, in the accent, and only on the press that scans nothing."""
+    from portia.ui import screens
+    from portia.ui.state import App
+
+    app = App()
+    app.scope_ticks = frozenset({"DB.STG.ORDERS", "DB.STG.lines"})
+    with _as_app(screens, app):
+        assert screens._action_note(2) == "Adds 2 tables as metadata."
+        with ui.element("div") as slot:
+            screens._note_line(screens._action_note(2), accent=screens.METADATA_WORD)
+        app.profile_on_add = True
+        assert screens._action_note(2) == "Adds and profiles 2 tables."
+    runs = [
+        (str(e.text), "c-accent" in e.classes) for e in slot.descendants() if hasattr(e, "text")
+    ]
+    assert ("metadata", True) in runs
+    assert [text for text, accent in runs if accent] == ["metadata"]
+
+
 def test_the_breakdown_is_only_the_repo_when_nothing_is_being_imported(tmp_path):
     from portia.ui import screens
     from portia.ui.state import App
