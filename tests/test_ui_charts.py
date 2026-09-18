@@ -798,3 +798,51 @@ def test_an_unrelated_drag_clears_a_tab_gesture_that_never_ended():
     start = script.split('document.addEventListener("dragstart"', 1)[1].split("});", 1)[0]
     assert "dragging = null;" in start
     assert "if (!row) return;" in start
+
+
+# --- looking around a chart (§3.9.1) ----------------------------------------
+#
+# Zoom, pan and the filled view are the client's state, so there is no Python
+# behaviour to test. What can be pinned from here is the two lines a later edit
+# is most likely to undo without noticing, because neither fails loudly: both
+# were found in a browser, and both pass every other test when broken.
+
+
+def _asset(name: str) -> str:
+    from pathlib import Path
+
+    from portia.ui import charts
+
+    return (Path(charts.__file__).parent / "assets" / name).read_text()
+
+
+def test_where_you_are_looking_in_a_chart_never_reaches_the_server():
+    """`canvas.js`'s rule. The height grip and a failed render are the only two
+    things a chart reports, and zooming adds no third."""
+    import re
+
+    js = _asset("chart.js")
+    emitted = set(re.findall(r'emitEvent\("(portia:[a-z-]+)"', js))
+    assert emitted == {"portia:chart-failed", "portia:chart-height"}
+    assert "const LOOKING = new Map()" in js, "kept per chart key, never per element"
+
+
+def test_a_zoomed_mount_cannot_make_its_own_figure_taller():
+    """The figure's height is a flex basis of its content and `chart.js` sizes
+    the mount from the view, so a mount in normal flow is a feedback loop. It
+    also has to out-specify the `.vega-embed` rule `vegaEmbed` injects later."""
+    import re
+
+    css = _asset("portia.css")
+    rule = re.search(r"\n\.chart-view > \.chart-mount \{(.*?)\}", css, re.S)
+    assert rule, "a bare `.chart-mount` ties with vega-embed's own rule and loses on order"
+    assert "position: absolute" in rule.group(1)
+    assert re.search(r"\n\.chart-mount canvas \{\s*display: block;", css)
+
+
+def test_a_filled_chart_lifts_its_ancestors_over_the_other_panes():
+    """Fixed covers the window and still paints inside its stacking context, so
+    the right pane drew over a filled chart until the chain was lifted."""
+    js, css = _asset("chart.js"), _asset("portia.css")
+    assert 'host.classList.add("chart-full-host")' in js
+    assert ".chart-full-host {\n  z-index: 5000 !important;" in css

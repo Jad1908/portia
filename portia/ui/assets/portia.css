@@ -4116,13 +4116,127 @@ body.tab-dragging .tab-drop {
 
 /* Where `vegaEmbed` mounts. It clears whatever container it is given, so it may
  * not be `.chart-figure` itself — that holds the `<script>` carrying the rows,
- * and a redraw has to still find them (`assets/chart.js`). */
-.chart-mount,
-.chart-mount .vega-embed,
-.chart-mount .vega-embed canvas {
-  width: 100%;
-  height: 100%;
+ * and a redraw has to still find them (`assets/chart.js`).
+ *
+ * **The figure is a column: a row of tools, then the view that scrolls**
+ * *(2026-09-18)*. The mount is positioned absolutely inside the view, and that
+ * is the load-bearing line. `chart.js` sizes the mount as a multiple of the
+ * view, and the figure's own height comes from a flex basis of its content, so
+ * a mount in normal flow would make the view taller, which makes the mount
+ * taller, and a zoomed chart would grow until the pane ran out. An absolute
+ * box adds to what the view can scroll and nothing to what the figure measures. */
+.chart-figure {
+  display: flex;
+  flex-direction: column;
+}
+.chart-view {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+}
+.chart-view--zoomed {
+  cursor: grab;
+  user-select: none;
+}
+.chart-view--panning {
+  cursor: grabbing;
+}
+/* `.chart-view >`, for the specificity. `vegaEmbed` puts its own `vega-embed`
+ * class on the element it is given and injects `.vega-embed { position:
+ * relative; display: inline-block }` after this file, so a bare `.chart-mount`
+ * rule ties on specificity and loses on order (measured in the browser: the
+ * mount came out relative, in flow, and 5px taller than its canvas). */
+.chart-view > .chart-mount {
+  position: absolute;
+  top: 0;
+  left: 0;
   display: block;
+}
+/* A canvas is inline by default and sits on a text baseline, which is 5px of
+ * descender under it: enough to overflow a view it fits exactly, raise a
+ * scrollbar, shrink the view, and so raise the other one (measured). */
+.chart-mount canvas {
+  display: block;
+}
+/* At 100% a fitted chart is the view's size by construction, so there is
+ * nothing to scroll to and no bar may appear to say otherwise. */
+.chart-view--fit {
+  overflow: hidden;
+}
+
+/* Zoom out, the level, zoom in, fill the window. Above the picture and never
+ * over it: a legend sits in that corner more often than not. Quiet until the
+ * pointer is on the figure, `chat-row-actions`' idiom, and never invisible,
+ * because a control nobody can see is a feature nobody has. */
+.chart-tools {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-xxs);
+  height: 24px;
+  opacity: 0.55;
+  transition: opacity 120ms ease;
+}
+.chart-figure:hover .chart-tools,
+.chart-tools:focus-within {
+  opacity: 1;
+}
+.chart-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 var(--sp-xs);
+  border: 0;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--mute);
+  font: inherit;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.chart-tool:hover {
+  background: var(--hairline-soft);
+  color: var(--ink);
+}
+.chart-tool .material-icons {
+  font-size: 15px;
+}
+/* Wide enough for `800%`, so the row holds still while the number moves. */
+.chart-tool--level {
+  min-width: 40px;
+}
+
+/* The chart over the whole window. Fixed to the viewport and opaque, under
+ * Quasar's dialogs and tooltips (6000 and up) and over every pane. The class is
+ * the client's (`chart.js` keeps it per chart key), so a pane refresh that
+ * replaces the figure puts the new one straight back here. */
+.chart-figure.chart-figure--full {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  width: auto;
+  height: auto !important;
+  min-height: 0;
+  /* The pane stacks its children with a top margin, and a margin moves a
+   * fixed box too: it sat 16px down with the toolbar showing above it. */
+  margin: 0;
+  padding: var(--sp-lg);
+  background: var(--surface);
+}
+.chart-figure--full .chart-tools {
+  opacity: 1;
+}
+/* The filled figure's ancestors, marked by `chart.js`. Fixed covers the
+ * window's rectangle and still paints inside its own stacking context, and a
+ * splitter panel is one, so without this the right pane drew over the chart. */
+.chart-full-host {
+  z-index: 5000 !important;
 }
 
 /* The last-drawn picture, standing in while Vega embeds (`assets/chart.js`).
