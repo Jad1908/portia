@@ -75,14 +75,17 @@ served by the folder picker (already in the repo) or the importer (not yet).
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from nicegui import context, ui
 
 from portia.agent import prompts
 from portia.core import cancel
 from portia.ui import components as c
-from portia.ui import engine, state
+from portia.ui import engine, picktree, state, tree
 from portia.ui.engine import DATA_DIR
 from portia.ui.state import APP
 
@@ -335,14 +338,20 @@ def panel(*, in_dialog: bool = False) -> None:
     list gets — a panel where the primary action is somewhere below the fold is a
     panel that looks like it did nothing when you press it.
     """
+    if not APP.data_mode:
+        # The dialog's copy of *where is the data*. The first-run screen asks it
+        # as a screen of its own (`choose_data`); from the workspace the panel
+        # is all there is, and **Change** in the head below lands here.
+        _choice_in_panel(in_dialog=in_dialog)
+        return
     remote = APP.data_mode == state.WAREHOUSE_DATA
-    with ui.element("div").classes("p-panel-head"):
-        ui.label("Add data").classes("t-heading-md")
-        ui.label(
-            ADD_WHY_WAREHOUSE.format(name=APP.connection or "a warehouse")
-            if remote
-            else ADD_WHY.format(formats=_formats())
-        ).classes("p-panel-sub")
+    # **A title and no line under it** *(2026-09-18, the user's call)*. Both
+    # routes carried a sentence here restating what the sections below already
+    # say in their own heads, and the panel opened on a paragraph.
+    with ui.element("div").classes("p-panel-head p-panel-head--split"):
+        with ui.element("div").classes("p-panel-head-text"):
+            ui.label("Add data").classes("t-heading-md")
+        _data_kind(remote)
     with ui.element("div").classes("p-panel-body add-data-body"):
         # Two columns where there is room for two: the question you are almost
         # always answering on the left, the one you are usually not on the right.
@@ -366,9 +375,294 @@ def panel(*, in_dialog: bool = False) -> None:
         _actions(in_dialog=in_dialog)
 
 
+def _data_kind(remote: bool) -> None:
+    """Which kind of data this project reads, and the way to answer differently.
+
+    **The answer was final from the press of a card** *(until 2026-09-18, the
+    user's report)*: Back skipped the question and went to the brief, and the
+    Settings row that said *Connect a warehouse* opened the file panel. It is
+    open until something is indexed (`engine.can_change_data`), because a
+    project reads from one place and the first source is what would have to be
+    mixed with. After that the chip stays and the button is not drawn.
+    """
+    with ui.element("div").classes("data-kind"):
+        ui.icon("cloud" if remote else "folder").classes("data-kind-icon")
+        ui.label(CHOOSE_WAREHOUSE if remote else CHOOSE_LOCAL).classes("data-kind-name")
+        if engine.can_change_data(APP):
+            c.button("Change", _reopen_choice, kind="secondary", micro=True)
+
+
+def _reopen_choice() -> None:
+    from portia.ui import app as app_module
+
+    engine.reopen_data_choice(APP)
+    if APP.on_add_data:
+        app_module.shell.refresh()
+    else:
+        _refresh()
+
+
+def _choice_cards() -> None:
+    with ui.element("div").classes("choice-grid"):
+        c.choice_card(
+            CHOOSE_LOCAL,
+            CHOOSE_LOCAL_WHY,
+            icon="folder",
+            on_click=lambda: _choose(state.LOCAL_DATA),
+        )
+        c.choice_card(
+            CHOOSE_WAREHOUSE,
+            CHOOSE_WAREHOUSE_WHY.format(providers=_providers_sentence()),
+            icon="cloud",
+            on_click=lambda: _choose(state.WAREHOUSE_DATA),
+        )
+
+
+def _choice_in_panel(*, in_dialog: bool) -> None:
+    with ui.element("div").classes("p-panel-head"):
+        ui.label(CHOOSE_TITLE).classes("t-heading-md")
+        ui.label(CHOOSE_WHY).classes("p-panel-sub")
+    with ui.element("div").classes("p-panel-body"):
+        _choice_cards()
+    with ui.element("div").classes("p-panel-actions"):
+        with ui.element("div").classes("row-gap-sm"):
+            c.button(_leave_label(in_dialog), lambda: _leave(in_dialog), kind="secondary")
+
+
 def _refresh() -> None:
     """Redraw the surface. Both instances; only one of them is ever on screen."""
     panel.refresh()
+
+
+# --- the tick tree, which both routes draw ----------------------------------
+
+#: The glyph per container kind. A leaf has none: its name is its box's label.
+_TREE_ICONS = {tree.DATABASE: "storage", tree.SCHEMA: "schema", tree.FOLDER: "folder"}
+
+
+@dataclass(frozen=True)
+class _TreeView:
+    """What one drawing of a tick tree needs besides its rows.
+
+    ``whole`` is the tree before the filter, which the counts are read from: a
+    container's **box** speaks for the rows on screen and its **count** for
+    everything under it, so a tick the filter hid is still in the number
+    (`picktree.py`). The callbacks are the route's own, because a file's tick
+    is an exclusion and a table's is a selection.
+    """
+
+    name: str
+    whole: tuple[picktree.Item, ...]
+    ticks: frozenset[str]
+    is_open: Callable[[picktree.Item], bool]
+    toggle: Callable[[str], Any]
+    tick_leaf: Callable[[str, bool], Any]
+    tick_under: Callable[[str, bool], Any]
+    unit: str
+    fixed_word: str
+    filtering: bool = False
+    loading: str | None = None
+
+
+#: Every box and count on screen, by tree and then by row key, so a tick can
+#: change what the rows *say* without rebuilding them (`_sync_tree`). A list per
+#: key because the panel is drawn twice, as the screen and as the dialog; an
+#: element a redraw deleted is dropped the next time its key is read.
+_DRAWN: dict[str, dict[str, list[tuple[ui.checkbox, ui.label | None]]]] = {}
+
+
+def _drawn(view: _TreeView, key: str, box: ui.checkbox, meta: ui.label | None = None) -> None:
+    _DRAWN.setdefault(view.name, {}).setdefault(key, []).append((box, meta))
+
+
+def _sync_tree(view: _TreeView, items: tuple[picktree.Item, ...]) -> None:
+    """Make every row on screen say what the ticks now are, **in place**.
+
+    A tick changes boxes and counts and moves no row, so nothing is rebuilt:
+    redrawing a 400-table schema per tick was 186 ms to the browser, measured,
+    and threw the list back to its first row. Setting ``value`` from here
+    raises no event, because the rows listen for Quasar's own
+    ``update:model-value``, which only a person's press emits.
+    """
+    rows = _DRAWN.get(view.name, {})
+    for item in items:
+        live = [(box, meta) for box, meta in rows.get(item.key, []) if not box.is_deleted]
+        rows[item.key] = live
+        value: bool | None
+        text: str | None = None
+        if item.leaf:
+            value = item.fixed or item.key in view.ticks
+        else:
+            shown = picktree.tally(item, view.ticks)
+            value = _BOX_VALUE[shown.state]
+            for box, _meta in live:
+                box.set_enabled(_offers(shown))
+            whole = picktree.find(view.whole, item.key) or item
+            text = _tally_text(picktree.tally(whole, view.ticks), view.unit, view.fixed_word)
+            _sync_tree(view, item.children or ())
+        for box, meta in live:
+            if box.value is not value:
+                box.value = value
+            if meta is not None and meta.text != text:
+                meta.text = text
+
+
+def _pressing(tick: Callable[[str, bool], Any], key: str) -> Callable[[bool], Any]:
+    """One row's press, bound to its key."""
+
+    def pressed(on: bool) -> Any:
+        return tick(key, on)
+
+    return pressed
+
+
+def _offers(shown: picktree.Tally) -> bool:
+    """Whether a container's box has anything to take. Only a fully listed one
+    with nothing left under it does not: an unlisted one is ticked by listing it."""
+    return bool(shown.of) or not shown.complete
+
+
+def _on_press(box: ui.checkbox, handler: Callable[[bool], Any]) -> None:
+    """Call ``handler`` when a **person** presses the box, with what it became.
+
+    Quasar's own ``update:model-value`` rather than `on_value_change`: that one
+    also fires when `_sync_tree` sets a value, and a folder told it is now
+    empty would untick its files a second time. The event carries the value
+    and the DOM event; ``[None]`` keeps the first, which is NiceGUI's own
+    spelling for the same listener, and without it the payload is a list that
+    is true whatever the box became (found by pressing a full schema off, in
+    the browser, 2026-09-18).
+    """
+    box.on("update:model-value", lambda e: handler(bool(e.args)), [None])
+
+
+#: What a container's box holds for each state. ``None`` is Quasar's dash.
+_BOX_VALUE = {picktree.ALL: True, picktree.SOME: None, picktree.NONE: False}
+
+
+def _tree_rows(view: _TreeView, items: tuple[picktree.Item, ...], depth: int = 0) -> None:
+    """The rows, a level at a time. While a filter is on, every listed container
+    is drawn open: a match inside a shut schema is a match nobody sees."""
+    for item in items:
+        if item.leaf:
+            _tree_leaf(view, item, depth)
+            continue
+        opened = item.listed and (view.filtering or view.is_open(item))
+        _tree_node(view, item, depth, opened)
+        if opened:
+            if item.children:
+                _tree_rows(view, item.children, depth + 1)
+            else:
+                with (
+                    ui.element("div")
+                    .classes("tree-row tree-row--empty")
+                    .style(f"--depth: {depth + 1}")
+                ):
+                    ui.label(SCOPE_EMPTY if view.unit == "table" else NOTHING_UNDER).classes(
+                        "tree-row-meta"
+                    )
+
+
+def _tree_node(view: _TreeView, item: picktree.Item, depth: int, opened: bool) -> None:
+    """A container: a twistie, a box with three states, the glyph, the name, the count.
+
+    **The whole row unfolds it**, as a row does in an editor's file tree: the
+    twistie is where the eye goes and 16px is not where a hand should have to.
+    The box is the one part that does something else, so its click stops there.
+
+    The box is ``None`` for *some*, which Quasar draws as the dash, and a press
+    on a dash ticks the rest. It is disabled only when a fully listed container
+    has nothing left to take (`_offers`): an unlisted one can be ticked, and
+    the press lists it first (`_tick_schema`).
+    """
+    shown = picktree.tally(item, view.ticks)
+    total = picktree.tally(picktree.find(view.whole, item.key) or item, view.ticks)
+    with ui.element("div").classes("tree-row tree-row--node").style(f"--depth: {depth}") as row:
+        if view.loading == item.key:
+            ui.spinner(size="12px").classes("tree-twistie")
+        else:
+            ui.icon("chevron_right").classes("tree-twistie" + (" is-open" if opened else ""))
+        box = _tree_box(_BOX_VALUE[shown.state])
+        box.set_enabled(_offers(shown))
+        _on_press(box, _pressing(view.tick_under, item.key))
+        ui.icon(_TREE_ICONS[item.kind]).classes("tree-row-icon")
+        ui.label(item.name).classes("tree-row-name")
+        meta = ui.label(_tally_text(total, view.unit, view.fixed_word)).classes("tree-row-meta")
+    row.on("click", lambda k=item.key: view.toggle(k))
+    _drawn(view, item.key, box, meta)
+
+
+def _tree_leaf(view: _TreeView, item: picktree.Item, depth: int) -> None:
+    """One file or table to take, or one already in.
+
+    **The whole row is the hit target**, not a 15px box beside text you cannot
+    click. It was the checkbox's own label until the row got a glyph between
+    the two; now the row takes the press and the box stops its own click, or
+    both would fire on the box and cancel each other out.
+
+    A leaf that is already in keeps its place, because it is still part of what
+    is under this container, but its box is disabled and the row takes no
+    press: it states a fact instead of offering an action.
+    """
+    classes = "tree-row tree-row--leaf" + (" tree-row--done" if item.fixed else "")
+    with ui.element("div").classes(classes).style(f"--depth: {depth}") as row:
+        ui.element("span").classes("tree-twistie")
+        box = _tree_box(item.fixed or item.key in view.ticks)
+        ui.icon(_LEAF_ICONS.get(item.detail or item.kind, "table_chart")).classes("tree-row-icon")
+        ui.label(item.name).classes("tree-row-name")
+        if item.fixed:
+            box.props("disable")
+            ui.label(item.note).classes("tree-row-meta")
+        else:
+            if item.detail:
+                ui.label(item.detail).classes("tree-row-meta")
+            _on_press(box, _pressing(view.tick_leaf, item.key))
+            row.on("click", lambda k=item.key, b=box: view.tick_leaf(k, not b.value))
+    _drawn(view, item.key, box)
+
+
+#: The glyph per leaf, by its own kind where it has one (a view) and by what it
+#: is otherwise. A file of rows and a table are the same glyph on purpose.
+_LEAF_ICONS = {"view": "table_view", picktree.FILE: "table_chart", picktree.TABLE: "table_chart"}
+
+
+def _tree_box(value: bool | None) -> ui.checkbox:
+    """A row's box: small, label-less, and deaf to the row's own click handler."""
+    box = ui.checkbox(value=value).classes("p-check tree-box").props("dense")
+    box.on("click.stop", js_handler="() => {}")
+    return box
+
+
+def _tally_text(total: picktree.Tally, unit: str, fixed_word: str) -> str:
+    """What a container holds, as counts: *3 of 12*, *12 tables*, *4 in scope*.
+
+    Numbers of things, never sized or coloured by how big they are
+    (`DESIGN.md`). A container that is not fully listed has no total, so it
+    states the ticks alone; one with nothing listed says nothing.
+    """
+    parts = []
+    if total.ticked:
+        parts.append(
+            TALLY_OF.format(n=total.ticked, of=total.of)
+            if total.complete
+            else TALLY_SOME.format(n=total.ticked)
+        )
+    elif total.complete and (total.of or not total.fixed):
+        parts.append(c.count(total.of, unit))
+    if total.fixed:
+        parts.append(f"{total.fixed} {fixed_word}")
+    return " · ".join(parts)
+
+
+def _tree_filter(value: str, on_change: Callable[[str], Any]) -> None:
+    """The filter box above a tree. **Outside the tree's refreshable**, so typing
+    redraws the rows and never the box the caret is in."""
+    box = ui.input(value=value, placeholder=FILTER_PLACEHOLDER)
+    box.classes("p-field p-input w-full tree-filter")
+    box.props("dense borderless hide-bottom-space clearable debounce=200")
+    with box.add_slot("prepend"):
+        ui.icon("search").classes("tree-filter-icon")
+    box.on_value_change(lambda e: on_change(str(e.value or "")))
 
 
 # --- route one: the data already in the repo --------------------------------
@@ -388,18 +682,19 @@ def _in_repo() -> None:
     line saying what it is for.
     """
     with ui.element("div").classes("add-section"):
-        _section_head(IN_REPO_HEADING, IN_REPO_WHY)
+        _section_head(IN_REPO_HEADING)
         if APP.data_dir and not APP.repicking:
             _chosen_folder()
         else:
             _picker()
 
 
-def _section_head(title: str, hint: str) -> None:
-    """A section's title and the one line saying what it is for."""
+def _section_head(title: str) -> None:
+    """A section's title. **No line under it** *(2026-09-18, the user's call)*:
+    each one restated what the controls below it already show, and with the
+    panel's own subtitle gone too the screen opens on the thing to do."""
     with ui.element("div").classes("add-section-head"):
         ui.label(title).classes("add-section-title")
-        ui.label(hint).classes("add-section-hint")
 
 
 def _picker() -> None:
@@ -548,39 +843,91 @@ def _chosen_folder() -> None:
     if not files:
         c.empty_note(NOTHING_HERE.format(formats=_formats()))
         return
-    indexed = _indexed_paths()
-    todo = [p for p in files if _rel(p).as_posix() not in indexed]
+    todo = picktree.leaves(_file_items())
     with ui.element("div").classes("pick-head"):
         ui.label(PICK_WHICH if todo else ALL_DONE).classes("pick-head-label")
         if todo:
-            c.button("All", lambda: _tick_all(todo, True), micro=True)
-            c.button("None", lambda: _tick_all(todo, False), micro=True)
-    with ui.element("div").classes("pick-list"):
-        for path in files:
-            _pick_row(path, indexed)
+            c.button("All", lambda: _tick_shown(True), micro=True)
+            c.button("None", lambda: _tick_shown(False), micro=True)
+    if len(files) >= FILTER_FROM:
+        _tree_filter(APP.pick_filter, _filter_files)
+    with c.scroll_area("pick-files", classes="pick-tree"):
+        _file_tree()
 
 
-def _pick_row(path: Path, indexed: set[str]) -> None:
-    """One file to profile, or one already done.
+#: How many files the data folder holds before the tree gets a filter box. Under
+#: this the whole list is on screen and a box to search it is a control with
+#: nothing to do.
+FILTER_FROM = 12
 
-    **The path is the checkbox's own label**, so the whole row is one hit target
-    rather than a 15px box beside some text you cannot click. That is also why it
-    is not a row-with-a-click-handler: the handler and the box would both fire on
-    the box and cancel each other out.
 
-    An already-indexed file keeps its place in the list — it is still part of
-    "what is under this folder" — but its box is disabled, so the row states a
-    fact instead of offering an action.
+def _file_items() -> tuple[picktree.Item, ...]:
+    """The files under the data folder as a tree, the indexed ones marked.
+
+    Recomputed from disk on every draw, for `_ticked`'s reason: a file imported
+    into the middle of the folder is a row without a second click.
     """
-    rel = _rel(path).as_posix()
-    done = rel in indexed
-    with ui.element("div").classes("pick-row pick-row--done" if done else "pick-row"):
-        box = ui.checkbox(rel, value=not done and rel not in APP.unpicked).classes("p-check")
-        box.props("dense disable" if done else "dense")
-        if done:
-            ui.label(INDEXED_NOTE).classes("pick-row-note")
-        else:
-            box.on_value_change(lambda e, r=rel: _tick(r, e.value))
+    rels = [_rel(p).as_posix() for p in engine.data_files_in(APP, APP.data_dir)]
+    notes = {rel: INDEXED_NOTE for rel in _indexed_paths()}
+    return picktree.from_paths(rels, APP.data_dir, notes)
+
+
+@ui.refreshable
+def _file_tree() -> None:
+    """Folders and files under the data folder, every box saying what is under it.
+
+    **A folder is a box now** *(2026-09-18, `CONNECTOR.md` §2.5.1)*. The list
+    was flat, so leaving out one year of a folder-per-year extract was a click
+    per file, and nothing but reading every row said which folders were whole.
+
+    What an indexed file's row says, and why its box is dead, is
+    `_chosen_folder`'s to explain.
+    """
+    _tree_rows(*_file_view())
+
+
+def _file_view() -> tuple[_TreeView, tuple[picktree.Item, ...]]:
+    """The file tree's view and the rows its filter leaves, off the disk as it is now."""
+    whole = _file_items()
+    view = _TreeView(
+        name="files",
+        whole=whole,
+        ticks=frozenset(picktree.leaves(whole)) - APP.unpicked,
+        is_open=lambda item: item.key not in APP.pick_closed,
+        toggle=_toggle_pick_folder,
+        tick_leaf=_tick,
+        tick_under=_tick_folder,
+        unit="file",
+        fixed_word=INDEXED_NOTE,
+        filtering=bool(APP.pick_filter.strip()),
+    )
+    return view, picktree.shown(whole, APP.pick_filter)
+
+
+def _toggle_pick_folder(rel: str) -> None:
+    APP.toggle_pick_folder(rel)
+    _file_tree.refresh()
+
+
+def _filter_files(text: str) -> None:
+    APP.pick_filter = text
+    _file_tree.refresh()
+
+
+def _tick_folder(rel: str, on: bool) -> None:
+    """A folder's box: every file under it **that is on screen**, so a filter
+    narrows what one press takes and never ticks a row nobody can see."""
+    folder = picktree.find(_file_view()[1], rel)
+    if folder is not None:
+        APP.tick_all(picktree.leaves([folder]), on)
+    _sync_tree(*_file_view())
+    _actions.refresh()
+
+
+def _tick_shown(on: bool) -> None:
+    APP.tick_all(picktree.leaves(_file_view()[1]), on)
+    _sync_tree(*_file_view())
+    _actions.refresh()
 
 
 def _indexed_paths() -> set[str]:
@@ -605,15 +952,11 @@ def _ticked() -> list[Path]:
 
 
 def _tick(rel: str, on: bool) -> None:
-    """One checkbox. Only the actions are redrawn — the row already shows itself,
-    and rebuilding the list under the pointer that just clicked it is churn."""
+    """One file's box. No row is rebuilt: the folders above it are told what
+    they now hold (`_sync_tree`), and the button is told its count."""
     APP.tick(rel, on)
+    _sync_tree(*_file_view())
     _actions.refresh()
-
-
-def _tick_all(files: list[Path], on: bool) -> None:
-    APP.tick_all({_rel(p).as_posix() for p in files}, on)
-    _refresh()
 
 
 def _browse_to(rel: str) -> None:
@@ -713,8 +1056,8 @@ def choose_data() -> None:
     One or the other, never both on one screen (`state.LOCAL_DATA`). The screen
     that offered a folder picker beside a connection form read as two half-forms
     and asked the reader to work out which one applied. Choosing sends you to a
-    screen about that place only; the other kind stays reachable later from
-    Settings, which is where a decision this durable belongs.
+    screen about that place only, and the answer can be changed from that
+    screen's head until something is indexed (`_data_kind`).
     """
     with ui.element("div").classes("p-centered"):
         with ui.element("div").classes("p-panel p-panel--prose"):
@@ -722,19 +1065,7 @@ def choose_data() -> None:
                 ui.label(CHOOSE_TITLE).classes("t-heading-md")
                 ui.label(CHOOSE_WHY).classes("p-panel-sub")
             with ui.element("div").classes("p-panel-body"):
-                with ui.element("div").classes("choice-grid"):
-                    c.choice_card(
-                        CHOOSE_LOCAL,
-                        CHOOSE_LOCAL_WHY,
-                        icon="folder",
-                        on_click=lambda: _choose(state.LOCAL_DATA),
-                    )
-                    c.choice_card(
-                        CHOOSE_WAREHOUSE,
-                        CHOOSE_WAREHOUSE_WHY.format(providers=_providers_sentence()),
-                        icon="cloud",
-                        on_click=lambda: _choose(state.WAREHOUSE_DATA),
-                    )
+                _choice_cards()
             with ui.element("div").classes("p-panel-actions"):
                 with ui.element("div").classes("row-gap-sm"):
                     c.button("Back", _back_to_brief, kind="secondary")
@@ -744,7 +1075,12 @@ def _choose(mode: str) -> None:
     from portia.ui import app as app_module
 
     engine.choose_data(mode, APP)
-    app_module.shell.refresh()
+    if APP.on_add_data:
+        app_module.shell.refresh()
+    else:
+        # From the workspace the question was asked inside the add-data dialog,
+        # and redrawing the shell would rebuild the window behind it.
+        _refresh()
     if mode == state.WAREHOUSE_DATA and not APP.connection:
         open_connect_dialog()
 
@@ -752,10 +1088,6 @@ def _choose(mode: str) -> None:
 # --- the warehouse route (`docs/CONNECTOR.md`) ---------------------------------
 
 WAREHOUSE_HEADING = "Tables in scope"
-WAREHOUSE_WHY = (
-    "The tables this project is about. Ticking adds a table; the switches on the right say "
-    "whether it is also profiled and read."
-)
 CONNECT_TITLE = "Connect to a warehouse"
 CONNECT_SUB = "Saved outside the repo with no secret in it. The project only names it."
 PICK_SUB = "Pick a saved connection, or set up a new one."
@@ -791,6 +1123,10 @@ ADD_CONNECTION = "Add connection"
 USE_EXISTING = "Use existing connection"
 SCOPE_LOADING = "Listing…"
 SCOPE_EMPTY = "Nothing here the role can see."
+NOTHING_UNDER = "Nothing readable here."
+FILTER_PLACEHOLDER = "Filter by name"
+TALLY_OF = "{n} of {of}"
+TALLY_SOME = "{n} selected"
 IN_SCOPE_NOTE = "in scope"
 BUILT_NOTE = "built by this project as {model}"
 NO_CONNECT_DIALOG = "The connect dialog did not load. Reload the page."
@@ -805,7 +1141,7 @@ def _warehouse_route() -> None:
     Index button below, because scoping is indexing at the metadata tier.
     """
     with ui.element("div").classes("add-section"):
-        _section_head(WAREHOUSE_HEADING, WAREHOUSE_WHY)
+        _section_head(WAREHOUSE_HEADING)
         _connection_state()
         if APP.connected:
             _scope_picker()
@@ -863,98 +1199,172 @@ def _connection_state() -> None:
 
 
 def _scope_picker() -> None:
-    """Database → schema → tables, browsed one level at a time and listed lazily.
+    """Database → schema → table as **one tree**, listed lazily, every box ticking
+    what is under it (`picktree.py`, `CONNECTOR.md` §2.5.1).
 
-    The folder picker's shape, because it is the same question one level up:
-    *which of these is the data*. A table row is a tick, an already-scoped one
-    says so and cannot be ticked twice, and the count on the Index button below
-    is the ticks here.
+    It was the folder picker's shape, one level at a time, and that shape was
+    wrong for this question. A folder is *chosen*, once; tables are *collected*,
+    from several schemas, and a browser that draws one schema cannot show what
+    was ticked in the last one. A schema row also had no box, so §2.5's
+    *ticking a schema ticks its tables* was written and never built.
+
+    The filter box and the scrolling region are outside the tree's refreshable:
+    a tick redraws the rows, and the caret and the scroll offset stay put.
     """
-    with ui.element("div").classes("picker"):
-        _scope_crumbs()
-        listing = APP.scope_listing.get(APP.scope_at)
-        if listing is None:
-            if APP.scope_loading:
+    if "" not in APP.scope_listing:
+        with ui.element("div").classes("picker"):
+            if APP.scope_loading is not None:
                 with ui.element("div").classes("connect-state p-2"):
                     ui.spinner(size="sm")
                     ui.label(SCOPE_LOADING)
             else:
                 with ui.element("div").classes("p-2"):
-                    c.button(
-                        "List", lambda: _browse_scope(APP.scope_at), micro=True, icon="refresh"
-                    )
-            return
-        if not listing:
-            c.empty_note(SCOPE_EMPTY)
-        parts = [p for p in APP.scope_at.split(".") if p]
-        if len(parts) < 2:
-            for name in listing:
-                _scope_level_row(name, f"{APP.scope_at}.{name}".strip("."))
-        else:
-            in_scope = set(APP.scope)
-            built = engine.written_tables(APP)
-            for table, kind in listing:
-                _scope_table_row(f"{APP.scope_at}.{table}", table, kind, in_scope, built)
+                    c.button("List", _list_databases, micro=True, icon="refresh")
+        return
+    with ui.element("div").classes("pick-head"):
+        _tree_filter(APP.scope_filter, _filter_scope)
+        _scope_clear()
+    with c.scroll_area("pick-tables", classes="pick-tree"):
+        _scope_tree()
 
 
-def _scope_crumbs() -> None:
-    parts = [p for p in APP.scope_at.split(".") if p]
-    with ui.element("div").classes("picker-crumbs"):
-        c.button(APP.connection or "", lambda: _browse_scope(""), micro=True, icon="cloud")
-        for i, part in enumerate(parts):
-            at = ".".join(parts[: i + 1])
-            c.button(part, lambda a=at: _browse_scope(a), micro=True)
+@ui.refreshable
+def _scope_clear() -> None:
+    if APP.scope_ticks:
+        c.button("None", _clear_scope_ticks, micro=True)
 
 
-def _scope_level_row(name: str, at: str) -> None:
-    with ui.element("div").classes("picker-row"):
-        ui.icon("storage" if "." not in at else "schema").classes("picker-row-icon")
-        ui.label(name).classes("picker-row-name")
-        c.button("", lambda a=at: _browse_scope(a), icon="chevron_right", micro=True).classes(
-            "picker-row-go"
-        )
+def _scope_items() -> tuple[picktree.Item, ...]:
+    """The warehouse as far as it has been listed, with what is already in marked.
 
-
-def _scope_table_row(
-    qualified: str, table: str, kind: str, in_scope: set[str], built: dict[str, str] | None = None
-) -> None:
-    """One table to scope, one already scoped, or one **this project built**.
-
-    A built table is known already, under its model's name, and profiled from
-    there (`catalog.profile_remote`); ticking it here would have written a
-    second entry for the same table under the same name (2026-09-07). So the
-    row says what it is and cannot be ticked, as an in-scope one cannot.
+    A table **this project built** is known already, under its model's name, and
+    profiled from there (`catalog.profile_remote`); ticking it here would write
+    a second entry for the same table (2026-09-07). So its row says what it is
+    and cannot be ticked, as an in-scope one cannot.
     """
-    done = qualified in in_scope
-    model = (built or {}).get(qualified)
-    with ui.element("div").classes("pick-row pick-row--done" if done or model else "pick-row"):
-        box = ui.checkbox(
-            f"{table}  ({kind})" if kind != "table" else table,
-            value=done or qualified in APP.scope_ticks,
-        ).classes("p-check")
-        box.props("dense disable" if done or model else "dense")
-        if model:
-            ui.label(BUILT_NOTE.format(model=model)).classes("pick-row-note")
-        elif done:
-            ui.label(IN_SCOPE_NOTE).classes("pick-row-note")
-        else:
-            box.on_value_change(lambda e, q=qualified: _tick_scope(q, e.value))
+    notes = {qualified: IN_SCOPE_NOTE for qualified in APP.scope}
+    notes |= {
+        qualified: BUILT_NOTE.format(model=model)
+        for qualified, model in (engine.written_tables(APP) or {}).items()
+    }
+    return picktree.from_listing(APP.scope_listing, notes)
+
+
+@ui.refreshable
+def _scope_tree() -> None:
+    view, rows = _scope_view()
+    if not view.whole:
+        c.empty_note(SCOPE_EMPTY)
+        return
+    _tree_rows(view, rows)
+
+
+def _scope_view() -> tuple[_TreeView, tuple[picktree.Item, ...]]:
+    whole = _scope_items()
+    view = _TreeView(
+        name="tables",
+        whole=whole,
+        ticks=APP.scope_ticks,
+        is_open=lambda item: item.key in APP.scope_open,
+        toggle=_toggle_scope,
+        tick_leaf=_tick_scope,
+        tick_under=_tick_schema,
+        unit="table",
+        fixed_word=IN_SCOPE_NOTE,
+        filtering=bool(APP.scope_filter.strip()),
+        loading=APP.scope_loading,
+    )
+    return view, picktree.shown(whole, APP.scope_filter)
+
+
+def _redraw_scope() -> None:
+    """After a tick: the rows are told their new state in place, never rebuilt."""
+    _sync_tree(*_scope_view())
+    _scope_clear.refresh()
+    _actions.refresh()
 
 
 def _tick_scope(qualified: str, on: bool) -> None:
     APP.tick_scope(qualified, on)
-    _actions.refresh()
+    _redraw_scope()
 
 
-async def _browse_scope(at: str) -> None:
-    APP.scope_at = at
+def _clear_scope_ticks() -> None:
+    APP.scope_ticks = frozenset()
+    _redraw_scope()
+
+
+def _filter_scope(text: str) -> None:
+    APP.scope_filter = text
+    _scope_tree.refresh()
+
+
+async def _list_databases() -> None:
+    """The first listing. Also what a finished connect calls, from a dialog that
+    has just closed under it, so the client is taken off the page if there is
+    one and the listing goes ahead either way."""
+    client = _page_client()
+    await _listing(client, engine.browse_remote(APP, "", _refresh))
     _refresh()
-    if at not in APP.scope_listing:
-        try:
-            await engine.browse_remote(APP, at)
-        except Exception as exc:  # noqa: BLE001 — a listing that failed is a sentence on screen
-            ui.notify(f"{type(exc).__name__}: {exc}")
-    _refresh()
+
+
+async def _toggle_scope(key: str) -> None:
+    """Unfold or shut a row. The first unfolding is a query, and the row says so
+    with a spinner where its caret was."""
+    # Held first: the redraw below deletes the caret this handler stands in
+    # (`app._say`'s rule), and a failed listing has to reach the screen.
+    client = _page_client()
+    if APP.toggle_scope_node(key) and key not in APP.scope_listing:
+        await _listing(client, engine.browse_remote(APP, key, _scope_tree.refresh))
+    _scope_tree.refresh()
+
+
+async def _tick_schema(key: str, on: bool) -> None:
+    """A schema's box, or a database's: list what is under it, then tick it.
+
+    **A snapshot, never a rule** (`CONNECTOR.md` §2.5.1): the press ticks the
+    tables that are there now, and `scope` stays a list of names. A table
+    somebody creates in that schema next month joins nothing until a person
+    ticks it, because with the profile switch on it would otherwise be scanned
+    on this project's meter without anyone having chosen it.
+
+    With a filter on, the press takes the rows on screen and no others.
+    """
+    client = _page_client()
+    if on:
+        # **No row is rebuilt for this listing.** Only a listed container can be
+        # open, so what arrives is under a shut row and changes no row on
+        # screen: the count beside the box says *Listing…* and then the number.
+        await _listing(client, engine.list_under(APP, key, lambda: _say_listing(key)))
+    node = picktree.find(_scope_view()[1], key)
+    if node is not None:
+        APP.tick_scope_all(picktree.leaves([node]), on)
+    _redraw_scope()
+
+
+def _say_listing(key: str) -> None:
+    for _box, meta in _DRAWN.get("tables", {}).get(key, []):
+        if meta is not None and not meta.is_deleted:
+            meta.text = SCOPE_LOADING
+
+
+def _page_client():
+    """The page a handler was pressed on, or ``None`` where there is no page: a
+    finished connect calls the first listing from a dialog that has just closed."""
+    try:
+        return context.client
+    except RuntimeError:
+        return None
+
+
+async def _listing(client, listing) -> None:
+    """Await one listing; a failure is a sentence on screen and the tree as it was."""
+    try:
+        await listing
+    except Exception as exc:  # noqa: BLE001 — a listing that failed is a sentence on screen
+        if client is not None:
+            with client:
+                ui.notify(f"{type(exc).__name__}: {exc}")
 
 
 async def _scope_and_interpret(names: list[str], *, in_dialog: bool = False) -> None:
@@ -1402,7 +1812,7 @@ async def _connect_now() -> None:
     app_module.shell.refresh()
     artifacts.pane.refresh()
     _refresh()
-    await _browse_scope("")
+    await _list_databases()
 
 
 # --- the start panel: a local server portia can start (`PROVIDERS.md` §4.9) -----
@@ -1839,9 +2249,9 @@ def _profile_toggle() -> None:
             .bind_value(APP, "profile_on_add")
             .on_value_change(_refresh)
         )
-        ui.label(PROFILE_ON_COST if APP.profile_on_add else PROFILE_OFF_COST).classes(
-            "add-section-hint"
-        )
+        # Caption size, not the hint's 13px: one line under a switch, which the
+        # switch's own label already introduces (the user's call, 2026-09-18).
+        c.caption(PROFILE_ON_COST if APP.profile_on_add else PROFILE_OFF_COST)
 
 
 def _interpret_toggle() -> None:
@@ -1872,7 +2282,8 @@ def _interpret_toggle() -> None:
                     on_start=open_server_dialog,
                 )
         remote = APP.data_mode == state.WAREHOUSE_DATA
-        ui.label(INTERPRET_COST_REMOTE if remote else INTERPRET_COST).classes("add-section-hint")
+        # The profile switch's size, so the two cost cards read as a pair.
+        c.caption(INTERPRET_COST_REMOTE if remote else INTERPRET_COST)
 
 
 async def _interpret_switched() -> None:
@@ -1998,8 +2409,30 @@ def _actions(*, in_dialog: bool = False) -> None:
             # place to stand, and Add data waits in the left pane.
             c.button("Skip for now", lambda: _leave(in_dialog), kind="secondary")
         if not in_dialog:
-            c.button("Back", _back_to_brief, kind="secondary")
-    c.caption(_action_note(outstanding))
+            # One step back. That is the question before this screen while it
+            # can still be answered differently, and the brief once it cannot.
+            back = _reopen_choice if engine.can_change_data(APP) else _back_to_brief
+            c.button("Back", back, kind="secondary")
+    metadata_only = bool(outstanding and APP.scope_ticks and not APP.profile_on_add)
+    _note_line(_action_note(outstanding), accent=METADATA_WORD if metadata_only else "")
+
+
+def _note_line(note: str, *, accent: str = "") -> None:
+    """The caption under the actions, with one word in the accent when asked.
+
+    The word is *metadata*, on the press that adds tables without scanning
+    them (the user's call, 2026-09-18). It replaced a second sentence, *Free;
+    nothing is scanned*, and says the same thing in the place the eye already
+    is: which of the two kinds of press this one is. Kind, never rank.
+    """
+    before, word, after = note.partition(accent) if accent else (note, "", "")
+    if not word:
+        c.caption(note)
+        return
+    with ui.element("div").classes("t-caption c-mute note-line"):
+        ui.label(before)
+        ui.label(word).classes("c-accent")
+        ui.label(after)
 
 
 def _index_label(outstanding: int) -> str:
@@ -2031,8 +2464,16 @@ def _action_note(outstanding: int) -> str:
         # The warehouse route has one part, so a breakdown would only restate
         # the count. What the press does with the tables is the thing to say,
         # and the switch on the right decides it.
+        # **And where they came from**: the tree shows a tick beside its
+        # schema, and this line is the one place the whole selection is one
+        # sentence. With the profile switch on it is also the number of scans
+        # a press puts on the meter, which a ticked schema makes easy to grow.
         lead = SCOPE_PROFILE_ALL if APP.profile_on_add else SCOPE_ALL
-        return lead.format(n=c.count(outstanding, "table"))
+        tables = c.count(outstanding, "table")
+        schemas = picktree.containers(APP.scope_ticks, ".")
+        if schemas > 1:
+            tables = SCOPE_ACROSS.format(n=tables, schemas=c.count(schemas, "schema"))
+        return lead.format(n=tables)
     if outstanding:
         planned = len(APP.import_plan)
         here = outstanding - planned
@@ -2492,15 +2933,7 @@ CONTEXT_PLACEHOLDER = "The project in a few sentences…"
 #: rather than by explaining at length what an answer is not.
 CONTEXT_SHAPE = "The goal, how you model it, and roughly what data you have."
 
-ADD_WHY_WAREHOUSE = (
-    "Tables from {name}, read where they are. A ticked table arrives as metadata; the switches "
-    "say whether it is profiled and read too."
-)
-ADD_WHY = (
-    "portia reads {formats}. Choose the data folder in this repo, or import files from outside it."
-)
 IN_REPO_HEADING = "Data in this repo"
-IN_REPO_WHY = "Choose the folder that holds this project's data."
 NO_SUBFOLDERS = "No subfolders with readable data."
 NO_DATA_HERE = "nothing readable"
 MORE_FILES = "and {n} more"
@@ -2531,13 +2964,13 @@ INTERPRET_COST_REMOTE = (
     "Spends a model exchange. It reads the metadata, or the profile if there is one."
 )
 PROFILE_SWITCH = "Profile each table on the warehouse"
-PROFILE_OFF_COST = (
-    "Off: a table arrives as metadata, for free. Columns and types, row count, last change. "
-    "Profile later from the Indexing tab or the table itself."
-)
-PROFILE_ON_COST = "On: each table is scanned once on the warehouse. That is on its meter."
-SCOPE_ALL = "Adds {n} as metadata. Free; nothing is scanned."
-SCOPE_PROFILE_ALL = "Adds and profiles {n}. Each is scanned once on the warehouse."
+PROFILE_OFF_COST = "A table arrives as metadata, for free. Tables can be profiled later."
+PROFILE_ON_COST = "Each table is scanned once, which uses compute on the data warehouse."
+SCOPE_ALL = "Adds {n} as metadata."
+SCOPE_PROFILE_ALL = "Adds and profiles {n}."
+#: The word `_note_line` draws in the accent on a metadata-only press.
+METADATA_WORD = "metadata"
+SCOPE_ACROSS = "{n} across {schemas}"
 SCOPED_METADATA = "Added {n} as metadata."
 SCOPED_PROFILED = "Added {n}, {profiled} profiled."
 READING_NEXT = "The copilot is reading them. The job is in the chat list."

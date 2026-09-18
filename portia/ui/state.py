@@ -872,14 +872,17 @@ class App:
     #: view only when nothing is saved (`screens._initial_view`).
     connect_new: bool = False
     connect_pick: str = ""
-    #: The scope picker: where it is looking (``""``, ``"DB"`` or ``"DB.SCHEMA"``),
-    #: what it has already listed at each place (a browse is a query and is not
-    #: repeated on every redraw), which tables are ticked, and whether a listing
-    #: is on its way.
-    scope_at: str = ""
+    #: The scope picker (`picktree.py`): which databases and schemas are unfolded
+    #: (``"DB"`` or ``"DB.SCHEMA"``, shut by default because opening one is a
+    #: query), what has already been listed at each place (a browse is a query
+    #: and is not repeated on every redraw), which tables are ticked, what the
+    #: filter box holds, and the place a listing is on its way for (``None`` when
+    #: none is; ``""`` is the databases themselves).
+    scope_open: frozenset[str] = frozenset()
     scope_listing: dict[str, list] = field(default_factory=dict)
     scope_ticks: frozenset[str] = frozenset()
-    scope_loading: bool = False
+    scope_filter: str = ""
+    scope_loading: str | None = None
     #: The connect dialog's project half (`CONNECTOR.md` §2.7.1): whether the
     #: copilot may write, as a draft until Connect saves it, and the sentence
     #: the dialog opens with when an action sent you there.
@@ -916,9 +919,24 @@ class App:
         return self.connection_status == CONNECTED
 
     def tick_scope(self, qualified: str, on: bool) -> None:
-        self.scope_ticks = (
-            (self.scope_ticks | {qualified}) if on else (self.scope_ticks - {qualified})
-        )
+        self.tick_scope_all([qualified], on)
+
+    def tick_scope_all(self, qualified: Collection[str], on: bool) -> None:
+        """A schema's box, or a database's: every table under it, in one press."""
+        names = frozenset(qualified)
+        self.scope_ticks = (self.scope_ticks | names) if on else (self.scope_ticks - names)
+
+    def toggle_scope_node(self, key: str) -> bool:
+        """Unfold or shut a database or a schema. Returns whether it is now open."""
+        opened = key not in self.scope_open
+        self.scope_open = (self.scope_open | {key}) if opened else (self.scope_open - {key})
+        return opened
+
+    def toggle_pick_folder(self, rel: str) -> None:
+        if rel in self.pick_closed:
+            self.pick_closed -= {rel}
+        else:
+            self.pick_closed |= {rel}
 
     def toggle_warehouse_node(self, rel: str) -> None:
         if rel in self.warehouse_closed:
@@ -943,6 +961,12 @@ class App:
     #: the only shape in which that default survives the list being rebuilt when
     #: a file is imported into the middle of it.
     unpicked: frozenset[str] = frozenset()
+    #: The file tree under the data folder: which folders are shut, and what the
+    #: filter box holds. Shut is the exception here, unlike the warehouse's tree:
+    #: the files are already on disk, and the shape of the folder is what the
+    #: list is drawn for.
+    pick_closed: frozenset[str] = frozenset()
+    pick_filter: str = ""
     #: Whether the folder picker is showing again over an already-chosen data
     #: folder. A mode rather than clearing the setting, so "change the folder"
     #: can be abandoned — clearing first would make it a button whose only

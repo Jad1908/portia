@@ -601,6 +601,28 @@ def test_the_breakdown_partitions_the_button_and_does_not_double_count(tmp_path)
     assert "1 copied in to data/" in note and "1 already in the repo" in note
 
 
+def test_a_metadata_press_says_so_in_one_sentence_with_the_word_in_the_accent():
+    """*Free; nothing is scanned* and *Each is scanned once on the warehouse*
+    are gone (the user, 2026-09-18). What tells the two presses apart is the
+    word *metadata*, in the accent, and only on the press that scans nothing."""
+    from portia.ui import screens
+    from portia.ui.state import App
+
+    app = App()
+    app.scope_ticks = frozenset({"DB.STG.ORDERS", "DB.STG.lines"})
+    with _as_app(screens, app):
+        assert screens._action_note(2) == "Adds 2 tables as metadata."
+        with ui.element("div") as slot:
+            screens._note_line(screens._action_note(2), accent=screens.METADATA_WORD)
+        app.profile_on_add = True
+        assert screens._action_note(2) == "Adds and profiles 2 tables."
+    runs = [
+        (str(e.text), "c-accent" in e.classes) for e in slot.descendants() if hasattr(e, "text")
+    ]
+    assert ("metadata", True) in runs
+    assert [text for text, accent in runs if accent] == ["metadata"]
+
+
 def test_the_breakdown_is_only_the_repo_when_nothing_is_being_imported(tmp_path):
     from portia.ui import screens
     from portia.ui.state import App
@@ -1808,6 +1830,45 @@ def test_back_on_a_first_run_screen_goes_to_the_brief_and_keeps_the_project_open
     for screen in (screens.choose_data, screens._actions.func):
         source = inspect.getsource(screen)
         assert "_back_to_brief" in source and "_back_to_picker" not in source
+    # One step back from add data is the question before it, while it is open.
+    assert "_reopen_choice if engine.can_change_data(APP)" in inspect.getsource(
+        screens._actions.func
+    )
+
+
+def test_where_the_data_is_can_be_answered_again_until_something_is_indexed(tmp_path, monkeypatch):
+    """The answer was final from the press of a card (the user, 2026-09-18):
+    Back skipped the question, and Settings' *Connect a warehouse* opened the
+    file panel. It is open until a source pins the project, because a project
+    reads from one place, and choosing files un-names a connection nothing
+    has scoped a table through."""
+    from portia.ui import app as app_module
+    from portia.ui import engine, screens
+    from portia.ui.state import App
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(app_module.shell, "refresh", lambda *a, **k: None)
+    monkeypatch.setattr(engine, "install_backend", lambda _app: None)
+    catalog.init_project("Three feeds.", portia_dir=".portia")
+    catalog.set_connection("work", portia_dir=".portia")
+    app = App(root=tmp_path, portia_dir=".portia", catalog=catalog.load_catalog(".portia"))
+    app.data_mode, app.left_add_data = state.WAREHOUSE_DATA, False
+    assert app.connection == "work" and engine.can_change_data(app)
+
+    with _as_app(screens, app):
+        screens._reopen_choice()
+        assert app.data_mode == "" and app.needs_data_choice
+        screens._choose(state.LOCAL_DATA)
+    assert app.data_mode == state.LOCAL_DATA
+    assert not app.connection, "or the next open would put the project back on the warehouse"
+
+    app.catalog = {**app.catalog, "sources": {"ORDERS": {"source": "data/ORDERS.csv"}}}
+    assert not engine.can_change_data(app)
+    with pytest.raises(ValueError, match="one place"):
+        engine.reopen_data_choice(app)
+    with _as_app(screens, app), ui.element("div") as slot:
+        screens._data_kind(remote=False)
+    assert not [e for e in slot.descendants() if e.tag == "q-btn"], "no Change once pinned"
 
 
 def test_every_connection_button_says_what_it_opens():
@@ -4495,22 +4556,141 @@ def test_the_indexing_list_carries_the_tables_the_project_built(tmp_path, monkey
     assert rows.state == engine.INTERPRETED
 
 
-def test_the_picker_will_not_scope_a_table_this_project_built():
+def test_the_picker_will_not_scope_a_table_this_project_built(monkeypatch):
+    from portia.ui import engine, screens
+
+    app = App(catalog={"scope": ["p.raw.CUSTOMERS"]})
+    app.scope_listing = {
+        "": ["p"],
+        "p": ["raw", "staging"],
+        "p.raw": [("CUSTOMERS", "table"), ("orders", "table")],
+        "p.staging": [("stg_x", "table")],
+    }
+    app.scope_open = frozenset({"p", "p.raw", "p.staging"})
+    monkeypatch.setattr(engine, "written_tables", lambda _app: {"p.staging.stg_x": "stg_x"})
+
+    with _as_app(screens, app), ui.element("div") as slot:
+        screens._scope_tree()
+    done = [row for row in slot.descendants() if "tree-row--done" in getattr(row, "classes", [])]
+    notes = [
+        str(e.text)
+        for row in done
+        for e in row.descendants()
+        if "tree-row-meta" in getattr(e, "classes", [])
+    ]
+    assert notes == [screens.IN_SCOPE_NOTE, screens.BUILT_NOTE.format(model="stg_x")]
+    leaves = [
+        box
+        for row in slot.descendants()
+        if "tree-row--leaf" in getattr(row, "classes", [])
+        for box in row.descendants()
+        if box.tag == "q-checkbox"
+    ]
+    assert [bool(b._props.get("disable", False)) for b in leaves] == [True, False, True]
+
+
+def _node_boxes(slot) -> dict[str, object]:
+    """Each container's box value, by the name drawn beside it."""
+    boxes = {}
+    for row in slot.descendants():
+        if "tree-row--node" not in getattr(row, "classes", []):
+            continue
+        inside = list(row.descendants())
+        box = [e for e in inside if e.tag == "q-checkbox"]
+        name = [e for e in inside if "tree-row-name" in getattr(e, "classes", [])]
+        if box and name:
+            boxes[str(name[0].text)] = box[0].value
+    return boxes
+
+
+def _node_counts(slot) -> list[str]:
+    return [
+        str(e.text)
+        for row in slot.descendants()
+        if "tree-row--node" in getattr(row, "classes", [])
+        for e in row.descendants()
+        if "tree-row-meta" in getattr(e, "classes", [])
+    ]
+
+
+def test_a_schema_row_says_what_is_ticked_under_it_without_being_opened(monkeypatch):
+    """The complaint (2026-09-18): tick tables in one schema, go to another,
+    and nothing on screen says the first ticks exist. A shut schema now carries
+    a box and a count, and so does the database above it."""
+    from portia.ui import engine, screens
+
+    app = App()
+    app.scope_listing = {
+        "": ["DB"],
+        "DB": ["STG_A", "STG_B"],
+        "DB.STG_A": [("ORDERS", "table"), ("lines", "table")],
+        "DB.STG_B": [("SHIFTS", "table")],
+    }
+    app.scope_open = frozenset({"DB"})
+    app.scope_ticks = frozenset({"DB.STG_A.ORDERS", "DB.STG_B.SHIFTS"})
+    monkeypatch.setattr(engine, "written_tables", lambda _app: {})
+
+    with _as_app(screens, app), ui.element("div") as slot:
+        screens._scope_tree()
+
+    assert _node_boxes(slot) == {"DB": None, "STG_A": None, "STG_B": True}
+    assert _node_counts(slot) == ["2 of 3", "1 of 2", "1 of 1"]
+
+
+def test_ticking_a_schema_lists_it_and_ticks_the_tables_there_now(monkeypatch):
+    """A snapshot, never a rule: the press takes the names the listing returned,
+    leaves out what is already in scope, and writes table names, not a pattern."""
+    import asyncio
+
+    from portia.ui import engine, screens
+
+    app = App(catalog={"scope": ["DB.STG_A.ORDERS"]})
+    app.scope_listing = {"": ["DB"], "DB": ["STG_A"]}
+    asked = []
+
+    async def browse(app_, at, on_start=None):
+        asked.append(at)
+        app_.scope_listing[at] = [("ORDERS", "table"), ("lines", "table"), ("V_X", "view")]
+        return app_.scope_listing[at]
+
+    monkeypatch.setattr(engine, "browse_remote", browse)
+    monkeypatch.setattr(engine, "written_tables", lambda _app: {})
+    monkeypatch.setattr(screens, "_redraw_scope", lambda: None)
+
+    with _as_app(screens, app), ui.element("div"):
+        asyncio.run(screens._tick_schema("DB.STG_A", True))
+        assert asked == ["DB.STG_A"]
+        assert app.scope_ticks == {"DB.STG_A.lines", "DB.STG_A.V_X"}
+
+        app.scope_filter = "v_"
+        asyncio.run(screens._tick_schema("DB.STG_A", False))
+    assert app.scope_ticks == {"DB.STG_A.lines"}, "a filtered press takes the rows on screen"
+
+
+def test_a_folder_box_unticks_every_file_under_it(tmp_path, monkeypatch):
     from portia.ui import screens
 
-    with _as_app(screens, App()), ui.element("div") as slot:
-        screens._scope_table_row(
-            "p.staging.stg_x", "stg_x", "table", set(), {"p.staging.stg_x": "stg_x"}
-        )
-        screens._scope_table_row(
-            "p.raw.orders", "orders", "table", set(), {"p.staging.stg_x": "stg_x"}
-        )
-    notes = [
-        str(e.text) for e in slot.descendants() if "pick-row-note" in getattr(e, "classes", [])
-    ]
-    assert notes == [screens.BUILT_NOTE.format(model="stg_x")]
-    boxes = [e for e in slot.descendants() if e.tag == "q-checkbox"]
-    assert [b._props.get("disable", False) for b in boxes] == [True, False]
+    (tmp_path / "data" / "2023").mkdir(parents=True)
+    (tmp_path / "data" / "2024").mkdir()
+    for rel in ("2023/a.csv", "2023/B.csv", "2024/c.csv", "orders.csv"):
+        (tmp_path / "data" / rel).write_text("a\n1\n")
+    app = App(root=tmp_path, catalog={"data_dir": "data"})
+    monkeypatch.setattr(screens._actions, "refresh", lambda: None)
+
+    with _as_app(screens, app):
+        screens._seed_ticks()
+        with ui.element("div") as slot:
+            screens._file_tree()
+        assert _node_boxes(slot) == {"2023": True, "2024": True}
+
+        screens._tick_folder("data/2023", False)
+        assert sorted(p.name for p in screens._ticked()) == ["c.csv", "orders.csv"]
+        # Told in place: the same elements, no redraw, now saying what is ticked.
+        assert _node_boxes(slot) == {"2023": False, "2024": True}
+
+        screens._tick("data/2023/B.csv", True)
+        assert _node_boxes(slot) == {"2023": None, "2024": True}
+        assert _node_counts(slot) == ["1 of 2", "1 of 1"]
 
 
 # --- a scoped table has two axes: read, and profiled (2026-09-07) ----------------
