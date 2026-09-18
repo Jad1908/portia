@@ -449,8 +449,8 @@ def model_effort(
     **The control keeps one shape whichever provider is picked** (`DESIGN.md` →
     Layout stability). The spinner and the refresh button share one fixed
     `spend-slot` that exists whether or not either is drawn, and the effort
-    segments sit in a `spend-detail` row that keeps its height when a provider
-    ignores effort — measured before this, switching Anthropic → Ollama in the
+    segments sit in a `spend-detail` row that keeps its height, empty, when a
+    provider ignores effort — measured before this, switching Anthropic → Ollama in the
     composer moved the textarea and every control above it, and the refresh
     button wrapped onto a line of its own because the select claimed the row.
     """
@@ -489,14 +489,27 @@ def model_effort(
             # the 50px the input reserves ellipsized every model name beside
             # free space. Filled, the input *is* the display — one element,
             # the full width.
-            ui.select(
-                _model_options(app.model, listed),
-                value=app.model,
+            # **A server with no models offers none** *(2026-09-18, the user:
+            # "the UI says no model but there is one in the picker?")*. The
+            # select showed the provider's default name, `qwen3:8b`, over a
+            # line saying nothing is installed. The name was a placeholder
+            # for a model that was never pulled, and a select is read as a
+            # list of what exists. A parked chat keeps its name: it ran on it.
+            nothing = listed == [] and not provider_fixed
+            select = ui.select(
+                {"": _NO_MODELS_SHORT} if nothing else _model_options(app.model, listed),
+                value="" if nothing else app.model,
                 on_change=lambda e: setattr(app, "model", e.value),
-            ).props(
-                "borderless dense options-dense new-value-mode=add-unique use-input"
-                " fill-input hide-selected"
-            ).classes("p-field p-field-mono model-select")
+            )
+            if nothing:
+                select.props("borderless dense options-dense")
+                select.set_enabled(False)
+            else:
+                select.props(
+                    "borderless dense options-dense new-value-mode=add-unique use-input"
+                    " fill-input hide-selected"
+                )
+            select.classes("p-field p-field-mono model-select")
             with ui.element("span").classes("spend-slot"):
                 if kind in APP.models_listing:
                     ui.spinner(size="xs")
@@ -528,8 +541,12 @@ def model_effort(
             button(START_SERVER, lambda: on_start(kind), icon="play_arrow", micro=True)
     with ui.element("div").classes("spend-detail"):
         if not provider.honours_effort:
-            # The row is reserved either way; saying why beats leaving it blank.
-            caption(_EFFORT_IGNORED.format(label=provider.label))
+            # Nothing, at the row's height. It said *Effort is a Claude
+            # setting. Ollama ignores it.* until 2026-09-18, on the argument
+            # that saying why beats a blank. The user read it as noise about a
+            # control that is not there, and the row is what layout stability
+            # needs, not the sentence.
+            pass
         elif effort_disabled:
             caption(f"effort {app.effort}" if app.effort else "default effort")
         else:
@@ -606,9 +623,9 @@ _LIST_AGAIN = "List the server's models again"
 START_SERVER = "Start the server…"
 STOP_SERVER = "Stop the server…"
 STARTING_SERVER = "starting llama-server…"
-_EFFORT_IGNORED = "Effort is a Claude setting. {label} ignores it."
 _NO_MODELS = "No models installed. Run {command} in a terminal."
 _NO_MODELS_PLAIN = "No models."
+_NO_MODELS_SHORT = "no models"
 _ADD_MODEL = "Add a model in a terminal:"
 _COPY = "Copy"
 

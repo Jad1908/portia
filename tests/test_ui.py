@@ -5251,6 +5251,27 @@ def test_a_window_that_never_switched_provider_offers_every_anthropic_model():
     assert list(select.options) == list(providers.anthropic.MODELS)
 
 
+def test_a_server_with_no_models_offers_none_and_says_nothing_about_effort():
+    """The select showed the provider's default name over a line saying nothing
+    is installed, and under it a sentence about a control that is not there."""
+    from portia.ui import state
+
+    fresh = state.App(provider="ollama")
+    fresh.provider_models["ollama"] = []
+    original, state.APP = state.APP, fresh
+    try:
+        with ui.element("div") as slot:
+            c.model_effort(fresh, lambda effort: None)
+    finally:
+        state.APP = original
+    drawn = list(slot.descendants())
+    select = next(e for e in drawn if "model-select" in e.classes)
+    assert select.value == "" and list(select.options.values()) == ["no models"]
+    assert not select.enabled
+    detail = next(e for e in drawn if "spend-detail" in e.classes)
+    assert not list(detail.descendants()), "the row is reserved, and empty"
+
+
 def test_a_local_model_is_listed_with_the_vendors_own_size():
     from portia.agent import providers
 
