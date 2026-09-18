@@ -96,7 +96,10 @@ class Session:
             )
             if name == _PLOT_TOOL:
                 drawn.collect_failures(self.portia_dir)
-            sent = dict(args)
+            # Where the catalog is was settled when this process started. See
+            # `_without_the_catalog_argument` for what a host's model did with
+            # the chance to say otherwise.
+            sent = {**args, _CATALOG_ARG: self.portia_dir}
             if name in _CHAT_SCOPED and not sent.get("chat"):
                 sent["chat"] = self.log.path.stem
             try:
@@ -189,7 +192,11 @@ def build(session: Session) -> Any:
     from portia.agent import tools
 
     wrapped = [
-        dataclasses.replace(tool, handler=session.wrap(tool.name, tool.handler))
+        dataclasses.replace(
+            tool,
+            handler=session.wrap(tool.name, tool.handler),
+            input_schema=_without_the_catalog_argument(tool.input_schema),
+        )
         for tool in (_pushed_brief(t, session.portia_dir) for t in _offered())
     ]
     server = create_sdk_mcp_server(name=tools.SERVER_NAME, version="0.1.0", tools=wrapped)[
@@ -204,6 +211,30 @@ def build(session: Session) -> Any:
     # session, which a skill is not: a skill is fetched when the model thinks to.
     server.instructions = prompts.load("headless/instructions")
     return server
+
+
+#: The argument every tool takes for where the catalog is.
+_CATALOG_ARG = "portia_dir"
+
+
+def _without_the_catalog_argument(schema: Any) -> Any:
+    """A tool's input schema with ``portia_dir`` taken out of what the host is offered.
+
+    **Found by the first real drive, 2026-09-19.** Every tool takes an optional
+    ``portia_dir`` and the app's copilot has never filled it. A host's model
+    knows its working directory, and Haiku passed ``"portia_dir": "."`` on every
+    call, helpfully and wrongly: the catalog was read from the project root,
+    where there is none, the brief said *nothing is indexed* about a project
+    with two sources, and the model went to the shell to index them again. For
+    this process the catalog's place is a fact settled at start-up, so it is not
+    a question a host is asked, and `Session.wrap` overwrites it if it is
+    answered anyway.
+    """
+    if not isinstance(schema, dict) or _CATALOG_ARG not in (schema.get("properties") or {}):
+        return schema
+    properties = {k: v for k, v in schema["properties"].items() if k != _CATALOG_ARG}
+    required = [k for k in schema.get("required") or [] if k != _CATALOG_ARG]
+    return {**schema, "properties": properties, "required": required}
 
 
 #: The one tool a host is offered differently from the app's copilot.
@@ -227,7 +258,7 @@ def _pushed_brief(tool: Any, portia_dir: str) -> Any:
     from portia.agent import context
 
     async def brief(args: dict[str, Any]) -> dict[str, Any]:
-        text = await asyncio.to_thread(context.build_brief, args.get("portia_dir") or portia_dir)
+        text = await asyncio.to_thread(context.build_brief, portia_dir)
         return {"content": [{"type": "text", "text": text}]}
 
     return dataclasses.replace(

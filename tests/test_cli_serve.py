@@ -71,11 +71,38 @@ def test_a_host_is_offered_the_tools_the_app_is(sales):
 
     served, in_app = drive(sales, both)
     assert [t.name for t in served] == [t.name for t in in_app]
-    differing = [a.name for a, b in zip(served, in_app, strict=True) if a != b]
-    assert differing == [serve.BRIEF_TOOL]
+    for ours, theirs in zip(served, in_app, strict=True):
+        # The one argument a host is not asked for (`_without_the_catalog_argument`).
+        theirs.inputSchema.get("properties", {}).pop("portia_dir", None)
+        assert ours.inputSchema == theirs.inputSchema, ours.name
+        assert ours.annotations == theirs.annotations, ours.name
+        if ours.name != serve.BRIEF_TOOL:
+            assert ours.description == theirs.description, ours.name
     (brief,) = (t for t in served if t.name == serve.BRIEF_TOOL)
     assert "CALL THIS FIRST" in brief.description
     assert "ALREADY HAVE" not in brief.description
+
+
+def test_a_host_is_never_asked_where_the_catalog_is(sales):
+    async def listing(client, session):
+        return (await client.list_tools()).tools
+
+    for tool in drive(sales, listing):
+        assert "portia_dir" not in tool.inputSchema.get("properties", {}), tool.name
+
+
+def test_a_host_that_says_where_the_catalog_is_anyway_is_overruled(sales):
+    """Haiku passed `"portia_dir": "."` on every call and was told nothing was indexed."""
+
+    async def ask(client, session):
+        brief = await client.call_tool(serve.BRIEF_TOOL, {"portia_dir": "."})
+        described = await client.call_tool(
+            "describe_source", {"source": "orders", "portia_dir": "."}
+        )
+        return brief.content[0].text, described.isError
+
+    brief, failed = drive(sales, ask)
+    assert "orders" in brief and not failed
 
 
 def test_the_brief_a_host_pulls_is_the_brief_the_app_pushes(sales):
