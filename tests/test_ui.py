@@ -377,6 +377,126 @@ def test_indexing_hands_straight_over_to_the_read(tmp_path, monkeypatch):
     assert started == ["orders"], "and read, without waiting to be asked twice"
 
 
+def test_a_pressed_index_is_busy_until_profiling_ends_and_takes_one_press(tmp_path, monkeypatch):
+    """The button kept its live form through the whole run, so a second press
+    started a second run. Busy from the press to the end of the free half, and
+    a button again before the read, which is when a second batch is indexed."""
+    import asyncio
+
+    from nicegui import core, ui
+
+    from portia.ui import engine, exchange, screens
+    from portia.ui.state import App
+
+    pd.DataFrame({"a": [1, 2]}).to_csv(tmp_path / "orders.csv", index=False)
+    monkeypatch.chdir(tmp_path)
+    app = App(root=tmp_path)
+    catalog.init_project("test", portia_dir=app.portia_dir)
+
+    seen: dict[str, str] = {}
+    real_index = engine.index
+
+    async def watched_index(paths, app_, **kwargs):
+        seen["while profiling"] = app.indexing_pressed
+        await screens._index_now()  # the second press, mid-run
+        return await real_index(paths, app_, **kwargs)
+
+    async def fake_start(prompt, *, model, effort, kind, label):
+        seen["at the read"] = app.indexing_pressed
+
+    monkeypatch.setattr(engine, "index", watched_index)
+    monkeypatch.setattr(exchange, "start", fake_start)
+    monkeypatch.setattr(ui, "notify", lambda *a, **k: None)
+    monkeypatch.setattr(screens, "_ticked", lambda: [tmp_path / "orders.csv"])
+    monkeypatch.setattr(screens._actions, "refresh", lambda *a, **k: None)
+
+    # A press arrives inside the pressed button's slot. `asyncio.run` starts a
+    # task with an empty slot stack, so the test's own client is entered by hand.
+    from nicegui import context
+
+    client = context.client
+
+    async def press() -> None:
+        monkeypatch.setattr(core, "loop", asyncio.get_running_loop())
+        with client:
+            await screens._index_now()
+
+    with _as_app(screens, app):
+        asyncio.run(press())
+
+    assert seen == {"while profiling": "Index 1 file", "at the read": ""}
+    assert list(app.sources) == ["orders"], "one run, not two"
+    assert app.indexing_pressed == ""
+
+
+def test_a_busy_button_keeps_its_fill_and_its_words():
+    """Quasar's `loading` hid the label and muddied the accent. Busy is the
+    same button washed out, and the CSS is what stops the second press."""
+    import re
+    from pathlib import Path
+
+    with ui.element("div"):
+        busy = c.button("Index 3 files", kind="primary", busy=True)
+    assert "btn-busy" in busy.classes and "btn-primary" in busy.classes
+    assert busy.text == "Index 3 files"
+    assert "loading" not in busy.props
+    css = (Path(c.__file__).parent / "assets" / "portia.css").read_text()
+    rule = re.search(r"\n\.btn\.btn-busy \{(.*?)\}", css, re.S).group(1)
+    assert "pointer-events: none" in rule and "background" not in rule
+
+
+def test_the_index_press_holds_its_client_before_it_redraws_its_own_button():
+    """The first build refreshed `_actions` from inside the button's handler
+    and then notified through the deleted slot. The run died at its first
+    toast with the button busy for good (2026-09-18, found by the user)."""
+    import inspect
+
+    from portia.ui import screens
+
+    source = inspect.getsource(screens._index_now)
+    held, redraw, entered = (
+        source.index("client = context.client"),
+        source.index("_actions.refresh()"),
+        source.index("with client:"),
+    )
+    assert held < redraw < entered
+    assert "_actions.refresh()" in inspect.getsource(screens._pressed_done)
+    assert source.index("finally:") < source.rindex("_pressed_done()")
+
+
+def test_a_running_index_always_offers_the_way_out():
+    """It was offered only once the project had a source, so a first index that
+    hung held the screen with nothing but Back."""
+    import inspect
+
+    from portia.ui import screens
+
+    source = inspect.getsource(screens._actions.func)
+    branch = source[source.index("if outstanding or busy:") : source.index("elif APP.sources")]
+    assert "_leave_label(in_dialog)" in branch
+    assert "if APP.sources or in_dialog:" not in branch
+
+
+def test_opening_the_workspace_lands_in_the_job_that_is_running(monkeypatch):
+    """The caption under the button says the copilot is reading. The workspace
+    opened on the chat list, with that job one more click away."""
+    from portia.ui import app as app_module
+    from portia.ui import screens
+    from portia.ui.state import App
+
+    monkeypatch.setattr(app_module.shell, "refresh", lambda *a, **k: None)
+    app = App(catalog={"sources": {"orders": {}}})
+    with _as_app(screens, app):
+        screens._leave(in_dialog=False)
+        assert app.open is None, "nothing running, so the list"
+
+        app.left_add_data = False
+        job = app.start_exchange("read them", model="m", effort=None, kind=state.INDEXING)
+        assert app.open is None, "a job still never takes the screen by itself"
+        screens._leave(in_dialog=False)
+        assert app.open is job and app.left_add_data
+
+
 def test_a_batch_indexed_while_the_first_is_being_read_is_not_dropped(monkeypatch):
     """Indexing again mid-read is ordinary on this screen, and `exchange.start`
     refuses a second live turn *silently* — so the queue is drained in a loop
@@ -1560,7 +1680,7 @@ def test_the_screen_offers_exactly_one_accented_action(tmp_path):
     source = inspect.getsource(screens._actions.func)
 
     assert source.count('kind="primary"') == 2, "one per branch of the same if/elif"
-    assert "if outstanding:" in source
+    assert "if outstanding or busy:" in source
     assert "elif APP.sources and not in_dialog:" in source, "and the dialog's Close is not one"
 
 

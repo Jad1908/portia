@@ -77,7 +77,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from nicegui import ui
+from nicegui import context, ui
 
 from portia.agent import prompts
 from portia.core import cancel
@@ -945,6 +945,7 @@ async def _scope_and_interpret(names: list[str], *, in_dialog: bool = False) -> 
     finally:
         APP.indexing_status = ""
         APP.indexing_stop = None
+        _pressed_done()
         stop.close()
         _progress.refresh()
     ui.notify(_scoped_note(len(scoped), len(profiled), reading=_will_read(stop)))
@@ -957,6 +958,7 @@ async def _scope_and_interpret(names: list[str], *, in_dialog: bool = False) -> 
         artifacts.pane.refresh()
     else:
         _refresh()
+        _catch_up_workspace()
     if not stop.cancelled:
         await _interpret_pending()
 
@@ -1905,17 +1907,27 @@ def _actions(*, in_dialog: bool = False) -> None:
     accented Close is the accent landing on the one control that does nothing.
     """
     outstanding = len(_ticked()) + len(APP.import_plan) + len(APP.scope_ticks)
-    unit = "table" if APP.scope_ticks else "file"
+    # **A pressed Index stays where it was, busy** *(2026-09-18)*. It used to
+    # stay exactly as it was, live, for the whole of the profiling: nothing on
+    # the button said the press had landed, and a second press started a second
+    # run over the same files. The spinner in place of the label is the usual
+    # answer, and it holds the button's size, so nothing under the hand moves.
+    busy = bool(APP.indexing_pressed)
     with ui.element("div").classes("row-gap-sm"):
-        if outstanding:
+        if outstanding or busy:
             c.button(
-                f"Index {c.count(outstanding, unit)}",
+                APP.indexing_pressed or _index_label(outstanding),
                 lambda: _index_now(in_dialog=in_dialog),
                 kind="primary",
                 icon=c.INDEX_ICON,
+                busy=busy,
             )
-            if APP.sources or in_dialog:
-                c.button(_leave_label(in_dialog), lambda: _leave(in_dialog), kind="secondary")
+            # **Always a way out** *(2026-09-18, the user's call)*. It was
+            # offered only once the project had a source, so a first index that
+            # hung, or was only slow, held the screen with nothing but Back.
+            # Leaving stops nothing: the run carries on, and the sources view
+            # in the workspace shows the same status line and the same Stop.
+            c.button(_leave_label(in_dialog), lambda: _leave(in_dialog), kind="secondary")
         elif APP.sources and not in_dialog:
             c.button(
                 _leave_label(in_dialog),
@@ -1932,6 +1944,11 @@ def _actions(*, in_dialog: bool = False) -> None:
         if not in_dialog:
             c.button("Back", _back_to_picker, kind="secondary")
     c.caption(_action_note(outstanding))
+
+
+def _index_label(outstanding: int) -> str:
+    unit = "table" if APP.scope_ticks else "file"
+    return f"Index {c.count(outstanding, unit)}"
 
 
 def _leave_label(in_dialog: bool) -> str:
@@ -2000,24 +2017,62 @@ async def _index_now(*, in_dialog: bool = False) -> None:
     The copy is first because its results join the profiling — importing three
     files and then having to tick them in a list that has just rebuilt is the
     kind of second step this screen was rewritten to remove.
+
+    **One press, one run.** The button is busy from here until the profiling
+    ends (`_pressed_done`), and a press that arrives anyway is dropped.
     """
-    copied: list[Path] = []
-    if APP.import_plan:
-        pairs, APP.import_plan = APP.import_plan, []
-        copied = await engine.import_files(pairs, APP)
-        ui.notify(f"Copied {c.count(len(copied), 'file')} into {APP.import_dir(DATA_DIR)}/.")
-    # Deduplicated by path: an import into the data folder lands in a place the
-    # ticked list was read from a moment ago, and profiling it twice would be a
-    # minute of work for one entry.
-    seen, paths = set(), []
-    for path in [*_ticked(), *copied]:
-        resolved = path.resolve()
-        if resolved not in seen:
-            seen.add(resolved)
-            paths.append(path)
-    tables = sorted(APP.scope_ticks)
-    await _index_and_interpret(paths, in_dialog=in_dialog and not tables)
-    await _scope_and_interpret(tables, in_dialog=in_dialog)
+    if APP.indexing_pressed or APP.indexing_stop is not None:
+        return
+    # **Held before anything is refreshed** (`app._say`'s rule, and the trap
+    # this function's first build walked into on 2026-09-18). Making the button
+    # busy redraws `_actions`, which deletes the button this handler is
+    # standing in, and every `ui.notify` after that raised *the parent element
+    # this slot belongs to has been deleted*. The run died at its first toast:
+    # tables scoped and never read, the button busy for good, and no way out
+    # of the screen. The client outlives any element in it, so the whole run
+    # is entered through it.
+    client = context.client
+    outstanding = len(_ticked()) + len(APP.import_plan) + len(APP.scope_ticks)
+    APP.indexing_pressed = _index_label(outstanding)
+    _actions.refresh()
+    with client:
+        try:
+            copied: list[Path] = []
+            if APP.import_plan:
+                pairs, APP.import_plan = APP.import_plan, []
+                copied = await engine.import_files(pairs, APP)
+                where = APP.import_dir(DATA_DIR)
+                ui.notify(f"Copied {c.count(len(copied), 'file')} into {where}/.")
+            # Deduplicated by path: an import into the data folder lands in a
+            # place the ticked list was read from a moment ago, and profiling
+            # it twice would be a minute of work for one entry.
+            seen, paths = set(), []
+            for path in [*_ticked(), *copied]:
+                resolved = path.resolve()
+                if resolved not in seen:
+                    seen.add(resolved)
+                    paths.append(path)
+            tables = sorted(APP.scope_ticks)
+            await _index_and_interpret(paths, in_dialog=in_dialog and not tables)
+            await _scope_and_interpret(tables, in_dialog=in_dialog)
+        finally:
+            # Whatever happened in there, the button is a button again. A
+            # no-op after a normal run, where profiling's own `finally` let go.
+            _pressed_done()
+
+
+def _pressed_done() -> None:
+    """The free half is over, so the button is a button again.
+
+    Called where profiling ends and **before** the read starts. The read is a
+    model turn of a minute or more, indexing a second batch during it is an
+    ordinary thing to do here (`_interpret_pending`), and a button busy for the
+    length of it would be refusing that. It redraws the actions itself, so no
+    path out of a run can leave a busy button behind it.
+    """
+    if APP.indexing_pressed:
+        APP.indexing_pressed = ""
+        _actions.refresh()
 
 
 async def _index_and_interpret(paths: list[Path], *, in_dialog: bool = False) -> None:
@@ -2055,6 +2110,7 @@ async def _index_and_interpret(paths: list[Path], *, in_dialog: bool = False) ->
     finally:
         APP.indexing_status = ""
         APP.indexing_stop = None
+        _pressed_done()
         # Made here, closed here — a cancelled scope holds a thread that goes on
         # interrupting connections the next indexing run may reuse.
         stop.close()
@@ -2083,12 +2139,27 @@ async def _index_and_interpret(paths: list[Path], *, in_dialog: bool = False) ->
         artifacts.pane.refresh()
     else:
         _refresh()
+        _catch_up_workspace()
     # **A stop stops the paid half too.** Profiling is free and deterministic;
     # interpretation is a model turn that costs money, and running one on the
     # sources that happened to finish — immediately after the human asked the app
     # to stop — is the app spending their money to disagree with them.
     if not stop.cancelled:
         await _interpret_pending()
+
+
+def _catch_up_workspace() -> None:
+    """Show a run's results to someone who left for the workspace while it ran.
+
+    The way out is offered beside a running index now, so the run can end with
+    the add-data screen gone. The left pane drew the catalog as it was when
+    they walked in, and nothing else would tell it that sources have arrived.
+    """
+    from portia.ui import artifacts, transcript
+
+    if APP.left_add_data:
+        artifacts.pane.refresh()
+        transcript.pane.refresh()
 
 
 def _leave(in_dialog: bool) -> None:
@@ -2110,6 +2181,15 @@ def _leave(in_dialog: bool) -> None:
     # leaving under your own steam has to take it down, or it floats over the
     # workspace pointing at a tab you are already looking at.
     dismiss_invitation()
+    # **Into the job, when one is running** *(2026-09-18, the user's call)*.
+    # This button's own caption says the copilot is reading and the docstring
+    # above promised the transcript that is running, and the workspace opened
+    # on the chat list with the job one more click away. A job still never
+    # takes the screen by itself (`CHAT_SESSIONS.md` §3.5). This is a press,
+    # on a button under a sentence about that job.
+    job = APP.live_job
+    if job is not None:
+        APP.show_chat(job)
     APP.enter_workspace()
     app_module.shell.refresh()
 

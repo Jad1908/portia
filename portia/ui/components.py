@@ -350,6 +350,7 @@ def button(
     micro: bool = False,
     split: bool = False,
     enabled: bool = True,
+    busy: bool = False,
 ) -> ui.button:
     """One button. ``kind`` is primary | secondary | tertiary.
 
@@ -367,6 +368,15 @@ def button(
     text. It is opt-in rather than automatic for every icon-plus-label button:
     most of those are ordinary buttons that merely have an icon, and a rule
     through all of them would be decoration.
+
+    ``busy`` is a press being acted on: the same button in the same place with
+    the same words, washed out, and no click gets through. A press that leaves
+    the button exactly as it was reads as a press that missed, and it invites
+    a second one. **Not Quasar's ``loading``**, which the first build used: it
+    hides the label, and its overlay over the accent came out a murky dark
+    green with a spinner too small to read (the user, 2026-09-18). Whatever is
+    running says so in its own status line; the button only has to say it has
+    been pressed.
     """
     classes = f"btn btn-{kind}" + (" btn-micro" if micro else "")
     if icon and not label:
@@ -379,6 +389,11 @@ def button(
     b = ui.button(label, on_click=on_click, icon=icon, color=None).props("unelevated no-caps dense")
     b.classes(classes)
     b.set_enabled(enabled)
+    if busy:
+        # Not `set_enabled(False)`: Quasar's disabled state repaints the fill,
+        # and the point is that the colour stays.
+        b.classes("btn-busy")
+        b.props("aria-disabled=true tabindex=-1")
     return b
 
 

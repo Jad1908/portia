@@ -970,6 +970,12 @@ class App:
     #: when nothing is running. Profiling twenty real extracts takes a minute,
     #: and a window that says nothing for a minute reads as broken.
     indexing_status: str = ""
+    #: The Index button's label as it was pressed, held while the press is
+    #: being acted on. The counts it was built from empty out during the run
+    #: (an import plan is consumed by the copy), and a button that changed
+    #: its words or gave its place to the way out mid-run is the button
+    #: moving under the hand that just pressed it.
+    indexing_pressed: str = ""
     #: Sources profiled but not yet read by the copilot. The read **starts as
     #: soon as profiling finishes** (2026-08-07) rather than waiting for the way
     #: out to be pressed: the turn is the slow half, and a screen that holds it
