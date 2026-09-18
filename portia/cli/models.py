@@ -58,7 +58,9 @@ def _check(args: argparse.Namespace) -> None:
     from portia.agent import session
 
     provider = providers.get(args.provider)
-    result = provider.preflight(args.model, prompt_chars=lambda: session.prompt_chars(args.dir))
+    result = provider.preflight(
+        args.model, prompt_chars=lambda: session.prompt_chars(args.dir, args.provider)
+    )
     for key, value in result.facts.items():
         shown = present.size(value) if key in SIZE_FACTS and value is not None else value
         print(f"  {key:20s} {shown if shown is not None else '—'}")

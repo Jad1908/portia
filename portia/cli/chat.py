@@ -140,7 +140,7 @@ async def run_and_render(
 
     provider = provider or session.DEFAULT_PROVIDER
     print(f"  [{provider} · {model}{', effort ' + effort if effort else ''}]")
-    log = runlog.start(portia_dir, cwd=cwd, kind=kind)
+    log = runlog.start(portia_dir, cwd=cwd, kind=kind, provider=provider)
     print(f"  [logging to {log.path}]")
 
     async for event in session.run(

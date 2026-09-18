@@ -817,13 +817,15 @@ def _asset(name: str) -> str:
 
 
 def test_where_you_are_looking_in_a_chart_never_reaches_the_server():
-    """`canvas.js`'s rule. The height grip and a failed render are the only two
-    things a chart reports, and zooming adds no third."""
+    """`canvas.js`'s rule. The height grip, a failed render and what a drawn
+    chart looks like are the three things a chart reports, all facts about work
+    portia did, and zooming adds no fourth: a zoomed chart is not even pictured."""
     import re
 
     js = _asset("chart.js")
     emitted = set(re.findall(r'emitEvent\("(portia:[a-z-]+)"', js))
-    assert emitted == {"portia:chart-failed", "portia:chart-height"}
+    assert emitted == {"portia:chart-failed", "portia:chart-height", "portia:chart-picture"}
+    assert "if (!key || zoom !== 1 ||" in js, "a zoomed layout is nobody's chart"
     assert "const LOOKING = new Map()" in js, "kept per chart key, never per element"
 
 

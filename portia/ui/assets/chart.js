@@ -312,6 +312,7 @@ window.portiaChart = (function () {
             }
           }
         }
+        offer(payload.key, mount, looking.zoom);
       })
       .catch((err) => {
         settle();
@@ -340,6 +341,84 @@ window.portiaChart = (function () {
 
   // ── looking around a chart ────────────────────────────────────────────────
   //
+  // What the chart looks like, sent to the server for the copilot's `view_chart`
+  // (`docs/VISUALIZATION.md` §12). The copilot writes the spec and has never seen
+  // a chart: a receipt says `drawn` over overprinted labels exactly as it does
+  // over a clean axis. This is the failure report's sibling, a fact about work
+  // portia did rather than where somebody is looking, so it may round-trip.
+  //
+  // **Every settled paint, not only the first**, because a splitter drag redraws
+  // at a new width without the server hearing of it, and the picture has to be
+  // the one on screen. Debounced per chart so a drag costs one `toDataURL`.
+  // **An unchanged picture is sent again on purpose**: the server forgets a
+  // tab's picture when the copilot redraws it, so that a correction is never
+  // judged by the render it corrected, and a redraw that happens to look the
+  // same has to be able to say so.
+  //
+  // **Only at 100%.** Zoom re-lays the chart out bigger (§3.9.1), which is the
+  // reader looking around and not the chart changing, and a layout nobody chose
+  // is not what the copilot should judge.
+  //
+  // **Shrunk and given a background.** The canvas is transparent and, on a
+  // retina screen, twice the size it looks: sent as it is, a dark-mode chart
+  // would be light text on nothing, and a wide one would pass socket.io's
+  // million-byte message limit and be dropped without a word. So it is drawn
+  // onto the pane's own colour at no more than PICTURE_EDGE on its long side,
+  // halved again if it is still too long to send.
+  const PICTURE_EDGE = 1200;
+  const PICTURE_CHARS = 800000;
+  const PICTURE_DELAY = 300;
+  const OFFERS = new Map();
+
+  function backdrop(node) {
+    for (let at = node; at; at = at.parentElement) {
+      const colour = getComputedStyle(at).backgroundColor;
+      if (colour && colour !== "transparent" && !/,\s*0\)$/.test(colour)) return colour;
+    }
+    return "#ffffff";
+  }
+
+  function picture(canvas, colour, edge) {
+    const scale = Math.min(1, edge / Math.max(canvas.width, canvas.height));
+    const out = document.createElement("canvas");
+    out.width = Math.max(1, Math.round(canvas.width * scale));
+    out.height = Math.max(1, Math.round(canvas.height * scale));
+    const pen = out.getContext("2d");
+    pen.fillStyle = colour;
+    pen.fillRect(0, 0, out.width, out.height);
+    pen.drawImage(canvas, 0, 0, out.width, out.height);
+    return { image: out.toDataURL("image/png"), width: out.width, height: out.height };
+  }
+
+  function offer(key, mount, zoom) {
+    if (!key || zoom !== 1 || typeof emitEvent !== "function") return;
+    clearTimeout(OFFERS.get(key));
+    OFFERS.set(
+      key,
+      setTimeout(() => {
+        OFFERS.delete(key);
+        const canvas = mount.isConnected && mount.querySelector("canvas");
+        if (!canvas || !canvas.width || !canvas.height) return;
+        let made;
+        try {
+          made = picture(canvas, backdrop(mount), PICTURE_EDGE);
+          if (made.image.length > PICTURE_CHARS) {
+            made = picture(canvas, backdrop(mount), PICTURE_EDGE / 2);
+          }
+        } catch (err) {
+          return; // a tainted canvas has no picture to offer
+        }
+        if (made.image.length > PICTURE_CHARS) return;
+        emitEvent("portia:chart-picture", {
+          tab: key,
+          image: made.image,
+          width: made.width,
+          height: made.height,
+        });
+      }, PICTURE_DELAY)
+    );
+  }
+
   // Zoom, pan, and a view that fills the window *(2026-09-18, the user's call)*.
   // The only way to see a dense chart closer was the browser's own zoom, which
   // scales the tree, the transcript and the toolbar along with it.

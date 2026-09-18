@@ -725,6 +725,52 @@ def render_failed(key: str, message: str) -> None:
     _refresh()
 
 
+#: The longest picture a browser may report, in base64 characters. socket.io
+#: drops a message over a million bytes, and `assets/chart.js` shrinks a picture
+#: to fit well under it, so anything longer did not come from that file.
+PICTURE_LIMIT = 900_000
+_PNG_PREFIX = "data:image/png;base64,"
+
+
+def pictured(key: str, data_url: str, width: int, height: int) -> None:
+    """The browser painted a chart, and this is what it looks like (§12).
+
+    Handed to `agent/drawn`, which is where `view_chart` reads it, under the
+    chart's **name** and not its key: the name is what the agent called it, and
+    a chart the user has since kept is keyed by its path. The chart's rows go
+    with it so the tool can put the measured values beside the pixels.
+
+    **Held in memory, written nowhere, logged nowhere** (the user's call):
+    nothing in portia saves automatically, and a paint is not something the
+    copilot did. Anything that is not the PNG `chart.js` sends is dropped
+    without a word, because a stale or foreign client is not an error here
+    either (§11.3).
+    """
+    from portia.agent import drawn
+
+    chart = APP.chart(key)
+    if chart is None or not chart.drawable:
+        return
+    if not data_url.startswith(_PNG_PREFIX) or len(data_url) > PICTURE_LIMIT:
+        return
+    drawn.report_picture(
+        chart.name,
+        drawn.Picture(
+            image=data_url[len(_PNG_PREFIX) :],
+            width=int(width),
+            height=int(height),
+            chart={
+                "tab": chart.name,
+                "question": chart.question,
+                "vega": chart.vega,
+                "rows": chart.rows,
+                "columns": chart.columns,
+                "n_rows": len(chart.rows),
+            },
+        ),
+    )
+
+
 def _unsplit() -> None:
     APP.unsplit()
     _refresh()

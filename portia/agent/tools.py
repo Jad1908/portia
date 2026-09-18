@@ -452,31 +452,39 @@ def _receipt(chart: dict) -> dict:
     axis. A field the spec encodes is a field the user is looking at. The spec
     itself is not echoed: the agent wrote it and it is in the log verbatim.
     """
-    encoded = chartspec.fields(chart["vega"])
-    rows, receipt = (
-        chart["rows"],
-        {
-            "drawn": chart["tab"],
-            "question": chart["question"],
-            "n_rows": chart["n_rows"],
-            "columns": chart["columns"],
-        },
-    )
+    receipt = {"drawn": chart["tab"], **_facts(chart)}
     # A chart a surface could not draw, reported after its own call returned
     # (`VISUALIZATION.md` §11.2). It rides here because there is nowhere earlier
     # to put it, and it is worth having late: a reply that draws nine charts can
     # still fix the last six once the third has said it broke.
     if failures := drawn.take_failures():
         receipt["render_failures"] = failures
-    if not encoded:
-        return receipt
-    if len(rows) <= RECEIPT_ROWS:
-        receipt["plotted"] = [{col: row.get(col) for col in encoded} for row in rows]
-        return receipt
-    receipt[UNPAIRED] = True
-    for column in encoded:
-        receipt[column] = _span(rows, column)
     return receipt
+
+
+def _facts(chart: dict) -> dict:
+    """What a chart holds, in the receipt's shape: paired rows, or ``unpaired``.
+
+    Split out of :func:`_receipt` for `view_chart`, which hands the same facts
+    back beside a picture. One function, so the numbers a model reads next to
+    the pixels are the numbers it read when it drew them.
+    """
+    encoded = chartspec.fields(chart["vega"])
+    rows = chart["rows"]
+    facts: dict[str, Any] = {
+        "question": chart["question"],
+        "n_rows": chart["n_rows"],
+        "columns": chart["columns"],
+    }
+    if not encoded:
+        return facts
+    if len(rows) <= RECEIPT_ROWS:
+        facts["plotted"] = [{col: row.get(col) for col in encoded} for row in rows]
+        return facts
+    facts[UNPAIRED] = True
+    for column in encoded:
+        facts[column] = _span(rows, column)
+    return facts
 
 
 #: Distinct values a receipt names before it stops listing them and says how many
@@ -516,6 +524,63 @@ def _span(rows: list[dict], column: str) -> Any:
     if len(seen) <= RECEIPT_VALUES:
         return seen
     return {"showing": seen[:RECEIPT_VALUES], "n_distinct": len(seen)}
+
+
+#: What a surface reports a picture as. One format, named once: the browser
+#: encodes it, `ui/charts.pictured` refuses anything else, and this labels it.
+PICTURE_MIME = "image/png"
+
+
+@tool(
+    "view_chart",
+    prompts.tool("view_chart"),
+    {
+        "type": "object",
+        "properties": {
+            "tab": {
+                "type": "string",
+                "description": "The chart's tab name, as its plot_data receipt spelled it",
+            },
+        },
+        "required": ["tab"],
+    },
+    annotations=_READ_ONLY,
+)
+async def view_chart(args: dict[str, Any]) -> dict[str, Any]:
+    """Hand the model a picture of a chart, with the measured rows beside it.
+
+    **The one result that is not only text**, so it does not go through
+    :func:`_evidence`'s encoder: the picture is an image block, which the SDK
+    passes to the model as an image, and the text block beside it is the
+    receipt's facts (:func:`_facts`). The threading and the stop scope are
+    `_evidence`'s, reused: `handlers.view_chart` may wait a few seconds for a
+    paint that is on its way, and that wait must not hold the loop the paint is
+    reported through.
+
+    **`RESULT_BUDGET` measures the text and not the picture.** The picture's size
+    is capped where it arrives (`ui/charts.pictured`), because a limit on an
+    image is a limit on pixels and the browser is what has them.
+
+    Only the text reaches a chat log (`events.tool_result_text` reads text
+    blocks), so the log records that the copilot looked and at how many pixels,
+    and no picture is written anywhere. Nothing in portia saves automatically.
+    """
+    seen: dict[str, Any] = {}
+
+    def look() -> dict:
+        seen.update(handlers.view_chart(args["tab"]))
+        chart = seen.get("chart") or {}
+        return {
+            "viewed": seen["viewed"],
+            "picture": {"width": seen["width"], "height": seen["height"]},
+            **(_facts(chart) if chart else {}),
+        }
+
+    result = await _evidence(look)
+    if result.get("is_error") or "image" not in seen:
+        return result
+    picture = {"type": "image", "data": seen["image"], "mimeType": PICTURE_MIME}
+    return {"content": [picture, *result["content"]]}
 
 
 @tool(
@@ -805,6 +870,7 @@ READ_TOOLS = [
     join_findings,
     query_data,
     plot_data,
+    view_chart,
     review_queries,
     read_spec,
     run_spec,
@@ -813,8 +879,21 @@ WRITE_TOOLS = [set_interpretation, set_group, record_step, record_finding]
 
 ALL_TOOLS = [*READ_TOOLS, *WRITE_TOOLS]
 
+#: Tools whose answer is a picture. **Offered only to a model that can see one**
+#: (`providers.Provider.sees_images`): a text-only model handed an image block
+#: either errors or, worse, describes a chart it was never shown. Same rule as
+#: effort, which is refused on a provider that would ignore it.
+VISION_TOOLS = [view_chart]
 
-def descriptions() -> dict[str, str]:
+
+def offered(*, sees_images: bool = True) -> list:
+    """The tools a session gets, given what its model can take in."""
+    if sees_images:
+        return list(ALL_TOOLS)
+    return [t for t in ALL_TOOLS if t not in VISION_TOOLS]
+
+
+def descriptions(*, sees_images: bool = True) -> dict[str, str]:
     """Every tool description as the model receives it, keyed by tool name.
 
     Read off the registered tools rather than out of ``prompts/tools/``, because
@@ -828,7 +907,7 @@ def descriptions() -> dict[str, str]:
     *find* the prompts but not to read them without leaving what you are doing.
     Nothing in the loop calls this.
     """
-    return {tool_.name: str(tool_.description or "") for tool_ in ALL_TOOLS}
+    return {t.name: str(t.description or "") for t in offered(sees_images=sees_images)}
 
 
 def qualified(name: str) -> str:
@@ -836,6 +915,8 @@ def qualified(name: str) -> str:
     return f"mcp__{SERVER_NAME}__{name}"
 
 
-def build_server():
+def build_server(*, sees_images: bool = True):
     """The in-process MCP server the agent talks to. Runs inside this process."""
-    return create_sdk_mcp_server(name=SERVER_NAME, version="0.1.0", tools=ALL_TOOLS)
+    return create_sdk_mcp_server(
+        name=SERVER_NAME, version="0.1.0", tools=offered(sees_images=sees_images)
+    )
