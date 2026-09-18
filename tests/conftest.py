@@ -51,6 +51,29 @@ def _never_the_working_graph():
         os.environ["NEO4J_URI"] = previous
 
 
+@pytest.fixture(autouse=True)
+def _never_the_users_window_files(tmp_path_factory, monkeypatch):
+    """Point the window's three per-user files at a temp folder, for every test.
+
+    `engine.open_project` writes `~/.config/portia/recents.json`, and a test
+    that opens a project without redirecting it writes a pytest temp folder
+    into the list a real person opens the app on. The list keeps eight, so
+    one run of the suite pushed every real project off the opening screen
+    (found 2026-09-18: eight of eight entries were `pytest-of-…` paths).
+    Same shape as the fixture above and the same reason: nothing failed, so
+    nothing said so.
+    """
+    try:
+        from portia.ui import engine
+    except ImportError:  # the `ui` extra is not installed
+        yield
+        return
+    home = tmp_path_factory.mktemp("portia-config")
+    for name in ("RECENTS", "VIEWS", "LAYOUTS"):
+        monkeypatch.setattr(engine, name, home / f"{name.lower()}.json")
+    yield
+
+
 @pytest.fixture
 def con():
     """A store with no project behind it, closed when the test ends."""

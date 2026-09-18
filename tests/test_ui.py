@@ -253,6 +253,21 @@ def test_the_add_data_copy_is_read_off_the_loader(monkeypatch):
     assert screens._formats() == "CSV, JSON or PARQUET"
 
 
+def test_an_opening_screen_taller_than_the_window_scrolls_to_its_top():
+    """`justify-content: center` over content taller than the window puts half
+    the overflow above a scroll range that starts at zero. Reported on a 13"
+    screen: no logo, and no way to scroll up to it."""
+    import re
+    from pathlib import Path
+
+    css = (Path(c.__file__).parent / "assets" / "portia.css").read_text()
+    rule = re.search(r"\n\.p-centered \{(.*?)\}", css, re.S).group(1)
+    assert "justify-content" not in rule
+    assert "overflow-y: auto" in rule
+    child = re.search(r"\n\.p-centered > \* \{(.*?)\}", css, re.S).group(1)
+    assert "margin-block: auto" in child
+
+
 def test_the_way_out_of_add_data_says_a_read_is_running(loop):
     """The read starts when profiling ends, so the screen you are still on has
     to name the turn that is running rather than promise one that is coming."""
