@@ -1,0 +1,16 @@
+{
+  "name": "portia",
+  "metadata": {
+    "description": "portia: agent-assisted data harmonization, with every number measured by a check."
+  },
+  "owner": {
+    "name": "Jad Aouad"
+  },
+  "plugins": [
+    {
+      "name": "portia",
+      "source": "./plugin",
+      "description": "portia's data tools inside Claude Code."
+    }
+  ]
+}
