@@ -248,13 +248,27 @@ window.portiaChart = (function () {
     // container it is given, which would take the element holding the data with
     // it — and then a redraw would find nothing to draw. One mount div, reused,
     // keeps the payload where the next redraw can still read it.
-    let mount = element.querySelector(".chart-mount");
-    const fresh = !mount;
+    //
+    // The mount sits in a **view**, the box that scrolls, under a row of tools
+    // (`navigate`, below). At 100% the mount is exactly the view's size and
+    // nothing scrolls; zoomed, it is that many times the view and the view pans.
+    let view = element.querySelector(".chart-view");
+    const fresh = !view;
     if (fresh) {
-      mount = document.createElement("div");
-      mount.className = "chart-mount";
-      element.appendChild(mount);
+      view = document.createElement("div");
+      view.className = "chart-view";
+      const made = document.createElement("div");
+      made.className = "chart-mount";
+      view.appendChild(made);
+      element.appendChild(view);
     }
+    const mount = view.querySelector(".chart-mount");
+    const looking = lookingAt(payload.key);
+    if (fresh) navigate(element, view, payload.key);
+    const vega = spec(payload);
+    const fits = vega.width === "container";
+    mount.dataset.fits = fits ? "1" : "";
+    size(view, mount, looking.zoom, fits);
     // **A fresh element opens on the last picture, not on a blank.** A pane
     // refresh replaces the figure and the painted canvas dies with it, while
     // the embed below is async — so a rebuilt chart blanked and repainted
@@ -266,7 +280,7 @@ window.portiaChart = (function () {
       const ghost = document.createElement("img");
       ghost.className = "chart-ghost";
       ghost.src = snapshot;
-      element.appendChild(ghost);
+      view.appendChild(ghost);
     }
     const settle = () => {
       const ghost = element.querySelector(".chart-ghost");
@@ -277,9 +291,13 @@ window.portiaChart = (function () {
     // shares with `canvas.js`. Checking that it is still in the document is
     // cheaper than trying to cancel the embed.
     window
-      .vegaEmbed(mount, spec(payload), { actions: false, renderer: "canvas" })
+      .vegaEmbed(mount, vega, { actions: false, renderer: "canvas" })
       .then(() => {
         settle();
+        // The zoom gesture stretched the old canvas to stand in for this one,
+        // and the embed replaced that canvas, stretch and all.
+        mount.dataset.drawnZoom = String(looking.zoom);
+        if (fresh) restore(view, looking);
         // Captured on the first paint of this element only. A resize drag
         // redraws once per frame, and `toDataURL` is not a per-frame cost —
         // the snapshot refreshes anyway when the drag ends, because the
@@ -319,6 +337,210 @@ window.portiaChart = (function () {
       });
     watch(element);
   }
+
+  // ── looking around a chart ────────────────────────────────────────────────
+  //
+  // Zoom, pan, and a view that fills the window *(2026-09-18, the user's call)*.
+  // The only way to see a dense chart closer was the browser's own zoom, which
+  // scales the tree, the transcript and the toolbar along with it.
+  //
+  // **All of it is the client's state and none of it reaches the server**, the
+  // rule `canvas.js` and `scroll.js` are built on: where you are looking is not
+  // a fact about the project. It is kept per chart **key**, never per element,
+  // because a pane refresh replaces the element and a zoom that reset whenever
+  // the copilot wrote a file would be a zoom nobody could use.
+  //
+  // **Zooming re-lays the chart out, it does not magnify pixels.** The mount
+  // becomes `zoom` times the view and Vega draws into it again, so marks spread
+  // apart, the axes gain ticks and the type stays sharp at its own size. A CSS
+  // scale of the canvas would blur past the screen's pixel ratio and make the
+  // labels huge without making them more. The scale is still used, for the
+  // length of the gesture only: a redraw per wheel tick is too slow to follow a
+  // pinch, so the old canvas is stretched to the new size at once and the sharp
+  // one replaces it when the gesture pauses (`SETTLE_MS`).
+  //
+  // A chart that lays out its own panels (a facet, a concat) has no container
+  // to fit, so there the zoom is the CSS property: softer, and the only honest
+  // option short of rewriting the agent's sizes.
+  //
+  // Nothing here computes a number. The scale domains, the marks and the rows
+  // are what the `SELECT` returned, drawn bigger.
+  const LOOKING = new Map();
+  const MIN_ZOOM = 1;
+  const MAX_ZOOM = 8;
+  const ZOOM_STEP = 1.25;
+  const SETTLE_MS = 160;
+
+  function lookingAt(key) {
+    const name = key || "";
+    if (!LOOKING.has(name)) LOOKING.set(name, { zoom: 1, full: false, x: 0, y: 0 });
+    return LOOKING.get(name);
+  }
+
+  function size(view, mount, zoom, fits) {
+    view.classList.toggle("chart-view--fit", fits && zoom === 1);
+    view.classList.toggle("chart-view--zoomed", zoom > 1);
+    if (!fits) {
+      mount.style.width = "";
+      mount.style.height = "";
+      mount.style.zoom = zoom === 1 ? "" : String(zoom);
+      return;
+    }
+    mount.style.zoom = "";
+    mount.style.width = Math.floor(view.clientWidth * zoom) + "px";
+    mount.style.height = Math.floor(view.clientHeight * zoom) + "px";
+  }
+
+  // Where the view was scrolled to, as fractions, so a rebuilt element opens
+  // where the last one was left. Fractions because the box may have changed.
+  function restore(view, looking) {
+    view.scrollLeft = looking.x * (view.scrollWidth - view.clientWidth);
+    view.scrollTop = looking.y * (view.scrollHeight - view.clientHeight);
+  }
+
+  function tool(icon, title, press) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "chart-tool";
+    button.title = title;
+    if (icon) {
+      const glyph = document.createElement("i");
+      glyph.className = "material-icons";
+      glyph.textContent = icon;
+      button.appendChild(glyph);
+    }
+    button.addEventListener("click", press);
+    return button;
+  }
+
+  function navigate(element, view, key) {
+    const looking = lookingAt(key);
+    const tools = document.createElement("div");
+    tools.className = "chart-tools";
+    const level = tool("", "Back to 100%. Ctrl or ⌘ and scroll zooms at the pointer.", () =>
+      zoomTo(1),
+    );
+    level.classList.add("chart-tool--level");
+    const full = tool("open_in_full", "Fill the window", () => fill(!looking.full));
+    tools.appendChild(tool("remove", "Zoom out", () => zoomTo(looking.zoom / ZOOM_STEP)));
+    tools.appendChild(level);
+    tools.appendChild(tool("add", "Zoom in", () => zoomTo(looking.zoom * ZOOM_STEP)));
+    tools.appendChild(full);
+    element.insertBefore(tools, view);
+
+    const mount = view.querySelector(".chart-mount");
+    let settling = 0;
+
+    function label() {
+      level.textContent = Math.round(looking.zoom * 100) + "%";
+    }
+
+    // Zoom about a point of the view, the centre unless a pointer says
+    // otherwise: what was under it before is under it after.
+    function zoomTo(next, at) {
+      const zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next));
+      if (zoom === looking.zoom) return;
+      const point = at || { x: view.clientWidth / 2, y: view.clientHeight / 2 };
+      const ratio = zoom / looking.zoom;
+      const left = (view.scrollLeft + point.x) * ratio - point.x;
+      const top = (view.scrollTop + point.y) * ratio - point.y;
+      looking.zoom = zoom;
+      label();
+      const fits = mount.dataset.fits === "1";
+      // `size` first, so the scroll range exists before it is scrolled in.
+      size(view, mount, zoom, fits);
+      if (fits) {
+        // The stand-in: the canvas as drawn, stretched to the size it is about
+        // to be redrawn at.
+        const drawn = Number(mount.dataset.drawnZoom) || 1;
+        const canvas = mount.querySelector("canvas");
+        if (canvas) {
+          canvas.style.transformOrigin = "0 0";
+          canvas.style.transform = "scale(" + zoom / drawn + ")";
+        }
+      }
+      view.scrollLeft = left;
+      view.scrollTop = top;
+      remember();
+      clearTimeout(settling);
+      if (!fits) return;
+      settling = setTimeout(() => {
+        if (!element.isConnected) return;
+        delete element.dataset.portiaDrawn;
+        draw(element);
+      }, SETTLE_MS);
+    }
+
+    function fill(on) {
+      looking.full = on;
+      element.classList.toggle("chart-figure--full", on);
+      full.firstChild.textContent = on ? "close_fullscreen" : "open_in_full";
+      full.title = on ? "Back to the pane (Esc)" : "Fill the window";
+      // The box changed, so the figure's own `ResizeObserver` redraws it.
+    }
+
+    function remember() {
+      const wide = view.scrollWidth - view.clientWidth;
+      const tall = view.scrollHeight - view.clientHeight;
+      looking.x = wide > 0 ? view.scrollLeft / wide : 0;
+      looking.y = tall > 0 ? view.scrollTop / tall : 0;
+    }
+
+    // Ctrl or ⌘ with the wheel, which is also what a trackpad pinch arrives
+    // as. A bare wheel is left alone: over a chart at 100% it scrolls the pane,
+    // and zoomed it pans the view, both of which are what a wheel is for.
+    view.addEventListener(
+      "wheel",
+      (event) => {
+        if (!event.ctrlKey && !event.metaKey) return;
+        event.preventDefault();
+        const box = view.getBoundingClientRect();
+        zoomTo(looking.zoom * Math.exp(-event.deltaY * 0.01), {
+          x: event.clientX - box.left,
+          y: event.clientY - box.top,
+        });
+      },
+      { passive: false },
+    );
+    view.addEventListener("scroll", remember, { passive: true });
+    view.addEventListener("dblclick", () => zoomTo(1));
+
+    // Drag to pan, zoomed only. A flag and window listeners, for the reason
+    // the grip below gives: capture ties the drag to an element that may be
+    // replaced under it.
+    let from = null;
+    const move = (event) => {
+      if (!from) return;
+      view.scrollLeft = from.left - (event.clientX - from.x);
+      view.scrollTop = from.top - (event.clientY - from.y);
+    };
+    const drop = () => {
+      from = null;
+      view.classList.remove("chart-view--panning");
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", drop);
+      window.removeEventListener("pointercancel", drop);
+    };
+    view.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0 || looking.zoom <= 1) return;
+      event.preventDefault();
+      from = { x: event.clientX, y: event.clientY, left: view.scrollLeft, top: view.scrollTop };
+      view.classList.add("chart-view--panning");
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", drop);
+      window.addEventListener("pointercancel", drop);
+    });
+
+    label();
+    if (looking.full) fill(true);
+  }
+
+  // Esc leaves the filled view, whichever chart is in it.
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    const filled = document.querySelector(".chart-figure--full .chart-tool:last-child");
+    if (filled) filled.click();
+  });
 
   // The last successfully painted canvas per chart key, as a data URL. What a
   // fresh element shows while its own render is in flight (`draw`). Keyed like
