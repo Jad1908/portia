@@ -682,18 +682,19 @@ def _in_repo() -> None:
     line saying what it is for.
     """
     with ui.element("div").classes("add-section"):
-        _section_head(IN_REPO_HEADING, IN_REPO_WHY)
+        _section_head(IN_REPO_HEADING)
         if APP.data_dir and not APP.repicking:
             _chosen_folder()
         else:
             _picker()
 
 
-def _section_head(title: str, hint: str) -> None:
-    """A section's title and the one line saying what it is for."""
+def _section_head(title: str) -> None:
+    """A section's title. **No line under it** *(2026-09-18, the user's call)*:
+    each one restated what the controls below it already show, and with the
+    panel's own subtitle gone too the screen opens on the thing to do."""
     with ui.element("div").classes("add-section-head"):
         ui.label(title).classes("add-section-title")
-        ui.label(hint).classes("add-section-hint")
 
 
 def _picker() -> None:
@@ -1087,10 +1088,6 @@ def _choose(mode: str) -> None:
 # --- the warehouse route (`docs/CONNECTOR.md`) ---------------------------------
 
 WAREHOUSE_HEADING = "Tables in scope"
-WAREHOUSE_WHY = (
-    "The tables this project is about. Ticking adds a table; the switches on the right say "
-    "whether it is also profiled and read."
-)
 CONNECT_TITLE = "Connect to a warehouse"
 CONNECT_SUB = "Saved outside the repo with no secret in it. The project only names it."
 PICK_SUB = "Pick a saved connection, or set up a new one."
@@ -1144,7 +1141,7 @@ def _warehouse_route() -> None:
     Index button below, because scoping is indexing at the metadata tier.
     """
     with ui.element("div").classes("add-section"):
-        _section_head(WAREHOUSE_HEADING, WAREHOUSE_WHY)
+        _section_head(WAREHOUSE_HEADING)
         _connection_state()
         if APP.connected:
             _scope_picker()
@@ -2252,9 +2249,9 @@ def _profile_toggle() -> None:
             .bind_value(APP, "profile_on_add")
             .on_value_change(_refresh)
         )
-        ui.label(PROFILE_ON_COST if APP.profile_on_add else PROFILE_OFF_COST).classes(
-            "add-section-hint"
-        )
+        # Caption size, not the hint's 13px: one line under a switch, which the
+        # switch's own label already introduces (the user's call, 2026-09-18).
+        c.caption(PROFILE_ON_COST if APP.profile_on_add else PROFILE_OFF_COST)
 
 
 def _interpret_toggle() -> None:
@@ -2285,7 +2282,8 @@ def _interpret_toggle() -> None:
                     on_start=open_server_dialog,
                 )
         remote = APP.data_mode == state.WAREHOUSE_DATA
-        ui.label(INTERPRET_COST_REMOTE if remote else INTERPRET_COST).classes("add-section-hint")
+        # The profile switch's size, so the two cost cards read as a pair.
+        c.caption(INTERPRET_COST_REMOTE if remote else INTERPRET_COST)
 
 
 async def _interpret_switched() -> None:
@@ -2936,7 +2934,6 @@ CONTEXT_PLACEHOLDER = "The project in a few sentences…"
 CONTEXT_SHAPE = "The goal, how you model it, and roughly what data you have."
 
 IN_REPO_HEADING = "Data in this repo"
-IN_REPO_WHY = "Choose the folder that holds this project's data."
 NO_SUBFOLDERS = "No subfolders with readable data."
 NO_DATA_HERE = "nothing readable"
 MORE_FILES = "and {n} more"
@@ -2967,11 +2964,8 @@ INTERPRET_COST_REMOTE = (
     "Spends a model exchange. It reads the metadata, or the profile if there is one."
 )
 PROFILE_SWITCH = "Profile each table on the warehouse"
-PROFILE_OFF_COST = (
-    "Off: a table arrives as metadata, for free. Columns and types, row count, last change. "
-    "Profile later from the Indexing tab or the table itself."
-)
-PROFILE_ON_COST = "On: each table is scanned once on the warehouse. That is on its meter."
+PROFILE_OFF_COST = "A table arrives as metadata, for free. Tables can be profiled later."
+PROFILE_ON_COST = "Each table is scanned once, which uses compute on the data warehouse."
 SCOPE_ALL = "Adds {n} as metadata."
 SCOPE_PROFILE_ALL = "Adds and profiles {n}."
 #: The word `_note_line` draws in the accent on a metadata-only press.
