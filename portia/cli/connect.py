@@ -61,6 +61,8 @@ def _list(args: argparse.Namespace) -> None:
 
 
 def _suggest(args: argparse.Namespace) -> None:
+    for problem in registry.snowflake_file_problems():
+        print(f"note: {problem}\n")
     found = registry.suggestions()
     if not found:
         print(f"nothing to suggest — no {registry.snowflake_connections_file()}")
