@@ -17,9 +17,10 @@ browse through the repo with a count against each folder, and a second picker
 here would be a second opinion about what counts as a data folder, so this tab
 says what it is and hands you to the panel that sets it.
 
-Four **sections**, in the order they are worth changing: **Project** (where you
+Five **sections**, in the order they are worth changing: **Project** (where you
 are and what it is about) · **Copilot** (what a turn spends, and which writes
-stop) · **Data** (what arrives, and where it lands) · **Appearance**. A list down
+stop) · **Data** (what arrives, and where it lands) · **Appearance** · **Help**
+(the way to report a problem, `ui/feedback.py`). A list down
 the left and one section's settings on the right *(2026-09-04)* — an editor's
 settings page rather than a tab strip over a stack, because the list can hold a
 glyph and stays readable at eight sections where a strip is scrolling at five.
@@ -36,8 +37,9 @@ from __future__ import annotations
 from nicegui import ui
 
 from portia.agent import providers
+from portia.core import feedback as core_feedback
 from portia.ui import components as c
-from portia.ui import engine, screens, state, theme
+from portia.ui import engine, feedback, screens, state, theme
 from portia.ui.state import APP, BRIEF
 
 TITLE = "Settings"
@@ -96,6 +98,9 @@ AGENT_WRITES_WHY = (
 )
 THEME_WHAT = "Theme"
 THEME_WHY = "Auto follows the system."
+REPORT_WHAT = "Something broke, or could be better"
+REPORT_WHY = "Opens a report you read and edit. portia sends nothing itself."
+VERSION_WHAT = "Version"
 NO_PANEL = "The settings panel did not load. Reload the page."
 STALE_PANEL = "Settings may show stale values ({why}). Reload the page."
 
@@ -130,11 +135,17 @@ def open_dialog() -> None:
     _DIALOG.open()
 
 
-#: The four sections, in the order they are worth changing, and their glyphs.
+#: The sections, in the order they are worth changing, and their glyphs.
 #: A tuple rather than a dict so the order is the declaration — a settings panel
 #: whose sections move when someone re-sorts a dict is one you have to re-learn.
-TABS = ("Project", "Copilot", "Data", "Appearance")
-_ICONS = {"Project": "folder", "Copilot": "forum", "Data": "table_chart", "Appearance": "palette"}
+TABS = ("Project", "Copilot", "Data", "Appearance", "Help")
+_ICONS = {
+    "Project": "folder",
+    "Copilot": "forum",
+    "Data": "table_chart",
+    "Appearance": "palette",
+    "Help": "help_outline",
+}
 
 #: Which one is showing. Page state, not project state: it is where you are
 #: looking inside a dialog, and it survives the panel being refreshed so that
@@ -279,12 +290,30 @@ def _appearance() -> None:
         )
 
 
+def _help() -> None:
+    """The way to tell us something, and which build is doing the telling.
+
+    The version is drawn because it is the first thing anybody fixing a bug
+    asks, and because a report's box shows the same line (`feedback.version`).
+    """
+    with c.setting(REPORT_WHAT, REPORT_WHY):
+        c.button(feedback.OPEN, _report, icon="outlined_flag")
+    with c.setting(VERSION_WHAT):
+        c.mono(core_feedback.version())
+
+
 # --- what the controls do ---------------------------------------------------
 
 
 #: Section name → what draws it. Defined after the four, and checked against
 #: `TABS` by a test: a section with no body renders an empty panel.
-_BODY = {"Project": _project, "Copilot": _copilot, "Data": _data, "Appearance": _appearance}
+_BODY = {
+    "Project": _project,
+    "Copilot": _copilot,
+    "Data": _data,
+    "Appearance": _appearance,
+    "Help": _help,
+}
 
 
 def _set_confirm(tool: str, ask_first: bool) -> None:
@@ -388,6 +417,11 @@ def _set_agent_writes(on: bool) -> None:
     """The hand-off (`engine.set_agent_writes`) — a second place to change it, never a second setting."""
     if on != APP.agent_writes:
         engine.set_agent_writes(on, APP)
+
+
+def _report() -> None:
+    _close()
+    feedback.open_dialog()
 
 
 def _add_data() -> None:

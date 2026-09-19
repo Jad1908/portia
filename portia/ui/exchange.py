@@ -35,6 +35,7 @@ from typing import Any
 
 from portia import runlog
 from portia.agent import events, providers
+from portia.core import feedback
 from portia.ui import engine, state
 from portia.ui.state import APP, Chat, Decision
 
@@ -165,6 +166,7 @@ async def start(
         raise
     except Exception as exc:  # noqa: BLE001 — shown to the operator, not swallowed
         exchange.error = f"{type(exc).__name__}: {exc}"
+        exchange.problem = feedback.remember(exc, "indexing" if chat.is_job else "chat")
         if chat.resumed and exchange.subtype is None:
             await _refuse_resume(chat, exc)
     finally:

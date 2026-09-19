@@ -267,6 +267,15 @@ def _exchange_failed(chat) -> None:
             }
         )
     c.alert(_FAILED.format(error=exchange.error), kind="error")
+    _report(exchange)
+
+
+def _report(exchange) -> None:
+    """*Report this*, under an exchange that failed. Nothing under one that was stopped."""
+    if exchange.problem is not None:
+        from portia.ui import feedback
+
+        feedback.report_button(exchange.problem)
 
 
 def _starting(chat) -> bool:
@@ -2477,6 +2486,7 @@ def _turn_ended(chat) -> None:
     with ui.element("div").classes("chat-ended"):
         if turn.error:
             c.text(turn.error, color="c-error")
+            _report(turn)
         c.caption(_ended_line(turn))
         spend = _spend_line(turn)
         if spend:
