@@ -4,6 +4,6 @@
 {why}
 
 Until that is fixed the tools run on local files, and every source this project scoped
-from the warehouse will be refused. Tell the user now. `uv run python -m
-portia.cli.connect list` shows the connections this machine has, and `connect suggest`
-shows what their own tools already describe.
+from the warehouse will be refused. Tell the user now. `portia connect list` shows the
+connections this machine has, and `portia connect suggest` shows what their own tools
+already describe.

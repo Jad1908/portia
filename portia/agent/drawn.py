@@ -235,7 +235,7 @@ WINDOW_FILE = "window.json"
 #: How the receipt says a window can be opened. Shown to the model as a fact
 #: about this project, the same way `PROVIDERS.md` shows `ollama pull`: shown,
 #: never run.
-OPEN_WITH = "uv run python -m portia.ui --project ."
+OPEN_WITH = "portia ui --project ."
 
 #: Who can see a published chart, as the hosting edge reports it, or ``None``
 #: when the surface is in-process and the question does not arise.

@@ -10,7 +10,7 @@ that signs in another way. Tell the user now, and offer the two that work:
 
 - `browser`: their company sign-in, in a browser window.
 - `file`: the entry they already keep in Snowflake's `connections.toml`, by name.
-  `uv run python -m portia.cli.connect suggest` lists those entries, then
+  `portia connect suggest` lists those entries, then
   `connect add <name> --auth file` and `connect use <name>`.
 
 What the catalog already holds still reads: `get_context`, `describe_source`, `read_spec`.
