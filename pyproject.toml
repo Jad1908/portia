@@ -22,6 +22,9 @@ dependencies = [
 # portia, Claude Code first (`portia/cli/serve.py`). Needs the `agent` extra: the
 # tools are declared with the SDK's decorator, and the SDK brings `mcp`.
 [project.scripts]
+# `portia <command>`: the window and every `portia/cli/` edge under one name, for
+# an install that is not a checkout (`portia/cli/__main__.py`).
+portia = "portia.cli.__main__:main"
 portia-mcp = "portia.cli.serve:main"
 # The two rules a tool server cannot hold, as Claude Code hooks (`portia/cli/hook.py`).
 portia-hook = "portia.cli.hook:main"

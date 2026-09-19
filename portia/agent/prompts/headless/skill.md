@@ -57,20 +57,20 @@ returned. Keep what changed a decision with `record_finding`. Keeping nothing is
 These run in the shell, from the project's root. They are portia's own entry points
 and they print facts, never rows.
 
-- **Index new data.** `uv run python -m portia.cli.index <file, folder or glob> --no-interpret`
+- **Index new data.** `portia index <file, folder or glob> --no-interpret`
   measures each source and writes its catalog entry with no model call. On a project
   with no description yet, ask the user for one first (the domain and the goal, how
   they model it, roughly what data they have, in their own words) and pass it as
   `--init "<their description>"`, or the command will wait on a prompt nobody can
-  answer. Data outside the repository is refused; `python -m portia.cli.import_data`
+  answer. Data outside the repository is refused; `portia import_data`
   copies it in. Then read what you indexed, as the next section says.
-- **Compile the pipeline.** `uv run python -m portia.cli.build` writes one `.sql` per
+- **Compile the pipeline.** `portia build` writes one `.sql` per
   spec under `models/`. `--check` writes nothing and fails if a `.sql` no longer
   matches its spec.
 - **Run one spec.** The `run_spec` tool. It re-executes the spec and reports drift
   and outcome per step.
-- **Read the journal.** `uv run python -m portia.cli.journal list`.
-- **Open the window.** `uv run python -m portia.ui --project .` It shows the pipeline
+- **Read the journal.** `portia journal list`.
+- **Open the window.** `portia ui --project .` It shows the pipeline
   as a graph, the catalog, the findings, the charts, and this session's tool calls as
   a read-only chat. It follows what you do within a couple of seconds.
 
@@ -88,15 +88,15 @@ If a user offers one, say that and point them at the two ways below.
 Setting a project up is the user's machine talking to their warehouse, through
 commands that print no secret:
 
-1. `uv run python -m portia.cli.connect suggest` lists the connections their own tools
+1. `portia connect suggest` lists the connections their own tools
    already describe: Snowflake's `connections.toml`, the Google Cloud SDK's project.
-2. `uv run python -m portia.cli.connect add <name> --auth <how>` saves one for portia.
+2. `portia connect add <name> --auth <how>` saves one for portia.
    `connect providers` lists each warehouse's fields and ways to sign in. On Snowflake
    prefer `--auth file`, which signs in the way their `connections.toml` entry says and
    needs nothing else typed, or `--auth browser` for a company sign-in. On BigQuery the
    default uses the Google Cloud sign-in already on the machine.
-3. `uv run python -m portia.cli.connect use <name>` points this project at it.
-4. `uv run python -m portia.cli.connect browse <name> [DB[.SCHEMA]]` lists what is
+3. `portia connect use <name>` points this project at it.
+4. `portia connect browse <name> [DB[.SCHEMA]]` lists what is
    there, and `connect scope DB.SCHEMA.TABLE ...` brings tables into the project as
    metadata, with no scan. A profile of a warehouse table is a scan and costs money:
    ask before the first one, and name the table.

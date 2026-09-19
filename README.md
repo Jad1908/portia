@@ -29,6 +29,9 @@ be checked.
 
 ## Install
 
+If an AI agent is installing this for you, point it at [`INSTALL.md`](INSTALL.md). It covers the
+app and the Claude Code plugin, step by step, with a check after each step.
+
 Requires Python 3.11+, [uv](https://docs.astral.sh/uv/) and Docker.
 
 ```bash
@@ -92,17 +95,17 @@ portia's tools also run in your own Claude Code session, with no window. Install
 commands the plugin starts, then the plugin:
 
 ```bash
-uv tool install "portia[agent,ui] @ git+https://github.com/Jad1908/portia"
+uv tool install "portia[agent,ui,graph] @ git+https://github.com/Jad1908/portia"
+claude plugin marketplace add Jad1908/portia
+claude plugin install portia@portia
 ```
 
-```
-/plugin marketplace add Jad1908/portia
-/plugin install portia@portia
-```
+Start a new Claude Code session afterwards. [`INSTALL.md`](INSTALL.md) has the checks, the
+warehouse setup and what to do when something goes wrong.
 
 Claude then profiles, queries, charts and records steps through portia, and a hook holds a reply
 until it has reviewed what it asked, which is how findings get kept. Charts go to the window:
-`python -m portia.ui --project .` opens it and it follows the session within two seconds. With
+`portia ui --project .` opens it and it follows the session within two seconds. With
 the window closed Claude says a chart is waiting.
 
 The difference from the app is one you should know. The app's copilot has no file access, so it

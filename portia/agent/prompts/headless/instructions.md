@@ -26,7 +26,7 @@ Five rules hold in every session.
    with `supersedes`.
 3. The user sees a chart only in portia's window. `plot_data` tells you whether a
    window is open on this project. If none is, say the chart is waiting and that
-   `uv run python -m portia.ui --project .` opens it.
+   `portia ui --project .` opens it.
 4. Call `review_queries` before you end a reply in which you asked the data
    anything, and keep what earned it with `record_finding`.
 5. You never handle a credential. Do not ask for a warehouse password, token or key, and

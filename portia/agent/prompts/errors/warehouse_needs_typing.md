@@ -7,7 +7,7 @@ project needs a connection that signs in another way, and offer both:
 
 - `browser`: their company sign-in, in a browser window.
 - `file`: the entry they already keep in Snowflake's `connections.toml`, by name.
-  `uv run python -m portia.cli.connect suggest` lists those entries, then
+  `portia connect suggest` lists those entries, then
   `connect add <name> --auth file` and `connect use <name>`.
 
 Do not call this tool again until they say the connection has changed.
