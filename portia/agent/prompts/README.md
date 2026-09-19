@@ -22,8 +22,10 @@ go use dbt instead. That sentence was buried in a decorator argument.
 | `tools/<tool>.md` | one tool's description — what it does **and when to reach for it** | in the tool list |
 | `tasks/<task>.md` | the opening instruction a CLI command sends | once, per invocation |
 | `errors/<name>.md` | what a **refused** tool call says back — and what a held reply is told (`review_before_reply.md`, via the `Stop` hook in `agent/session.py`) | when the engine blocks a write, or holds a reply |
-| `headless/instructions.md` | what a **host that is not portia** is told when it connects to `portia-mcp` (`cli/serve.py`): read the skill, read the brief, and the four rules that have to hold whether or not the skill was fetched | every request, in Claude Code |
+| `headless/instructions.md` | what a **host that is not portia** is told when it connects to `portia-mcp` (`cli/serve.py`): read the skill, read the brief, and the five rules that have to hold whether or not the skill was fetched | every request, in Claude Code |
 | `headless/get_context.md` | `get_context` as a host is offered it: *call this first*, where the app's says *you already have this* | in the tool list, in Claude Code |
+| `headless/signin/<kind>.md` | the last section of the brief a host pulls on a **warehouse** project: how this connection signs in, that a browser may open, that no credential is ever typed into the chat (`cli/serve.signing_in`). One file per kind: `browser`, `file`, `quiet`, `typed`, and `missing` when this machine has no such connection | with `get_context`, until a session is open |
+| `errors/warehouse_needs_typing.md` | what a host's model reads in place of `SecretRequired`: never ask for the password, offer `browser` or `file` | when a tool reaches a warehouse that wants a secret typed |
 | `errors/hand_edit.md`, `errors/raw_read.md` | what Claude Code's file tools are told when `portia-hook guard` refuses them (`cli/hook.py`): which portia tool owns the file, or which check answers the question | when a host's model edits a portia file or opens indexed data |
 
 `errors/` exists because a refusal is read at the exact moment the model is choosing what to do

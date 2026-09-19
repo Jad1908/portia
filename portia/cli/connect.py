@@ -28,8 +28,10 @@ from portia.core.io import connect
 def _add(args: argparse.Namespace) -> None:
     provider = registry.PROVIDERS[args.kind]
     fields = {key: getattr(args, key) for key in provider.keys}
-    connection = registry.Connection(
-        name=args.name, kind=args.kind, auth=args.auth or provider.default_auth, **fields
+    connection = registry.filled_from_vendor(
+        registry.Connection(
+            name=args.name, kind=args.kind, auth=args.auth or provider.default_auth, **fields
+        )
     )
     path = registry.save(connection)
     print(f"saved {args.name!r} ({provider.label}) → {path}")
@@ -67,6 +69,11 @@ def _suggest(args: argparse.Namespace) -> None:
         missing = [f for f in c.provider.required if not c.fields.get(f)]
         note = f"  (missing {', '.join(missing)})" if missing else ""
         print(f"{c.name:20s} {c.provider.label:10s} {c.provider.summary(c)}{note}")
+    if any(c.kind == registry.SNOWFLAKE.kind for c in found):
+        print(
+            f"\nadd one as it is, signing in the way the file says:  "
+            f"connect add <name> --auth {registry.FILE}"
+        )
 
 
 def _test(args: argparse.Namespace) -> None:
@@ -110,6 +117,16 @@ def _secret_for(connection: registry.Connection) -> str | None:
     if not connection.needs_secret:
         return None
     import getpass
+    import sys
+
+    if not sys.stdin.isatty():
+        # A host's shell, a CI job: nobody is there to type, and `getpass` would
+        # wait on a prompt nothing can answer (`docs/HEADLESS.md` §7).
+        raise SystemExit(
+            f"{connection.name} signs in with a {(connection.secret_label or 'secret').lower()}, "
+            "and there is no terminal here to type it into. Use a connection that signs in "
+            "with `browser` or `file` (`connect providers` lists them)."
+        )
 
     return getpass.getpass(f"{connection.name} {(connection.secret_label or '').lower()}: ")
 

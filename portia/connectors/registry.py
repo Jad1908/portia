@@ -303,7 +303,21 @@ def suggestions() -> list[Connection]:
 #: account password (the connector runs the account's MFA on top of it), or a
 #: programmatic access token.
 BROWSER, PASSWORD, TOKEN = "browser", "password", "token"
-AUTH_METHODS = (BROWSER, PASSWORD, TOKEN)
+
+#: Sign in the way **Snowflake's own `connections.toml` says**, by the entry's
+#: name *(2026-09-19, `docs/HEADLESS.md` §7)*. The connector reads its own file,
+#: so whatever that entry holds works: a password, a key pair, OAuth, the
+#: authenticator a company's admins set up. **portia is handed none of it**: it
+#: passes a name, and *nothing in here is a credential* stays true.
+#:
+#: It exists for a host with no window. A typed secret is held on the pool, in
+#: the memory of the process that asked for it, and under `cli/serve.py` there
+#: is no dialog to ask and no terminal a host's shell can answer. Asking for it
+#: in the chat was turned down: a password pasted into a conversation is in its
+#: transcript. The person who already keeps this file for dbt and `snow` types
+#: nothing anywhere.
+FILE = "file"
+AUTH_METHODS = (BROWSER, PASSWORD, TOKEN, FILE)
 
 #: What a Snowflake connection must say (`CONNECTOR.md` §2.4). ``user`` is
 #: required because browser SSO still wants the login name — the connector
@@ -363,6 +377,30 @@ def snowflake_suggestions(path: Path | None = None) -> list[Connection]:
     return out
 
 
+def filled_from_vendor(connection: Connection) -> Connection:
+    """A :data:`FILE` connection with the fields nobody typed read off the vendor's entry.
+
+    Under :data:`FILE` the entry in `connections.toml` is the truth, so asking
+    somebody to retype its account, user and warehouse to satisfy
+    `Connection.check` would be asking them to keep two copies in step by hand.
+    What is copied is what `snowflake_suggestions` offers, which is never a
+    secret. A field that *was* typed wins, and an entry that is not in the file
+    changes nothing here: `check` then names what is missing.
+    """
+    if connection.auth != FILE:
+        return connection
+    wanted = connection.fields.get("profile") or connection.name
+    offered = next((c for c in connection.provider.suggest() if c.name == wanted), None)
+    if offered is None:
+        return connection
+    return Connection(
+        name=connection.name,
+        kind=connection.kind,
+        auth=connection.auth,
+        **{**offered.fields, **connection.fields},
+    )
+
+
 def _opt(value: object) -> str | None:
     return str(value) if value not in (None, "") else None
 
@@ -378,11 +416,16 @@ SNOWFLAKE = Provider(
         Field("role", "Role"),
         Field("database", "Database"),
         Field("schema", "Schema"),
+        # Which entry of `connections.toml` to open under :data:`FILE`. Left
+        # empty it is the connection's own name, which is what a connection
+        # made from a suggestion already has.
+        Field("profile", "Name in connections.toml", False, "my_connection"),
     ),
     auth=(
         Auth(BROWSER, "Browser sign-in"),
         Auth(PASSWORD, "Password", secret="Password"),
         Auth(TOKEN, "Access token", secret="Access token"),
+        Auth(FILE, "connections.toml"),
     ),
     summary=lambda c: f"{c.user or ''}@{c.account or ''}",
     suggest=snowflake_suggestions,
