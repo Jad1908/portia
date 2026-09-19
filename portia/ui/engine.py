@@ -62,7 +62,7 @@ from typing import Any
 from portia import catalog, figures, findings, pipeline, runlog
 from portia import spec as spec_module
 from portia.cli.import_data import plan as plan_copy
-from portia.core import cancel
+from portia.core import cancel, feedback
 from portia.core.io import connect, find_data_files, load_table, source_table, supported_suffixes
 from portia.core.table import Table
 from portia.ui import graph, tree
@@ -388,6 +388,7 @@ async def connect_project(app: App, secret: str | None = None) -> bool:
         await asyncio.to_thread(partial(connectors.activate, app.portia_dir, secret=secret))
     except Exception as exc:  # noqa: BLE001 — the pane says why, whatever the driver said
         app.connection_status = f"failed: {_plain(exc)}"
+        feedback.remember(exc, "connecting")
         return False
     app.connection_status = State.CONNECTED
     return True
@@ -1309,6 +1310,7 @@ async def execute(
     told — and would sit there until the next run.
     """
     app.run_error = None
+    app.run_problem = None
     app.built = []
     try:
         built = await build(app, only=only, on_progress=on_progress, stop=stop)
@@ -1318,6 +1320,7 @@ async def execute(
     except Exception as exc:  # noqa: BLE001 — shown to the operator, not swallowed
         app.results = None
         app.run_error = f"{type(exc).__name__}: {exc}"
+        app.run_problem = feedback.remember(exc, "run")
         return []
     app.built = built
     open_model = app.spec_path.stem if app.spec_path else None

@@ -271,6 +271,9 @@ class Exchange:
     cached_tokens: int | None = None
     output_tokens: int | None = None
     error: str | None = None
+    #: The same failure as `core.feedback` remembered it, for *Report this*
+    #: beside the alert. None on an interrupt: a stop is not a failure.
+    problem: Any = None  # feedback.Problem
 
     @property
     def ended(self) -> bool:
@@ -680,6 +683,8 @@ class App:
     #: run header can say so rather than implying one spec ran alone.
     built: list = field(default_factory=list)  # list[pipeline.BuiltModel]
     run_error: str | None = None
+    #: `run_error` as `core.feedback` remembered it, for *Report this* under it.
+    run_problem: Any = None  # feedback.Problem
     outputs: list[Path] = field(default_factory=list)
     #: The reports written beside those tables, one per model. Saving a table and
     #: saving the account of the run that produced it is one press, so these two

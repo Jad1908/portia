@@ -25,7 +25,18 @@ from nicegui.client import Client
 
 from portia import pipeline
 from portia.core import cancel, present
-from portia.ui import artifacts, engine, screens, settings, state, theme, transcript, workflow
+from portia.core import feedback as core_feedback
+from portia.ui import (
+    artifacts,
+    engine,
+    feedback,
+    screens,
+    settings,
+    state,
+    theme,
+    transcript,
+    workflow,
+)
 from portia.ui import components as c
 from portia.ui.state import APP
 
@@ -55,6 +66,19 @@ def _stop_local_server() -> None:
 nicegui_app.on_shutdown(_stop_local_server)
 
 
+def _remember_uncaught(exc: Exception) -> None:
+    """An error nothing caught, kept for a report (`core/feedback.remember`).
+
+    NiceGUI logs these to the terminal and the window carries on, so they are
+    the failures somebody is least able to describe: a button that did nothing.
+    Settings' *Report a problem* offers the last one.
+    """
+    core_feedback.remember(exc, "the window")
+
+
+nicegui_app.on_exception(_remember_uncaught)
+
+
 @ui.page("/")
 def page() -> None:
     theme.apply()
@@ -66,6 +90,7 @@ def page() -> None:
     screens.build_connect_dialog()
     screens.build_server_dialog()
     settings.build_dialog()
+    feedback.build_dialog()
     # `DESIGN.md` → Width behaviour, which cannot be done in CSS once the panes
     # are inside splitters: a splitter sets an inline pixel width on its panel, so
     # restyling the pane inside changes nothing about the space reserved beside it.

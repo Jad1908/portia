@@ -42,6 +42,7 @@ from nicegui import ui
 
 from portia import catalog
 from portia.checks.outcome import BLOCKING_FLAGS, describe_contribution, describe_grain
+from portia.core import feedback as core_feedback
 from portia.core.present import format_rate
 from portia.core.serialize import to_json
 from portia.ui import charts, engine, graph, state
@@ -1083,6 +1084,10 @@ def _run_error() -> None:
     with ui.element("div").classes("stack-sm"):
         ui.label("Run failed").classes("t-heading-sm c-error")
         c.code_block(APP.run_error or "")
+        if APP.run_problem is not None:
+            from portia.ui import feedback
+
+            feedback.report_button(APP.run_problem)
 
 
 def _run_header() -> None:
@@ -1419,6 +1424,7 @@ async def _profile_now(name: str) -> None:
     try:
         await engine.profile_remote(APP, name)
     except Exception as exc:  # noqa: BLE001 — shown, not swallowed
+        core_feedback.remember(exc, "profiling")
         ui.notify(f"{type(exc).__name__}: {exc}")
         return
     pane.refresh()

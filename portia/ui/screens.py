@@ -84,6 +84,7 @@ from nicegui import context, ui
 
 from portia.agent import prompts
 from portia.core import cancel
+from portia.core import feedback as core_feedback
 from portia.ui import components as c
 from portia.ui import engine, picktree, state, tree
 from portia.ui.engine import DATA_DIR
@@ -1362,6 +1363,7 @@ async def _listing(client, listing) -> None:
     try:
         await listing
     except Exception as exc:  # noqa: BLE001 — a listing that failed is a sentence on screen
+        core_feedback.remember(exc, "listing the warehouse")
         if client is not None:
             with client:
                 ui.notify(f"{type(exc).__name__}: {exc}")
