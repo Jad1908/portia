@@ -654,3 +654,27 @@ def test_the_connect_command_refuses_a_typed_secret_where_nobody_can_type(monkey
     with pytest.raises(SystemExit, match="no terminal here"):
         connect_cli._secret_for(_conn(auth=registry.PASSWORD))
     assert connect_cli._secret_for(_conn(auth=registry.FILE)) is None
+
+
+def test_a_file_written_in_config_tomls_form_is_said_in_words(tmp_path, monkeypatch):
+    """The first real drive: `[connections.demo]` reads as a connection called
+    *connections*, offered with every field missing and unopenable by name."""
+    _vendor_file(tmp_path, monkeypatch, VENDOR.replace("[demo]", "[connections.demo]"))
+    (tmp_path / "connections.toml").chmod(0o600)
+    (problem,) = registry.snowflake_file_problems()
+    assert "[connections.demo]" in problem and "it is [demo]" in problem
+    assert "hunter2" not in problem
+
+
+def test_a_file_other_users_can_read_is_said_with_the_command_that_fixes_it(tmp_path, monkeypatch):
+    _vendor_file(tmp_path, monkeypatch, VENDOR)
+    (tmp_path / "connections.toml").chmod(0o644)
+    (problem,) = registry.snowflake_file_problems()
+    assert "chmod 0600" in problem
+    (tmp_path / "connections.toml").chmod(0o600)
+    assert registry.snowflake_file_problems() == []
+
+
+def test_no_file_is_no_problem(tmp_path, monkeypatch):
+    monkeypatch.setenv("SNOWFLAKE_HOME", str(tmp_path))
+    assert registry.snowflake_file_problems() == []

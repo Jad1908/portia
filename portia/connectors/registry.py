@@ -377,6 +377,46 @@ def snowflake_suggestions(path: Path | None = None) -> list[Connection]:
     return out
 
 
+def snowflake_file_problems(path: Path | None = None) -> list[str]:
+    """What is wrong with Snowflake's own file, in words, or nothing.
+
+    **Both found on the first real drive of :data:`FILE`, 2026-09-19.** The file
+    was written as ``[connections.demo]``, which is the header `config.toml` wants
+    and which `connections.toml` reads as one connection called *connections*
+    holding a table called *demo*: `suggest` offered that with every field
+    missing, and the connector would have refused ``demo`` as an unknown name.
+    And it was readable by other users, which the connector warns about on every
+    open, in a paragraph on stderr nobody reads.
+
+    Facts about the file, never its values: nothing here returns a field's content.
+    """
+    target = path or snowflake_connections_file()
+    try:
+        raw = tomllib.loads(target.read_text())
+        mode = target.stat().st_mode
+    except (FileNotFoundError, tomllib.TOMLDecodeError, OSError):
+        return []
+    problems = []
+    for name, fields in raw.items():
+        nested = (
+            [k for k, v in fields.items() if isinstance(v, dict)]
+            if isinstance(fields, dict)
+            else []
+        )
+        if nested and len(nested) == len(fields):
+            wrote, wants = f"[{name}.{nested[0]}]", f"[{nested[0]}]"
+            problems.append(
+                f"{target} has a section written {wrote}. That is config.toml's form; "
+                f"in connections.toml it is {wants}, or the entry cannot be opened by name."
+            )
+    if os.name == "posix" and mode & 0o077:
+        problems.append(
+            f"{target} can be read by other users, which Snowflake's connector objects to: "
+            f'chmod 0600 "{target}"'
+        )
+    return problems
+
+
 def filled_from_vendor(connection: Connection) -> Connection:
     """A :data:`FILE` connection with the fields nobody typed read off the vendor's entry.
 
