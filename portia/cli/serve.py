@@ -138,6 +138,22 @@ async def _stoppable(handler: Handler, args: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _offered() -> list[Any]:
+    """The tools a host is offered: all of them but the one that needs the window's memory.
+
+    `view_chart` hands the copilot the browser's own picture of a tab, and
+    `agent/drawn` holds that picture **in memory and nowhere else**, on purpose:
+    nothing is saved. In the app the tool and the window are one process. Here
+    the window, if there is one, is another, so the tool could only ever refuse,
+    and a tool that always refuses is a turn spent learning that. `tools.offered`
+    already has the list without it, for a model that cannot take an image in;
+    the reason differs and the list is the same.
+    """
+    from portia.agent import tools
+
+    return tools.offered(sees_images=False)
+
+
 def _prompts_read() -> dict[str, Any]:
     """What this host's model is given by portia: the instructions and the tools.
 
@@ -149,19 +165,22 @@ def _prompts_read() -> dict[str, Any]:
 
     return {
         "system": prompts.load("headless/instructions"),
-        "tools": {**tools.descriptions(), BRIEF_TOOL: prompts.load("headless/get_context")},
+        "tools": {
+            **tools.descriptions(sees_images=False),
+            BRIEF_TOOL: prompts.load("headless/get_context"),
+        },
     }
 
 
 def build(session: Session) -> Any:
-    """The MCP server: `tools.ALL_TOOLS`, each handler wrapped by ``session``."""
+    """The MCP server: the tools a host is offered, each handler wrapped by ``session``."""
     from claude_agent_sdk import create_sdk_mcp_server
 
     from portia.agent import tools
 
     wrapped = [
         dataclasses.replace(tool, handler=session.wrap(tool.name, tool.handler))
-        for tool in (_pushed_brief(t, session.portia_dir) for t in tools.ALL_TOOLS)
+        for tool in (_pushed_brief(t, session.portia_dir) for t in _offered())
     ]
     server = create_sdk_mcp_server(name=tools.SERVER_NAME, version="0.1.0", tools=wrapped)[
         "instance"
