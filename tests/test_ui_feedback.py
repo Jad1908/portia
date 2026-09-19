@@ -80,3 +80,19 @@ def test_neither_route_is_the_primary_action():
     import inspect
 
     assert 'kind="primary"' not in inspect.getsource(panel._panel.func)
+
+
+def test_the_email_route_is_drawn_only_while_there_is_an_address():
+    """An empty `feedback.EMAIL` means no private route, and a button that opens
+    a message to nobody is worse than no button."""
+    import inspect
+
+    source = inspect.getsource(panel._panel.func)
+    assert source.count("if feedback.EMAIL:") == 2  # the button, and the address in words
+
+
+def test_the_address_shipped_is_one_a_mail_link_can_be_built_for():
+    url = feedback.mail_url("It broke", "said", "written")
+
+    assert feedback.EMAIL and " " not in feedback.EMAIL and feedback.EMAIL.count("@") == 1
+    assert url.startswith(f"mailto:{feedback.EMAIL}?subject=%5Bportia%5D%20It%20broke&body=")

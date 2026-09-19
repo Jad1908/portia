@@ -43,11 +43,13 @@ from portia.core import cancel
 #: query parameters and never calls the API.
 ISSUES_URL = "https://github.com/Jad1908/portia/issues/new"
 
-#: Where a private report goes. **Empty means there is no private route yet**,
-#: and the window then draws no email button rather than one that goes nowhere.
-#: It is public the moment it is committed, so it wants to be an alias that can
-#: be switched off, never somebody's personal address.
-EMAIL = ""
+#: Where a private report goes: a forwarding alias, never somebody's own
+#: address, because this line is public the moment it is committed and an alias
+#: can be switched off once the scrapers find it. **Empty means there is no
+#: private route**, and the window then draws no email button rather than one
+#: that goes nowhere. An installed copy keeps the address it shipped with, so
+#: changing this strands every older build's Email button.
+EMAIL = "portia.feedback.math706@slmail.me"
 
 #: How many errors are remembered. A report carries one; the rest are there so
 #: the error the user means is still around after the one that followed it.
