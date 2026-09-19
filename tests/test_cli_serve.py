@@ -64,7 +64,9 @@ def test_a_host_is_offered_the_tools_the_app_is(sales):
 
     async def both(client, session):
         served = (await client.list_tools()).tools
-        async with connect(tools.build_server()["instance"]) as in_app:
+        # The app's list for a model that takes no image: `view_chart` needs the
+        # window's memory, which is another process here (`serve._offered`).
+        async with connect(tools.build_server(sees_images=False)["instance"]) as in_app:
             return served, (await in_app.list_tools()).tools
 
     served, in_app = drive(sales, both)
@@ -83,6 +85,13 @@ def test_the_brief_a_host_pulls_is_the_brief_the_app_pushes(sales):
         return (await client.call_tool(serve.BRIEF_TOOL, {})).content[0].text
 
     assert drive(sales, pull) == context.build_brief(sales)
+
+
+def test_a_host_is_not_offered_the_tool_that_reads_the_windows_memory(sales):
+    async def names(client, session):
+        return {t.name for t in (await client.list_tools()).tools}
+
+    assert drive(sales, names) == {t.name for t in tools.ALL_TOOLS} - {"view_chart"}
 
 
 def test_the_instructions_arrive_with_the_connection(sales):
@@ -134,7 +143,7 @@ def test_what_the_log_says_was_read_is_what_this_host_was_given(sales):
     read = runlog.read(drive(sales, one)).prompts
     assert "get_context" in read["system"]
     assert "You have no filesystem" not in read["system"]  # the app's prompt, not sent here
-    assert read["tools"].keys() == tools.descriptions().keys()
+    assert read["tools"].keys() == tools.descriptions(sees_images=False).keys()
     assert "CALL THIS FIRST" in read["tools"][serve.BRIEF_TOOL]
 
 
