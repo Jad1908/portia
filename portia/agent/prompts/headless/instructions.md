@@ -15,7 +15,7 @@ stops at each layer.
 Then call `get_context`. It returns this project's brief: what the data is, the
 groups, one line per source, and every spec in build order.
 
-Four rules hold in every session.
+Five rules hold in every session.
 
 1. Every number you state about this project's data comes from a portia tool
    result. Do not open a data file, `head` it, or query it with your own code. A
@@ -29,3 +29,6 @@ Four rules hold in every session.
    `uv run python -m portia.ui --project .` opens it.
 4. Call `review_queries` before you end a reply in which you asked the data
    anything, and keep what earned it with `record_finding`.
+5. You never handle a credential. Do not ask for a warehouse password, token or key, and
+   do not accept one pasted into the chat. The skill says how a connection is set up
+   without one.

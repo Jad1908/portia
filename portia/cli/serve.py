@@ -28,6 +28,10 @@ is where each piece of it is put back:
   window open on the project shows them as the unsaved charts they are, the
   receipt tells the model whether such a window exists, and a render that
   failed there comes back on the next receipt (`agent/drawn.py`).
+- **Signing in to a warehouse.** The app has a dialog for it. Here the session
+  opens on the first call that needs it, the brief says so before a browser
+  window surprises anybody, and a connection that wants a password typed is
+  refused in words a model can act on (:func:`signing_in`, :func:`_readable`).
 - **Stop.** The host cancels a request; MCP delivers that as a cancelled task,
   and a cancelled `await` does nothing to the thread a DuckDB query is on. Each
   call runs under its own `core.cancel` scope, which is what Run and Build use,
@@ -94,6 +98,7 @@ class Session:
                     {"name": tools.qualified(name), "input": args, "id": call_id},
                 )
             )
+            follow_the_project(self.portia_dir)
             if name == _PLOT_TOOL:
                 drawn.collect_failures(self.portia_dir)
             # Where the catalog is was settled when this process started. See
@@ -103,7 +108,7 @@ class Session:
             if name in _CHAT_SCOPED and not sent.get("chat"):
                 sent["chat"] = self.log.path.stem
             try:
-                result = await _stoppable(handler, sent)
+                result = _readable(await _stoppable(handler, sent))
             except asyncio.CancelledError:
                 self._result(call_id, prompts.error("tool_stopped"), failed=True)
                 raise
@@ -259,11 +264,102 @@ def _pushed_brief(tool: Any, portia_dir: str) -> Any:
 
     async def brief(args: dict[str, Any]) -> dict[str, Any]:
         text = await asyncio.to_thread(context.build_brief, portia_dir)
+        if signing := signing_in():
+            text = f"{text}\n\n{signing}"
         return {"content": [{"type": "text", "text": text}]}
 
     return dataclasses.replace(
         tool, handler=brief, description=prompts.load("headless/get_context")
     )
+
+
+def _warehouse() -> Any | None:
+    """The pool behind this process's warehouse, or ``None`` on files."""
+    from portia.connectors import pool
+    from portia.core import backend
+
+    active = backend.active()
+    return pool.pool_of(active) if active.remote else None
+
+
+def signing_in() -> str:
+    """What a host's model is told about signing in to the warehouse. ``""`` on files.
+
+    **The one thing in a host's brief the app's does not say**, because in the
+    app it is the window's business: the connect dialog asks for a password, and
+    a browser sign-in is started by a person pressing a button. Here the session
+    opens on the first tool call that needs it (`pool.Pool.handle`), so a
+    browser window appears on the user's screen because of something the model
+    did, and they should have been told. And a connection that wants a password
+    typed cannot open at all, which is worth saying before the first refusal
+    rather than after it (`docs/HEADLESS.md` §7).
+
+    Nothing once a session is open: by then none of it is news.
+    """
+    from portia.connectors import registry
+
+    for label, why in _unusable.items():
+        return prompts.load("headless/signin/missing").format(label=label, why=why)
+    held = _warehouse()
+    if held is None or held.connected:
+        return ""
+    connection = held.connection
+    if held.needs_secret:
+        what = (connection.secret_label or "secret").lower()
+        return prompts.load("headless/signin/typed").format(label=connection.name, what=what)
+    if connection.auth == registry.BROWSER:
+        return prompts.load("headless/signin/browser").format(label=connection.name)
+    if connection.auth == registry.FILE:
+        return prompts.load("headless/signin/file").format(label=connection.name)
+    return prompts.load("headless/signin/quiet").format(label=connection.name)
+
+
+def _readable(result: dict[str, Any]) -> dict[str, Any]:
+    """A result a host's model can act on, where the app's wording assumed a window.
+
+    `pool.SecretRequired` says *enter it to connect*, which is right where a
+    dialog is about to ask and an instruction nobody can follow here. It
+    reaches this edge already turned into text by `tools._failed`, so it is
+    recognised by the exception's name, which `_failed` always puts first.
+    """
+    from portia.connectors import pool
+
+    held = _warehouse()
+    text = events.tool_result_text(result.get("content"))
+    if held is None or not text.startswith(f"{pool.SecretRequired.__name__}:"):
+        return result
+    what = (held.connection.secret_label or "secret").lower()
+    said = prompts.error("warehouse_needs_typing", label=held.connection.name, what=what)
+    return {"content": [{"type": "text", "text": said}], "is_error": True}
+
+
+def follow_the_project(portia_dir: str) -> None:
+    """Re-read which connection the project names, and switch if it changed.
+
+    A host's session usually *starts* before the project has a connection: the
+    model sets one up with `connect use` halfway through, in another process,
+    and this one would go on answering from DuckDB until somebody restarted it.
+    The window never had the problem because its own button makes the change.
+    One small YAML read per call, against a query on a warehouse.
+    """
+    from portia.connectors import registry
+    from portia.core import backend
+
+    try:
+        named = catalog.project_settings(portia_dir)["connection"]
+    except Exception:  # noqa: BLE001 - an unreadable project file changes nothing
+        return
+    active = backend.active()
+    if named in _unusable and named not in registry.names():
+        return  # already tried and still not there; the brief says why
+    if (active.label if active.remote else None) != named:
+        activate(portia_dir)
+
+
+#: Why the connection the project names could not be installed, by name, or
+#: empty. Kept so the brief can say it: a project that quietly fell back to
+#: DuckDB answers *no such source* about tables that are in its own catalog.
+_unusable: dict[str, str] = {}
 
 
 def activate(portia_dir: str) -> None:
@@ -272,14 +368,17 @@ def activate(portia_dir: str) -> None:
     What the window does on opening a project (`ui/engine.open_project`), for the
     same reason: a session may open a browser for SSO, and a server started
     because a host was started must not. A project naming a connection this
-    machine does not have still serves; the tool that needs it says why.
+    machine does not have still serves, on files, and :func:`signing_in` says so.
     """
     from portia import connectors
 
+    _unusable.clear()
+    connectors.deactivate()
     try:
         connectors.activate(portia_dir, connect=False)
-    except Exception:  # noqa: BLE001 - reported by the first tool that needs it
-        return
+    except Exception as exc:  # noqa: BLE001 - said in the brief, and the server still serves
+        named = catalog.project_settings(portia_dir).get("connection") or ""
+        _unusable[str(named)] = str(exc)
 
 
 async def serve(portia_dir: str) -> None:
