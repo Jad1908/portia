@@ -33,7 +33,7 @@ from __future__ import annotations
 from portia.core import dialect as dialects
 from portia.core.present import count
 from portia.core.serialize import round_float, to_jsonable
-from portia.core.table import Table
+from portia.core.table import Table, subquery
 
 GRAIN_EXAMPLES = 5  # worst-offending grain keys shown when a grain claim fails
 
@@ -317,15 +317,15 @@ def _table_grain(table: Table, grain: list[str]) -> dict:
     # No `dropna` to think about: SQL groups NULLs together, which is what
     # pandas' `dropna=False` was asking for. A null in the grain key is a fact
     # worth seeing, not a row to quietly leave out of the count.
-    grouped = f"SELECT {quoted}, count(*) AS n FROM ({table.query}) GROUP BY {quoted}"
-    n_distinct = int(table.con.execute(f"SELECT count(*) FROM ({grouped})").fetchone()[0])
+    grouped = f"SELECT {quoted}, count(*) AS n FROM {subquery(table.query)} GROUP BY {quoted}"
+    n_distinct = int(table.con.execute(f"SELECT count(*) FROM {subquery(grouped)}").fetchone()[0])
     # Ties broken by the key, so which duplicates get shown doesn't depend on
     # hash order — the same run twice must name the same examples.
     rows = table.con.execute(
-        f"SELECT * FROM ({grouped}) WHERE n > 1 ORDER BY n DESC, {quoted} LIMIT {GRAIN_EXAMPLES}"
+        f"SELECT * FROM {subquery(grouped)} WHERE n > 1 ORDER BY n DESC, {quoted} LIMIT {GRAIN_EXAMPLES}"
     ).fetchall()
     n_duplicated = int(
-        table.con.execute(f"SELECT count(*) FROM ({grouped}) WHERE n > 1").fetchone()[0]
+        table.con.execute(f"SELECT count(*) FROM {subquery(grouped)} WHERE n > 1").fetchone()[0]
     )
     return _grain_report(
         keys,

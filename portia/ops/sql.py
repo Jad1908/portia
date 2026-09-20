@@ -41,7 +41,7 @@ from typing import Any
 
 from portia.core import backend, cancel
 from portia.core import dialect as dialects
-from portia.core.table import Table, quote_ident
+from portia.core.table import Table, quote_ident, subquery
 from portia.ops.base import OpResult
 
 #: Every field this op reports — see ``ops.join.PROVENANCE_KEYS`` for why.
@@ -528,7 +528,9 @@ def _restore_types(table: Table, types: dict[str, str]) -> Table:
     select = _cast(types)
     if not select:
         return table
-    return Table(name=table.name, query=f"SELECT {select} FROM ({table.query})", con=table.con)
+    return Table(
+        name=table.name, query=f"SELECT {select} FROM {subquery(table.query)}", con=table.con
+    )
 
 
 def render_text(provenance: dict) -> str:

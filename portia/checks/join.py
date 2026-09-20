@@ -38,7 +38,7 @@ from portia.checks.profiling import BOOLEAN, DATETIME, NUMERIC_KINDS, kind_of
 from portia.core import dialect as dialects
 from portia.core.dialect import Dialect
 from portia.core.serialize import round_float, to_jsonable
-from portia.core.table import Table
+from portia.core.table import Table, subquery
 
 SAMPLE_KEYS = 5  # example unmatched keys shown per side
 SAMPLE_ROWS = 3  # example rows shown per anomaly in join_findings
@@ -278,14 +278,12 @@ def _table_side(table: Table, keys: list[str]) -> dict:
     d = table.dialect
     quoted = [d.quote(k) for k in keys]
     not_null = " AND ".join(f"{q} IS NOT NULL" for q in quoted)
-    grouped = (
-        f"SELECT count(*) AS n FROM ({table.query}) WHERE {not_null} GROUP BY {', '.join(quoted)}"
-    )
+    grouped = f"SELECT count(*) AS n FROM {subquery(table.query)} WHERE {not_null} GROUP BY {', '.join(quoted)}"
     n_rows, null_rows = table.con.execute(
-        f"SELECT count(*), {d.count_where(f'NOT ({not_null})')} FROM ({table.query})"
+        f"SELECT count(*), {d.count_where(f'NOT ({not_null})')} FROM {subquery(table.query)}"
     ).fetchone()
     n_distinct, n_duplicated, max_mult = table.con.execute(
-        f"SELECT count(*), {d.count_where('n > 1')}, coalesce(max(n), 0) FROM ({grouped})"
+        f"SELECT count(*), {d.count_where('n > 1')}, coalesce(max(n), 0) FROM {subquery(grouped)}"
     ).fetchone()
     dtypes = table.dtypes
     return {
@@ -371,7 +369,7 @@ def _key_counts(table: Table, keys: list[str], comparable: bool, prefix: str, co
     not_null = " AND ".join(f"{e} IS NOT NULL" for e in exprs)
     ordinals = ", ".join(str(i + 1) for i in range(len(keys)))
     return (
-        f"SELECT {select}, count(*) AS {count} FROM ({table.query}) "
+        f"SELECT {select}, count(*) AS {count} FROM {subquery(table.query)} "
         f"WHERE {not_null} GROUP BY {ordinals}"
     )
 
@@ -501,6 +499,12 @@ def join_findings(
     keys plus :data:`SAMPLE_ROW_COLUMNS` more; see :func:`example_columns`.
     """
     lkeys, rkeys = resolve_keys(on, left_on, right_on)
+    # As each side spells them, the way `join_report` already does. Without
+    # this the report resolved ``ID`` to ``id`` and the example rows below
+    # quoted what was typed, which an engine that folds answers with *no such
+    # column* (found on the first PostgreSQL drive, `CONNECTORS.md` §9.3).
+    lkeys = dialects.resolve_columns(lkeys, left.columns)
+    rkeys = dialects.resolve_columns(rkeys, right.columns)
     report = join_report(left, right, on=on, left_on=left_on, right_on=right_on)
     comparable = report["key_dtype_match"]
     lcols = example_columns(left, lkeys, left_columns)

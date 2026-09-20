@@ -130,3 +130,29 @@ def test_a_narrow_table_is_unchanged_by_the_cap(findings):
         "order_id",
         "amount",
     ]
+
+
+def test_the_example_rows_quote_a_key_as_the_table_spells_it_not_as_it_was_typed(con):
+    """The report resolved ``ID`` to ``id`` and the rows below it quoted ``"ID"``.
+
+    DuckDB matches a quoted name without case, so nothing here could fail on it;
+    PostgreSQL answered *no such column*. The SQL is what is checked, because the
+    SQL is what another engine reads.
+    """
+    from portia.core.table import Table
+
+    left = Table.from_frame(pd.DataFrame({"ORDER_ID": [1, 2, 3]}), "l", con)
+    right = Table.from_frame(pd.DataFrame({"id": [1]}), "r", con)
+    asked: list[str] = []
+
+    class Spy:
+        def __getattr__(self, name):
+            return getattr(con, name)
+
+        def execute(self, sql):
+            asked.append(sql)
+            return con.execute(sql)
+
+    found = join_findings(left.using(Spy()), right.using(Spy()), left_on="order_id", right_on="ID")
+    assert [r["ORDER_ID"] for r in found["evidence"]["unmatched_left_rows"]] == [2, 3]
+    assert not [sql for sql in asked if '"ID"' in sql or '"order_id"' in sql]

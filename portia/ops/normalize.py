@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from portia.core import dialect as dialects
 from portia.core.serialize import to_jsonable
-from portia.core.table import Table
+from portia.core.table import Table, subquery
 from portia.ops.base import OpResult, named_from
 
 SAMPLE_FAILED = 5
@@ -77,7 +77,12 @@ def apply_normalize(table: Table, transforms: list[dict], *, name: str | None = 
         records.append({"column": col, "op": op, **_measure(out, col, op, expression)})
         if op == "to_numeric" and t.get("fill") is not None:
             expression = f"coalesce({expression}, {float(t['fill'])})"
-        compiled = _project(out.columns, col, expression, compiled, out.dialect)
+        # The first projection reads the input by name. Every one after reads
+        # the projection before it, which is a query and needs its brackets:
+        # two transforms used to compile to ``FROM SELECT …``, which no engine
+        # parses, in a file nothing ran (found on the first PostgreSQL drive).
+        from_item = compiled if not records[:-1] else subquery(compiled)
+        compiled = _project(out.columns, col, expression, from_item, out.dialect)
         out = _replace(out, col, expression, name or table.name)
 
     # A normalize with no transforms is a pass-through, and `SELECT *` says so
@@ -108,7 +113,7 @@ def _project(
 
 def _replace(table: Table, column: str, expression: str, name: str) -> Table:
     """The same relation with one column rewritten, in place, keeping the order."""
-    query = _project(table.columns, column, expression, f"({table.query})", table.dialect)
+    query = _project(table.columns, column, expression, subquery(table.query), table.dialect)
     return Table(name=name, query=query, con=table.con)
 
 

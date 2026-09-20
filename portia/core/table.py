@@ -39,6 +39,20 @@ from portia.core import dialect as dialects
 DEFAULT_HEAD = 10
 
 
+#: What a query is called when it is read as a whole and nothing refers to it.
+SUBQUERY_ALIAS = "_q"
+
+
+def subquery(query: str) -> str:
+    """``query`` as something to write after ``FROM``, when nothing reads it by name.
+
+    Aliased, because PostgreSQL before 16 refuses a subquery in ``FROM`` without
+    one and the SQL standard agrees with it; DuckDB, Snowflake and BigQuery
+    accept either. :attr:`Table.ref` is the form to use when the alias matters.
+    """
+    return f"({query}) AS {SUBQUERY_ALIAS}"
+
+
 def quote_ident(name: str) -> str:
     """A SQL identifier in **DuckDB's** spelling. For SQL that runs locally by construction.
 
@@ -96,7 +110,7 @@ class Table:
 
     def scalar(self, expr: str) -> Any:
         """One aggregate over the whole table, as one value."""
-        return self._fetchone(f"SELECT {expr} FROM ({self.query})")[0]
+        return self._fetchone(f"SELECT {expr} FROM {self._whole}")[0]
 
     def row(self, exprs: dict[str, str]) -> dict:
         """Many aggregates in **one pass**, as ``{alias: value}``.
@@ -109,8 +123,12 @@ class Table:
             return {}
         q = self.dialect.quote
         select = ", ".join(f"{e} AS {q(alias)}" for alias, e in exprs.items())
-        values = self._fetchone(f"SELECT {select} FROM ({self.query})")
+        values = self._fetchone(f"SELECT {select} FROM {self._whole}")
         return dict(zip(exprs, values, strict=True))
+
+    @property
+    def _whole(self) -> str:
+        return subquery(self.query)
 
     def _fetchone(self, sql: str) -> tuple:
         result = self.con.execute(sql).fetchone()
@@ -161,7 +179,7 @@ class Table:
         that reaches for a whole table has stopped scaling, and these are the
         lines where that would be visible.
         """
-        return self.con.execute(f"SELECT * FROM ({self.query}) LIMIT {int(n)}").fetch_df()
+        return self.con.execute(f"SELECT * FROM {self._whole} LIMIT {int(n)}").fetch_df()
 
     def preview(self, n: int = DEFAULT_HEAD) -> tuple[int, pd.DataFrame]:
         """``(total rows, the first n of them)`` — everything a preview needs.
@@ -187,7 +205,7 @@ class Table:
         `core.serialize` knows how to narrow DuckDB's own types; it should not
         have to undo pandas' on the way.
         """
-        return self.con.execute(f"SELECT * FROM ({self.query}) LIMIT {int(n)}").fetchall()
+        return self.con.execute(f"SELECT * FROM {self._whole} LIMIT {int(n)}").fetchall()
 
     def copy_to(self, path: str | Path, *, options: str = "") -> None:
         """Write the table out. ``COPY … TO``, so it never passes through memory.
