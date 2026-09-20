@@ -124,7 +124,8 @@ def pane() -> None:
 
 # --- the warehouse (`docs/CONNECTOR.md` §2.13) -------------------------------
 
-WAREHOUSE_ICON = "cloud"
+#: Not a cloud: one of the databases can be on this machine (2026-09-20).
+WAREHOUSE_ICON = "dns"
 DATABASE_ICON = "storage"
 SCHEMA_ICON = "schema"
 #: A scoped or built table nobody has scanned. *Metadata only* rather than
@@ -155,7 +156,7 @@ def _warehouse_section() -> None:
     if not APP.connection:
         return
     c.rule()
-    c.section_header("Warehouse")
+    c.section_header("Database")
     row = c.artifact_row(
         name=APP.connection,
         icon=WAREHOUSE_ICON,

@@ -84,13 +84,13 @@ DATA_OPEN = "Add data"
 INTERPRET_WHAT = "Read each new source"
 INTERPRET_LABEL = "The copilot writes what a source means after it is profiled"
 INTERPRET_WHY = "Profiling is free and always happens. Reading spends a model exchange."
-WAREHOUSE_WHAT = "Warehouse"
+WAREHOUSE_WHAT = "Database"
 WAREHOUSE_WHY = (
     "The connection this project runs on, named in project.yaml; the account behind it is "
     "yours, in ~/.config/portia/connections.yaml. Set from Add data."
 )
 NO_WAREHOUSE = "none, files in the repo"
-WAREHOUSE_OPEN = "Connect a warehouse"
+WAREHOUSE_OPEN = "Connect a database"
 AGENT_WRITES_LABEL = "The copilot creates tables as it records steps"
 AGENT_WRITES_WHY = (
     "Each recorded step becomes a table in the warehouse, in the schema the copilot chose for "
@@ -270,7 +270,7 @@ def _data() -> None:
             # Drawn only while it can do what it says. It used to open the file
             # panel whatever the project held (2026-09-18).
             if engine.can_change_data(APP):
-                c.button(WAREHOUSE_OPEN, _connect_warehouse, icon="cloud")
+                c.button(WAREHOUSE_OPEN, _connect_warehouse, icon="dns")
     with c.setting(INTERPRET_WHAT, INTERPRET_WHY):
         ui.switch(INTERPRET_LABEL).classes("p-toggle").bind_value(APP, "interpret")
 

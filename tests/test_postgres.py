@@ -124,3 +124,16 @@ def test_an_estimated_row_count_says_so_wherever_it_is_shown():
     assert not catalog.rows_estimated(None)
     assert catalog._metadata_summary(estimated, 5).startswith("about 5000 rows, 5 columns.")
     assert catalog._metadata_summary({"rows": 3}, 2).startswith("3 rows, 2 columns.")
+
+
+def test_every_provider_has_its_mark_so_the_window_never_draws_a_blank():
+    """The card and the dialog draw a mark per provider, off a file and a CSS class named for it."""
+    from pathlib import Path
+
+    import portia.ui
+
+    assets = Path(portia.ui.__file__).parent / "assets"
+    css = (assets / "portia.css").read_text()
+    for kind in registry.PROVIDERS:
+        assert (assets / "connectors" / f"{kind}.svg").is_file(), kind
+        assert f".connector-glyph-{kind} " in css, kind
