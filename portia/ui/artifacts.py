@@ -125,8 +125,9 @@ def pane() -> None:
 # --- the warehouse (`docs/CONNECTOR.md` §2.13) -------------------------------
 
 #: Not a cloud: one of the databases can be on this machine (2026-09-20).
-WAREHOUSE_ICON = "dns"
-DATABASE_ICON = "storage"
+#: A connection is a link; the database it reaches is the cylinder under it.
+WAREHOUSE_ICON = "sym_r_link"
+DATABASE_ICON = c.DATABASE_GLYPH
 SCHEMA_ICON = "schema"
 #: A scoped or built table nobody has scanned. *Metadata only* rather than
 #: *not profiled* (2026-09-07): beside the Indexing tab's *not read* the old

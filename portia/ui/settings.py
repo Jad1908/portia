@@ -270,7 +270,7 @@ def _data() -> None:
             # Drawn only while it can do what it says. It used to open the file
             # panel whatever the project held (2026-09-18).
             if engine.can_change_data(APP):
-                c.button(WAREHOUSE_OPEN, _connect_warehouse, icon="dns")
+                c.button(WAREHOUSE_OPEN, _connect_warehouse, icon=c.DATABASE_GLYPH)
     with c.setting(INTERPRET_WHAT, INTERPRET_WHY):
         ui.switch(INTERPRET_LABEL).classes("p-toggle").bind_value(APP, "interpret")
 
