@@ -432,7 +432,7 @@ def _refresh() -> None:
 # --- the tick tree, which both routes draw ----------------------------------
 
 #: The glyph per container kind. A leaf has none: its name is its box's label.
-_TREE_ICONS = {tree.DATABASE: "storage", tree.SCHEMA: "schema", tree.FOLDER: "folder"}
+_TREE_ICONS = {tree.DATABASE: c.DATABASE_GLYPH, tree.SCHEMA: "schema", tree.FOLDER: "folder"}
 
 
 @dataclass(frozen=True)
@@ -1033,7 +1033,7 @@ CHOOSE_LOCAL = "Files in this repo"
 CHOOSE_WAREHOUSE = "A database"
 #: The glyph for *data behind a connection*. It was a cloud until one of the
 #: providers could be on the same machine.
-DATABASE_KIND_ICON = "dns"
+DATABASE_KIND_ICON = c.DATABASE_GLYPH
 
 
 def _provider_kinds() -> list[str]:

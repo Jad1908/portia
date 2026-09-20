@@ -5080,14 +5080,9 @@ body.tab-dragging .tab-drop {
   -webkit-mask-image: url(/portia-assets/providers/llamacpp.svg);
   mask-image: url(/portia-assets/providers/llamacpp.svg);
 }
-/* One mark per database portia connects to, under assets/connectors/, masked
- * so it takes the ink of where it sits. Same rule as the model providers'
- * marks above: kind, never rank. **Drawn for this repo, as line marks**
- * (2026-09-20, the user's call): the vendors' own filled logos were tried
- * first and read as rough at 16px, the elephant most of all, because a mask
- * keeps the silhouette and loses the inner lines that make it an elephant. One
- * 1.6 stroke on a 24 grid, round caps and joins, the weight of the Material
- * glyphs beside them. */
+/* One mark per database portia connects to, under assets/connectors/: the
+ * vendor's own, from Simple Icons (CC0), masked so it takes the ink of where it
+ * sits. Same rule as the model providers' marks above: kind, never rank. */
 .connector-glyph-snowflake {
   -webkit-mask-image: url(/portia-assets/connectors/snowflake.svg);
   mask-image: url(/portia-assets/connectors/snowflake.svg);

@@ -52,6 +52,12 @@ HIDDEN_FIELDS = ("portia_dir",)
 #: database glyph and was rejected at button size: three plain bars read as a
 #: hamburger menu, and `dns`'s indicator lights do not.
 INDEX_ICON = "dns"
+#: *Data behind a connection*, and a database in a tree: the cylinder, from
+#: Material Symbols Rounded, drawn as an outline. It was ``dns`` on the card and
+#: ``storage`` in the tree, two filled server racks, which read as rough beside
+#: everything else and, for ``dns``, was already the glyph for Index (the
+#: user's call, 2026-09-20: leaner, rounder).
+DATABASE_GLYPH = "sym_r_database"
 
 _NULL = "·"
 
