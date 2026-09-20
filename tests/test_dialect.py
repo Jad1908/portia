@@ -69,7 +69,7 @@ def test_snowflake_quartiles_are_three_aliases_read_back_in_order():
 
 
 def test_every_dialect_is_reachable_by_name():
-    assert set(dialect.BY_NAME) == {"duckdb", "snowflake", "bigquery"}
+    assert set(dialect.BY_NAME) == {"duckdb", "snowflake", "bigquery", "postgres"}
 
 
 def test_a_profile_under_snowflakes_dialect_writes_no_duckdb_only_sql():
@@ -146,6 +146,7 @@ def test_folding_is_the_engine_s_own_and_only_snowflake_upper_cases():
     assert dialect.DUCKDB.fold("stg_chicago") == "stg_chicago"
     assert dialect.SNOWFLAKE.fold("stg_chicago") == "STG_CHICAGO"
     assert dialect.BIGQUERY.fold("stg_chicago") == "stg_chicago"
+    assert dialect.POSTGRES.fold("STG_Chicago") == "stg_chicago", "PostgreSQL folds the other way"
 
 
 # --- quoting and casting are the dialect's (`CONNECTORS.md` §3) --------------------
@@ -240,6 +241,97 @@ def test_kind_of_reads_googlesqls_names():
     assert profiling.kind_of("STRING") == profiling.STRING
     assert profiling.kind_of("ARRAY<INT64>") == profiling.OTHER
     assert profiling.kind_of("STRUCT") == profiling.OTHER
+
+
+# --- PostgreSQL (`CONNECTORS.md` §9) ------------------------------------------------
+
+
+def test_postgres_keeps_filter_and_exact_quartiles_and_spells_the_rest_its_own_way():
+    d = dialect.POSTGRES
+    assert d.name == "postgres" and not d.approximate_quartiles
+    assert d.quote('a"b') == '"a""b"'
+    assert d.count_where("x > 1") == "count(*) FILTER (WHERE x > 1)"
+    assert (d.text, d.double) == ("text", "double precision")
+    assert d.as_text('"id"') == 'CAST("id" AS text)', "nothing casts to text by itself there"
+    assert dialect.DUCKDB.as_text('"id"') == '"id"', "and everywhere else it is left alone"
+    (expr,) = d.quartile_exprs('"n"').values()
+    assert expr == 'percentile_cont(ARRAY[0.25, 0.5, 0.75]) WITHIN GROUP (ORDER BY "n")'
+    assert d.read_quartiles({"c0_quartiles": [1.0, 2.0, 3.0]}, "c0") == (1.0, 2.0, 3.0)
+    assert d.read_quartiles({"c0_quartiles": None}, "c0") == (None, None, None)
+
+
+def test_the_guarded_cast_is_the_servers_own_parser_from_16_and_a_narrow_pattern_before():
+    exact = dialect.POSTGRES.try_cast('"x"', "double precision")
+    assert "pg_input_is_valid(CAST(\"x\" AS text), 'double precision')" in exact
+    older = dialect.POSTGRES_BEFORE_16.try_cast('"x"', "double precision")
+    assert "pg_input_is_valid" not in older and " ~ '" in older
+    assert "\\" not in older, "no backslash, so standard_conforming_strings cannot change it"
+    assert dialect.POSTGRES_BEFORE_16.name == "postgres", "one dialect to sqlglot and the prompt"
+    import pytest
+
+    with pytest.raises(ValueError, match="before PostgreSQL 16"):
+        dialect.POSTGRES_BEFORE_16.try_cast('"x"', "date")
+
+
+def test_the_pattern_admits_only_what_the_cast_cannot_refuse():
+    import re
+
+    pattern = re.compile(dialect._PLAIN_NUMBER.replace("[[:space:]]", r"\s"))
+    for good in ("1", "-1.5", " 12.50 ", ".5", "1e9", "+3.2E-4"):
+        assert pattern.match(good), good
+    for bad in ("", "n/a", "1,5", "NaN", "1e999", "0x10", "1.2.3", "9" * 201):
+        assert not pattern.match(bad), bad
+
+
+def test_writing_a_table_is_the_dialects_because_postgres_has_no_create_or_replace():
+    home, query = ["shop", "staging"], "SELECT 1 AS n"
+    assert dialect.DUCKDB.write_table(home, "t", query) == [
+        'CREATE SCHEMA IF NOT EXISTS "shop"."staging"',
+        'CREATE OR REPLACE TABLE "shop"."staging"."t" AS SELECT 1 AS n',
+    ]
+    schema, swap = dialect.POSTGRES.write_table(home, "t", query)
+    assert schema == 'CREATE SCHEMA IF NOT EXISTS "staging"', "a session reaches one database"
+    assert swap.startswith('DROP TABLE IF EXISTS "shop"."staging"."t"; CREATE TABLE ')
+    assert "CASCADE" not in swap, "a view somebody built on it must make the drop fail"
+
+
+def test_an_ordering_can_leave_out_what_the_engine_cannot_sort():
+    assert dialect.DUCKDB.orders_every_type and not dialect.POSTGRES.orders_every_type
+    assert dialect.DUCKDB.order_by_all(3, skip=[1]) == "ORDER BY ALL"
+    assert dialect.POSTGRES.order_by_all(3, skip=[1]) == "ORDER BY 1, 3"
+    assert dialect.POSTGRES.order_by_all(1, skip=[0]) == ""
+    assert dialect.SNOWFLAKE.order_by_all(2) == "ORDER BY 1, 2"
+
+
+def test_kind_of_reads_postgres_names_as_psql_shows_them():
+    kinds = {
+        "integer": profiling.INTEGER,
+        "bigint": profiling.INTEGER,
+        "numeric(10,2)": profiling.FLOAT,
+        "double precision": profiling.FLOAT,
+        "character varying(20)": profiling.STRING,
+        "character(3)": profiling.STRING,
+        "text": profiling.STRING,
+        "uuid": profiling.STRING,
+        "boolean": profiling.BOOLEAN,
+        "timestamp without time zone": profiling.DATETIME,
+        "date": profiling.DATETIME,
+        "jsonb": profiling.OTHER,
+        "text[]": profiling.OTHER,
+    }
+    assert {name: profiling.kind_of(name) for name in kinds} == kinds
+
+
+def test_a_profile_under_postgres_reads_a_string_and_an_untyped_column_as_text():
+    exprs = profiling._stat_exprs(
+        {"ID": profiling.STRING, "meta": profiling.OTHER, "n": profiling.INTEGER}, dialect.POSTGRES
+    )
+    assert 'CAST("ID" AS text) <> trim(CAST("ID" AS text))' in exprs["c0_whitespace"]
+    assert exprs["c0_distinct"] == 'count(DISTINCT "ID")'
+    assert exprs["c1_distinct"] == 'count(DISTINCT CAST("meta" AS text))', "json has no equality"
+    assert "try_cast" not in " ".join(exprs.values())
+    local = profiling._stat_exprs({"meta": profiling.OTHER}, dialect.DUCKDB)
+    assert local["c0_distinct"] == 'count(DISTINCT "meta")', "DuckDB is asked what it always was"
 
 
 def test_a_query_read_as_a_whole_carries_an_alias_because_postgres_before_16_requires_one(con):

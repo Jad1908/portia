@@ -211,3 +211,29 @@ def bigquery_session():
     session = pool.connect()
     yield session
     pool.close()
+
+
+@pytest.fixture
+def postgres_session():
+    """A real PostgreSQL session — or a skip. ``PORTIA_TEST_POSTGRES=<name>``.
+
+    The other two fixtures' argument (`docs/CONNECTORS.md` §4): a stub answering
+    a server's questions would be a second, wrong PostgreSQL. The name is one of
+    the user's own connections; a password is read from ``PGPASSWORD``, which is
+    also where libpq looks, so a connection that signs in from a password file
+    needs nothing here. The tests write to one schema of their own.
+    """
+    pytest.importorskip("psycopg", reason="the postgres extra is not installed")
+    name = os.environ.get("PORTIA_TEST_POSTGRES")
+    if not name:
+        pytest.skip("no PORTIA_TEST_POSTGRES — name a connection from connections.yaml")
+    from portia.connectors import postgres, registry
+
+    try:
+        connection = registry.get(name)
+    except KeyError:
+        pytest.skip(f"no connection {name!r} in {registry.CONNECTIONS}")
+    pool = postgres.Pool(connection)
+    session = pool.connect(os.environ.get("PGPASSWORD"))
+    yield session
+    pool.close()

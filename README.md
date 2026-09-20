@@ -8,7 +8,7 @@
   <p>
     <img alt="python 3.11+" src="https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white">
     <img alt="engine: DuckDB" src="https://img.shields.io/badge/engine-DuckDB-FFF000?logo=duckdb&logoColor=black">
-    <img alt="warehouse: Snowflake, BigQuery" src="https://img.shields.io/badge/warehouse-Snowflake%20%C2%B7%20BigQuery-29B5E8">
+    <img alt="databases: Snowflake, BigQuery, PostgreSQL" src="https://img.shields.io/badge/databases-Snowflake%20%C2%B7%20BigQuery%20%C2%B7%20PostgreSQL-29B5E8">
     <img alt="copilot: Claude or a local model" src="https://img.shields.io/badge/copilot-Claude%20or%20local-D97757">
   </p>
 
@@ -18,8 +18,8 @@
 
 ---
 
-portia is a copilot for data work. Connect it to Snowflake, BigQuery or a folder of CSV and
-Parquet files. It profiles every table, answers your questions about them, draws charts, and builds
+portia is a copilot for data work. Connect it to Snowflake, BigQuery, PostgreSQL or a folder of CSV
+and Parquet files. It profiles every table, answers your questions about them, draws charts, and builds
 the tables you ask for one decision at a time. Each decision is recorded in a YAML spec and compiled
 to dbt-shaped SQL that runs without portia.
 
@@ -34,7 +34,7 @@ Requires Python 3.11+, [uv](https://docs.astral.sh/uv/) and Docker.
 ```bash
 git clone https://github.com/Jad1908/portia.git
 cd portia
-uv sync --extra ui --extra agent --extra graph      # add --extra snowflake or --extra bigquery
+uv sync --extra ui --extra agent --extra graph      # add --extra snowflake, bigquery or postgres
 docker compose up -d neo4j
 ```
 
@@ -69,8 +69,8 @@ project to `sandbox/demo` and `devtools/demodata/DEMO.md` says what is planted i
 
 ## Features
 
-- **Snowflake, BigQuery and local files.** Tables are read where they are. On a warehouse, queries run under
-  your role and nothing is pulled down. On disk, nothing is copied.
+- **Snowflake, BigQuery, PostgreSQL and local files.** Tables are read where they are. On a database,
+  queries run under your role, nothing is pulled down, and built tables are created there. On disk, nothing is copied.
 - **Profiling and join diagnosis.** Null rates, distinct counts, key coverage and fan-out, measured
   before any join is run.
 - **Charts in the conversation.** Ask to be shown something and the chart opens in a tab beside the

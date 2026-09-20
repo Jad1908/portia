@@ -34,7 +34,7 @@ from __future__ import annotations
 from difflib import get_close_matches
 from typing import Any
 
-from portia.checks.profiling import BOOLEAN, DATETIME, NUMERIC_KINDS, kind_of
+from portia.checks.profiling import BOOLEAN, DATETIME, NUMERIC_KINDS, OTHER, kind_of
 from portia.core import dialect as dialects
 from portia.core.dialect import Dialect
 from portia.core.serialize import round_float, to_jsonable
@@ -567,6 +567,19 @@ def example_columns(table: Table, keys: list[str], named: list[str] | None) -> l
     return [*keys, *rest]
 
 
+def _unsortable(this: Table, columns: list[str]) -> list[int]:
+    """Positions in ``columns`` to leave out of an ordering, on an engine that needs telling.
+
+    A type with no kind is left out where the engine cannot sort every type:
+    one ``json`` column on a PostgreSQL table refused every example row of a
+    join against it. The schema is only asked for on such an engine.
+    """
+    if this.dialect.orders_every_type:
+        return []
+    dtypes = this.dtypes
+    return [i for i, c in enumerate(columns) if kind_of(dtypes.get(c, "")) == OTHER]
+
+
 def _example_rows(this: Table, columns: list[str], where: str) -> list[dict]:
     """Example rows, projected to ``columns``.
 
@@ -577,7 +590,7 @@ def _example_rows(this: Table, columns: list[str], where: str) -> list[dict]:
     → Checks, *"every sample list is alphabetical, never by frequency"*.
     """
     projection = ", ".join(this.dialect.quote(c) for c in columns)
-    order = this.dialect.order_by_all(len(columns))
+    order = this.dialect.order_by_all(len(columns), skip=_unsortable(this, columns))
     sql = (
         f"SELECT {projection} FROM ({this.query}) AS __t WHERE {where} {order} LIMIT {SAMPLE_ROWS}"
     )

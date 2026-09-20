@@ -61,6 +61,12 @@ bigquery = [
     "google-cloud-bigquery>=3.20",
     "sqlglot>=25.0",
 ]
+# The PostgreSQL connector (docs/CONNECTORS.md §9). `binary` ships libpq inside
+# the wheel, so nobody installs Postgres to talk to one.
+postgres = [
+    "psycopg[binary]>=3.2",
+    "sqlglot>=25.0",
+]
 
 [build-system]
 requires = ["hatchling"]

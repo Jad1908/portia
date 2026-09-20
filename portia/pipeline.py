@@ -446,11 +446,10 @@ def _write_into_warehouse(name: str, results: list[StepResult], con: Any, target
     assert table is not None
     dialect = dialects.of(con)
     home = table_home(target, dialect)
-    con.execute(f"CREATE SCHEMA IF NOT EXISTS {'.'.join(dialect.quote(p) for p in home)}")
-    parts = [*home, dialect.fold(name)]
-    qualified = ".".join(dialect.quote(p) for p in parts)
-    con.execute(f"CREATE OR REPLACE TABLE {qualified} AS {table.query}")
-    return ".".join(parts)
+    folded = dialect.fold(name)
+    for statement in dialect.write_table(home, folded, table.query):
+        con.execute(statement)
+    return ".".join([*home, folded])
 
 
 def _spec_target(active: backend.Backend, name: str, doc: dict, path: Path) -> str | None:
