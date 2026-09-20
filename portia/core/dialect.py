@@ -14,9 +14,9 @@ that says nothing is DuckDB, which is what every connection was before
 and a test that profiles a DuckDB table while a Snowflake backend is active
 still profiles it correctly.
 
-**Two instances, no registry.** A third engine adds a subclass here and one
-prompt file (`prompts/backend/`); that is the whole of what `CONNECTOR.md` §2.9
-asks of it.
+**An instance per engine, no registry.** A new engine adds a subclass here and
+one prompt file (`prompts/backend/`); that is the whole of what `CONNECTOR.md`
+§2.9 asks of it.
 """
 
 from __future__ import annotations
@@ -55,6 +55,15 @@ class Dialect:
         """A cast that yields NULL where it would fail, so failures can be counted."""
         return f"try_cast({expr} AS {type_name})"
 
+    def as_text(self, expr: str) -> str:
+        """``expr`` where a string function will accept it.
+
+        Unchanged here and on both warehouses, which cast to text by themselves.
+        Postgres does not: ``trim`` of a ``uuid`` is an error there, and the
+        profiler calls a ``uuid`` a string (`checks.profiling.kind_of`).
+        """
+        return expr
+
     def count_where(self, condition: str) -> str:
         """``count(*)`` over the rows where ``condition`` holds."""
         return f"count(*) FILTER (WHERE {condition})"
@@ -83,8 +92,17 @@ class Dialect:
         q25, median, q75 = stats[f"{prefix}_quartiles"]
         return q25, median, q75
 
-    def order_by_all(self, n_columns: int) -> str:
-        """Order by every projected column, so a ``LIMIT`` is the same rows every run."""
+    #: Whether every type the engine stores can be sorted. False where one
+    #: cannot (PostgreSQL's ``json``), and a caller ordering a projection it did
+    #: not choose then passes ``skip`` to :meth:`order_by_all`.
+    orders_every_type = True
+
+    def order_by_all(self, n_columns: int, skip: Iterable[int] = ()) -> str:
+        """Order by every projected column, so a ``LIMIT`` is the same rows every run.
+
+        ``skip`` is the zero-based positions to leave out of the ordering, for
+        an engine that says it cannot sort every type.
+        """
         return "ORDER BY ALL"
 
     def fold(self, identifier: str) -> str:
@@ -97,6 +115,27 @@ class Dialect:
         reserved word as a model name still works.
         """
         return identifier
+
+    def write_table(self, home: list[str], name: str, query: str) -> list[str]:
+        """The statements that leave ``query``'s rows in ``home.name``, replacing what was there.
+
+        ``home`` is ``[database, schema]`` and every part arrives folded. A list
+        because not every engine has ``CREATE OR REPLACE TABLE``
+        (`pipeline._write_into_warehouse` runs them in order).
+        """
+        where = ".".join(self.quote(p) for p in home)
+        table = ".".join(self.quote(p) for p in [*home, name])
+        return [
+            f"CREATE SCHEMA IF NOT EXISTS {where}",
+            f"CREATE OR REPLACE TABLE {table} AS {query}",
+        ]
+
+
+def _by_ordinals(n_columns: int, skip: Iterable[int] = ()) -> str:
+    """``ORDER BY 1, 2, …``: what ``ORDER BY ALL`` says, on an engine without it."""
+    left_out = set(skip)
+    ordinals = [str(i + 1) for i in range(n_columns) if i not in left_out]
+    return "ORDER BY " + ", ".join(ordinals) if ordinals else ""
 
 
 class Snowflake(Dialect):
@@ -129,10 +168,8 @@ class Snowflake(Dialect):
     def read_quartiles(self, stats: dict, prefix: str) -> tuple[Any, Any, Any]:
         return stats[f"{prefix}_q25"], stats[f"{prefix}_median"], stats[f"{prefix}_q75"]
 
-    def order_by_all(self, n_columns: int) -> str:
-        if n_columns <= 0:
-            return ""
-        return "ORDER BY " + ", ".join(str(i + 1) for i in range(n_columns))
+    def order_by_all(self, n_columns: int, skip: Iterable[int] = ()) -> str:
+        return _by_ordinals(n_columns, skip)
 
     def fold(self, identifier: str) -> str:
         """Upper: ``stg_chicago`` created quoted lower would need quoting forever."""
@@ -192,11 +229,102 @@ class BigQuery(Dialect):
         step = QUANTILE_BUCKETS // 4
         return boundaries[step], boundaries[2 * step], boundaries[3 * step]
 
-    def order_by_all(self, n_columns: int) -> str:
-        if n_columns <= 0:
-            return ""
-        return "ORDER BY " + ", ".join(str(i + 1) for i in range(n_columns))
+    def order_by_all(self, n_columns: int, skip: Iterable[int] = ()) -> str:
+        return _by_ordinals(n_columns, skip)
 
+
+class Postgres(Dialect):
+    """PostgreSQL's spellings (`docs/CONNECTORS.md` §9). Closest to DuckDB of the three.
+
+    Double quotes, ``FILTER (WHERE …)`` and exact quartiles all hold. What
+    differs:
+
+    - **An unquoted identifier folds to lower case**, the opposite of Snowflake.
+    - **Nothing casts to text by itself**, so `as_text` spells the cast.
+    - **There is no ``try_cast``.** Version 16 added ``pg_input_is_valid``, which
+      asks the type's own parser and is exact. `PostgresBefore16` is the
+      spelling for an older server.
+    - **The quartiles are one ordered-set aggregate over an array of
+      fractions**, so one sort and not three, read back as a list the way
+      DuckDB's are.
+    - **``CREATE OR REPLACE TABLE`` does not exist**, and ``CREATE SCHEMA`` takes
+      a bare name because a session reaches one database. `write_table` drops
+      and creates in **one** string: the driver sends it as one simple query,
+      which the server runs as one transaction, so a build that fails leaves the
+      old table. No ``CASCADE``: a view somebody built on the table makes the
+      drop fail in the server's own words, which is the right outcome.
+    """
+
+    name = "postgres"
+    text = "text"
+    double = "double precision"
+    #: ``json``, ``xml`` and the geometric types have no ordering operator.
+    orders_every_type = False
+
+    def as_text(self, expr: str) -> str:
+        return f"CAST({expr} AS {self.text})"
+
+    def try_cast(self, expr: str, type_name: str) -> str:
+        text = self.as_text(expr)
+        return (
+            f"CASE WHEN pg_input_is_valid({text}, '{type_name}') "
+            f"THEN CAST({text} AS {type_name}) END"
+        )
+
+    def quartile_exprs(self, column: str) -> dict[str, str]:
+        return {
+            "quartiles": f"percentile_cont(ARRAY[0.25, 0.5, 0.75]) WITHIN GROUP (ORDER BY {column})"
+        }
+
+    def read_quartiles(self, stats: dict, prefix: str) -> tuple[Any, Any, Any]:
+        values = stats[f"{prefix}_quartiles"]
+        if not values:
+            return None, None, None
+        q25, median, q75 = values
+        return q25, median, q75
+
+    def order_by_all(self, n_columns: int, skip: Iterable[int] = ()) -> str:
+        return _by_ordinals(n_columns, skip)
+
+    def fold(self, identifier: str) -> str:
+        """Lower: ``STG_ORDERS`` created quoted upper would need quoting forever."""
+        return identifier.lower()
+
+    def write_table(self, home: list[str], name: str, query: str) -> list[str]:
+        schema = self.quote(home[-1])
+        table = ".".join(self.quote(p) for p in [*home, name])
+        return [
+            f"CREATE SCHEMA IF NOT EXISTS {schema}",
+            f"DROP TABLE IF EXISTS {table}; CREATE TABLE {table} AS {query}",
+        ]
+
+
+class PostgresBefore16(Postgres):
+    """A server older than 16, which has no ``pg_input_is_valid``.
+
+    The cast is guarded by a pattern instead, and the pattern is **narrower than
+    the parser on purpose**: a string it admits and the cast then refuses would
+    fail the whole profile, so it admits plain decimals with a short exponent
+    and nothing else. ``NaN`` and ``Infinity`` parse on 16 and are not counted
+    here. Only ``double precision`` is asked for anywhere in portia
+    (`checks.profiling`, `ops.normalize`); another type is refused rather than
+    guessed at.
+    """
+
+    def try_cast(self, expr: str, type_name: str) -> str:
+        if type_name != self.double:
+            raise ValueError(f"no guarded cast to {type_name!r} before PostgreSQL 16")
+        text = self.as_text(expr)
+        return f"CASE WHEN {text} ~ '{_PLAIN_NUMBER}' THEN CAST({text} AS {type_name}) END"
+
+
+#: What `PostgresBefore16.try_cast` lets through to the cast. The digit caps keep
+#: an admitted string inside ``double precision``'s range, where the cast cannot
+#: raise. No backslash in it, so it reads the same whatever
+#: ``standard_conforming_strings`` is set to.
+_PLAIN_NUMBER = (
+    "^[[:space:]]*[+-]?([0-9]{1,200}([.][0-9]*)?|[.][0-9]+)([eE][+-]?[0-9]{1,2})?[[:space:]]*$"
+)
 
 #: How many buckets `BigQuery.quartile_exprs` asks ``APPROX_QUANTILES`` for.
 #: A thousand puts each quartile within a tenth of a percentile of the exact
@@ -207,10 +335,12 @@ QUANTILE_BUCKETS = 1000
 DUCKDB = Dialect()
 SNOWFLAKE = Snowflake()
 BIGQUERY = BigQuery()
+POSTGRES = Postgres()
+POSTGRES_BEFORE_16 = PostgresBefore16()
 
 #: Every dialect there is, by name — what `core/backend.py` and the prompt
 #: composer look one up by.
-BY_NAME: dict[str, Dialect] = {d.name: d for d in (DUCKDB, SNOWFLAKE, BIGQUERY)}
+BY_NAME: dict[str, Dialect] = {d.name: d for d in (DUCKDB, SNOWFLAKE, BIGQUERY, POSTGRES)}
 
 
 def of(con: Any) -> Dialect:

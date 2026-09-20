@@ -29,6 +29,7 @@ by default, and offer what exists*; :func:`suggestions` is the second half.
 
 from __future__ import annotations
 
+import configparser
 import os
 import sys
 import tomllib
@@ -462,9 +463,75 @@ BIGQUERY = Provider(
     levels=("project", "dataset"),
 )
 
+# --- PostgreSQL (`docs/CONNECTORS.md` §9) -----------------------------------------
+
+#: How a PostgreSQL connection signs in. ``password`` is typed per session and
+#: held on the pool. ``pgpass`` sends none and lets libpq look where ``psql``
+#: looks: ``~/.pgpass``, ``PGPASSWORD``, or nothing on a server that trusts the
+#: socket. It is the method with nothing to type, which is what a session with
+#: no window needs.
+PGPASS = "pgpass"
+
+
+def pg_service_file() -> Path:
+    """Where libpq reads named services: ``$PGSERVICEFILE`` or ``~/.pg_service.conf``."""
+    override = os.environ.get("PGSERVICEFILE")
+    return Path(override).expanduser() if override else Path.home() / ".pg_service.conf"
+
+
+def postgres_suggestions(path: Path | None = None) -> list[Connection]:
+    """The services libpq's own file describes, as portia's shape, for the form to offer.
+
+    Read and never written, the rule the other two follow. A ``password`` line
+    in it is dropped.
+    """
+    parser = configparser.ConfigParser(interpolation=None)
+    try:
+        parser.read_string((path or pg_service_file()).read_text())
+    except (OSError, configparser.Error):
+        return []
+    return [
+        Connection(
+            name=name,
+            kind=POSTGRES.kind,
+            host=_opt(service.get("host")),
+            port=_opt(service.get("port")),
+            database=_opt(service.get("dbname")),
+            user=_opt(service.get("user")),
+            sslmode=_opt(service.get("sslmode")),
+        )
+        for name, service in parser.items()
+        if name != parser.default_section
+    ]
+
+
+POSTGRES = Provider(
+    kind="postgres",
+    label="PostgreSQL",
+    icon="storage",
+    fields=(
+        Field("host", "Host", True, "localhost"),
+        Field("port", "Port", False, "5432"),
+        Field("database", "Database", True, "shop"),
+        Field("user", "User", True, "jane"),
+        Field("schema", "Schema", False, "public"),
+        Field("sslmode", "SSL mode", False, "require"),
+    ),
+    auth=(
+        Auth(PASSWORD, "Password", secret="Password"),
+        Auth(PGPASS, "Password file"),
+    ),
+    summary=lambda c: f"{c.user or ''}@{c.host or ''}/{c.database or ''}",
+    suggest=postgres_suggestions,
+)
+
 #: Every warehouse portia can connect to, by kind. The dialog's provider list
 #: and `connectors.module_for` both read this, in this order.
-PROVIDERS: dict[str, Provider] = {SNOWFLAKE.kind: SNOWFLAKE, BIGQUERY.kind: BIGQUERY}
+PROVIDERS: dict[str, Provider] = {
+    SNOWFLAKE.kind: SNOWFLAKE,
+    BIGQUERY.kind: BIGQUERY,
+    POSTGRES.kind: POSTGRES,
+}
 
 #: What an entry with no ``kind`` is: every file written before there was a
 #: second provider names a Snowflake connection.

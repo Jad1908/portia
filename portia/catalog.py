@@ -424,10 +424,22 @@ def is_profiled(entry: dict) -> bool:
     return not entry.get(REMOTE) or bool(entry.get("profiled"))
 
 
+def rows_estimated(indexed: dict | None) -> bool:
+    """Whether an entry's free row count is the engine's estimate and not a count.
+
+    PostgreSQL's is what the planner believed at the last ``ANALYZE``
+    (`connectors/postgres.Session.table_facts`). A field on the facts, read
+    here once, so every surface that shows the number says the same thing
+    about it.
+    """
+    return "rows" in ((indexed or {}).get("approximate") or [])
+
+
 def _metadata_summary(facts: dict, n_columns: int) -> str:
     """The placeholder for a table nobody has profiled or read yet."""
     rows = facts.get("rows")
-    lead = f"{rows} rows, " if rows is not None else ""
+    about = "about " if rows_estimated(facts) else ""
+    lead = f"{about}{rows} rows, " if rows is not None else ""
     return f"{lead}{n_columns} columns. Not profiled. {AUTO_DRAFT_MARKER} — the agent will refine this.)"
 
 

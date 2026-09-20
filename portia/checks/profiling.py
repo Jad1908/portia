@@ -67,7 +67,7 @@ BOOLEAN, DATETIME, STRING, OTHER = "boolean", "datetime", "string", "other"
 #: Kinds that get describe()-style range and spread rather than a modal value.
 NUMERIC_KINDS = frozenset({INTEGER, FLOAT, NUMERIC})
 
-#: DuckDB's names, then Snowflake's and BigQuery's where they differ.
+#: DuckDB's names, then Snowflake's, BigQuery's and PostgreSQL's where they differ.
 #: Snowflake's numbers are all ``NUMBER(p, s)`` and are read by `_scale`; its
 #: text is ``TEXT`` and its timestamps are ``TIMESTAMP_NTZ``/``_LTZ``/``_TZ``,
 #: which the prefix match already covers. BigQuery says ``INT64``, ``FLOAT64``,
@@ -93,6 +93,9 @@ _INTEGERS = frozenset(
 _FLOATS = frozenset({"FLOAT", "FLOAT4", "FLOAT8", "REAL", "DOUBLE", "DOUBLE PRECISION", "FLOAT64"})
 _DECIMALS = ("DECIMAL", "NUMERIC", "BIGNUMERIC")
 _STRINGS = frozenset({"VARCHAR", "CHAR", "BPCHAR", "TEXT", "STRING", "UUID"})
+#: PostgreSQL spells its bounded strings out, with the bound: ``character
+#: varying(20)``, ``character(3)``.
+_STRING_PREFIXES = ("CHARACTER",)
 _TEMPORAL = ("DATE", "TIME", "TIMESTAMP", "INTERVAL")
 _BOOLEANS = frozenset({"BOOLEAN", "BOOL"})
 
@@ -233,9 +236,20 @@ def _column_extras(
     table: Table, col: str, kind: str, n_non_null: int, sample_values: int
 ) -> Extras:
     cancel.check()
-    samples = _table_samples(table, col, sample_values)
+    samples = _table_samples(table, col, sample_values, kind)
     wants_top = bool(n_non_null) and kind not in NUMERIC_KINDS and kind != BOOLEAN
-    return samples, _table_top(table, col) if wants_top else None
+    return samples, _table_top(table, col, kind) if wants_top else None
+
+
+def _comparable(dialect: Dialect, col: str, kind: str) -> str:
+    """The column as something the engine can compare, group and order.
+
+    A type portia has no kind for is read as text where the engine needs
+    telling (`Dialect.as_text`): PostgreSQL's ``json`` has no equality, so
+    ``count(DISTINCT …)`` over one failed the whole table's profile.
+    """
+    q = dialect.quote(col)
+    return dialect.as_text(q) if kind == OTHER else q
 
 
 def _stat_exprs(kinds: dict[str, str], dialect: Dialect = dialects.DUCKDB) -> dict[str, str]:
@@ -248,7 +262,7 @@ def _stat_exprs(kinds: dict[str, str], dialect: Dialect = dialects.DUCKDB) -> di
     for i, (col, kind) in enumerate(kinds.items()):
         q = dialect.quote(col)
         exprs[f"c{i}_non_null"] = f"count({q})"
-        exprs[f"c{i}_distinct"] = f"count(DISTINCT {q})"
+        exprs[f"c{i}_distinct"] = f"count(DISTINCT {_comparable(dialect, col, kind)})"
         if kind in NUMERIC_KINDS:
             exprs[f"c{i}_min"] = f"min({q})"
             exprs[f"c{i}_max"] = f"max({q})"
@@ -264,7 +278,8 @@ def _stat_exprs(kinds: dict[str, str], dialect: Dialect = dialects.DUCKDB) -> di
             for suffix, expr in dialect.quartile_exprs(q).items():
                 exprs[f"c{i}_{suffix}"] = expr
         elif kind == STRING:
-            exprs[f"c{i}_whitespace"] = dialect.count_where(f"{q} <> trim({q})")
+            text = dialect.as_text(q)
+            exprs[f"c{i}_whitespace"] = dialect.count_where(f"{text} <> trim({text})")
             parses = dialect.try_cast(q, dialect.double)
             exprs[f"c{i}_numeric"] = dialect.count_where(f"{parses} IS NOT NULL")
     return exprs
@@ -322,23 +337,23 @@ def _table_column(
     return out
 
 
-def _table_samples(table: Table, col: str, k: int) -> list:
+def _table_samples(table: Table, col: str, k: int, kind: str = STRING) -> list:
     """Example values — distinct and ordered. See :data:`SAMPLE_VALUES` for why."""
-    q = table.dialect.quote(col)
+    q = _comparable(table.dialect, col, kind)
     rows = table.sql(
         f"SELECT DISTINCT {q} FROM {table.ref} WHERE {q} IS NOT NULL ORDER BY {q}"
     ).rows(k)
     return [to_jsonable(v) for (v,) in rows]
 
 
-def _table_top(table: Table, col: str) -> tuple[Any, int] | None:
+def _table_top(table: Table, col: str, kind: str = STRING) -> tuple[Any, int] | None:
     """The modal value and its count, ties broken by the value itself.
 
     ``ORDER BY count(*) DESC`` alone leaves a tie undefined, and half the fixture
     columns have one — `hotels.city` is Paris 2, Amsterdam 2, Barcelona 1. An
     undefined answer is not a measurement, so the smaller value wins.
     """
-    q = table.dialect.quote(col)
+    q = _comparable(table.dialect, col, kind)
     rows = table.sql(
         f"SELECT {q} AS v, count(*) AS n FROM {table.ref} "
         f"WHERE {q} IS NOT NULL GROUP BY {q} ORDER BY n DESC, {q} ASC"
@@ -389,7 +404,7 @@ def kind_of(dtype: str) -> str:
         return INTEGER if _scale(name) == 0 else FLOAT
     if name in _FLOATS or name.startswith(_DECIMALS):
         return FLOAT
-    if name in _STRINGS:
+    if name in _STRINGS or name.startswith(_STRING_PREFIXES):
         return STRING
     return OTHER
 

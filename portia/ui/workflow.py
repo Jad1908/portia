@@ -1359,7 +1359,7 @@ def _source_inspector(name: str) -> None:
                 c.kv("connection", APP.connection or "")
                 rows = (entry.get("indexed") or {}).get("rows")
                 if rows is not None:
-                    c.kv("rows", c.count(int(rows), "row"))
+                    c.kv(_rows_label(entry), c.count(int(rows), "row"))
             else:
                 c.kv("file", entry.get("source", ""))
         if remote:
@@ -1386,6 +1386,11 @@ _PROFILED_AT = "profiled {at}"
 _PROFILE_NOW = "Profile now"
 _PROFILING = "Profiling {name}…"
 _NOT_CONNECTED_FOR_PROFILE = "Connect to the warehouse first."
+
+
+def _rows_label(entry: dict) -> str:
+    """``rows``, or ``rows (estimate)`` when the engine's free count is one."""
+    return "rows (estimate)" if catalog.rows_estimated(entry.get("indexed")) else "rows"
 
 
 def _profile_state(name: str, entry: dict) -> None:
@@ -1810,7 +1815,7 @@ def _built_entry(name: str, entry: dict) -> None:
             c.kv("connection", APP.connection or "")
         rows = (entry.get("indexed") or {}).get("rows")
         if rows is not None:
-            c.kv("rows", c.count(int(rows), "row"))
+            c.kv(_rows_label(entry), c.count(int(rows), "row"))
         built = (entry.get("built") or {}).get("at")
         if built:
             c.kv("built", str(built)[:16].replace("T", " "))

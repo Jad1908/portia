@@ -98,6 +98,21 @@ FORBIDDEN = (
     # database through a federated connection, and ``LOAD DATA`` / ``EXPORT
     # DATA`` are already caught by the words they start with.
     "external_query",
+    # PostgreSQL's (`docs/CONNECTORS.md` §9): functions a SELECT can call that
+    # read the server's files, reach another server, or act on a session.
+    # ``COPY`` and ``DO`` are caught above and by the statement's first word.
+    "dblink",
+    "dblink_exec",
+    "lo_export",
+    "lo_import",
+    "pg_cancel_backend",
+    "pg_ls_dir",
+    "pg_read_binary_file",
+    "pg_read_file",
+    "pg_reload_conf",
+    "pg_sleep",
+    "pg_terminate_backend",
+    "set_config",
 )
 
 #: Snowflake's ``SYSTEM$…`` functions — cancel a query, ask for a token, reach
@@ -174,7 +189,7 @@ def referenced_tables(sql: str, *, dialect: str = "duckdb") -> set[str]:
         from sqlglot import exp
     except ImportError as exc:  # pragma: no cover - the extra pins it
         raise RuntimeError(
-            "checking which tables a statement names needs sqlglot — `uv sync --extra snowflake`"
+            "checking which tables a statement names needs sqlglot — `uv sync --extra postgres` (any connector's extra brings it)"
         ) from exc
     parsed = sqlglot.parse_one(sql, read=dialect)
     defined = {cte.alias_or_name for cte in parsed.find_all(exp.CTE)}

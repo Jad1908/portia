@@ -418,6 +418,15 @@ def test_the_parse_check_and_the_quoted_binding_speak_googlesql():
     assert sql_op.compose(inputs, bound).startswith("WITH `orders` AS (SELECT 1 AS id)")
 
 
+def test_postgres_functions_that_leave_the_tables_are_refused():
+    from portia.ops.sql import SqlNotAllowed, check_sql
+
+    for call in ("pg_read_file('/etc/passwd')", "dblink('host=x', 'select 1')", "pg_sleep(60)"):
+        with pytest.raises(SqlNotAllowed):
+            check_sql(f"SELECT {call}")
+    check_sql("SELECT pg_typeof(amount), settings FROM t")  # near a refused word is fine
+
+
 def test_a_second_transform_compiles_to_a_bracketed_query_that_runs(con):
     """Two transforms compiled to ``FROM SELECT …``, in a file nothing executed."""
     import pandas as pd

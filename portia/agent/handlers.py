@@ -177,7 +177,17 @@ def describe_source(source: str, portia_dir: str = catalog.DEFAULT_DIR) -> dict:
         **(
             {}
             if profiled
-            else {"profiled": False, "n_rows": (entry.get("indexed") or {}).get("rows")}
+            else {
+                "profiled": False,
+                "n_rows": (entry.get("indexed") or {}).get("rows"),
+                # The planner's estimate on PostgreSQL. A field, because a bare
+                # number reads as a count.
+                **(
+                    {"approximate": ["n_rows"]}
+                    if catalog.rows_estimated(entry.get("indexed"))
+                    else {}
+                ),
+            }
         ),
         "columns": [
             {
