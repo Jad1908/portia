@@ -169,8 +169,7 @@ def open_project(path: str | Path, app: App) -> Path:
     # browser (`docs/CONNECTOR.md` §2.4).
     app.warehouse_closed = frozenset()
     app.connect_form, app.connect_error, app.connect_secret = {}, "", ""
-    app.scope_open, app.scope_listing, app.scope_ticks = frozenset(), {}, frozenset()
-    app.scope_filter, app.scope_loading = "", None
+    forget_scope_picker(app)
     install_backend(app)
     # Where the data is, when the project has already said (`state.data_mode`).
     if app.connection:
@@ -197,6 +196,7 @@ def choose_data(mode: str, app: App) -> None:
     if mode == State.LOCAL_DATA and app.connection and can_change_data(app):
         catalog.set_connection(None, portia_dir=app.portia_dir)
         refresh_catalog(app)
+        forget_scope_picker(app)
         install_backend(app)
     app.data_mode = mode
 
@@ -230,6 +230,22 @@ def needs_secret(app: App) -> bool:
 
 
 # --- the warehouse ----------------------------------------------------------
+
+
+def forget_scope_picker(app: App) -> None:
+    """Drop what the scope picker listed and ticked: it was another connection's.
+
+    A browse is a query, so `browse_scope` keeps each answer on the app and the
+    picker draws from there. **That answer belongs to the connection that gave
+    it** *(2026-09-20, the user's report)*: connect to BigQuery, then connect to
+    PostgreSQL from the same screen, and the tree still drew BigQuery's
+    datasets, because the databases were already listed and were never asked
+    for again. The ticks go too: a ticked table of the last connection is a
+    name this one may not have. Called wherever the project's connection is
+    set, never from a render.
+    """
+    app.scope_open, app.scope_listing, app.scope_ticks = frozenset(), {}, frozenset()
+    app.scope_filter, app.scope_loading = "", None
 
 
 def install_backend(app: App) -> None:
@@ -446,6 +462,7 @@ def save_connection(fields: dict[str, str], *, app: App, agent_writes: bool = Fa
     registry.save(connection)
     catalog.set_connection(connection.name, agent_writes=agent_writes, portia_dir=app.portia_dir)
     refresh_catalog(app)
+    forget_scope_picker(app)
     install_backend(app)
     return connection.name
 
@@ -454,6 +471,7 @@ def clear_connection(app: App) -> None:
     """Make the project local again. The scope stays; forgetting it is a separate act."""
     catalog.set_connection(None, portia_dir=app.portia_dir)
     refresh_catalog(app)
+    forget_scope_picker(app)
     install_backend(app)
 
 

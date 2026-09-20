@@ -306,3 +306,50 @@ def test_the_form_carries_the_provider_and_the_dialog_starts_a_new_one_on_the_li
     with pytest.raises(ValueError, match="no connector for 'oracle'"):
         engine.save_connection({"name": "x", "kind": "oracle"}, app=app)
     engine.clear_connection(app)
+
+
+def test_switching_connection_forgets_what_the_picker_listed_for_the_last_one(
+    tmp_path, monkeypatch
+):
+    """The user's report, 2026-09-20: connect to one database, then to another from
+    the same screen, and the tree still drew the first one's schemas. A browse is
+    kept on the app so a redraw costs no query, and nothing dropped it when the
+    connection under it changed, so the databases were never asked for again."""
+    from portia.connectors import registry
+
+    monkeypatch.setattr(registry, "CONNECTIONS", tmp_path / "c.yaml")
+    catalog.init_project("x", portia_dir=tmp_path / ".portia")
+    app = App()
+    engine.open_project(tmp_path, app)
+    engine.save_connection(
+        {"name": "first", "account": "a", "user": "u", "warehouse": "W"}, app=app
+    )
+    app.scope_listing = {"": ["ANALYTICS"], "ANALYTICS": ["RAW"]}
+    app.scope_open = frozenset({"ANALYTICS"})
+    app.scope_ticks = frozenset({"ANALYTICS.RAW.ORDERS"})
+    app.scope_filter = "ord"
+
+    engine.save_connection(
+        {
+            "name": "second",
+            "kind": "postgres",
+            "host": "localhost",
+            "database": "shop",
+            "user": "u",
+        },
+        app=app,
+    )
+    assert app.connection == "second" and backend.active().kind == "postgres"
+    assert (app.scope_listing, app.scope_open, app.scope_ticks) == ({}, frozenset(), frozenset())
+    assert app.scope_filter == ""
+
+    app.scope_listing = {"": ["shop"]}
+    engine.clear_connection(app)
+    assert app.scope_listing == {}, "and going back to files drops it too"
+
+
+def test_a_connected_project_offers_to_switch_not_to_use_an_existing_one():
+    from portia.ui import screens
+
+    assert screens.SWITCH_CONNECTION == "Switch connection"
+    assert screens.USE_EXISTING != screens.SWITCH_CONNECTION

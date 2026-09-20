@@ -1118,6 +1118,9 @@ NO_CONNECTION = "This project names no connection yet."
 CONNECT_TO = "Connect to {name}"
 ADD_CONNECTION = "Add connection"
 USE_EXISTING = "Use existing connection"
+#: The same dialog, from a project that is already connected: what the press
+#: does there is change the connection, so that is what it says (2026-09-20).
+SWITCH_CONNECTION = "Switch connection"
 SCOPE_LOADING = "Listing…"
 SCOPE_EMPTY = "Nothing here the role can see."
 NOTHING_UNDER = "Nothing readable here."
@@ -1155,7 +1158,10 @@ def _connection_state() -> None:
             ui.label(CONNECTED_AS.format(name=APP.connection))
             ui.element("div").classes("flex-1")
             c.button(
-                USE_EXISTING, lambda: open_connect_dialog(new=False), kind="secondary", micro=True
+                SWITCH_CONNECTION,
+                lambda: open_connect_dialog(new=False),
+                kind="secondary",
+                micro=True,
             )
         return
     if status == state.CONNECTING:
