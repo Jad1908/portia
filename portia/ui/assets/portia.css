@@ -5053,7 +5053,8 @@ body.tab-dragging .tab-drop {
  * like every other icon and follows the theme. Kind, never rank: the picked
  * segment gets the soft accent wash a segment already gets, and the same mark
  * sits on a prompt row and a chat row at the caption's ink. */
-.provider-glyph {
+.provider-glyph,
+.connector-glyph {
   display: inline-block;
   width: 14px;
   height: 14px;
@@ -5078,6 +5079,36 @@ body.tab-dragging .tab-drop {
 .provider-glyph-llamacpp {
   -webkit-mask-image: url(/portia-assets/providers/llamacpp.svg);
   mask-image: url(/portia-assets/providers/llamacpp.svg);
+}
+/* One mark per database portia connects to, under assets/connectors/: the
+ * vendor's own, from Simple Icons (CC0), masked so it takes the ink of where it
+ * sits. Same rule as the model providers' marks above: kind, never rank. */
+.connector-glyph-snowflake {
+  -webkit-mask-image: url(/portia-assets/connectors/snowflake.svg);
+  mask-image: url(/portia-assets/connectors/snowflake.svg);
+}
+.connector-glyph-bigquery {
+  -webkit-mask-image: url(/portia-assets/connectors/bigquery.svg);
+  mask-image: url(/portia-assets/connectors/bigquery.svg);
+}
+.connector-glyph-postgres {
+  -webkit-mask-image: url(/portia-assets/connectors/postgres.svg);
+  mask-image: url(/portia-assets/connectors/postgres.svg);
+}
+.connect-pick-row .connector-glyph,
+.connect-state .connector-glyph {
+  width: 16px;
+  height: 16px;
+  color: var(--body);
+}
+.choice-card-marks {
+  display: flex;
+  gap: 12px;
+  margin-top: 4px;
+}
+.choice-card-marks .connector-glyph {
+  width: 18px;
+  height: 18px;
 }
 .provider-segments .btn .provider-glyph {
   color: inherit;

@@ -387,7 +387,7 @@ def _data_kind(remote: bool) -> None:
     mixed with. After that the chip stays and the button is not drawn.
     """
     with ui.element("div").classes("data-kind"):
-        ui.icon("cloud" if remote else "folder").classes("data-kind-icon")
+        ui.icon(DATABASE_KIND_ICON if remote else "folder").classes("data-kind-icon")
         ui.label(CHOOSE_WAREHOUSE if remote else CHOOSE_LOCAL).classes("data-kind-name")
         if engine.can_change_data(APP):
             c.button("Change", _reopen_choice, kind="secondary", micro=True)
@@ -405,16 +405,11 @@ def _reopen_choice() -> None:
 
 def _choice_cards() -> None:
     with ui.element("div").classes("choice-grid"):
-        c.choice_card(
-            CHOOSE_LOCAL,
-            CHOOSE_LOCAL_WHY,
-            icon="folder",
-            on_click=lambda: _choose(state.LOCAL_DATA),
-        )
+        c.choice_card(CHOOSE_LOCAL, icon="folder", on_click=lambda: _choose(state.LOCAL_DATA))
         c.choice_card(
             CHOOSE_WAREHOUSE,
-            CHOOSE_WAREHOUSE_WHY.format(providers=_providers_sentence()),
-            icon="cloud",
+            icon=DATABASE_KIND_ICON,
+            marks=_provider_kinds(),
             on_click=lambda: _choose(state.WAREHOUSE_DATA),
         )
 
@@ -422,7 +417,6 @@ def _choice_cards() -> None:
 def _choice_in_panel(*, in_dialog: bool) -> None:
     with ui.element("div").classes("p-panel-head"):
         ui.label(CHOOSE_TITLE).classes("t-heading-md")
-        ui.label(CHOOSE_WHY).classes("p-panel-sub")
     with ui.element("div").classes("p-panel-body"):
         _choice_cards()
     with ui.element("div").classes("p-panel-actions"):
@@ -438,7 +432,7 @@ def _refresh() -> None:
 # --- the tick tree, which both routes draw ----------------------------------
 
 #: The glyph per container kind. A leaf has none: its name is its box's label.
-_TREE_ICONS = {tree.DATABASE: "storage", tree.SCHEMA: "schema", tree.FOLDER: "folder"}
+_TREE_ICONS = {tree.DATABASE: c.DATABASE_GLYPH, tree.SCHEMA: "schema", tree.FOLDER: "folder"}
 
 
 @dataclass(frozen=True)
@@ -1034,21 +1028,27 @@ def _here_note(here: int) -> str:
 # --- where the data is: the question before either route ----------------------
 
 CHOOSE_TITLE = "Where is the data?"
-CHOOSE_WHY = (
-    "A project reads from one place. Pick it, and the next screen is about that place only."
-)
 CHOOSE_LOCAL = "Files in this repo"
-CHOOSE_LOCAL_WHY = "CSV and Parquet, read in place. Profiled for free, nothing copied."
-CHOOSE_WAREHOUSE = "A warehouse"
-CHOOSE_WAREHOUSE_WHY = "{providers}. Tables read where they are, through a connection of yours. Nothing is copied down."
+#: *A database*, not *a warehouse*, since PostgreSQL is one of them (2026-09-20).
+CHOOSE_WAREHOUSE = "A database"
+#: The glyph for *data behind a connection*. It was a cloud until one of the
+#: providers could be on the same machine.
+DATABASE_KIND_ICON = c.DATABASE_GLYPH
 
 
-def _providers_sentence() -> str:
-    """The warehouses portia can connect to, off the registry, so the card cannot lag a connector."""
+def _provider_kinds() -> list[str]:
+    """The databases portia can connect to, off the registry, so the card cannot lag a connector."""
     from portia.connectors import registry
 
-    labels = [p.label for p in registry.PROVIDERS.values()]
-    return " or ".join(labels) if len(labels) <= 2 else ", ".join(labels[:-1]) + f" or {labels[-1]}"
+    return list(registry.PROVIDERS)
+
+
+def _provider_mark(provider) -> None:
+    """A provider's own mark, or the generic glyph for a kind this build has none for."""
+    if provider is None:
+        ui.icon(DATABASE_KIND_ICON).classes("connect-pick-icon")
+    else:
+        c.connector_glyph(provider.kind, tip=False)
 
 
 def choose_data() -> None:
@@ -1064,7 +1064,6 @@ def choose_data() -> None:
         with ui.element("div").classes("p-panel p-panel--prose"):
             with ui.element("div").classes("p-panel-head"):
                 ui.label(CHOOSE_TITLE).classes("t-heading-md")
-                ui.label(CHOOSE_WHY).classes("p-panel-sub")
             with ui.element("div").classes("p-panel-body"):
                 _choice_cards()
             with ui.element("div").classes("p-panel-actions"):
@@ -1089,15 +1088,12 @@ def _choose(mode: str) -> None:
 # --- the warehouse route (`docs/CONNECTOR.md`) ---------------------------------
 
 WAREHOUSE_HEADING = "Tables in scope"
-CONNECT_TITLE = "Connect to a warehouse"
+CONNECT_TITLE = "Connect to a database"
 CONNECT_SUB = "Saved outside the repo with no secret in it. The project only names it."
-PICK_SUB = "Pick a saved connection, or set up a new one."
-PROVIDER_SUB = "Which warehouse? Each signs in its own way."
 #: The one field every provider shares; the rest are the provider's
 #: (`registry.Provider.fields`), and the sign-in methods and what each needs
 #: typed are the provider's too (`CONNECTORS.md` §2.13).
 NAME_FIELD = ("name", "Connection name", True, "work")
-PROVIDER_LABEL = "Warehouse"
 CHANGE_PROVIDER = "Change"
 #: The dialog's project half, under the picked connection or the form
 #: (`CONNECTOR.md` §2.7.1): whether the copilot may create tables as it
@@ -1187,7 +1183,7 @@ def _connection_state() -> None:
                 CONNECT_TO.format(name=APP.connection),
                 artifacts.connect_now,
                 kind="primary",
-                icon="cloud",
+                icon=DATABASE_KIND_ICON,
             )
         c.button(
             ADD_CONNECTION,
@@ -1540,13 +1536,11 @@ def _connect_panel() -> None:
     with ui.element("div").classes("p-panel p-panel--prose"):
         with ui.element("div").classes("p-panel-head"):
             ui.label(CONNECT_TITLE).classes("t-heading-md")
-            if not APP.connect_new:
-                sub = PICK_SUB
-            elif _provider_of(APP.connect_form) is None:
-                sub = PROVIDER_SUB
-            else:
-                sub = CONNECT_SUB
-            ui.label(sub).classes("p-panel-sub")
+            # One line, and only on the form: where what is typed there goes is
+            # the one thing on this dialog no title or mark can say. The list
+            # of connections and the list of providers explain themselves.
+            if APP.connect_new and _provider_of(APP.connect_form) is not None:
+                ui.label(CONNECT_SUB).classes("p-panel-sub")
         with ui.element("div").classes("p-panel-body"):
             if APP.connect_note:
                 c.alert(APP.connect_note, kind="info")
@@ -1568,7 +1562,7 @@ def _connect_panel() -> None:
                     CONNECTING_GO if busy else CONNECT_GO,
                     _connect_now,
                     kind="primary",
-                    icon="cloud",
+                    icon=DATABASE_KIND_ICON,
                     enabled=not busy
                     and (
                         (APP.connect_new and _provider_of(APP.connect_form) is not None)
@@ -1598,7 +1592,7 @@ def _connect_pick(saved: list[dict[str, str]], picked: dict[str, str] | None) ->
                 "connect-pick-row" + (" connect-pick-row--selected" if selected else "")
             )
             with row:
-                ui.icon(provider.icon if provider else "cloud").classes("connect-pick-icon")
+                _provider_mark(provider)
                 ui.label(s["name"]).classes("connect-pick-name")
                 ui.label(s.get("summary", "")).classes("connect-pick-meta")
                 ui.label(_auth_label(s)).classes("connect-pick-auth")
@@ -1649,8 +1643,8 @@ def _connect_form() -> None:
         return
     auth = form.get("auth") or provider.default_auth
     with ui.element("div").classes("connect-state"):
-        ui.icon(provider.icon)
-        ui.label(f"{PROVIDER_LABEL}: {provider.label}")
+        _provider_mark(provider)
+        ui.label(provider.label)
         ui.element("div").classes("flex-1")
         c.button(CHANGE_PROVIDER, _start_new, kind="secondary", micro=True)
     with ui.element("div").classes("connect-auth"):
@@ -1690,9 +1684,8 @@ def _provider_list() -> None:
     with ui.element("div").classes("connect-pick"):
         for provider in registry.PROVIDERS.values():
             with ui.element("div").classes("connect-pick-row") as row:
-                ui.icon(provider.icon).classes("connect-pick-icon")
+                _provider_mark(provider)
                 ui.label(provider.label).classes("connect-pick-name")
-                ui.label(", ".join(a.label for a in provider.auth)).classes("connect-pick-meta")
             row.on("click", lambda _e, k=provider.kind: _pick_provider(k))
 
 

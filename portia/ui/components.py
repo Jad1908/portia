@@ -17,7 +17,7 @@ Two rules are enforced here rather than trusted to each caller:
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +52,12 @@ HIDDEN_FIELDS = ("portia_dir",)
 #: database glyph and was rejected at button size: three plain bars read as a
 #: hamburger menu, and `dns`'s indicator lights do not.
 INDEX_ICON = "dns"
+#: *Data behind a connection*, and a database in a tree: the cylinder, from
+#: Material Symbols Rounded, drawn as an outline. It was ``dns`` on the card and
+#: ``storage`` in the tree, two filled server racks, which read as rough beside
+#: everything else and, for ``dns``, was already the glyph for Index (the
+#: user's call, 2026-09-20: leaner, rounder).
+DATABASE_GLYPH = "sym_r_database"
 
 _NULL = "·"
 
@@ -136,16 +142,44 @@ def alert(text: str, kind: str = "error") -> ui.element:
 
 
 def choice_card(
-    title: str, why: str, *, icon: str, on_click: Callable[..., Any] | None = None
+    title: str,
+    *,
+    icon: str,
+    marks: Iterable[str] = (),
+    on_click: Callable[..., Any] | None = None,
 ) -> ui.element:
-    """One of a few large options, for a screen that asks one question."""
+    """One of a few large options, for a screen that asks one question.
+
+    A glyph and a title, and no sentence under them (the user's call,
+    2026-09-20): ``marks`` is a row of `connector_glyph`s where the title alone
+    would leave *which ones* unsaid.
+    """
     with ui.element("div").classes("choice-card") as card:
         ui.icon(icon).classes("choice-card-icon")
         ui.label(title).classes("choice-card-title")
-        ui.label(why).classes("choice-card-why")
+        kinds = list(marks)
+        if kinds:
+            with ui.element("div").classes("choice-card-marks"):
+                for kind in kinds:
+                    connector_glyph(kind)
     if on_click is not None:
         card.on("click", on_click)
     return card
+
+
+def connector_glyph(kind: str, *, tip: bool = True) -> ui.element:
+    """One database's mark, in the ink of wherever it sits. Kind, never rank.
+
+    `provider_glyph`'s mechanism over `assets/connectors/<kind>.svg`. The
+    tooltip is the provider's name, which is the whole of what a mark owes.
+    """
+    from portia.connectors import registry
+
+    glyph = ui.element("span").classes(f"connector-glyph connector-glyph-{kind}")
+    provider = registry.PROVIDERS.get(kind)
+    if tip and provider is not None:
+        glyph.tooltip(provider.label)
+    return glyph
 
 
 def section_header(value: str) -> ui.label:

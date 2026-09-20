@@ -124,8 +124,10 @@ def pane() -> None:
 
 # --- the warehouse (`docs/CONNECTOR.md` §2.13) -------------------------------
 
-WAREHOUSE_ICON = "cloud"
-DATABASE_ICON = "storage"
+#: Not a cloud: one of the databases can be on this machine (2026-09-20).
+#: A connection is a link; the database it reaches is the cylinder under it.
+WAREHOUSE_ICON = "sym_r_link"
+DATABASE_ICON = c.DATABASE_GLYPH
 SCHEMA_ICON = "schema"
 #: A scoped or built table nobody has scanned. *Metadata only* rather than
 #: *not profiled* (2026-09-07): beside the Indexing tab's *not read* the old
@@ -155,7 +157,7 @@ def _warehouse_section() -> None:
     if not APP.connection:
         return
     c.rule()
-    c.section_header("Warehouse")
+    c.section_header("Database")
     row = c.artifact_row(
         name=APP.connection,
         icon=WAREHOUSE_ICON,
