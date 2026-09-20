@@ -240,3 +240,19 @@ def test_kind_of_reads_googlesqls_names():
     assert profiling.kind_of("STRING") == profiling.STRING
     assert profiling.kind_of("ARRAY<INT64>") == profiling.OTHER
     assert profiling.kind_of("STRUCT") == profiling.OTHER
+
+
+def test_a_query_read_as_a_whole_carries_an_alias_because_postgres_before_16_requires_one(con):
+    from portia.core.table import subquery
+
+    assert subquery("SELECT 1") == "(SELECT 1) AS _q"
+    t = Table.from_frame(pd.DataFrame({"n": [1, 2, 3]}), "t", con)
+    asked: list[str] = []
+
+    class Spy:
+        def execute(self, sql):
+            asked.append(sql)
+            return con.execute(sql)
+
+    assert t.using(Spy()).count() == 3
+    assert asked == ['SELECT count(*) FROM (SELECT * FROM "t") AS _q']

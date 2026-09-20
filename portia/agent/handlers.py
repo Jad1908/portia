@@ -38,7 +38,7 @@ from portia.core import backend
 from portia.core import dialect as dialects
 from portia.core.io import connect, source_table
 from portia.core.serialize import to_json, to_jsonable
-from portia.core.table import Table
+from portia.core.table import Table, subquery
 from portia.knowledge import measure, query, store
 from portia.knowledge import schema as knowledge_schema
 from portia.ops import join as join_op
@@ -346,7 +346,9 @@ def query_data(
     want = QUERY_ROWS if limit is None else max(0, int(limit))
     start = max(0, int(offset))
     window = Table(
-        produced.name, f"SELECT * FROM ({produced.query}) LIMIT {want} OFFSET {start}", produced.con
+        produced.name,
+        f"SELECT * FROM {subquery(produced.query)} LIMIT {want} OFFSET {start}",
+        produced.con,
     )
     # Both exits from a `Table` are capped (`core/table.py`); `rows` is the one
     # for evidence rather than for a screen, so DuckDB's own types narrow through

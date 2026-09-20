@@ -416,3 +416,16 @@ def test_the_parse_check_and_the_quoted_binding_speak_googlesql():
     bound = sql_op.quote_declared("SELECT * FROM ORDERS o", inputs, dialect="bigquery")
     assert bound == "SELECT * FROM `orders` AS o"
     assert sql_op.compose(inputs, bound).startswith("WITH `orders` AS (SELECT 1 AS id)")
+
+
+def test_a_second_transform_compiles_to_a_bracketed_query_that_runs(con):
+    """Two transforms compiled to ``FROM SELECT …``, in a file nothing executed."""
+    import pandas as pd
+
+    from portia.core.table import Table
+    from portia.ops.normalize import apply_normalize
+
+    t = Table.from_frame(pd.DataFrame({"a": [" x "], "b": ["1"]}), "t", con)
+    done = apply_normalize(t, [{"column": "a", "op": "strip"}, {"column": "b", "op": "to_numeric"}])
+    assert "FROM SELECT" not in done.compiled
+    assert con.execute(done.compiled).fetchall() == done.table.rows() == [("x", 1.0)]
