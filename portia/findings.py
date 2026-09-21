@@ -129,7 +129,7 @@ def record(
     }
     path = _free_path(root / FINDINGS_DIR, slug(question))
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump(doc, f, sort_keys=False, default_flow_style=False, allow_unicode=True)
     return path
 
@@ -388,7 +388,7 @@ def split_ref(ref: str) -> tuple[str, str | None]:
 
 
 def _read(path: Path) -> dict:
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
 
 

@@ -23,7 +23,7 @@ def load(name: str) -> str:
     path = HERE / f"{name}.md"
     if not path.exists():
         raise FileNotFoundError(f"no prompt {name!r} — expected {path}")
-    return _EDITOR_NOTE.sub("", path.read_text()).strip()
+    return _EDITOR_NOTE.sub("", path.read_text(encoding="utf-8")).strip()
 
 
 def tool(name: str, **fields: object) -> str:

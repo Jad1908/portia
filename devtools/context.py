@@ -277,7 +277,7 @@ def _system_prompt(portia_dir: str) -> tuple[str, str, str, bool]:
 
     read = runlog.prompts_read(portia_dir)
     system = str(read.get("system") or "")
-    l0 = session.PROMPT_PATH.read_text()
+    l0 = session.PROMPT_PATH.read_text(encoding="utf-8")
     l1 = context.build_brief(portia_dir)
     return system, l0, l1, system.startswith(l0.rstrip()) and system.endswith(l1.rstrip())
 

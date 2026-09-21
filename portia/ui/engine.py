@@ -712,7 +712,7 @@ async def browse_for_files() -> list[Path]:
 
 
 def _choose_files() -> list[Path]:
-    return [Path(line) for line in _osascript(_CHOOSE_FILES.read_text())]
+    return [Path(line) for line in _osascript(_CHOOSE_FILES.read_text(encoding="utf-8"))]
 
 
 def _osascript(script: str) -> list[str]:
@@ -735,7 +735,7 @@ def _osascript(script: str) -> list[str]:
 def recents() -> list[tuple[Path, str]]:
     """Recently opened project directories, newest first, with when they were opened."""
     try:
-        entries = json.loads(RECENTS.read_text())
+        entries = json.loads(RECENTS.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
     return [(Path(e["path"]), e.get("opened", "")) for e in entries if isinstance(e, dict)]
@@ -746,7 +746,7 @@ def remember(root: Path) -> None:
     entries = [{"path": str(root), "opened": datetime.now().isoformat(timespec="minutes")}]
     entries += [{"path": str(p), "opened": when} for p, when in kept]
     RECENTS.parent.mkdir(parents=True, exist_ok=True)
-    RECENTS.write_text(json.dumps(entries[:RECENTS_KEPT], indent=2))
+    RECENTS.write_text(json.dumps(entries[:RECENTS_KEPT], indent=2), encoding="utf-8")
 
 
 def remembered_view(root: Path) -> frozenset[str] | None:
@@ -759,7 +759,7 @@ def remembered_view(root: Path) -> frozenset[str] | None:
     emptiness (`graph._visible`).
     """
     try:
-        saved = json.loads(VIEWS.read_text())
+        saved = json.loads(VIEWS.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     names = saved.get(str(root)) if isinstance(saved, dict) else None
@@ -768,7 +768,7 @@ def remembered_view(root: Path) -> frozenset[str] | None:
 
 def remember_view(root: Path, names: frozenset[str] | None) -> None:
     try:
-        saved = json.loads(VIEWS.read_text())
+        saved = json.loads(VIEWS.read_text(encoding="utf-8"))
         saved = saved if isinstance(saved, dict) else {}
     except (OSError, ValueError):
         saved = {}
@@ -777,7 +777,7 @@ def remember_view(root: Path, names: frozenset[str] | None) -> None:
     else:
         saved[str(root)] = sorted(names)
     VIEWS.parent.mkdir(parents=True, exist_ok=True)
-    VIEWS.write_text(json.dumps(saved, indent=2, sort_keys=True))
+    VIEWS.write_text(json.dumps(saved, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def remembered_layout(root: Path) -> dict[str, tuple[int, int]]:
@@ -800,12 +800,12 @@ def remember_layout(root: Path, offsets: dict[str, tuple[int, int]]) -> None:
     else:
         saved.pop(str(root), None)
     LAYOUTS.parent.mkdir(parents=True, exist_ok=True)
-    LAYOUTS.write_text(json.dumps(saved, indent=2, sort_keys=True))
+    LAYOUTS.write_text(json.dumps(saved, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def _read_json(path: Path) -> dict:
     try:
-        saved = json.loads(path.read_text())
+        saved = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     return saved if isinstance(saved, dict) else {}
@@ -1425,7 +1425,7 @@ def read_text(path: Path) -> str:
     files of a few kilobytes; the work that genuinely blocks is still threaded
     below.
     """
-    return path.read_text()
+    return path.read_text(encoding="utf-8")
 
 
 # --- the two logged histories (docs/CONVERSATION.md §3) ----------------------
@@ -1530,7 +1530,7 @@ def _write_reports(app: App, folder: Path, when: datetime) -> list[Path]:
         if model.results
     ]
     meta.mkdir(parents=True, exist_ok=True)
-    (meta / RUN_INDEX).write_text(_run_index(app, when))
+    (meta / RUN_INDEX).write_text(_run_index(app, when), encoding="utf-8")
     return written
 
 

@@ -174,7 +174,8 @@ def write_model(
             spec_path=spec_path,
             spec_fingerprint=spec_fingerprint,
             when=when,
-        )
+        ),
+        encoding="utf-8",
     )
     return path
 
@@ -183,7 +184,7 @@ def write_sources(sources: dict[str, str], *, root: str | Path = ".", when=None)
     """Write the companion sources file. One per project, not one per spec."""
     path = Path(root) / MODELS_DIR / SOURCES_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(compile_sources(sources, when=when))
+    path.write_text(compile_sources(sources, when=when), encoding="utf-8")
     return path
 
 
@@ -582,7 +583,7 @@ def file_fingerprint(path: str | Path) -> str | None:
     p = Path(path)
     if not p.exists():
         return None
-    match = _HEADER_FINGERPRINT.search(p.read_text())
+    match = _HEADER_FINGERPRINT.search(p.read_text(encoding="utf-8"))
     return match.group(1) if match else None
 
 

@@ -78,7 +78,7 @@ def save(
     directory = _dir(root) / _safe_folder(folder)
     directory.mkdir(parents=True, exist_ok=True)
     path = _free_path(directory, slug(chart["tab"]))
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(doc, f, ensure_ascii=False, indent=2)
     return path
 
@@ -93,7 +93,7 @@ def load(path: str | Path) -> dict:
     it was always one mark and a handful of channels, which is what a minimal
     Vega-Lite spec is.
     """
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         doc = json.load(f)
     if "vega" not in doc and doc.get("encoding"):
         doc["vega"] = _as_vega(doc["encoding"])
