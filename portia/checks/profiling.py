@@ -266,10 +266,13 @@ def _stat_exprs(kinds: dict[str, str], dialect: Dialect = dialects.DUCKDB) -> di
         if kind in NUMERIC_KINDS:
             exprs[f"c{i}_min"] = f"min({q})"
             exprs[f"c{i}_max"] = f"max({q})"
-            exprs[f"c{i}_mean"] = f"avg({q})"
+            # The two moments are sums, and an engine that keeps a decimal's sum
+            # in fixed point overflows on them (`Dialect.as_float`).
+            moment = dialect.as_float(q)
+            exprs[f"c{i}_mean"] = f"avg({moment})"
             # stddev_samp, not stddev_pop: pandas' .std() is the sample estimate,
             # and it returns NULL for a single row, which is what we want reported.
-            exprs[f"c{i}_std"] = f"stddev_samp({q})"
+            exprs[f"c{i}_std"] = f"stddev_samp({moment})"
             # The three quartiles, in whatever shape the engine answers them —
             # one list-valued aggregate on DuckDB, three ordered-set aggregates
             # on Snowflake (`core/dialect.py`). This is the single most expensive

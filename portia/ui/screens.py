@@ -1392,27 +1392,39 @@ async def _scope_and_interpret(names: list[str], *, in_dialog: bool = False) -> 
         def _say(done: int, total: int, name: str) -> None:
             APP.indexing_status = f"{verb} {name}, {done + 1} of {total}"
             _progress.refresh()
+            # Somebody who left for the workspace mid-run sees each table's
+            # profile land as it does (`engine._hops`, ``reload_each``).
+            if APP.left_add_data:
+                artifacts.pane.refresh()
 
         return _say
 
     APP.indexing_status = f"Scoping {c.count(len(names), 'table')}…"
     stop = APP.indexing_stop = cancel.Scope()
     _progress.refresh()
+    scoped: list[str] = []
+    added: list[str] = []
     profiled: list[str] = []
+    failed: list[str] = []
     try:
-        scoped = await engine.scope(APP, names, on_progress=say("Scoping"), stop=stop)
+        ran = await engine.scope(APP, names, on_progress=say("Scoping"), stop=stop)
+        scoped, added, failed = ran.names, ran.items, ran.failed
         if APP.profile_on_add and scoped and not stop.cancelled:
-            profiled = await engine.profile_tables(
-                APP, scoped, on_progress=say("Profiling"), stop=stop
-            )
+            ran = await engine.profile_tables(APP, scoped, on_progress=say("Profiling"), stop=stop)
+            profiled, failed = ran.names, [*failed, *ran.failed]
     finally:
         APP.indexing_status = ""
         APP.indexing_stop = None
         _pressed_done()
         stop.close()
         _progress.refresh()
-    ui.notify(_scoped_note(len(scoped), len(profiled), reading=_will_read(stop)))
-    APP.scope_ticks = APP.scope_ticks - set(names[: len(scoped)])
+    ui.notify(
+        _scoped_note(len(scoped), len(profiled), reading=_will_read(stop), failed=len(failed)),
+        type="warning" if failed else None,
+    )
+    # What was scoped, by name: a table that failed stays ticked, and the ones
+    # that finished are not a prefix of the list once one in the middle failed.
+    APP.scope_ticks = APP.scope_ticks - set(added)
     APP.pending_interpret = [*APP.pending_interpret, *scoped]
     APP.indexed = (APP.indexed or 0) + len(scoped)
     if in_dialog:
@@ -1431,7 +1443,7 @@ def _will_read(stop: cancel.Scope) -> bool:
     return APP.interpret and not stop.cancelled and not APP.busy
 
 
-def _scoped_note(scoped: int, profiled: int, *, reading: bool) -> str:
+def _scoped_note(scoped: int, profiled: int, *, reading: bool, failed: int = 0) -> str:
     """What the press did, in one sentence, and what happens next.
 
     Counts of what was *done*, never of what was ticked: a stopped run may
@@ -1448,6 +1460,8 @@ def _scoped_note(scoped: int, profiled: int, *, reading: bool) -> str:
         after = READ_TAB_NEXT
     else:
         after = INDEX_TAB_NEXT
+    if failed:
+        after = f"{FAILED_PART.format(n=failed)} {after}"
     return f"{done} {after}"
 
 
@@ -2346,6 +2360,7 @@ def _progress() -> None:
     file list underneath it — and profiling thirty real extracts is a minute of a
     window that would otherwise say nothing at all.
     """
+    c.failures(APP.indexing_failed)
     if not APP.indexing_status:
         return
     with ui.element("div").classes("row-gap-sm indexing-status"):
@@ -2603,8 +2618,12 @@ async def _index_and_interpret(paths: list[Path], *, in_dialog: bool = False) ->
     APP.indexing_status = f"Reading {c.count(len(paths), 'file')}…"
     stop = APP.indexing_stop = cancel.Scope()
     _progress.refresh()
+    names: list[str] = []
+    done_paths: list[Path] = []
+    failed: list[str] = []
     try:
-        names = await engine.index(paths, APP, on_progress=say, stop=stop)
+        ran = await engine.index(paths, APP, on_progress=say, stop=stop)
+        names, done_paths, failed = ran.names, ran.items, ran.failed
     finally:
         APP.indexing_status = ""
         APP.indexing_stop = None
@@ -2618,18 +2637,19 @@ async def _index_and_interpret(paths: list[Path], *, in_dialog: bool = False) ->
     # sources it did finish, and those are in the catalog and on the left pane —
     # saying "profiled 20 sources" because twenty were selected would be the one
     # number here that is not a measurement.
-    ui.notify(f"Profiled {c.count(len(names), 'source')}.")
+    ui.notify(_profiled_note(len(names), len(failed)), type="warning" if failed else None)
     APP.pending_interpret = [*APP.pending_interpret, *names]
     APP.indexed = len(names)
     # Profiled is done: it drops out of the outstanding list, which is what turns
     # the primary action into the way out. Same rule as an already-indexed file
     # arriving un-ticked, applied a moment later.
     #
-    # **Only the ones that were actually profiled.** `engine.index` stops between
-    # files, so the finished ones are the first `len(names)` of the list — and
-    # retiring the rest because they were *selected* would leave the screen
-    # claiming a file had been read when nothing had read it.
-    APP.unpicked = APP.unpicked | {_rel(p).as_posix() for p in paths[: len(names)]}
+    # **Only the ones that were actually profiled**, as `engine.index` names
+    # them: retiring the rest because they were *selected* would leave the
+    # screen claiming a file had been read when nothing had read it. Not the
+    # first `len(names)` of the list, which it was until a file could fail
+    # without ending the run.
+    APP.unpicked = APP.unpicked | {_rel(p).as_posix() for p in done_paths}
 
     if in_dialog:
         _close_dialog()
@@ -2644,6 +2664,12 @@ async def _index_and_interpret(paths: list[Path], *, in_dialog: bool = False) ->
     # to stop — is the app spending their money to disagree with them.
     if not stop.cancelled:
         await _interpret_pending()
+
+
+def _profiled_note(done: int, failed: int) -> str:
+    """The toast after profiling: what finished, and what did not."""
+    note = f"Profiled {c.count(done, 'source')}."
+    return f"{note} {FAILED_PART.format(n=failed)}" if failed else note
 
 
 def _catch_up_workspace() -> None:
@@ -2974,6 +3000,7 @@ METADATA_WORD = "metadata"
 SCOPE_ACROSS = "{n} across {schemas}"
 SCOPED_METADATA = "Added {n} as metadata."
 SCOPED_PROFILED = "Added {n}, {profiled} profiled."
+FAILED_PART = "{n} failed, listed in the Indexing tab."
 READING_NEXT = "The copilot is reading them. The job is in the chat list."
 INDEX_TAB_NEXT = "Profile or read them from the Indexing tab."
 READ_TAB_NEXT = "Read them from the Indexing tab."

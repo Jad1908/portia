@@ -999,6 +999,12 @@ class App:
     #: when nothing is running. Profiling twenty real extracts takes a minute,
     #: and a window that says nothing for a minute reads as broken.
     indexing_status: str = ""
+    #: What could not be indexed, as ``{label: the error's first line}``: a
+    #: file's stem, a table's name. Written by `engine._hops`, which skips a
+    #: failed item and goes on, and cleared for a label by its next success.
+    #: Held rather than toasted because a warehouse profile is minutes and
+    #: nobody is looking when the eleventh of thirty fails. In memory only.
+    indexing_failed: dict[str, str] = field(default_factory=dict)
     #: The Index button's label as it was pressed, held while the press is
     #: being acted on. The counts it was built from empty out during the run
     #: (an import plan is consumed by the copy), and a button that changed

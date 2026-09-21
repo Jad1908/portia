@@ -749,6 +749,7 @@ def _index_actions() -> None:
     to_index = [*files, *remote]
     to_read = [s for s in ticked if s.indexed]
     running = bool(APP.indexing_status)
+    c.failures(APP.indexing_failed)
     _index_progress()
     with ui.element("div").classes("index-actions"):
         c.button(
@@ -834,6 +835,7 @@ async def _index_ticked() -> None:
         def _say(done: int, total: int, name: str) -> None:
             APP.indexing_status = f"{verb} {name}, {done + 1} of {total}"
             _index_actions.refresh()
+            artifacts.pane.refresh()
 
         return _say
 
@@ -841,20 +843,29 @@ async def _index_ticked() -> None:
     stop = APP.indexing_stop = cancel.Scope()
     _index_actions.refresh()
     done: list[str] = []
+    failed: list[str] = []
     try:
         if files:
             paths = [APP.root / s.rel for s in files]
-            done += await engine.index(paths, APP, on_progress=say("Profiling"), stop=stop)
+            ran = await engine.index(paths, APP, on_progress=say("Profiling"), stop=stop)
+            done, failed = ran.names, ran.failed
         if remote and not stop.cancelled:
             names = [s.name for s in remote]
-            done += await engine.profile_tables(APP, names, on_progress=say("Profiling"), stop=stop)
+            ran = await engine.profile_tables(APP, names, on_progress=say("Profiling"), stop=stop)
+            done, failed = [*done, *ran.names], [*failed, *ran.failed]
     finally:
         APP.indexing_status = ""
         APP.indexing_stop = None
         stop.close()
-    artifacts.pane.refresh()
-    pane.refresh()
-    ui.notify(f"Profiled {c.count(len(done), 'source')}.")
+        # In the `finally`, with the status it reads: the spinner this tab drew
+        # is taken down by this tab whatever ended the run. It used to follow
+        # the `try`, so an error left it turning over a job that had died.
+        artifacts.pane.refresh()
+        pane.refresh()
+    note = f"Profiled {c.count(len(done), 'source')}."
+    if failed:
+        note = f"{note} {len(failed)} failed, listed above the buttons."
+    ui.notify(note, type="warning" if failed else None)
 
 
 async def _interpret_ticked() -> None:

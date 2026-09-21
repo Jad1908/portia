@@ -64,6 +64,14 @@ class Dialect:
         """
         return expr
 
+    def as_float(self, expr: str) -> str:
+        """``expr`` where ``avg`` and ``stddev_samp`` can take it without overflowing.
+
+        Unchanged here: DuckDB computes both moments in floating point whatever
+        the column's type. Snowflake does not (`Snowflake.as_float`).
+        """
+        return expr
+
     def count_where(self, condition: str) -> str:
         """``count(*)`` over the rows where ``condition`` holds."""
         return f"count(*) FILTER (WHERE {condition})"
@@ -149,6 +157,22 @@ class Snowflake(Dialect):
     """
 
     name = "snowflake"
+
+    def as_float(self, expr: str) -> str:
+        """A ``DOUBLE``, because Snowflake keeps a ``NUMBER``'s moments in fixed point.
+
+        ``stddev_samp`` over a ``NUMBER`` sums squares as a 38-digit integer at
+        the column's scale, so a revenue column at scale 10 over a few hundred
+        million rows passes 10^38 and the **whole statement** fails with
+        *Number out of representable range: type FIXED[SB16](38,0)*. Every
+        column of the table rides in that one statement, so one wide ``NUMBER``
+        cost the table its profile (2026-09-21, the first real account with
+        real volumes; the demo account's numbers never got near it). ``avg``
+        sums the same way and is cast for the same reason. The mean and the
+        deviation are rounded for the catalog anyway; ``min``, ``max`` and the
+        quartiles pick or interpolate values, sum nothing, and stay exact.
+        """
+        return f"CAST({expr} AS DOUBLE)"
 
     def count_where(self, condition: str) -> str:
         return f"count_if({condition})"

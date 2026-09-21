@@ -149,6 +149,7 @@ def open_project(path: str | Path, app: App) -> Path:
     app.import_to_data_dir = True
     app.import_plan, app.import_error = [], ""
     app.indexed = None
+    app.indexing_failed = {}
     # Which folders are open belongs to the project you are looking at, not to
     # the window: `data/` opened in the last project says nothing about this one.
     app.open_folders = app.closed_folders = frozenset()
@@ -555,29 +556,116 @@ async def list_under(app: App, at: str, on_start: Callable[[], Any] | None = Non
             await list_under(app, f"{at}.{name}".strip("."), on_start)
 
 
+@dataclass(frozen=True)
+class Indexed:
+    """What one indexing run did, item by item.
+
+    ``names`` are the catalog names that finished and ``items`` what each was
+    asked as (a path, a qualified table), in the same order. Two lists because
+    a failure in the middle means the finished ones are **not a prefix** of
+    what was asked: the callers used to slice ``asked[: len(names)]``, which is
+    right for a Stop and wrong the moment one table fails and the next does not.
+    ``failed`` is the labels that raised; their sentences are on
+    `App.indexing_failed`, where the panes draw them.
+    """
+
+    names: list[str]
+    items: list
+    failed: list[str]
+
+
+async def _hops(
+    app: App,
+    items: list,
+    work: Callable[[Any], str],
+    *,
+    label: Callable[[Any], str],
+    where: str,
+    on_progress=None,
+    stop: cancel.Scope | None = None,
+    reload_each: bool = False,
+) -> Indexed:
+    """One item per hop off the loop: the shape `index`, `scope` and `profile_tables` share.
+
+    **One item failing is that item's failure, not the run's** *(2026-09-21,
+    the first drive on a real Snowflake account with thirty tables)*. The
+    eleventh table's profile raised in the warehouse, the exception left the
+    loop, and everything after it was skipped: nineteen tables never tried, the
+    catalog never reloaded so the ten that had finished drew as *metadata only*
+    while their profiles sat on disk, no toast, and a spinner in the Indexing
+    tab that nothing was left to take down. So a failure is remembered for a
+    report, kept as a sentence on `App.indexing_failed` under the item's label,
+    and the loop goes on. A later success on the same label clears it.
+
+    `Cancelled` still ends the run, and is still not a failure. The catalog is
+    reloaded in a ``finally``: what reached the disk is what the panes must
+    draw, whatever ended the loop.
+
+    ``reload_each`` reloads it after every hop as well, for the one caller
+    whose hop is a scan on a warehouse: thirty of those is most of an hour, and
+    a left pane opened in the middle said *metadata only* about tables whose
+    profile was on disk. Off elsewhere, because a reload reads every entry and a
+    local project indexing two hundred files would spend longer reloading than
+    profiling.
+    """
+    names: list[str] = []
+    finished: list = []
+    failed: list[str] = []
+    try:
+        for done, item in enumerate(items):
+            if stop is not None and stop.cancelled:
+                break
+            if on_progress is not None:
+                on_progress(done, len(items), label(item))
+            try:
+                names.append(await asyncio.to_thread(work, item))
+            except cancel.Cancelled:
+                break
+            except Exception as exc:  # noqa: BLE001 — one item's failure is a sentence on its row
+                feedback.remember(exc, where)
+                failed.append(label(item))
+                app.indexing_failed = {**app.indexing_failed, label(item): _sentence(exc)}
+                continue
+            finished.append(item)
+            app.indexing_failed = {k: v for k, v in app.indexing_failed.items() if k != label(item)}
+            if reload_each:
+                refresh_catalog(app)
+    finally:
+        refresh_catalog(app)
+    # The graph is the catalog restated, so a run that stopped or half failed
+    # still syncs what it did manage rather than leaving the two disagreeing.
+    await asyncio.to_thread(sync_knowledge, app)
+    return Indexed(names=names, items=finished, failed=failed)
+
+
+def _sentence(exc: BaseException) -> str:
+    """An error as one line for a row: its kind, and the first line it said.
+
+    The first line only. DuckDB quotes the whole statement back under it, and a
+    profile's statement is a page (`core/feedback` cuts the same thing).
+    """
+    said = str(exc).strip().splitlines()
+    return f"{type(exc).__name__}: {said[0]}" if said else type(exc).__name__
+
+
 async def scope(
     app: App, names: list[str], *, on_progress=None, stop: cancel.Scope | None = None
-) -> list[str]:
+) -> Indexed:
     """Bring tables into scope, one hop each, as metadata (`catalog.scope_table`).
 
     The same shape as `index`: one table per hop so the screen can say which,
-    what was done stays done when Stop lands, and the names that made it are
-    returned so the caller reports what happened rather than what was asked.
+    what was done stays done when Stop lands, and what made it is returned so
+    the caller reports what happened rather than what was asked (`_hops`).
     """
-    done_names: list[str] = []
-    for done, qualified in enumerate(names):
-        if stop is not None and stop.cancelled:
-            break
-        if on_progress is not None:
-            on_progress(done, len(names), qualified)
-        try:
-            written = await asyncio.to_thread(_scope_one, qualified, app.portia_dir, stop)
-        except cancel.Cancelled:
-            break
-        done_names.append(written)
-    refresh_catalog(app)
-    await asyncio.to_thread(sync_knowledge, app)
-    return done_names
+    return await _hops(
+        app,
+        names,
+        lambda qualified: _scope_one(qualified, app.portia_dir, stop),
+        label=str,
+        where="scoping a table",
+        on_progress=on_progress,
+        stop=stop,
+    )
 
 
 def _scope_one(qualified: str, portia_dir: str, stop: cancel.Scope | None) -> str:
@@ -602,38 +690,36 @@ async def profile_remote(app: App, name: str) -> dict:
 
 async def profile_tables(
     app: App, names: list[str], *, on_progress=None, stop: cancel.Scope | None = None
-) -> list[str]:
+) -> Indexed:
     """Profile several warehouse tables, one hop each: `scope`'s shape over `profile_remote`.
 
     The add-data screen asks for this when its profile switch is on, and the
     Indexing tab when a metadata-only table is ticked (2026-09-07). Both need
     what `index` needs: a sentence per table so the window can say which one is
     on the meter, and a Stop that lands between tables *and* interrupts the scan
-    in flight. What was profiled stays profiled; the names that made it are
-    returned so the caller reports what happened, not what was asked.
+    in flight. What was profiled stays profiled, a table whose scan the
+    warehouse refused is skipped with its reason kept, and what made it is
+    returned so the caller reports what happened, not what was asked (`_hops`).
     """
-    done_names: list[str] = []
-    for done, name in enumerate(names):
-        if stop is not None and stop.cancelled:
-            break
-        if on_progress is not None:
-            on_progress(done, len(names), name)
-        try:
-            await asyncio.to_thread(_profile_one, name, app.portia_dir, stop)
-        except cancel.Cancelled:
-            break
-        done_names.append(name)
-    refresh_catalog(app)
-    await asyncio.to_thread(sync_knowledge, app)
-    return done_names
+    return await _hops(
+        app,
+        names,
+        lambda name: _profile_one(name, app.portia_dir, stop),
+        label=str,
+        where="profiling a table",
+        on_progress=on_progress,
+        stop=stop,
+        reload_each=True,
+    )
 
 
-def _profile_one(name: str, portia_dir: str, stop: cancel.Scope | None) -> None:
+def _profile_one(name: str, portia_dir: str, stop: cancel.Scope | None) -> str:
     # The scope is installed inside the worker, as `_index_one` installs its:
     # `connect()` registers the session with the ambient scope, and that is the
     # handle Stop needs to reach a scan already running.
     with cancel.scope(stop):
         catalog.profile_remote(name, connect(), portia_dir=portia_dir)
+    return name
 
 
 def written_tables(app: App) -> dict[str, str]:
@@ -1014,7 +1100,7 @@ def _copy_all(pairs: list[tuple[Path, Path]]) -> list[Path]:
 
 async def index(
     paths: list[Path], app: App, *, on_progress=None, stop: cancel.Scope | None = None
-) -> list[str]:
+) -> Indexed:
     """Profile each file into the catalog. Deterministic, free, always happens.
 
     The *interpretation* half is a model turn and is deliberately not here — the
@@ -1037,27 +1123,15 @@ async def index(
     pane should show. The names are returned so the caller can say how far it
     got rather than treating a stop as having done nothing.
     """
-    names: list[str] = []
-    for done, path in enumerate(paths):
-        if stop is not None and stop.cancelled:
-            break
-        if on_progress is not None:
-            on_progress(done, len(paths), path.stem)
-        try:
-            names.append(await asyncio.to_thread(_index_one, path, app.portia_dir, stop))
-        except cancel.Cancelled:
-            # The file being profiled when Stop landed. `catalog.index_source`
-            # profiles before it writes, so an interrupted one left no entry —
-            # it is simply not in `names`, which is the whole of what "not
-            # profiled" has to mean here. Not re-raised: a stopped indexing run
-            # is an outcome with a result, not a failure, and the caller still
-            # needs the list of what did get done.
-            break
-    refresh_catalog(app)
-    # The graph is the catalog restated, so a stopped indexing run still syncs
-    # what it did manage to profile rather than leaving the two disagreeing.
-    await asyncio.to_thread(sync_knowledge, app)
-    return names
+    return await _hops(
+        app,
+        paths,
+        lambda path: _index_one(path, app.portia_dir, stop),
+        label=lambda path: path.stem,
+        where="indexing a file",
+        on_progress=on_progress,
+        stop=stop,
+    )
 
 
 def _index_one(path: Path, portia_dir: str, stop: cancel.Scope | None = None) -> str:
@@ -1746,11 +1820,19 @@ def source_states(app: App) -> list[SourceState]:
         )
         for name, entry in entries.items()
     ]
-    states += [
-        SourceState(name=path.stem, rel=rel, state=UNINDEXED)
-        for path in data_files_in(app, app.data_dir)
-        if (rel := path.relative_to(app.root).as_posix()) not in known
-    ]
+    # **A warehouse project lists no file** *(2026-09-21)*. Its data is the scope
+    # (`project_tree` already draws it that way), and a project folder on a
+    # work machine is a repository: with no `data_dir` the walk is the whole
+    # root, and thirty scoped tables were listed among seventy stray CSVs and
+    # Parquet files, by stem, so *forecast_runs* ten times, each one
+    # tickable for an Index that would have profiled it into a project that
+    # cannot join it to anything (`CONNECTOR.md` §2.2, no mixing).
+    if not app.connection:
+        states += [
+            SourceState(name=path.stem, rel=rel, state=UNINDEXED)
+            for path in data_files_in(app, app.data_dir)
+            if (rel := path.relative_to(app.root).as_posix()) not in known
+        ]
     # Built tables, by the same two states a source has: read, or not yet. A
     # model is never *unindexed* — building it is what indexes it — so the Index
     # button skips them and Interpret takes them, name for name.

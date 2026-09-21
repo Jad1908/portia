@@ -17,7 +17,7 @@ Two rules are enforced here rather than trusted to each caller:
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -139,6 +139,24 @@ def alert(text: str, kind: str = "error") -> ui.element:
         ui.icon(_ALERT_ICONS.get(kind, "info")).classes("p-alert-icon")
         ui.label(text).classes("p-alert-text pre-wrap")
     return box
+
+
+def failures(failed: Mapping[str, str]) -> ui.element | None:
+    """What indexing could not do, by name, with what each error said. Nothing when all went.
+
+    One block for every surface indexing starts from (`engine._hops`). Names in
+    the order they failed and every one of them listed: which failure matters
+    is not this block's call.
+    """
+    if not failed:
+        return None
+    lines = [FAILED_HEAD.format(n=count(len(failed), "source"))]
+    lines += [f"{name}: {said}" for name, said in failed.items()]
+    return alert("\n".join(lines), kind="error")
+
+
+#: The first line of `failures`.
+FAILED_HEAD = "Could not index {n}. The rest went ahead."
 
 
 def choice_card(
