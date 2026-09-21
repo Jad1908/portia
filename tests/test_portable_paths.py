@@ -75,3 +75,23 @@ def test_a_source_in_a_folder_is_recorded_with_forward_slashes(tmp_path):
     pd.DataFrame({"ID": [1, 2]}).to_csv(folder / "orders.csv", index=False)
     recorded = catalog.source_ref(folder / "orders.csv", portia_dir=tmp_path / ".portia")
     assert recorded == "data/raw/orders.csv"
+
+
+def test_each_vendors_file_is_looked_for_where_windows_keeps_it(monkeypatch, tmp_path):
+    from portia.connectors import registry
+
+    for variable in ("SNOWFLAKE_HOME", "CLOUDSDK_CONFIG", "PGSERVICEFILE"):
+        monkeypatch.delenv(variable, raising=False)
+    monkeypatch.setattr(registry.sys, "platform", "win32")
+    monkeypatch.setattr(registry.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "Local"))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+
+    local, roaming = tmp_path / "Local", tmp_path / "Roaming"
+    assert registry.snowflake_connections_file() == local / "snowflake" / "connections.toml"
+    assert registry.gcloud_config_dir() == roaming / "gcloud"
+    assert registry.pg_service_file() == roaming / "postgresql" / ".pg_service.conf"
+
+    # With the variable unset, the folder it names by default.
+    monkeypatch.delenv("APPDATA")
+    assert registry.gcloud_config_dir() == tmp_path / "AppData" / "Roaming" / "gcloud"
