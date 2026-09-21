@@ -329,7 +329,15 @@ def snowflake_connections_file() -> Path:
         return dot / "connections.toml"
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support" / "snowflake" / "connections.toml"
+    if sys.platform == "win32":
+        return _windows_dir("LOCALAPPDATA", "Local") / "snowflake" / "connections.toml"
     return Path.home() / ".config" / "snowflake" / "connections.toml"
+
+
+def _windows_dir(variable: str, folder: str) -> Path:
+    """One of Windows' per-user data folders: the variable, or where it points by default."""
+    named = os.environ.get(variable)
+    return Path(named) if named else Path.home() / "AppData" / folder
 
 
 def snowflake_suggestions(path: Path | None = None) -> list[Connection]:
@@ -402,9 +410,17 @@ ADC, SERVICE_ACCOUNT, ACCESS_TOKEN = "adc", "service_account", "token"
 
 
 def gcloud_config_dir() -> Path:
-    """Where the Google Cloud SDK keeps its configurations: ``$CLOUDSDK_CONFIG`` or ``~/.config/gcloud``."""
+    """Where the Google Cloud SDK keeps its configurations.
+
+    ``$CLOUDSDK_CONFIG``, else ``~/.config/gcloud``, which on Windows is
+    ``%APPDATA%\\gcloud``.
+    """
     override = os.environ.get("CLOUDSDK_CONFIG")
-    return Path(override).expanduser() if override else Path.home() / ".config" / "gcloud"
+    if override:
+        return Path(override).expanduser()
+    if sys.platform == "win32":
+        return _windows_dir("APPDATA", "Roaming") / "gcloud"
+    return Path.home() / ".config" / "gcloud"
 
 
 def gcloud_default_project(config_dir: Path | None = None) -> str | None:
@@ -476,9 +492,17 @@ PGPASS = "pgpass"
 
 
 def pg_service_file() -> Path:
-    """Where libpq reads named services: ``$PGSERVICEFILE`` or ``~/.pg_service.conf``."""
+    """Where libpq reads named services.
+
+    ``$PGSERVICEFILE``, else ``~/.pg_service.conf``, which on Windows is
+    ``%APPDATA%\\postgresql\\.pg_service.conf``.
+    """
     override = os.environ.get("PGSERVICEFILE")
-    return Path(override).expanduser() if override else Path.home() / ".pg_service.conf"
+    if override:
+        return Path(override).expanduser()
+    if sys.platform == "win32":
+        return _windows_dir("APPDATA", "Roaming") / "postgresql" / ".pg_service.conf"
+    return Path.home() / ".pg_service.conf"
 
 
 def postgres_suggestions(path: Path | None = None) -> list[Connection]:

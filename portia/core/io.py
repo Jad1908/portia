@@ -231,6 +231,20 @@ def table_query(qualified: str, *, dialect: dialects.Dialect = dialects.DUCKDB) 
     return "SELECT * FROM " + ".".join(dialect.quote(part) for part in qualified.split("."))
 
 
+def relative(path: str | Path, root: str | Path) -> str:
+    """``path`` relative to ``root``, **as portia writes it down: forward slashes**.
+
+    A relative path ends up in files that are committed and opened on another
+    machine (a catalog entry, a spec's ``sources:``, ``_sources.sql``), and in
+    keys the window splits on ``/``. ``str(Path)`` spells it with the machine's
+    own separator, so on Windows it wrote ``data\\orders.csv``, which a Mac
+    reads as one file name. Every system portia runs on opens a forward-slash
+    path, DuckDB on Windows included, so that is the one spelling. Raises
+    `ValueError` when ``path`` is not under ``root``, as ``relative_to`` does.
+    """
+    return Path(path).relative_to(root).as_posix()
+
+
 def rescans(path: str | Path) -> bool:
     """Does every query against this file re-read it from the start?
 
@@ -256,7 +270,9 @@ def read_query(path: str | Path, *, absolute: bool = True) -> str:
     """
     path = Path(path)
     fmt = _format(path)
-    args = [quote_literal(str(path.resolve() if absolute else path))]
+    # A path that is written to a file is spelled the portable way (`relative`);
+    # one that is executed here is this machine's own.
+    args = [quote_literal(str(path.resolve()) if absolute else path.as_posix())]
     args += [f"{key}={_sql_value(value)}" for key, value in fmt.sql_options.items()]
     return f"SELECT * FROM {fmt.sql_reader}({', '.join(args)})"
 

@@ -38,6 +38,7 @@ import yaml
 from portia.checks import profiling
 from portia.checks.profiling import profile_path
 from portia.core import dialect as dialects
+from portia.core.io import relative
 from portia.core.present import format_rate
 from portia.core.table import Table
 
@@ -85,7 +86,7 @@ def source_ref(data_path: str | Path, *, portia_dir: str | Path = DEFAULT_DIR) -
     root = project_root(portia_dir).resolve()
     target = Path(data_path).resolve()
     try:
-        return str(target.relative_to(root))
+        return relative(target, root)
     except ValueError:
         raise ValueError(
             f"{data_path} is outside this project ({root}). "

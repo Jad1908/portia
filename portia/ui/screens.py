@@ -977,7 +977,7 @@ def _choose_folder(rel: str) -> None:
 
 def _repick() -> None:
     APP.repicking = True
-    APP.browse_at = str(Path(APP.data_dir).parent) if "/" in APP.data_dir else ""
+    APP.browse_at = Path(APP.data_dir).parent.as_posix() if "/" in APP.data_dir else ""
     APP.browse_at = "" if APP.browse_at == "." else APP.browse_at
     _refresh()
 
@@ -2183,7 +2183,7 @@ def _import_plan() -> None:
                 with ui.element("div").classes("added-row"):
                     c.mono(str(src), small=True)
                     ui.icon("arrow_forward").classes("fact-icon")
-                    c.mono(str(_rel(dst)), small=True)
+                    c.mono(_rel(dst).as_posix(), small=True)
         c.button("Cancel this import", _clear_import, kind="secondary", micro=True)
 
 
