@@ -51,6 +51,7 @@ from typing import Any
 import yaml
 
 from portia import catalog, pipeline, spec
+from portia.core.io import relative
 
 #: Where a project keeps its journal. Root-level and committed — see the module
 #: docstring for the argument, and for the one that was weighed against it.
@@ -196,7 +197,7 @@ def load_all(root: str | Path = ".") -> list[dict]:
     for path in sorted(directory.glob("*.yaml")):
         doc = _read(path)
         if doc:
-            found.append({**doc, "path": str(path.relative_to(Path(root)))})
+            found.append({**doc, "path": relative(path, root)})
     return sorted(found, key=lambda d: str(d.get("at") or ""), reverse=True)
 
 

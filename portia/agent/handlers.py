@@ -36,7 +36,7 @@ from portia.checks.outcome import BLOCKING_FLAGS, REPORT_KEYS
 from portia.checks.profiling import profile_path
 from portia.core import backend
 from portia.core import dialect as dialects
-from portia.core.io import connect, source_table
+from portia.core.io import connect, relative, source_table
 from portia.core.serialize import to_json, to_jsonable
 from portia.core.table import Table, subquery
 from portia.knowledge import measure, query, store
@@ -639,7 +639,7 @@ def record_finding(
         portia_dir=portia_dir,
     )
     return {
-        "finding": str(path.relative_to(root)),
+        "finding": relative(path, root),
         "about": refs,
         "spec": spec_name,
         "n_queries": len(queries),
@@ -1341,7 +1341,7 @@ def read_spec(
     entry = catalog.load_models(portia_dir).get(name)
     briefs = findings.briefs_for_spec(name, root=root)
     out: dict[str, Any] = {
-        "spec": str(path.relative_to(root)) if path.is_relative_to(root) else str(path),
+        "spec": relative(path, root) if path.is_relative_to(root) else str(path),
         "model": name,
         "layer": layer,
         "sources": dict(doc.get("sources") or {}),
@@ -1349,7 +1349,7 @@ def read_spec(
         "steps": steps,
         "reads": sorted(deps.get(name, ())),
         "read_by": sorted(n for n, reads in deps.items() if name in reads),
-        "compiled": str(compiled.relative_to(root)) if compiled.exists() else None,
+        "compiled": relative(compiled, root) if compiled.exists() else None,
         "compiled_stale": pipeline.is_stale(path, doc, layer=layer, root=root),
         "built": ((entry or {}).get("built") or {}).get("at"),
         "n_findings": len(briefs),

@@ -40,6 +40,7 @@ from pathlib import Path
 from nicegui import ui
 
 from portia import catalog
+from portia.core.io import relative
 from portia.ui import components as c
 from portia.ui import engine, state, tree
 from portia.ui import graph as graph_module
@@ -531,7 +532,7 @@ def _figure_tree(saved: list[dict]) -> None:
     by_folder: dict[str, list[dict]] = {}
     for figure in saved:
         rel = Path(figure["path"]).relative_to(figures_module.FIGURES_DIR).parent
-        by_folder.setdefault(str(rel) if str(rel) != "." else "", []).append(figure)
+        by_folder.setdefault(rel.as_posix() if rel.as_posix() != "." else "", []).append(figure)
     known = sorted({*by_folder, *(f for f in engine.figure_folders(APP) if f)})
     _figure_level("", known, by_folder, depth=1)
 
@@ -732,7 +733,7 @@ def move_figure(path: str, folder: str) -> None:
         return
     # A tab showing it follows the file (`state.App.figure_moved`): a drag is a
     # rename portia did not author, and the picture on screen did not change.
-    APP.figure_moved(path, str(moved.relative_to(APP.root)))
+    APP.figure_moved(path, relative(moved, APP.root))
     pane.refresh()
     workflow.pane.refresh()
 

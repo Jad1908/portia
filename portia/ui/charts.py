@@ -40,6 +40,7 @@ from pathlib import Path
 
 from nicegui import ui
 
+from portia.core.io import relative
 from portia.core.serialize import to_json_compact
 from portia.ui import components as c
 from portia.ui.state import (
@@ -620,7 +621,7 @@ def keep(chart: Chart) -> str:
     # the pane below draws the note off the same field a figure opened from disk
     # carries.
     chart.notes = chart.keep_notes.strip()
-    APP.figure_saved(chart, str(path.relative_to(APP.root)))
+    APP.figure_saved(chart, relative(path, APP.root))
     return ""
 
 

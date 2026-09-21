@@ -35,6 +35,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from portia.core.io import relative
+
 #: Where saved figures live, relative to the project root. Beside `findings/` and
 #: `specs/`, at the top: it is something the project has, not something
 #: `.portia/` is keeping notes about.
@@ -134,7 +136,7 @@ def load_all(root: str | Path = ".") -> list[dict]:
             figure = load(path)
         except (OSError, ValueError):
             continue
-        figure["path"] = str(path.relative_to(Path(root)))
+        figure["path"] = relative(path, root)
         out.append(figure)
     return out
 
@@ -149,7 +151,7 @@ def folders(root: str | Path = ".") -> list[str]:
     base = _dir(root)
     found = [""]
     if base.exists():
-        found += sorted(str(p.relative_to(base)) for p in base.rglob("*") if p.is_dir())
+        found += sorted(relative(p, base) for p in base.rglob("*") if p.is_dir())
     return found
 
 
@@ -207,7 +209,7 @@ def contents(folder: str, root: str | Path = ".") -> list[str]:
     base = _dir(root) / _safe_folder(folder)
     if not base.is_dir():
         return []
-    return sorted(str(p.relative_to(Path(root))) for p in base.rglob(f"*{SUFFIX}") if p.is_file())
+    return sorted(relative(p, root) for p in base.rglob(f"*{SUFFIX}") if p.is_file())
 
 
 def remove_folder(folder: str, root: str | Path = ".", *, with_contents: bool = False) -> list[str]:

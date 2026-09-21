@@ -647,7 +647,7 @@ def render_markdown(
 
     # The heading reads; the path underneath is what ties the report back to the
     # spec that produced it. A report you can't trace to its recipe is an anecdote.
-    summary = [f"`{spec_path}`"] if spec_path else []
+    summary = [f"`{Path(spec_path).as_posix()}`"] if spec_path else []
     summary.append(f"{len(results)} step(s)")
     summary.append(f"**blocking: {', '.join(blocking)}**" if blocking else "no blocking flag")
 
