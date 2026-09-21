@@ -8,6 +8,7 @@ bar asks for (docs/VISION.md).
 from __future__ import annotations
 
 import argparse
+import socket
 
 from nicegui import app as nicegui_app
 from nicegui import ui
@@ -16,6 +17,40 @@ from portia.ui import app, theme
 from portia.ui.state import APP
 
 DEFAULT_PORT = 8080
+#: How many ports above the default are tried before giving up. 8080 is the
+#: most contested development port there is; twenty in a row being taken means
+#: something else is wrong, and saying so beats walking the whole range.
+PORT_TRIES = 20
+
+
+def is_free(host: str, port: int) -> bool:
+    """Whether the window could listen here, found by binding and letting go."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        try:
+            probe.bind((host, port))
+        except OSError:
+            return False
+    return True
+
+
+def pick_port(host: str, asked: int | None) -> int:
+    """The port to serve on.
+
+    **A port somebody asked for is theirs or it is refused**: they have a
+    bookmark, a tunnel or a forwarding rule pointing at it, and serving
+    somewhere else would be the app disagreeing with them quietly. With nothing
+    asked, the default is a preference and the next free port above it does as
+    well, which is the first thing a tester on Windows with WSL ran into.
+    """
+    if asked is not None:
+        if not is_free(host, asked):
+            raise ValueError(f"port {asked} on {host} is already in use; pass another --port")
+        return asked
+    for port in range(DEFAULT_PORT, DEFAULT_PORT + PORT_TRIES):
+        if is_free(host, port):
+            return port
+    last = DEFAULT_PORT + PORT_TRIES - 1
+    raise ValueError(f"no free port from {DEFAULT_PORT} to {last} on {host}; pass one with --port")
 
 
 async def _close_chats() -> None:
@@ -38,10 +73,24 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Open the portia app.")
     parser.add_argument("--project", default=None, help="project directory to open on start")
     parser.add_argument("--dir", default=APP.portia_dir, help="catalog directory in the project")
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help=f"port to serve on (default: {DEFAULT_PORT}, or the next free one above it)",
+    )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--no-show", action="store_true", help="don't open a browser")
     args = parser.parse_args()
+
+    try:
+        port = pick_port(args.host, args.port)
+    except ValueError as refusal:
+        raise SystemExit(str(refusal)) from None
+    # NiceGUI's own welcome is switched off below, so this is the only line
+    # that says where the window is, and a browser does not always open by
+    # itself (`--no-show`, WSL, a remote shell).
+    print(f"portia is at http://{args.host}:{port}", flush=True)
 
     APP.portia_dir = args.dir
     if args.project:
@@ -54,7 +103,7 @@ def main() -> None:
 
     ui.run(
         host=args.host,
-        port=args.port,
+        port=port,
         title=app.TITLE,
         favicon=theme.LOGO_FILE,
         # Auto: Quasar resolves it from prefers-color-scheme, and the toolbar's
