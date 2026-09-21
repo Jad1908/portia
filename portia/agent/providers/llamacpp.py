@@ -228,7 +228,7 @@ def load_config(path: Path | None = None) -> ServerConfig:
     target = path or CONFIG
     if not target.exists():
         return ServerConfig()
-    raw = yaml.safe_load(target.read_text()) or {}
+    raw = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
     if not isinstance(raw, dict):
         return ServerConfig()
     return ServerConfig(
@@ -241,7 +241,7 @@ def load_config(path: Path | None = None) -> ServerConfig:
 def save_config(config: ServerConfig, path: Path | None = None) -> Path:
     target = path or CONFIG
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(yaml.safe_dump(config.__dict__, sort_keys=True))
+    target.write_text(yaml.safe_dump(config.__dict__, sort_keys=True), encoding="utf-8")
     return target
 
 
@@ -375,7 +375,7 @@ def wait_ready(*, timeout: float = LOAD_TIMEOUT) -> None:
 
 def _log_tail(lines: int = 5) -> str:
     try:
-        tail = LOG.read_text(errors="replace").splitlines()[-lines:]
+        tail = LOG.read_text(errors="replace", encoding="utf-8").splitlines()[-lines:]
     except OSError:
         return ""
     return (

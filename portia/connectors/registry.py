@@ -243,7 +243,7 @@ def _connection(name: str, record: object) -> Connection | None:
 def _entries(path: Path | None = None) -> dict[str, dict]:
     """The file's records as written, readable by this build or not."""
     try:
-        raw = yaml.safe_load((path or CONNECTIONS).read_text()) or {}
+        raw = yaml.safe_load((path or CONNECTIONS).read_text(encoding="utf-8")) or {}
     except FileNotFoundError:
         return {}
     entries = raw.get("connections") or {}
@@ -282,7 +282,7 @@ def remove(name: str, path: Path | None = None) -> bool:
 
 def _write(entries: dict[str, dict], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.safe_dump({"connections": entries}, sort_keys=True))
+    path.write_text(yaml.safe_dump({"connections": entries}, sort_keys=True), encoding="utf-8")
 
 
 def suggestions() -> list[Connection]:
@@ -342,8 +342,8 @@ def snowflake_suggestions(path: Path | None = None) -> list[Connection]:
     """
     target = path or snowflake_connections_file()
     try:
-        raw = tomllib.loads(target.read_text())
-    except (FileNotFoundError, tomllib.TOMLDecodeError, OSError):
+        raw = tomllib.loads(target.read_text(encoding="utf-8"))
+    except (tomllib.TOMLDecodeError, OSError, UnicodeDecodeError):
         return []
     out = []
     for name, fields in raw.items():
@@ -416,12 +416,14 @@ def gcloud_default_project(config_dir: Path | None = None) -> str | None:
     """
     root = config_dir or gcloud_config_dir()
     try:
-        active = (root / "active_config").read_text().strip() or "default"
-    except OSError:
+        active = (root / "active_config").read_text(encoding="utf-8").strip() or "default"
+    except (OSError, UnicodeDecodeError):
         active = "default"
     try:
-        lines = (root / "configurations" / f"config_{active}").read_text().splitlines()
-    except OSError:
+        lines = (
+            (root / "configurations" / f"config_{active}").read_text(encoding="utf-8").splitlines()
+        )
+    except (OSError, UnicodeDecodeError):
         return None
     section = ""
     for line in lines:
@@ -487,8 +489,8 @@ def postgres_suggestions(path: Path | None = None) -> list[Connection]:
     """
     parser = configparser.ConfigParser(interpolation=None)
     try:
-        parser.read_string((path or pg_service_file()).read_text())
-    except (OSError, configparser.Error):
+        parser.read_string((path or pg_service_file()).read_text(encoding="utf-8"))
+    except (OSError, configparser.Error, UnicodeDecodeError):
         return []
     return [
         Connection(

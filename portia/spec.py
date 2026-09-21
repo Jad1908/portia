@@ -328,13 +328,13 @@ def run_order(models: dict[str, Path], *, base_dir: str | Path = ".") -> list[st
 
 def load_spec(path: str | Path) -> dict:
     """Parse a spec YAML file into a plain dict."""
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
 def save_spec(spec: dict, path: str | Path) -> None:
     """Write a spec dict to YAML — stable key order, block style, diff-friendly."""
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump(spec, f, sort_keys=False, default_flow_style=False)
 
 
@@ -625,7 +625,7 @@ def write_report(
     out.mkdir(parents=True, exist_ok=True)
     stamp = when.strftime(REPORT_STAMP)
     path = out / (f"{stamp}-{name}.md" if name else f"{stamp}.md")
-    path.write_text(render_markdown(results, spec_path=spec_path, when=when))
+    path.write_text(render_markdown(results, spec_path=spec_path, when=when), encoding="utf-8")
     return path
 
 

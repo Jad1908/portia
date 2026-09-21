@@ -76,7 +76,7 @@ def build_system_prompt(portia_dir: str = catalog.DEFAULT_DIR) -> str:
     *may* call is a tool it will sometimes skip — and the one it skipped in
     testing was the project context, which left its judgment generic.
     """
-    return f"{PROMPT_PATH.read_text()}\n\n---\n\n{context.build_brief(portia_dir)}"
+    return f"{PROMPT_PATH.read_text(encoding='utf-8')}\n\n---\n\n{context.build_brief(portia_dir)}"
 
 
 def prompt_chars(portia_dir: str = catalog.DEFAULT_DIR, provider: str = DEFAULT_PROVIDER) -> int:

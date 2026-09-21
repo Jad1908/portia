@@ -214,13 +214,13 @@ def _flush_brief(path: Path, *, brief: bool, catalog: bool) -> None:
     reach for the wrong directory, which is a confusing failure rather than a
     clean slate.
     """
-    doc = yaml.safe_load(path.read_text()) or {}
+    doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     if catalog:
         for key in AGENT_KEYS:
             doc.pop(key, None)
     if brief:
         doc.pop("project", None)
-    path.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
+    path.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), encoding="utf-8")
 
 
 def _flush_graph(root: Path) -> str:

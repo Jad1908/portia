@@ -151,9 +151,9 @@ def apply() -> ui.dark_mode:
     ui.add_head_html(f'<script src="{_VIS_NETWORK}"></script>')
     for src in _VEGA:
         ui.add_head_html(f'<script src="{src}"></script>')
-    ui.add_css(CSS.read_text().replace(f"{ASSET_TOKEN}/", f"{ASSET_ROUTE}/"))
+    ui.add_css(CSS.read_text(encoding="utf-8").replace(f"{ASSET_TOKEN}/", f"{ASSET_ROUTE}/"))
     for script in BEHAVIOUR:
-        ui.add_body_html(f"<script>{script.read_text()}</script>")
+        ui.add_body_html(f"<script>{script.read_text(encoding='utf-8')}</script>")
     _DARK = ui.dark_mode(None)
     return _DARK
 

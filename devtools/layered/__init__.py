@@ -117,7 +117,7 @@ def _rows(root: Path) -> None:
 
 
 def _write(path: Path, header: list[str], rows: list[list]) -> None:
-    with open(path, "w", newline="") as handle:
+    with open(path, "w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow(header)
         writer.writerows(rows)
@@ -373,7 +373,7 @@ def build(root: str | Path = DEFAULT_ROOT, *, index: bool = True) -> Path:
         # (`spec.spec_path`), exactly as its compiled `.sql` does.
         path = spec.spec_path(name, layer=doc.get("layer"), root=root)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(yaml.safe_dump(doc, sort_keys=False))
+        path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
 
     portia_dir = root / catalog.DEFAULT_DIR
     catalog.init_project(BRIEF, portia_dir=portia_dir)
