@@ -21,7 +21,7 @@ from portia.cli import knowledge
 def project(tmp_path: Path) -> Path:
     data = tmp_path / "data"
     data.mkdir()
-    with open(data / "orders.csv", "w", newline="") as f:
+    with open(data / "orders.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["order_id", "amount"])
         w.writerows([[1, 10], [2, 20]])
@@ -45,7 +45,8 @@ def project(tmp_path: Path) -> Path:
                 ],
             },
             sort_keys=False,
-        )
+        ),
+        encoding="utf-8",
     )
     return tmp_path
 
@@ -101,7 +102,8 @@ def test_what_could_not_be_read_is_reported_and_is_not_a_failure(project, monkey
                 ],
             },
             sort_keys=False,
-        )
+        ),
+        encoding="utf-8",
     )
     _run(monkeypatch, "--root", str(project))
     assert "agg.n: no input column underneath it" in capsys.readouterr().out

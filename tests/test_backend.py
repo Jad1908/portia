@@ -60,7 +60,7 @@ def test_table_query_quotes_every_part():
 
 def test_source_query_dispatches_and_a_path_still_reads_its_file(tmp_path):
     csv = tmp_path / "orders.csv"
-    csv.write_text("a\n1\n")
+    csv.write_text("a\n1\n", encoding="utf-8")
     assert source_query({"table": "x.y"}) == 'SELECT * FROM "x"."y"'
     assert "read_csv" in source_query("orders.csv", base=tmp_path)
     assert str(csv.resolve()) in source_query("orders.csv", base=tmp_path)
@@ -109,7 +109,7 @@ def test_a_spec_fingerprint_moves_when_a_source_becomes_a_table():
 def test_source_table_and_source_query_agree(ref, con, tmp_path):
     if isinstance(ref, str):
         (tmp_path / "a").mkdir()
-        (tmp_path / "a" / "b.csv").write_text("x\n1\n")
+        (tmp_path / "a" / "b.csv").write_text("x\n1\n", encoding="utf-8")
     t = source_table(ref, con, base=tmp_path)
     assert t.query == source_query(ref, base=tmp_path)
 

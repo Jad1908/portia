@@ -30,7 +30,7 @@ DOC = Path(__file__).resolve().parents[1] / "public_docs" / "GRAPH_SCHEMA.md"
 
 @pytest.fixture(scope="module")
 def text() -> str:
-    return DOC.read_text()
+    return DOC.read_text(encoding="utf-8")
 
 
 def test_every_node_label_is_documented(text):

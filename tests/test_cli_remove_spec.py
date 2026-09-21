@@ -22,7 +22,7 @@ def project(tmp_path: Path) -> Path:
     """A three-model chain: `stg_orders` -> `int_orders` -> `mart_orders`."""
     data = tmp_path / "data"
     data.mkdir()
-    with open(data / "orders.csv", "w", newline="") as f:
+    with open(data / "orders.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["order_id", "customer_id", "amount"])
         w.writerows([[1, " C1 ", 10], [2, "C2", 20]])
@@ -55,7 +55,8 @@ def _write(path: Path, layer: str, sources: dict, reads: str) -> None:
                 ],
             },
             sort_keys=False,
-        )
+        ),
+        encoding="utf-8",
     )
 
 

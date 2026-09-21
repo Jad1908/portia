@@ -216,7 +216,7 @@ def test_record_step_writes_a_runnable_spec_and_registers_sources(sales, tmp_pat
     )
     json.dumps(out)
 
-    doc = yaml.safe_load((tmp_path / "specs" / "orders.yaml").read_text())
+    doc = yaml.safe_load((tmp_path / "specs" / "orders.yaml").read_text(encoding="utf-8"))
     assert doc["sources"] == {"orders": "orders.csv", "customers": "customers.csv"}
     assert doc["steps"][0]["how"] == "left"
 
@@ -442,7 +442,7 @@ def test_record_step_can_chain_from_an_earlier_step(sales, tmp_path):
     )
     assert out["n_steps"] == 2
 
-    doc = yaml.safe_load((tmp_path / "specs" / "chain.yaml").read_text())
+    doc = yaml.safe_load((tmp_path / "specs" / "chain.yaml").read_text(encoding="utf-8"))
     assert "bridged" not in doc["sources"]  # a step is not registered as a source
 
     run = handlers.run_spec("specs/chain.yaml")
@@ -522,7 +522,7 @@ def test_a_step_reference_only_runs_the_spec_up_to_that_step(sales):
     from pathlib import Path
 
     path = Path("specs/chain.yaml")
-    doc = yaml.safe_load(path.read_text())
+    doc = yaml.safe_load(path.read_text(encoding="utf-8"))
     doc["steps"].append(
         {
             "id": "broken",
@@ -531,7 +531,7 @@ def test_a_step_reference_only_runs_the_spec_up_to_that_step(sales):
             "transforms": [{"column": "no_such_column", "op": "strip"}],
         }
     )
-    path.write_text(yaml.safe_dump(doc))
+    path.write_text(yaml.safe_dump(doc), encoding="utf-8")
 
     out = handlers.join_findings(
         "specs/chain.yaml#first", "customers", keys=["customer_id"], portia_dir=sales
@@ -573,7 +573,7 @@ def test_record_step_accepts_the_same_reference_form_the_checks_need(sales, tmp_
 
     # ...and the spec stores the bare id: a step naming its own spec by path,
     # inside that spec, is noise in a file whose point is reading well in a diff.
-    doc = yaml.safe_load((tmp_path / "specs" / "chain.yaml").read_text())
+    doc = yaml.safe_load((tmp_path / "specs" / "chain.yaml").read_text(encoding="utf-8"))
     assert doc["steps"][1]["input"] == "first"
     assert "chain.yaml" not in doc["steps"][1]["input"]
 
@@ -612,7 +612,7 @@ def test_a_step_chains_from_another_spec_by_model_name(sales, tmp_path):
     assert out["outcome"]["n_rows"] > 0
     # The upstream model is not an indexed source, so it must not have been
     # written into this spec's `sources` map as though it were a file.
-    doc = yaml.safe_load((tmp_path / "specs" / "mart_orders.yaml").read_text())
+    doc = yaml.safe_load((tmp_path / "specs" / "mart_orders.yaml").read_text(encoding="utf-8"))
     assert "stg_orders" not in doc["sources"]
     assert doc["steps"][0]["left"] == "stg_orders"
 
@@ -642,7 +642,7 @@ def test_a_hash_ref_to_another_spec_becomes_that_specs_model_name(sales, tmp_pat
         portia_dir=sales,
     )
 
-    doc = yaml.safe_load((tmp_path / "specs" / "mart_orders.yaml").read_text())
+    doc = yaml.safe_load((tmp_path / "specs" / "mart_orders.yaml").read_text(encoding="utf-8"))
     assert doc["steps"][0]["left"] == "stg_orders"
 
 
@@ -894,7 +894,7 @@ def test_an_acknowledged_zero_is_written_and_visible_in_the_spec(orphans, tmp_pa
     json.dumps(out)
     assert out["acknowledged"] == ["source_did_not_contribute", "all_null_column"]
 
-    doc = yaml.safe_load((tmp_path / "specs" / "x.yaml").read_text())
+    doc = yaml.safe_load((tmp_path / "specs" / "x.yaml").read_text(encoding="utf-8"))
     assert doc["steps"][0]["acknowledge"] == ["source_did_not_contribute", "all_null_column"]
 
 
@@ -1075,7 +1075,7 @@ def test_record_step_runs_a_sql_step_and_chains_from_it(sales, tmp_path):
     )
     assert chained["n_steps"] == 2
 
-    doc = yaml.safe_load((tmp_path / "specs" / "hatch.yaml").read_text())
+    doc = yaml.safe_load((tmp_path / "specs" / "hatch.yaml").read_text(encoding="utf-8"))
     assert "orders_per_customer" not in doc["sources"]  # a step is not a source
     assert doc["sources"]["orders"] == "orders.csv"  # its declared input is
     assert handlers.run_spec("specs/hatch.yaml")["has_drift"] is False
@@ -1103,7 +1103,7 @@ def test_a_sql_step_may_name_an_earlier_step_the_hash_way_too(sales, tmp_path):
         },
         portia_dir=sales,
     )
-    doc = yaml.safe_load((tmp_path / "specs" / "hatch.yaml").read_text())
+    doc = yaml.safe_load((tmp_path / "specs" / "hatch.yaml").read_text(encoding="utf-8"))
     assert doc["steps"][1]["inputs"] == ["stripped"]  # stored bare, like every other ref
 
 
@@ -1143,7 +1143,7 @@ def test_a_sql_step_may_name_an_earlier_step_the_hash_way_in_its_sql_too(sales, 
     )
     assert out["n_steps"] == 2
 
-    doc = yaml.safe_load((tmp_path / "specs" / "hatch.yaml").read_text())
+    doc = yaml.safe_load((tmp_path / "specs" / "hatch.yaml").read_text(encoding="utf-8"))
     step = doc["steps"][1]
     # Both halves normalized, so the spec reads as though the bare id was written.
     assert step["inputs"] == ["stripped"]
@@ -1273,7 +1273,7 @@ def test_a_step_may_still_name_its_own_spec_by_the_path_it_was_given(sales, tmp_
         portia_dir=sales,
     )
 
-    doc = yaml.safe_load((tmp_path / "specs" / "mart" / "orders.yaml").read_text())
+    doc = yaml.safe_load((tmp_path / "specs" / "mart" / "orders.yaml").read_text(encoding="utf-8"))
     assert doc["steps"][1]["input"] == "orders_with_customers"
 
 
@@ -1375,7 +1375,7 @@ def test_an_unknown_name_says_both_places_it_looked(sales):
 def _write_spec(root, rel: str, doc: dict) -> None:
     path = root / rel
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.safe_dump(doc, sort_keys=False))
+    path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
 
 
 _STG = {
@@ -1560,7 +1560,8 @@ def test_profile_opens_a_model_nobody_has_recorded_a_step_through(sales, tmp_pat
     (tmp_path / "specs").mkdir(exist_ok=True)
     (tmp_path / "specs" / "orders_only.yaml").write_text(
         "version: 1\nsources:\n  orders: orders.csv\nsteps:\n"
-        "- id: all\n  op: sql\n  inputs: [orders]\n  sql: SELECT * FROM orders\n"
+        "- id: all\n  op: sql\n  inputs: [orders]\n  sql: SELECT * FROM orders\n",
+        encoding="utf-8",
     )
     out = handlers.profile_source("orders_only", sales)
     assert out["source"] == "orders_only" and out["n_rows"] > 0 and out["summary"] == ""

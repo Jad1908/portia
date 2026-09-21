@@ -27,18 +27,18 @@ def project(tmp_path: Path) -> Path:
     """Two sources, a group, and two specs — one reading the other."""
     data = tmp_path / "data"
     data.mkdir()
-    with open(data / "orders.csv", "w", newline="") as f:
+    with open(data / "orders.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["order_id", "customer_id", "amount"])
         w.writerows([[1, " C1 ", 10], [2, "C2", 20]])
-    with open(data / "customers.csv", "w", newline="") as f:
+    with open(data / "customers.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["customer_id", "name"])
         w.writerows([["C1", "Ann"], ["C2", "Bo"]])
 
     # Indexed, read by no spec and compared to nothing — the state most of a
     # real project is in, and the one `connected_columns` exists to shrink.
-    with open(data / "returns.csv", "w", newline="") as f:
+    with open(data / "returns.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["return_id", "customer_id", "reason"])
         w.writerows([[1, "C1", "damaged"], [2, "C9", "late"]])
@@ -71,7 +71,8 @@ def project(tmp_path: Path) -> Path:
                 ],
             },
             sort_keys=False,
-        )
+        ),
+        encoding="utf-8",
     )
     (specs / "mart_orders.yaml").write_text(
         yaml.safe_dump(
@@ -89,7 +90,8 @@ def project(tmp_path: Path) -> Path:
                 ],
             },
             sort_keys=False,
-        )
+        ),
+        encoding="utf-8",
     )
     return tmp_path
 
@@ -480,7 +482,8 @@ def test_a_column_with_nothing_underneath_it_says_so_instead_of_looking_like_a_f
                 ],
             },
             sort_keys=False,
-        )
+        ),
+        encoding="utf-8",
     )
     store.write(build_graph(project).graph, neo4j_session)
 
@@ -517,7 +520,8 @@ def test_a_trail_that_ends_at_an_unreadable_column_still_reports_that_column(
                 ],
             },
             sort_keys=False,
-        )
+        ),
+        encoding="utf-8",
     )
     (project / "specs" / "mart_totals.yaml").write_text(
         yaml.safe_dump(
@@ -534,7 +538,8 @@ def test_a_trail_that_ends_at_an_unreadable_column_still_reports_that_column(
                 ],
             },
             sort_keys=False,
-        )
+        ),
+        encoding="utf-8",
     )
     store.write(build_graph(project).graph, neo4j_session)
 

@@ -522,7 +522,7 @@ def write_all(backend: Any | None = None) -> list[Path]:
     written = []
     for case in CASES:
         case.path.parent.mkdir(parents=True, exist_ok=True)
-        case.path.write_text(dumps(run_case(case, backend)))
+        case.path.write_text(dumps(run_case(case, backend)), encoding="utf-8")
         written.append(case.path)
     return written
 

@@ -218,7 +218,7 @@ def test_the_browser_shrinks_the_picture_and_paints_behind_it():
 
     from portia.ui import charts
 
-    js = (Path(charts.__file__).parent / "assets" / "chart.js").read_text()
+    js = (Path(charts.__file__).parent / "assets" / "chart.js").read_text(encoding="utf-8")
     assert "pen.fillRect(0, 0, out.width, out.height);" in js
     assert "edge / Math.max(canvas.width, canvas.height)" in js
     assert "const PICTURE_CHARS = 800000;" in js

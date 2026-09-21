@@ -132,7 +132,7 @@ def _write_spec(root, rel: str, doc: dict) -> None:
 
     path = root / rel
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.safe_dump(doc, sort_keys=False))
+    path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
 
 
 def _two_specs(root) -> None:

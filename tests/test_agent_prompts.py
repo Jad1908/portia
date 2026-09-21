@@ -174,7 +174,7 @@ def _is_query_text(literal: str) -> bool:
 
 def _long_string_literals(path: pathlib.Path):
     """Every non-docstring string literal over the threshold, with its line."""
-    tree = ast.parse(path.read_text())
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     docstrings = {
         d
         for node in ast.walk(tree)
@@ -223,7 +223,7 @@ def test_no_instruction_text_is_written_inline_in_code():
 
 def test_every_tool_description_comes_from_a_file():
     """Belt to the braces above: no @tool may inline its description."""
-    source = (PACKAGE / "agent" / "tools.py").read_text()
+    source = (PACKAGE / "agent" / "tools.py").read_text(encoding="utf-8")
     decorators = [
         node
         for node in ast.walk(ast.parse(source))

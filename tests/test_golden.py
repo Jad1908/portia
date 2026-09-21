@@ -117,7 +117,7 @@ def test_evidence_matches_golden(case, backend):
         "`python -m tests.golden --regenerate` and commit it with the case that needs it"
     )
     excepted = _exceptions(backend.name, case.name)
-    expected = _prune(json.loads(case.path.read_text()), excepted)
+    expected = _prune(json.loads(case.path.read_text(encoding="utf-8")), excepted)
     actual = _prune(normalized(run_case(case, backend)), excepted)
     assert actual == expected
 
@@ -164,7 +164,7 @@ def test_every_blocking_flag_is_frozen_somewhere():
     for case in CASES:
         if case.kind != "spec":
             continue
-        for step in json.loads(case.path.read_text())["steps"]:
+        for step in json.loads(case.path.read_text(encoding="utf-8"))["steps"]:
             fired |= set(step["outcome"]["flags"])
     assert BLOCKING_FLAGS <= fired
 

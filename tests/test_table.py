@@ -158,7 +158,7 @@ def test_nothing_new_pulls_a_whole_relation_into_memory():
         for path in sorted(package.rglob("*.py"))
         for rel in [path.relative_to(package.parent).as_posix()]
         if rel not in MATERIALIZERS
-        for i, line in enumerate(path.read_text().splitlines(), 1)
+        for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
         if _PULLS_EVERYTHING.search(line)
     ]
     assert not offenders, (

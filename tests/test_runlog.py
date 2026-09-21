@@ -42,7 +42,7 @@ def test_a_chat_is_one_file_opened_by_a_header_then_the_prompts_it_read(tmp_path
     _chat(tmp_path, events.Event(events.TEXT, {"text": "on it"}))
 
     (path,) = runlog.logs_in(tmp_path)
-    header, prompts, first, last = path.read_text().splitlines()
+    header, prompts, first, last = path.read_text(encoding="utf-8").splitlines()
     assert json.loads(header)["kind"] == runlog.HEADER
     assert json.loads(prompts)["kind"] == runlog.PROMPTS
     assert json.loads(first)["kind"] == events.PROMPT
@@ -62,7 +62,7 @@ def test_the_header_line_stays_small_so_a_list_can_be_drawn_from_it(tmp_path):
     surface that repeats it most.
     """
     log = _chat(tmp_path, cwd=tmp_path)
-    header_line, prompts_line = log.path.read_text().splitlines()[:2]
+    header_line, prompts_line = log.path.read_text(encoding="utf-8").splitlines()[:2]
 
     assert len(header_line) < 1000
     assert len(prompts_line) > len(header_line)
@@ -125,7 +125,7 @@ def test_a_payload_the_json_encoder_would_refuse_does_not_kill_the_turn(tmp_path
 def test_a_truncated_tail_does_not_lose_the_rest(tmp_path):
     log = _chat(tmp_path, prompt="p", model="m")
     _turn(log, events.Event(events.TEXT, {"text": "kept"}))
-    with log.path.open("a") as fh:
+    with log.path.open("a", encoding="utf-8") as fh:
         fh.write('{"kind": "text", "data": {"tex')  # died mid-write
 
     run = runlog.read(log.path)
@@ -362,7 +362,9 @@ def test_logs_written_before_the_rename_are_still_read(tmp_path):
     legacy = tmp_path / runlog.LEGACY_DIR
     legacy.mkdir(parents=True)
     path = legacy / "2026-07-29T16-32-57.jsonl"
-    path.write_text('{"kind": "header", "data": {"prompt": "old", "model": "m"}}\n')
+    path.write_text(
+        '{"kind": "header", "data": {"prompt": "old", "model": "m"}}\n', encoding="utf-8"
+    )
 
     assert runlog.logs_in(tmp_path) == [path]
     assert runlog.logs_in(tmp_path, runlog.CHAT) == [path]
@@ -377,7 +379,9 @@ def test_a_legacy_log_sorts_beside_the_new_ones(tmp_path):
     legacy = tmp_path / runlog.LEGACY_DIR
     legacy.mkdir(parents=True)
     old = legacy / "2026-07-01T09-00-00.jsonl"
-    old.write_text('{"kind": "header", "data": {"prompt": "old", "model": "m"}}\n')
+    old.write_text(
+        '{"kind": "header", "data": {"prompt": "old", "model": "m"}}\n', encoding="utf-8"
+    )
     new = _chat(tmp_path, prompt="new", model="m", when=datetime(2026, 7, 29, 9, 0))
 
     assert runlog.logs_in(tmp_path) == [new.path, old]
@@ -423,7 +427,8 @@ def test_wall_time_is_measured_from_the_records_not_the_header(tmp_path):
     log = runlog.start(tmp_path, cwd=tmp_path)
     log.write("text", {"text": "first"})
     log.path.write_text(
-        log.path.read_text() + '{"kind": "text", "at": "2100-01-01T00:00:10.000", "data": {}}\n',
+        log.path.read_text(encoding="utf-8")
+        + '{"kind": "text", "at": "2100-01-01T00:00:10.000", "data": {}}\n',
         encoding="utf-8",
     )
     assert runlog.summary(runlog.read(log.path))["wall_seconds"] > 0
@@ -547,7 +552,8 @@ def test_a_pre_rename_log_still_summarizes_off_its_header(tmp_path):
     path.write_text(
         '{"kind": "header", "data": {"prompt": "old goal", "model": "claude-haiku-4-5",'
         ' "effort": "low", "started": "2026-07-29T16:32:57"}}\n'
-        '{"kind": "text", "data": {"text": "on it"}}\n'
+        '{"kind": "text", "data": {"text": "on it"}}\n',
+        encoding="utf-8",
     )
 
     facts = runlog.summary(runlog.read(path))
@@ -667,7 +673,8 @@ def test_a_legacy_log_lists_as_legacy(tmp_path):
     legacy.mkdir()
     path = legacy / "2026-08-01T10-00-00.jsonl"
     path.write_text(
-        '{"kind": "header", "data": {"started": "2026-08-01T10:00:00", "prompt": "old goal", "model": "m"}}\n'
+        '{"kind": "header", "data": {"started": "2026-08-01T10:00:00", "prompt": "old goal", "model": "m"}}\n',
+        encoding="utf-8",
     )
     row = runlog.read_listing(path, tmp_path)
     assert row["legacy"] is True

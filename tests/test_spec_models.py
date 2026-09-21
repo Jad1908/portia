@@ -21,11 +21,11 @@ from portia.core.io import connect
 def project(tmp_path: Path) -> Path:
     data = tmp_path / "data"
     data.mkdir()
-    with open(data / "orders.csv", "w", newline="") as f:
+    with open(data / "orders.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["order_id", "customer_id", "amount"])
         w.writerows([[1, " C1 ", 10], [2, "C2", 20], [3, "C1", 5]])
-    with open(data / "customers.csv", "w", newline="") as f:
+    with open(data / "customers.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["customer_id", "name"])
         w.writerows([["C1", "Ann"], ["C2", "Bo"]])
@@ -36,7 +36,7 @@ def _write(project: Path, name: str, doc: dict, *, subdir: str = "") -> Path:
     directory = project / spec.SPECS_DIR / subdir if subdir else project / spec.SPECS_DIR
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{name}.yaml"
-    path.write_text(yaml.safe_dump(doc, sort_keys=False))
+    path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
     return path
 
 

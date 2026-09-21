@@ -67,13 +67,13 @@ def test_the_two_tiers_agree_on_what_missing_looks_like(tmp_path):
     try:
         for token in NA_TOKENS:
             p = tmp_path / "na.csv"
-            p.write_text(f"k,v\n1,x\n2,{token}\n")
+            p.write_text(f"k,v\n1,x\n2,{token}\n", encoding="utf-8")
             assert bool(load_frame(p)["v"].isna().iloc[1]), f"pandas keeps {token!r}"
             assert load_table(p, con).scalar("count(v)") == 1, f"duckdb keeps {token!r}"
 
         for token in ("-", "?", "NIL", "na", "Null", "missing"):
             p = tmp_path / "kept.csv"
-            p.write_text(f"k,v\n1,x\n2,{token}\n")
+            p.write_text(f"k,v\n1,x\n2,{token}\n", encoding="utf-8")
             assert not bool(load_frame(p)["v"].isna().iloc[1]), f"pandas nulls {token!r}"
             assert load_table(p, con).scalar("count(v)") == 2, f"duckdb nulls {token!r}"
     finally:

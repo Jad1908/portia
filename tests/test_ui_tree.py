@@ -17,14 +17,14 @@ READABLE = (".csv", ".parquet")
 def _project(root):
     """A project with the shape a layered one actually has on disk."""
     (root / "data").mkdir()
-    (root / "data" / "orders.csv").write_text("a\n1\n")
-    (root / "data" / "customers.csv").write_text("a\n1\n")
+    (root / "data" / "orders.csv").write_text("a\n1\n", encoding="utf-8")
+    (root / "data" / "customers.csv").write_text("a\n1\n", encoding="utf-8")
     (root / "specs" / "staging").mkdir(parents=True)
-    (root / "specs" / "staging" / "stg_orders.yaml").write_text("steps: []\n")
+    (root / "specs" / "staging" / "stg_orders.yaml").write_text("steps: []\n", encoding="utf-8")
     (root / "models" / "staging").mkdir(parents=True)
-    (root / "models" / "staging" / "stg_orders.sql").write_text("select 1\n")
-    (root / "notes.md").write_text("not portia's\n")
-    (root / "analysis.py").write_text("print()\n")
+    (root / "models" / "staging" / "stg_orders.sql").write_text("select 1\n", encoding="utf-8")
+    (root / "notes.md").write_text("not portia's\n", encoding="utf-8")
+    (root / "analysis.py").write_text("print()\n", encoding="utf-8")
     return root
 
 
@@ -32,7 +32,7 @@ def test_a_folder_is_drawn_only_when_something_under_it_survived(tmp_path):
     """Otherwise a repo's worth of empty structure is the left pane."""
     _project(tmp_path)
     (tmp_path / "docs").mkdir()
-    (tmp_path / "docs" / "readme.md").write_text("hi\n")
+    (tmp_path / "docs" / "readme.md").write_text("hi\n", encoding="utf-8")
 
     nodes = tree.build(tmp_path, {}, READABLE)
 
@@ -111,9 +111,11 @@ def test_hidden_directories_are_never_walked(tmp_path):
     showing the catalog's own YAML would invite hand-editing it."""
     _project(tmp_path)
     (tmp_path / ".portia" / "sources").mkdir(parents=True)
-    (tmp_path / ".portia" / "sources" / "orders.yaml").write_text("source: data/orders.csv\n")
+    (tmp_path / ".portia" / "sources" / "orders.yaml").write_text(
+        "source: data/orders.csv\n", encoding="utf-8"
+    )
     (tmp_path / ".git").mkdir()
-    (tmp_path / ".git" / "config.csv").write_text("a\n1\n")
+    (tmp_path / ".git" / "config.csv").write_text("a\n1\n", encoding="utf-8")
 
     names = [n.name for n in tree.build(tmp_path, {}, READABLE)]
 
@@ -123,8 +125,8 @@ def test_hidden_directories_are_never_walked(tmp_path):
 def test_folders_sort_before_files_and_nothing_sorts_by_anything_measured(tmp_path):
     """The only ordering in this pane is the one every file browser uses."""
     (tmp_path / "zzz").mkdir()
-    (tmp_path / "zzz" / "a.csv").write_text("a\n1\n")
-    (tmp_path / "aaa.csv").write_text("a\n1\n")
+    (tmp_path / "zzz" / "a.csv").write_text("a\n1\n", encoding="utf-8")
+    (tmp_path / "aaa.csv").write_text("a\n1\n", encoding="utf-8")
 
     nodes = tree.build(tmp_path, {}, READABLE)
 
@@ -134,7 +136,7 @@ def test_folders_sort_before_files_and_nothing_sorts_by_anything_measured(tmp_pa
 def test_a_symlinked_directory_is_not_followed(tmp_path):
     """A link pointing at an ancestor is a walk that does not terminate."""
     (tmp_path / "data").mkdir()
-    (tmp_path / "data" / "orders.csv").write_text("a\n1\n")
+    (tmp_path / "data" / "orders.csv").write_text("a\n1\n", encoding="utf-8")
     (tmp_path / "loop").symlink_to(tmp_path)
 
     nodes = tree.build(tmp_path, {}, READABLE)
@@ -186,7 +188,7 @@ def test_a_readable_file_outside_the_data_folder_is_not_drawn_as_data(tmp_path):
     folder — and drawing all of them is what `VISION.md` flags as untested."""
     _project(tmp_path)
     (tmp_path / "notebooks").mkdir()
-    (tmp_path / "notebooks" / "scratch.csv").write_text("a\n1\n")
+    (tmp_path / "notebooks" / "scratch.csv").write_text("a\n1\n", encoding="utf-8")
 
     scoped = [n.name for n in tree.build(tmp_path, {}, READABLE, "data")]
     unscoped = [n.name for n in tree.build(tmp_path, {}, READABLE)]
@@ -214,7 +216,7 @@ def test_an_indexed_source_outside_the_data_folder_is_still_drawn(tmp_path):
     is the whole of what the filter's first half asks."""
     _project(tmp_path)
     (tmp_path / "extra").mkdir()
-    (tmp_path / "extra" / "legacy.csv").write_text("a\n1\n")
+    (tmp_path / "extra" / "legacy.csv").write_text("a\n1\n", encoding="utf-8")
     known = {"extra/legacy.csv": (state.SOURCE, "legacy")}
 
     names = [n.name for n in tree.build(tmp_path, known, READABLE, "data")]
@@ -227,7 +229,7 @@ def test_the_project_root_as_a_data_folder_means_the_whole_repo(tmp_path):
     collapsed in one place rather than guessed at three call sites."""
     _project(tmp_path)
     (tmp_path / "notebooks").mkdir()
-    (tmp_path / "notebooks" / "scratch.csv").write_text("a\n1\n")
+    (tmp_path / "notebooks" / "scratch.csv").write_text("a\n1\n", encoding="utf-8")
 
     for root in ("", ".", None):
         names = [n.name for n in tree.build(tmp_path, {}, READABLE, root)]
@@ -237,9 +239,9 @@ def test_the_project_root_as_a_data_folder_means_the_whole_repo(tmp_path):
 def test_a_sibling_folder_with_a_shared_prefix_is_not_in_scope(tmp_path):
     """`data_archive/` is not inside `data/`, and a plain `startswith` says it is."""
     (tmp_path / "data").mkdir()
-    (tmp_path / "data" / "orders.csv").write_text("a\n1\n")
+    (tmp_path / "data" / "orders.csv").write_text("a\n1\n", encoding="utf-8")
     (tmp_path / "data_archive").mkdir()
-    (tmp_path / "data_archive" / "old.csv").write_text("a\n1\n")
+    (tmp_path / "data_archive" / "old.csv").write_text("a\n1\n", encoding="utf-8")
 
     names = [n.name for n in tree.build(tmp_path, {}, READABLE, "data")]
 
@@ -258,7 +260,7 @@ def test_the_picker_offers_every_folder_and_says_which_hold_data(tmp_path):
     """
     _project(tmp_path)
     (tmp_path / "docs").mkdir()
-    (tmp_path / "docs" / "readme.md").write_text("hi\n")
+    (tmp_path / "docs" / "readme.md").write_text("hi\n", encoding="utf-8")
 
     offered = {ch.name: ch for ch in tree.choices(tmp_path, "", READABLE)}
 
@@ -275,9 +277,9 @@ def test_the_count_is_recursive_so_a_wrapper_folder_still_says_it_holds_data(tmp
     """`raw/` holding nothing but `raw/2024/orders.csv` is still the answer
     someone is looking for; a direct count would show it as empty."""
     (tmp_path / "raw" / "2024").mkdir(parents=True)
-    (tmp_path / "raw" / "2024" / "orders.csv").write_text("a\n1\n")
+    (tmp_path / "raw" / "2024" / "orders.csv").write_text("a\n1\n", encoding="utf-8")
     (tmp_path / "raw" / "2023").mkdir()
-    (tmp_path / "raw" / "2023" / "orders.csv").write_text("a\n1\n")
+    (tmp_path / "raw" / "2023" / "orders.csv").write_text("a\n1\n", encoding="utf-8")
 
     offered = tree.choices(tmp_path, "", READABLE)
 
@@ -288,7 +290,7 @@ def test_the_picker_descends_and_the_trail_says_where_it_is(tmp_path):
     """A back button undoes one step; the trail is the whole path, which is what
     a screen whose only question is *which folder* has to show."""
     (tmp_path / "raw" / "2024").mkdir(parents=True)
-    (tmp_path / "raw" / "2024" / "orders.csv").write_text("a\n1\n")
+    (tmp_path / "raw" / "2024" / "orders.csv").write_text("a\n1\n", encoding="utf-8")
 
     inside = tree.choices(tmp_path, "raw", READABLE)
 
@@ -303,9 +305,9 @@ def test_the_files_a_folder_offers_are_every_readable_one_at_any_depth(tmp_path)
     `find_data_files` lists one directory on purpose — a destination is a folder,
     a scope is a folder and everything under it."""
     (tmp_path / "data" / "2024").mkdir(parents=True)
-    (tmp_path / "data" / "2024" / "orders.csv").write_text("a\n1\n")
-    (tmp_path / "data" / "customers.parquet").write_text("x")
-    (tmp_path / "data" / "notes.md").write_text("hi\n")
+    (tmp_path / "data" / "2024" / "orders.csv").write_text("a\n1\n", encoding="utf-8")
+    (tmp_path / "data" / "customers.parquet").write_text("x", encoding="utf-8")
+    (tmp_path / "data" / "notes.md").write_text("hi\n", encoding="utf-8")
 
     found = tree.data_files(tmp_path / "data", READABLE)
 
@@ -316,9 +318,9 @@ def test_the_picker_never_walks_into_a_hidden_or_linked_directory(tmp_path):
     """Same rules as the tree, because it is the same walk — a second walker in
     the screen would drift from this one the first time either was touched."""
     (tmp_path / "data").mkdir()
-    (tmp_path / "data" / "orders.csv").write_text("a\n1\n")
+    (tmp_path / "data" / "orders.csv").write_text("a\n1\n", encoding="utf-8")
     (tmp_path / ".venv").mkdir()
-    (tmp_path / ".venv" / "sample.csv").write_text("a\n1\n")
+    (tmp_path / ".venv" / "sample.csv").write_text("a\n1\n", encoding="utf-8")
     (tmp_path / "loop").symlink_to(tmp_path)
 
     assert [ch.name for ch in tree.choices(tmp_path, "", READABLE)] == ["data"]
