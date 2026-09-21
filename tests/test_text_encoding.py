@@ -18,8 +18,10 @@ import pathlib
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-#: Shipped code, and the tools that write files a project keeps.
-CHECKED = ("portia", "devtools")
+#: Shipped code, the tools that write files a project keeps, and the tests:
+#: a test that reads back what portia wrote has to read it the way portia wrote
+#: it, or the suite fails on the one machine where the rule matters.
+CHECKED = ("portia", "devtools", "tests")
 
 
 def _mode(call: ast.Call, position: int) -> str | None:

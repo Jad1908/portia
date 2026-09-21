@@ -536,7 +536,7 @@ def test_starting_is_refused_before_anything_runs_for_the_three_reasons_it_can(m
 def test_stopping_with_nothing_started_is_nothing_and_waiting_on_a_dead_server_says_so(monkeypatch):
     assert llamacpp.running() is None
     llamacpp.stop()
-    llamacpp.LOG.write_text("load: model file not found\n")
+    llamacpp.LOG.write_text("load: model file not found\n", encoding="utf-8")
     monkeypatch.setattr(llamacpp, "running", lambda: None)
     with pytest.raises(
         providers.ProviderUnavailable, match="exited before it was ready.*not found"
@@ -576,7 +576,7 @@ def test_the_registry_is_one_folder_created_on_first_use_and_listed_by_name(tmp_
     assert llamacpp.registry_models() == []
     assert llamacpp.REGISTRY_DIR.is_dir()
     (llamacpp.REGISTRY_DIR / "Qwen3-8B-Q4_K_M.gguf").write_bytes(b"gguf")
-    (llamacpp.REGISTRY_DIR / "notes.txt").write_text("not a model")
+    (llamacpp.REGISTRY_DIR / "notes.txt").write_text("not a model", encoding="utf-8")
     [only] = llamacpp.registry_models()
     assert only.name == "Qwen3-8B-Q4_K_M.gguf"
     config = llamacpp.ServerConfig(str(only))

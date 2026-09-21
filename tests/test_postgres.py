@@ -29,7 +29,7 @@ def test_a_postgres_connection_needs_a_host_a_database_and_a_user(tmp_path):
     assert loaded["shop"].kind == "postgres" and loaded["shop"].port == "5433"
     assert loaded["shop"].needs_secret and loaded["shop"].secret_label == "Password"
     assert not loaded["quiet"].needs_secret, "libpq finds the password where psql does"
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     assert "kind: postgres" in text and "auth: password" not in text, "the default auth is left out"
     assert "password:" not in text
 
@@ -89,7 +89,8 @@ def test_libpqs_service_file_is_read_for_suggestions_and_its_password_is_dropped
     services = tmp_path / "pg_service.conf"
     services.write_text(
         "[warehouse]\nhost=db.acme.com\nport=5433\ndbname=analytics\nuser=jane\n"
-        "password=hunter2\nsslmode=require\n"
+        "password=hunter2\nsslmode=require\n",
+        encoding="utf-8",
     )
     (found,) = registry.postgres_suggestions(services)
     assert found.name == "warehouse" and found.kind == "postgres"
@@ -133,7 +134,7 @@ def test_every_provider_has_its_mark_so_the_window_never_draws_a_blank():
     import portia.ui
 
     assets = Path(portia.ui.__file__).parent / "assets"
-    css = (assets / "portia.css").read_text()
+    css = (assets / "portia.css").read_text(encoding="utf-8")
     for kind in registry.PROVIDERS:
         assert (assets / "connectors" / f"{kind}.svg").is_file(), kind
         assert f".connector-glyph-{kind} " in css, kind

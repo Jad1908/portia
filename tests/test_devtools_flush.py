@@ -50,7 +50,8 @@ def project(tmp_path: Path) -> Path:
                 "scope": ["DB.RAW.T"],
                 "agent_writes": True,
             }
-        )
+        ),
+        encoding="utf-8",
     )
     for f in (
         ".portia/sources/t.yaml",
@@ -65,7 +66,7 @@ def project(tmp_path: Path) -> Path:
         "figures/sub/b.json",
         "data/t.csv",
     ):
-        (root / f).write_text("x\n")
+        (root / f).write_text("x\n", encoding="utf-8")
     return root
 
 
@@ -99,7 +100,7 @@ def test_the_brief_and_setup_survive_a_catalog_flush(project):
     rather than a clean slate."""
     _run(project, ("catalog",))
 
-    doc = yaml.safe_load((project / ".portia/project.yaml").read_text())
+    doc = yaml.safe_load((project / ".portia/project.yaml").read_text(encoding="utf-8"))
     assert doc == SETUP
 
 
@@ -110,11 +111,11 @@ def test_the_scope_goes_with_the_catalog(project):
     disabled — so a flushed warehouse project could not be re-indexed until
     `.portia` was deleted by hand (2026-09-06)."""
     _run(project, ("specs",))
-    doc = yaml.safe_load((project / ".portia/project.yaml").read_text())
+    doc = yaml.safe_load((project / ".portia/project.yaml").read_text(encoding="utf-8"))
     assert doc["scope"] == ["DB.RAW.T"], "only the catalog clears it"
 
     _run(project, ("catalog",))
-    doc = yaml.safe_load((project / ".portia/project.yaml").read_text())
+    doc = yaml.safe_load((project / ".portia/project.yaml").read_text(encoding="utf-8"))
     assert "scope" not in doc
     assert doc["connection"] == "work"
 
@@ -122,7 +123,7 @@ def test_the_scope_goes_with_the_catalog(project):
 def test_the_brief_goes_only_when_asked(project):
     _run(project, ("catalog", "brief"))
 
-    doc = yaml.safe_load((project / ".portia/project.yaml").read_text())
+    doc = yaml.safe_load((project / ".portia/project.yaml").read_text(encoding="utf-8"))
     assert doc == {k: v for k, v in SETUP.items() if k != "project"}
 
 

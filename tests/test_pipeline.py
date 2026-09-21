@@ -29,7 +29,7 @@ def project(tmp_path: Path) -> Path:
     """Two tiny CSVs with a dirty key, a miss on each side, and a fan-out."""
     data = tmp_path / "data"
     data.mkdir()
-    with open(data / "orders.csv", "w", newline="") as f:
+    with open(data / "orders.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["order_id", "customer_id", "amount"])
         w.writerows(
@@ -40,7 +40,7 @@ def project(tmp_path: Path) -> Path:
                 [4, None, 7],  # null key
             ]
         )
-    with open(data / "customers.csv", "w", newline="") as f:
+    with open(data / "customers.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["customer_id", "name"])
         w.writerows([["C1", "Ann"], ["C2", "Bo"], ["C2", "Bo (dup)"], ["C7", "Zed"]])
@@ -112,7 +112,7 @@ def test_compiled_sql_matches_the_engine(project: Path) -> None:
             project / pipeline.MODELS_DIR / pipeline.SOURCES_FILE,
             project / pipeline.MODELS_DIR / "orders_with_customers.sql",
         ]:
-            con.execute(sql_file.read_text())
+            con.execute(sql_file.read_text(encoding="utf-8"))
         actual = con.execute("SELECT * FROM orders_with_customers").fetch_df()
     finally:
         con.close()
@@ -186,7 +186,7 @@ def _spec_file(project: Path, name: str, doc: dict) -> None:
     directory.mkdir(parents=True, exist_ok=True)
     import yaml
 
-    (directory / f"{name}.yaml").write_text(yaml.safe_dump(doc, sort_keys=False))
+    (directory / f"{name}.yaml").write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
 
 
 def _two_layer_project(project: Path) -> None:
@@ -248,9 +248,9 @@ def test_the_built_pipeline_runs_end_to_end_in_a_fresh_database(project: Path) -
     con = duckdb.connect(":memory:")
     try:
         con.execute(f"SET FILE_SEARCH_PATH='{project}'")
-        con.execute((project / "models" / pipeline.SOURCES_FILE).read_text())
+        con.execute((project / "models" / pipeline.SOURCES_FILE).read_text(encoding="utf-8"))
         for model in built:  # dependency order matters and build_project gives it
-            con.execute(model.sql_path.read_text())
+            con.execute(model.sql_path.read_text(encoding="utf-8"))
         actual = con.execute("SELECT * FROM mart_orders").fetch_df()
     finally:
         con.close()
@@ -374,7 +374,7 @@ def test_a_scoped_build_still_writes_every_source(project: Path) -> None:
 
     pipeline.build_project(project, only="stg_orders")
 
-    sources = (project / "models" / pipeline.SOURCES_FILE).read_text()
+    sources = (project / "models" / pipeline.SOURCES_FILE).read_text(encoding="utf-8")
     assert '"orders"' in sources
     assert '"customers"' in sources, "a source only the unbuilt models read is still declared"
 
@@ -384,10 +384,10 @@ def test_a_scoped_build_produces_the_same_sql_as_a_full_one(project: Path) -> No
     _two_layer_project(project)
 
     pipeline.build_project(project)
-    full = (project / "models" / "mart" / "mart_orders.sql").read_text()
+    full = (project / "models" / "mart" / "mart_orders.sql").read_text(encoding="utf-8")
     (project / "models" / "mart" / "mart_orders.sql").unlink()
     pipeline.build_project(project, only="mart_orders")
-    scoped = (project / "models" / "mart" / "mart_orders.sql").read_text()
+    scoped = (project / "models" / "mart" / "mart_orders.sql").read_text(encoding="utf-8")
 
     assert _without_timestamp(full) == _without_timestamp(scoped)
 
@@ -692,13 +692,13 @@ def test_rebuilding_refreshes_facts_and_keeps_what_a_human_wrote(project):
     pipeline.build_project(project)
 
     path = portia_dir / catalog.MODELS_DIR / "mart_orders.yaml"
-    entry = yaml.safe_load(path.read_text())
+    entry = yaml.safe_load(path.read_text(encoding="utf-8"))
     entry["summary"] = "one row per matched order"
     entry["columns"][0]["role"] = "identifier"
-    path.write_text(yaml.safe_dump(entry, sort_keys=False))
+    path.write_text(yaml.safe_dump(entry, sort_keys=False), encoding="utf-8")
 
     pipeline.build_project(project)
-    after = yaml.safe_load(path.read_text())
+    after = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert after["summary"] == "one row per matched order"
     assert after["columns"][0]["role"] == "identifier"
     assert after["columns"][0]["n_distinct"] is not None

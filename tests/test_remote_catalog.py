@@ -94,7 +94,7 @@ def project(tmp_path):
 
 def test_scoping_a_table_records_metadata_and_scans_nothing(project, warehouse):
     path = catalog.scope_table("memory.sales.orders", warehouse, portia_dir=project)
-    entry = yaml.safe_load(path.read_text())
+    entry = yaml.safe_load(path.read_text(encoding="utf-8"))
 
     assert entry["source"] == "memory.sales.orders"
     assert entry["remote"] == {
@@ -110,7 +110,7 @@ def test_scoping_a_table_records_metadata_and_scans_nothing(project, warehouse):
     assert warehouse.scans == 0, "scoping must not scan the table"
     assert "Not profiled" in entry["summary"] and not catalog.is_interpreted(entry)
 
-    proj = yaml.safe_load((project / "project.yaml").read_text())
+    proj = yaml.safe_load((project / "project.yaml").read_text(encoding="utf-8"))
     assert proj["scope"] == ["memory.sales.orders"]
     assert proj["sources"]["orders"] == "sources/orders.yaml"
 
@@ -124,7 +124,7 @@ def test_profiling_a_scoped_table_writes_the_facts_back_and_keeps_judgment(proje
     profile = catalog.profile_remote("orders", warehouse, portia_dir=project)
 
     assert profile["n_rows"] == 3 and profile["source"] == "memory.sales.orders"
-    entry = yaml.safe_load((project / "sources" / "orders.yaml").read_text())
+    entry = yaml.safe_load((project / "sources" / "orders.yaml").read_text(encoding="utf-8"))
     assert entry["profiled"]["at"] and catalog.is_profiled(entry)
     assert entry["remote"]["table"] == "orders"
     assert entry["summary"] == "Orders, one row each."
@@ -138,13 +138,13 @@ def test_re_scoping_keeps_measured_facts_and_refreshes_metadata(project, warehou
     catalog.scope_table("memory.sales.orders", warehouse, portia_dir=project)
     catalog.profile_remote("orders", warehouse, portia_dir=project)
     catalog.scope_table("memory.sales.orders", warehouse, portia_dir=project)
-    entry = yaml.safe_load((project / "sources" / "orders.yaml").read_text())
+    entry = yaml.safe_load((project / "sources" / "orders.yaml").read_text(encoding="utf-8"))
     assert entry["profiled"] and {c["name"]: c for c in entry["columns"]}["id"]["n_distinct"] == 3
 
 
 def test_profile_remote_refuses_a_file_source(project, tmp_path):
     csv = tmp_path / "f.csv"
-    csv.write_text("a\n1\n")
+    csv.write_text("a\n1\n", encoding="utf-8")
     catalog.index_source(csv, portia_dir=project)
     with pytest.raises(ValueError, match="file source"):
         catalog.profile_remote("f", None, portia_dir=project)
@@ -208,7 +208,7 @@ def test_two_files_with_one_stem_get_their_folder_prepended(tmp_path):
     d = tmp_path / ".portia"
     for folder in ("raw", "clean"):
         (tmp_path / folder).mkdir()
-        (tmp_path / folder / "orders.csv").write_text("a\n1\n")
+        (tmp_path / folder / "orders.csv").write_text("a\n1\n", encoding="utf-8")
     catalog.index_source(tmp_path / "raw" / "orders.csv", portia_dir=d)
     catalog.index_source(tmp_path / "clean" / "orders.csv", portia_dir=d)
     assert set(catalog.load_catalog(d)["sources"]) == {"orders", "clean__orders"}
@@ -255,9 +255,9 @@ def test_a_remote_build_creates_the_table_in_the_target(project, warehouse):
     assert built[0].written_to == "memory.sales.fr_orders"
     assert warehouse._inner.execute("SELECT count(*) FROM sales.fr_orders").fetchone() == (2,)
     # The compiled file is untouched by where the table went.
-    assert 'CREATE TABLE "fr_orders" AS' in built[0].sql_path.read_text()
+    assert 'CREATE TABLE "fr_orders" AS' in built[0].sql_path.read_text(encoding="utf-8")
     # And the model was indexed as shape only — no scan on the meter.
-    model = yaml.safe_load((project / "models" / "fr_orders.yaml").read_text())
+    model = yaml.safe_load((project / "models" / "fr_orders.yaml").read_text(encoding="utf-8"))
     assert model["profiled"] is None and model["columns"][0]["dtype"]
 
 
@@ -476,7 +476,7 @@ def test_a_local_build_writes_nowhere_remote(project, warehouse):
 def test_a_name_that_differs_only_by_case_still_collides(project, warehouse, tmp_path):
     """macOS: `ORDERS.yaml` is `orders.yaml`. Found driving the window."""
     csv = tmp_path / "orders.csv"
-    csv.write_text("a\n1\n")
+    csv.write_text("a\n1\n", encoding="utf-8")
     catalog.index_source(csv, portia_dir=project)
     warehouse._inner.execute("CREATE SCHEMA up")
     warehouse._inner.execute('CREATE TABLE up."ORDERS" AS SELECT 1 AS id')
@@ -505,11 +505,11 @@ def test_a_note_survives_a_rescope_and_a_profile(project, warehouse):
     catalog.set_interpretation("orders", note="amount is net of tax", portia_dir=project)
 
     catalog.scope_table("memory.sales.orders", warehouse, portia_dir=project)
-    entry = yaml.safe_load((project / "sources" / "orders.yaml").read_text())
+    entry = yaml.safe_load((project / "sources" / "orders.yaml").read_text(encoding="utf-8"))
     assert [n["text"] for n in entry["notes"]] == ["amount is net of tax"]
 
     catalog.profile_remote("orders", warehouse, portia_dir=project)
-    entry = yaml.safe_load((project / "sources" / "orders.yaml").read_text())
+    entry = yaml.safe_load((project / "sources" / "orders.yaml").read_text(encoding="utf-8"))
     assert [n["text"] for n in entry["notes"]] == ["amount is net of tax"]
     assert list(entry)[-1] == "notes", "the margin stays after the facts"
 

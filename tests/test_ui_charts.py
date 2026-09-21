@@ -735,7 +735,9 @@ def test_the_next_receipt_carries_the_failure():
 def _asset(name: str) -> str:
     from pathlib import Path
 
-    return (Path(__file__).resolve().parents[1] / "portia/ui/assets" / name).read_text()
+    return (Path(__file__).resolve().parents[1] / "portia/ui/assets" / name).read_text(
+        encoding="utf-8"
+    )
 
 
 def test_the_drop_zone_starts_under_the_strip_not_over_it():
@@ -813,7 +815,7 @@ def _asset(name: str) -> str:
 
     from portia.ui import charts
 
-    return (Path(charts.__file__).parent / "assets" / name).read_text()
+    return (Path(charts.__file__).parent / "assets" / name).read_text(encoding="utf-8")
 
 
 def test_where_you_are_looking_in_a_chart_never_reaches_the_server():

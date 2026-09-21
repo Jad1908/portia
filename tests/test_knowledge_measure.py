@@ -115,11 +115,11 @@ def project(tmp_path: Path) -> Path:
     """Two sources whose country columns mean the same thing and share nothing."""
     data = tmp_path / "data"
     data.mkdir()
-    with open(data / "orders.csv", "w", newline="") as f:
+    with open(data / "orders.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["order_id", "customer_id", "country_name"])
         w.writerows([[1, "C1", "France"], [2, "C2", "Germany"]])
-    with open(data / "customers.csv", "w", newline="") as f:
+    with open(data / "customers.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["customer_id", "country_code"])
         w.writerows([["C1", "FRA"], ["C2", "DEU"]])
@@ -210,7 +210,8 @@ def test_rewriting_the_file_makes_the_measurement_stale_without_deleting_it(
     """§4.5 — mark, never delete. The number and its doubt arrive together."""
     monkeypatch.chdir(project)
     (project / "data" / "orders.csv").write_text(
-        "order_id,customer_id,country_name\n1,C1,France\n2,C2,Germany\n3,C3,Spain\n"
+        "order_id,customer_id,country_name\n1,C1,France\n2,C2,Germany\n3,C3,Spain\n",
+        encoding="utf-8",
     )
     catalog.index_source(project / "data" / "orders.csv", portia_dir=project / catalog.DEFAULT_DIR)
     store.write(build_graph(project).graph, measured)
@@ -283,7 +284,8 @@ def test_the_graph_is_refreshed_before_a_measurement_attaches_to_it(
                 ],
             },
             sort_keys=False,
-        )
+        ),
+        encoding="utf-8",
     )
     handlers.measure_overlaps(
         [
@@ -379,7 +381,8 @@ def test_a_measurement_that_could_not_be_attached_is_not_reported_as_stored(
                 ],
             },
             sort_keys=False,
-        )
+        ),
+        encoding="utf-8",
     )
     answer = handlers.measure_overlaps(
         [

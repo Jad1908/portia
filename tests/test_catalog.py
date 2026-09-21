@@ -28,7 +28,7 @@ def _write_source(tmp_path):
 def test_init_project_stores_context(tmp_path):
     d = tmp_path / ".portia"
     init_project("we run EU events and reconcile vendor data", portia_dir=d)
-    proj = yaml.safe_load((d / "project.yaml").read_text())
+    proj = yaml.safe_load((d / "project.yaml").read_text(encoding="utf-8"))
     assert proj["project"].startswith("we run EU events")
     assert proj["groups"] == [] and proj["sources"] == {}
 
@@ -37,7 +37,7 @@ def test_index_source_builds_two_layer_entry(tmp_path):
     csv = _write_source(tmp_path)
     d = tmp_path / ".portia"
     src_file = index_source(csv, portia_dir=d)
-    entry = yaml.safe_load(src_file.read_text())
+    entry = yaml.safe_load(src_file.read_text(encoding="utf-8"))
 
     # Layer 1: a prose summary (auto-drafted, mentions the key facts).
     assert "40 rows" in entry["summary"]
@@ -47,7 +47,7 @@ def test_index_source_builds_two_layer_entry(tmp_path):
     assert col["role"] is None
     assert "numeric_stored_as_text" in col["flags"]
     # registered in the project file
-    proj = yaml.safe_load((d / "project.yaml").read_text())
+    proj = yaml.safe_load((d / "project.yaml").read_text(encoding="utf-8"))
     assert proj["sources"]["customers"] == "sources/customers.yaml"
 
 
@@ -57,14 +57,14 @@ def test_reindex_preserves_judgment_refreshes_facts(tmp_path):
     src_file = index_source(csv, portia_dir=d)
 
     # simulate user edits: a semantic summary + a column role
-    data = yaml.safe_load(src_file.read_text())
+    data = yaml.safe_load(src_file.read_text(encoding="utf-8"))
     data["summary"] = "MY READ: the master EU customer list"
     next(c for c in data["columns"] if c["name"] == "customer_id")["role"] = "identifier"
-    src_file.write_text(yaml.safe_dump(data, sort_keys=False))
+    src_file.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
     # re-index the same file
     index_source(csv, portia_dir=d)
-    after = yaml.safe_load(src_file.read_text())
+    after = yaml.safe_load(src_file.read_text(encoding="utf-8"))
 
     assert after["summary"] == "MY READ: the master EU customer list"  # prose preserved
     cid = next(c for c in after["columns"] if c["name"] == "customer_id")
@@ -76,7 +76,7 @@ def test_set_interpretation_writes_judgment_and_leaves_facts_alone(tmp_path):
     csv = _write_source(tmp_path)
     d = tmp_path / ".portia"
     src_file = index_source(csv, portia_dir=d)
-    before = yaml.safe_load(src_file.read_text())
+    before = yaml.safe_load(src_file.read_text(encoding="utf-8"))
 
     set_interpretation(
         "customers",
@@ -84,7 +84,7 @@ def test_set_interpretation_writes_judgment_and_leaves_facts_alone(tmp_path):
         roles={"customer_id": "identifier", "signup_amount": "measure"},
         portia_dir=d,
     )
-    after = yaml.safe_load(src_file.read_text())
+    after = yaml.safe_load(src_file.read_text(encoding="utf-8"))
 
     assert after["summary"] == "The master EU customer list, one row per signup."
     roles = {c["name"]: c["role"] for c in after["columns"]}
@@ -105,7 +105,7 @@ def test_set_interpretation_leaves_omitted_fields_untouched(tmp_path):
 
     set_interpretation("customers", summary="A first read.", portia_dir=d)
     set_interpretation("customers", roles={"customer_id": "identifier"}, portia_dir=d)
-    after = yaml.safe_load(src_file.read_text())
+    after = yaml.safe_load(src_file.read_text(encoding="utf-8"))
 
     assert after["summary"] == "A first read."  # not clobbered by the roles-only call
     assert next(c for c in after["columns"] if c["name"] == "customer_id")["role"] == "identifier"
@@ -199,7 +199,9 @@ def test_indexing_copies_nothing(tmp_path):
 def test_the_entry_records_the_path_relative_to_the_project(tmp_path):
     """An absolute path pins a project to one laptop; the spec has to travel."""
     csv = _write_source(tmp_path)
-    entry = yaml.safe_load(index_source(csv, portia_dir=tmp_path / ".portia").read_text())
+    entry = yaml.safe_load(
+        index_source(csv, portia_dir=tmp_path / ".portia").read_text(encoding="utf-8")
+    )
 
     assert entry["source"] == "customers.csv"
     assert not Path(entry["source"]).is_absolute()
@@ -221,7 +223,9 @@ def test_indexing_refuses_a_file_outside_the_project(tmp_path):
 def test_the_entry_records_what_the_file_looked_like_when_indexed(tmp_path):
     """So a file that changed on disk afterwards is detectable, not silently stale."""
     csv = _write_source(tmp_path)
-    entry = yaml.safe_load(index_source(csv, portia_dir=tmp_path / ".portia").read_text())
+    entry = yaml.safe_load(
+        index_source(csv, portia_dir=tmp_path / ".portia").read_text(encoding="utf-8")
+    )
 
     assert entry["indexed"]["size"] == csv.stat().st_size
     assert entry["indexed"]["at"]
@@ -235,7 +239,7 @@ def test_a_source_whose_file_changed_reads_as_stale(tmp_path):
     time.sleep(0.01)
     messy_customers(n=30).to_csv(csv, index=False)
 
-    entry = yaml.safe_load((d / "sources" / "customers.yaml").read_text())
+    entry = yaml.safe_load((d / "sources" / "customers.yaml").read_text(encoding="utf-8"))
     assert is_stale(entry, portia_dir=d)
 
 
@@ -247,7 +251,7 @@ def test_reindexing_refreshes_the_facts_and_keeps_the_judgment(tmp_path):
     set_interpretation("customers", summary="our CRM export", portia_dir=d)
 
     messy_customers(n=30).to_csv(csv, index=False)
-    entry = yaml.safe_load(index_source(csv, portia_dir=d).read_text())
+    entry = yaml.safe_load(index_source(csv, portia_dir=d).read_text(encoding="utf-8"))
 
     assert entry["summary"] == "our CRM export"  # judgment preserved
     assert not is_stale(entry, portia_dir=d)  # fact refreshed
@@ -282,7 +286,7 @@ def test_import_plans_the_copy_before_making_it(tmp_path):
     assert pairs == [(stray, root / "data" / "customers.csv")]
     assert stray.exists()  # planning copies nothing
 
-    (root / "data" / "customers.csv").write_text("already here")
+    (root / "data" / "customers.csv").write_text("already here", encoding="utf-8")
     with pytest.raises(ValueError, match="refusing to overwrite"):
         plan([stray], root / "data", root)
 
@@ -337,7 +341,7 @@ def test_setting_the_data_folder_does_not_disturb_the_indexed_sources(tmp_path, 
     monkeypatch.chdir(tmp_path)
     init_project("a project", portia_dir=d)
     (tmp_path / "data").mkdir()
-    (tmp_path / "data" / "orders.csv").write_text("a,b\n1,2\n")
+    (tmp_path / "data" / "orders.csv").write_text("a,b\n1,2\n", encoding="utf-8")
     index_source(tmp_path / "data" / "orders.csv", portia_dir=d)
 
     set_data_dir("data", portia_dir=d)
@@ -358,7 +362,7 @@ def test_an_untouched_file_does_not_go_stale_on_the_clock(tmp_path, monkeypatch)
     monkeypatch.chdir(tmp_path)
     csv = _write_source(tmp_path)
     d = tmp_path / ".portia"
-    entry = yaml.safe_load(index_source(csv, portia_dir=d).read_text())
+    entry = yaml.safe_load(index_source(csv, portia_dir=d).read_text(encoding="utf-8"))
 
     # The one thing that moves without the file moving.
     entry["indexed"]["at"] = "1999-01-01T00:00:00+00:00"
@@ -381,7 +385,7 @@ def test_a_note_is_appended_dated_and_leaves_the_read_alone(tmp_path):
 
     set_interpretation("customers", note="signup_amount is in cents, not euros.", portia_dir=d)
     set_interpretation("customers", note="  customer_id repeats across years.  ", portia_dir=d)
-    after = yaml.safe_load(src_file.read_text())
+    after = yaml.safe_load(src_file.read_text(encoding="utf-8"))
 
     assert after["summary"] == "A first read."
     assert [n["text"] for n in after["notes"]] == [
@@ -399,12 +403,12 @@ def test_a_note_survives_a_reindex_and_an_empty_one_is_refused(tmp_path):
     set_interpretation("customers", note="the id is a legacy code", portia_dir=d)
 
     index_source(csv, portia_dir=d)
-    after = yaml.safe_load(src_file.read_text())
+    after = yaml.safe_load(src_file.read_text(encoding="utf-8"))
     assert [n["text"] for n in after["notes"]] == ["the id is a legacy code"]
 
     with pytest.raises(ValueError, match="say something"):
         set_interpretation("customers", note="   ", portia_dir=d)
-    untouched = yaml.safe_load(src_file.read_text())
+    untouched = yaml.safe_load(src_file.read_text(encoding="utf-8"))
     assert "notes" not in untouched or len(untouched["notes"]) == 1
 
 
@@ -414,4 +418,4 @@ def test_an_entry_without_notes_has_no_notes_key(tmp_path):
     d = tmp_path / ".portia"
     src_file = index_source(csv, portia_dir=d)
     set_interpretation("customers", summary="A read.", portia_dir=d)
-    assert "notes" not in yaml.safe_load(src_file.read_text())
+    assert "notes" not in yaml.safe_load(src_file.read_text(encoding="utf-8"))

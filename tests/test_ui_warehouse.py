@@ -135,7 +135,7 @@ def test_saving_a_connection_refuses_a_missing_field_before_writing_anything(tmp
     assert name == "prod" and app.connection == "prod"
     assert app.connection_status == state.NOT_CONNECTED and engine.needs_connection(app)
     assert backend.active().remote and not backend.active().agent_writes
-    proj = yaml.safe_load((d / "project.yaml").read_text())
+    proj = yaml.safe_load((d / "project.yaml").read_text(encoding="utf-8"))
     assert proj["connection"] == "prod" and "target" not in proj
     engine.clear_connection(app)
     assert app.connection is None and backend.active() is backend.LOCAL
@@ -159,7 +159,7 @@ def test_the_hand_off_rides_the_held_backend_without_dropping_the_session(tmp_pa
     assert app.agent_writes is False and backend.active().agent_writes is False
     assert snowflake.pool_of(backend.active()) is pool_before
     engine.set_agent_writes(True, app)
-    assert yaml.safe_load((d / "project.yaml").read_text())["agent_writes"] is True
+    assert yaml.safe_load((d / "project.yaml").read_text(encoding="utf-8"))["agent_writes"] is True
 
 
 def test_connecting_reports_a_failure_as_a_state_not_an_exception(tmp_path, monkeypatch):

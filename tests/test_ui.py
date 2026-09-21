@@ -284,7 +284,7 @@ def test_an_opening_screen_taller_than_the_window_scrolls_to_its_top():
     import re
     from pathlib import Path
 
-    css = (Path(c.__file__).parent / "assets" / "portia.css").read_text()
+    css = (Path(c.__file__).parent / "assets" / "portia.css").read_text(encoding="utf-8")
     rule = re.search(r"\n\.p-centered \{(.*?)\}", css, re.S).group(1)
     assert "justify-content" not in rule
     assert "overflow-y: auto" in rule
@@ -464,7 +464,7 @@ def test_a_busy_button_keeps_its_fill_and_its_words():
     assert "btn-busy" in busy.classes and "btn-primary" in busy.classes
     assert busy.text == "Index 3 files"
     assert "loading" not in busy.props
-    css = (Path(c.__file__).parent / "assets" / "portia.css").read_text()
+    css = (Path(c.__file__).parent / "assets" / "portia.css").read_text(encoding="utf-8")
     rule = re.search(r"\n\.btn\.btn-busy \{(.*?)\}", css, re.S).group(1)
     assert "pointer-events: none" in rule and "background" not in rule
 
@@ -590,7 +590,7 @@ def test_the_breakdown_partitions_the_button_and_does_not_double_count(tmp_path)
     from portia.ui.state import App
 
     (tmp_path / "data").mkdir()
-    (tmp_path / "data" / "orders.csv").write_text("a\n1\n")
+    (tmp_path / "data" / "orders.csv").write_text("a\n1\n", encoding="utf-8")
     app = App(root=tmp_path, catalog={"data_dir": "data"})
     app.import_plan = [(tmp_path / "x.csv", tmp_path / "data" / "x.csv")]
 
@@ -716,7 +716,7 @@ def test_runs_chats_and_indexing_are_three_different_lists(tmp_path):
 
     app = App(root=tmp_path)
     (tmp_path / "runs").mkdir()
-    (tmp_path / "runs" / "2026-07-29T09-00-00.md").write_text("# a spec run")
+    (tmp_path / "runs" / "2026-07-29T09-00-00.md").write_text("# a spec run", encoding="utf-8")
     chat = runlog.start(app.catalog_dir, kind=runlog.CHAT)
     job = runlog.start(app.catalog_dir, kind=runlog.INDEXING)
 
@@ -982,7 +982,7 @@ def project(tmp_path):
     (root / "data").mkdir(parents=True)
     outside = tmp_path / "elsewhere"
     outside.mkdir()
-    (outside / "orders.csv").write_text("a,b\n1,2\n")
+    (outside / "orders.csv").write_text("a,b\n1,2\n", encoding="utf-8")
     return App(root=root), outside
 
 
@@ -1042,12 +1042,12 @@ def test_a_name_already_taken_is_refused_before_anything_moves(project):
     from portia.ui import engine
 
     app, outside = project
-    (app.root / "data" / "orders.csv").write_text("already here")
+    (app.root / "data" / "orders.csv").write_text("already here", encoding="utf-8")
 
     with pytest.raises(ValueError, match="refusing to overwrite"):
         engine.plan_import(str(outside / "orders.csv"), "data", app)
 
-    assert (app.root / "data" / "orders.csv").read_text() == "already here"
+    assert (app.root / "data" / "orders.csv").read_text(encoding="utf-8") == "already here"
 
 
 def test_importing_copies_and_never_moves(project):
@@ -1062,7 +1062,7 @@ def test_importing_copies_and_never_moves(project):
     copied = asyncio.run(engine.import_files(pairs, app))
 
     assert copied == [app.root / "data" / "raw" / "orders.csv"]
-    assert copied[0].read_text() == "a,b\n1,2\n"
+    assert copied[0].read_text(encoding="utf-8") == "a,b\n1,2\n"
     assert (outside / "orders.csv").exists(), "the original is left where it was"
 
 
@@ -1336,7 +1336,7 @@ def test_the_pane_beside_a_rail_states_both_its_dimensions():
 
     assert 'classes("p-pane-row")' in inspect.getsource(app_module._workflow_and_transcript)
 
-    css = theme.CSS.read_text()
+    css = theme.CSS.read_text(encoding="utf-8")
     block = re.search(r"\.p-pane-row \{([^}]*)\}", css)
     assert block, ".p-pane-row is not styled"
     assert "width: 100%" in block.group(1) and "height: 100%" in block.group(1)
@@ -1418,7 +1418,7 @@ def test_the_css_backstop_agrees_with_the_floor_the_splitter_enforces():
     from portia.ui import app as app_module
     from portia.ui import theme
 
-    css = theme.CSS.read_text()
+    css = theme.CSS.read_text(encoding="utf-8")
 
     def floor(selector: str) -> int:
         # Every block naming this selector, not the first — the three panes share
@@ -1641,8 +1641,8 @@ def test_everything_under_the_chosen_folder_is_ticked_by_default(tmp_path):
     from portia.ui.state import App
 
     (tmp_path / "data" / "2024").mkdir(parents=True)
-    (tmp_path / "data" / "orders.csv").write_text("a\n1\n")
-    (tmp_path / "data" / "2024" / "events.csv").write_text("a\n1\n")
+    (tmp_path / "data" / "orders.csv").write_text("a\n1\n", encoding="utf-8")
+    (tmp_path / "data" / "2024" / "events.csv").write_text("a\n1\n", encoding="utf-8")
     app = App(root=tmp_path, catalog={"data_dir": "data"})
 
     with _as_app(screens, app):
@@ -1659,8 +1659,8 @@ def test_a_file_already_profiled_arrives_unticked(tmp_path):
     from portia.ui.state import App
 
     (tmp_path / "data").mkdir()
-    (tmp_path / "data" / "orders.csv").write_text("a\n1\n")
-    (tmp_path / "data" / "new.csv").write_text("a\n1\n")
+    (tmp_path / "data" / "orders.csv").write_text("a\n1\n", encoding="utf-8")
+    (tmp_path / "data" / "new.csv").write_text("a\n1\n", encoding="utf-8")
     app = App(
         root=tmp_path,
         catalog={"data_dir": "data", "sources": {"orders": {"source": "data/orders.csv"}}},
@@ -1681,8 +1681,8 @@ def test_an_already_indexed_file_cannot_be_ticked_back_on(tmp_path):
     from portia.ui.state import App
 
     (tmp_path / "data").mkdir()
-    (tmp_path / "data" / "orders.csv").write_text("a\n1\n")
-    (tmp_path / "data" / "new.csv").write_text("a\n1\n")
+    (tmp_path / "data" / "orders.csv").write_text("a\n1\n", encoding="utf-8")
+    (tmp_path / "data" / "new.csv").write_text("a\n1\n", encoding="utf-8")
     app = App(
         root=tmp_path,
         catalog={"data_dir": "data", "sources": {"orders": {"source": "data/orders.csv"}}},
@@ -1702,13 +1702,13 @@ def test_unticking_survives_the_list_being_rebuilt(tmp_path):
     from portia.ui.state import App
 
     (tmp_path / "data").mkdir()
-    (tmp_path / "data" / "orders.csv").write_text("a\n1\n")
+    (tmp_path / "data" / "orders.csv").write_text("a\n1\n", encoding="utf-8")
     app = App(root=tmp_path, catalog={"data_dir": "data"})
 
     with _as_app(screens, app):
         screens._seed_ticks()
         app.tick("data/orders.csv", False)
-        (tmp_path / "data" / "arrived.csv").write_text("a\n1\n")
+        (tmp_path / "data" / "arrived.csv").write_text("a\n1\n", encoding="utf-8")
         ticked = [p.name for p in screens._ticked()]
 
     assert ticked == ["arrived.csv"]
@@ -1769,9 +1769,9 @@ def test_the_whole_repo_as_a_scope_still_draws_every_readable_file(tmp_path):
     from portia.ui.state import App
 
     (tmp_path / "notebooks").mkdir()
-    (tmp_path / "notebooks" / "scratch.csv").write_text("a\n1\n")
+    (tmp_path / "notebooks" / "scratch.csv").write_text("a\n1\n", encoding="utf-8")
     (tmp_path / "data").mkdir()
-    (tmp_path / "data" / "orders.csv").write_text("a\n1\n")
+    (tmp_path / "data" / "orders.csv").write_text("a\n1\n", encoding="utf-8")
 
     app = App(root=tmp_path, catalog={"data_dir": "."})
     names = [n.name for n in engine.project_tree(app)]
@@ -1899,7 +1899,7 @@ def test_the_sources_row_is_a_card_with_a_chevron_and_no_bigger_than_a_chat_row(
 
     assert "chat-row-open" in inspect.getsource(transcript._pinned_sources_row)
     assert len(transcript._SOURCES_META) <= 40, "one line, and it is cut with an ellipsis"
-    css = (Path(c.__file__).parent / "assets" / "portia.css").read_text()
+    css = (Path(c.__file__).parent / "assets" / "portia.css").read_text(encoding="utf-8")
     rule = re.search(r"\n\.chat-row--pinned \{(.*?)\n\}", css, re.S).group(1)
     assert "border: 1px solid var(--hairline-strong)" in rule
     assert not re.search(r"font-size|font-weight|padding|--accent", rule), "kind, never rank"
@@ -2322,7 +2322,7 @@ def test_a_step_is_one_block_and_there_is_no_second_detail_panel():
     from portia.ui import theme, workflow
 
     assert not hasattr(workflow, "_step_detail")
-    assert ".graph-detail" not in theme.CSS.read_text()
+    assert ".graph-detail" not in theme.CSS.read_text(encoding="utf-8")
 
 
 def test_the_report_lists_the_spec_even_before_anything_has_run():
@@ -2441,7 +2441,9 @@ def test_following_the_newest_row_stops_the_moment_you_scroll_up():
     """The point of the rule: a question is answered by reading the evidence
     above it, and a panel that yanks you back to the foot while you do that is
     worse than one that never followed at all."""
-    script = (Path(__file__).resolve().parents[1] / "portia/ui/assets/scroll.js").read_text()
+    script = (Path(__file__).resolve().parents[1] / "portia/ui/assets/scroll.js").read_text(
+        encoding="utf-8"
+    )
 
     assert "was && !was.foot" in script, "scrolled up means keep the place, not follow"
     assert "keep(el)" in script
@@ -2944,7 +2946,8 @@ def _canvas_project(tmp_path: Path, *, index: bool = True) -> App:
                     }
                 ],
             }
-        )
+        ),
+        encoding="utf-8",
     )
     (tmp_path / "specs" / "mart.yaml").write_text(
         yaml.safe_dump(
@@ -2962,7 +2965,8 @@ def _canvas_project(tmp_path: Path, *, index: bool = True) -> App:
                     }
                 ],
             }
-        )
+        ),
+        encoding="utf-8",
     )
     app = App(root=tmp_path)
     if index:
@@ -3189,7 +3193,8 @@ def test_an_unread_step_is_no_longer_drawn_as_a_fact_on_the_row(tmp_path, monkey
                     },
                 ],
             }
-        )
+        ),
+        encoding="utf-8",
     )
     engine_module.select_spec(tmp_path / "specs" / "mart.yaml", app)
     els, klass = _drawn(app)
@@ -3435,14 +3440,14 @@ def test_the_lit_path_carries_its_hop_so_the_flow_has_a_direction(tmp_path, monk
 def test_the_destination_of_the_flow_does_not_pulse():
     """It is where the flow arrives, and a destination blinking along with the
     path reads as one more stop on it."""
-    css = (Path(c.__file__).parent / "assets" / "portia.css").read_text()
+    css = (Path(c.__file__).parent / "assets" / "portia.css").read_text(encoding="utf-8")
     block = css[css.index(".graph-node--lit .model-card--selected") :][:200]
     assert "animation: none" in block
 
 
 def test_the_flow_stops_for_anyone_who_asked_it_to():
     """The path still lights — the statement survives; only the motion goes."""
-    css = (Path(c.__file__).parent / "assets" / "portia.css").read_text()
+    css = (Path(c.__file__).parent / "assets" / "portia.css").read_text(encoding="utf-8")
     reduced = css[css.index("prefers-reduced-motion") :]
     for selector in (".graph-node--lit .model-card", ".graph-edges path.is-lit"):
         assert selector in reduced[:600]
@@ -4039,7 +4044,7 @@ def test_every_pulse_in_the_app_is_given_a_phase():
     offenders = [
         f"{path.name}:{n}"
         for path in ui_dir.glob("*.py")
-        for n, line in enumerate(path.read_text().splitlines(), 1)
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
         if 'classes("tool-pulse")' in line and path.name != "components.py"
     ]
     assert offenders == []
@@ -4051,7 +4056,7 @@ def test_the_pulse_period_matches_the_stylesheet():
     import portia.ui
     from portia.ui import components
 
-    css = (Path(portia.ui.__file__).parent / "assets" / "portia.css").read_text()
+    css = (Path(portia.ui.__file__).parent / "assets" / "portia.css").read_text(encoding="utf-8")
     assert f"animation: p-pulse {components.PULSE_PERIOD}s" in css
 
 
@@ -4215,8 +4220,8 @@ def test_the_enter_duration_matches_motion_js():
     import portia.ui
 
     assets = Path(portia.ui.__file__).parent / "assets"
-    assert "animation: p-enter 220ms" in (assets / "portia.css").read_text()
-    assert "DURATION_MS = 220" in (assets / "motion.js").read_text()
+    assert "animation: p-enter 220ms" in (assets / "portia.css").read_text(encoding="utf-8")
+    assert "DURATION_MS = 220" in (assets / "motion.js").read_text(encoding="utf-8")
 
 
 def test_an_enter_key_survives_any_name():
@@ -4283,7 +4288,7 @@ def test_the_artifact_stamp_holds_still_unless_something_was_written(tmp_path):
     app.root = tmp_path
     figure = tmp_path / "figures" / "split.json"
     figure.parent.mkdir()
-    figure.write_text("{}")
+    figure.write_text("{}", encoding="utf-8")
 
     first = engine_module.artifact_stamp(app)
     assert first == engine_module.artifact_stamp(app)
@@ -4294,10 +4299,10 @@ def test_the_artifact_stamp_holds_still_unless_something_was_written(tmp_path):
 
     log = tmp_path / ".portia" / "chats" / "chat.jsonl"
     log.parent.mkdir(parents=True)
-    log.write_text("one\n")
+    log.write_text("one\n", encoding="utf-8")
     with_log = engine_module.artifact_stamp(app)
     assert with_log != touched
-    log.write_text("one\ntwo\n")
+    log.write_text("one\ntwo\n", encoding="utf-8")
     assert engine_module.artifact_stamp(app) == with_log
 
 
@@ -4673,7 +4678,7 @@ def test_a_folder_box_unticks_every_file_under_it(tmp_path, monkeypatch):
     (tmp_path / "data" / "2023").mkdir(parents=True)
     (tmp_path / "data" / "2024").mkdir()
     for rel in ("2023/a.csv", "2023/B.csv", "2024/c.csv", "orders.csv"):
-        (tmp_path / "data" / rel).write_text("a\n1\n")
+        (tmp_path / "data" / rel).write_text("a\n1\n", encoding="utf-8")
     app = App(root=tmp_path, catalog={"data_dir": "data"})
     monkeypatch.setattr(screens._actions, "refresh", lambda: None)
 
@@ -4940,7 +4945,8 @@ def test_a_pre_rename_log_is_legacy(tmp_path, monkeypatch):
     legacy.mkdir(parents=True)
     path = legacy / "2026-08-01T10-00-00.jsonl"
     path.write_text(
-        '{"kind": "header", "data": {"started": "2026-08-01T10:00:00", "prompt": "old"}}\n'
+        '{"kind": "header", "data": {"started": "2026-08-01T10:00:00", "prompt": "old"}}\n',
+        encoding="utf-8",
     )
 
     chat = exchange.open_from_disk(path)
@@ -5323,7 +5329,7 @@ def test_the_sync_reloads_nothing_while_the_stamp_holds_still(tmp_path, monkeypa
     assert reloaded == ["catalog"]  # the first look; nothing to compare against
     exchange._sync_artifacts()
     assert reloaded == ["catalog"]  # unchanged: not even the catalog is re-read
-    (tmp_path / ".portia" / "project.yaml").write_text("context: hi\n")
+    (tmp_path / ".portia" / "project.yaml").write_text("context: hi\n", encoding="utf-8")
     exchange._sync_artifacts()
     assert reloaded == ["catalog", "catalog"]
 
@@ -5445,10 +5451,12 @@ def _journal_project(tmp_path):
     import yaml
 
     for path in (tmp_path / "findings").glob("*.yaml"):
-        doc = yaml.safe_load(path.read_text())
+        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
         if doc["spec"] == "stg":
             doc["at"] = "2026-09-01T09:00:00+02:00"
-            path.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
+            path.write_text(
+                yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), encoding="utf-8"
+            )
     return app
 
 
@@ -5694,7 +5702,7 @@ def test_every_provider_has_a_mark_the_stylesheet_knows():
     from portia.agent import providers
     from portia.ui import theme
 
-    css = (theme.ASSETS / "portia.css").read_text()
+    css = (theme.ASSETS / "portia.css").read_text(encoding="utf-8")
     for kind in providers.KINDS:
         assert (Path(theme.ASSETS) / "providers" / f"{kind}.svg").exists(), kind
         assert f".provider-glyph-{kind}" in css, kind
@@ -5710,7 +5718,7 @@ def test_an_asset_url_changes_when_the_asset_does():
     stamp = theme.ASSET_ROUTE.rsplit("/", 1)[1]
     assert len(stamp) == 8 and stamp == theme._asset_stamp()
     assert theme.LOGO.startswith(theme.ASSET_ROUTE)
-    css = theme.CSS.read_text()
+    css = theme.CSS.read_text(encoding="utf-8")
     assert theme.ASSET_TOKEN + "/providers/" in css
     assert theme.ASSET_ROUTE not in css, "the stylesheet must stay stable; the page rewrites it"
 
@@ -5921,7 +5929,7 @@ def test_a_status_light_is_a_closed_list_of_kinds_and_only_live_moves():
     with pytest.raises(ValueError, match="unknown status light"):
         c.status_light("urgent")
 
-    css = (Path(c.__file__).parent / "assets" / "portia.css").read_text()
+    css = (Path(c.__file__).parent / "assets" / "portia.css").read_text(encoding="utf-8")
     for kind in c.LIGHTS:
         assert f".status-light--{kind}" in css
     assert f"animation: p-live {c.LIVE_PERIOD}s" in css

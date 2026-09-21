@@ -130,7 +130,7 @@ def test_a_finding_lifts_its_numbers_out_of_the_log(sales, tmp_path):
         portia_dir=sales,
     )
 
-    doc = yaml.safe_load((tmp_path / got["finding"]).read_text())
+    doc = yaml.safe_load((tmp_path / got["finding"]).read_text(encoding="utf-8"))
     assert doc["queries"][0]["sql"] == "SELECT 0"
     assert doc["queries"][0]["result"] == '{"n_rows":0}'
     assert doc["so"] == "left join rather than inner, so they survive"
@@ -298,7 +298,7 @@ def test_a_stored_result_does_not_restate_what_sits_beside_it(sales, tmp_path):
     got = handlers.record_finding(
         "how many?", "eight", "nothing", ["orders"], [1], portia_dir=sales
     )
-    stored = yaml.safe_load((tmp_path / got["finding"]).read_text())["queries"][0]
+    stored = yaml.safe_load((tmp_path / got["finding"]).read_text(encoding="utf-8"))["queries"][0]
 
     assert stored["result"] == '{"n_rows":8}'
     assert stored["sql"] == "SELECT 1"  # kept once, where it belongs
@@ -319,7 +319,7 @@ def test_a_result_that_is_not_json_is_kept_exactly_as_it_came_back(sales, tmp_pa
     log.event(events.Event(events.TOOL_RESULT, {"id": "t1", "text": "ValueError: nope"}))
 
     got = handlers.record_finding("q", "a", "b", ["orders"], [1], portia_dir=sales)
-    stored = yaml.safe_load((tmp_path / got["finding"]).read_text())["queries"][0]
+    stored = yaml.safe_load((tmp_path / got["finding"]).read_text(encoding="utf-8"))["queries"][0]
     assert stored["result"] == "ValueError: nope"
 
 

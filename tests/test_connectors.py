@@ -40,7 +40,7 @@ def test_the_registry_round_trips_and_holds_no_secret(tmp_path):
     assert set(loaded) == {"prod", "dev"}
     assert loaded["prod"].role == "ANALYST" and loaded["prod"].database is None
     assert registry.names(path) == ["dev", "prod"]
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     assert "password" not in text and "token" not in text
 
 
@@ -67,7 +67,8 @@ def test_suggestions_read_snowflakes_file_and_drop_its_secrets(tmp_path):
     toml = tmp_path / "connections.toml"
     toml.write_text(
         '[work]\naccount = "acme-eu"\nuser = "jad"\nwarehouse = "WH"\npassword = "hunter2"\n'
-        '[bare]\naccount = "x"\n'
+        '[bare]\naccount = "x"\n',
+        encoding="utf-8",
     )
     found = {c.name: c for c in registry.snowflake_suggestions(toml)}
     assert found["work"].user == "jad" and found["work"].warehouse == "WH"
@@ -79,7 +80,7 @@ def test_suggestions_read_snowflakes_file_and_drop_its_secrets(tmp_path):
 def test_suggestions_survive_a_missing_or_broken_file(tmp_path):
     assert registry.snowflake_suggestions(tmp_path / "none.toml") == []
     broken = tmp_path / "broken.toml"
-    broken.write_text("[oops\n")
+    broken.write_text("[oops\n", encoding="utf-8")
     assert registry.snowflake_suggestions(broken) == []
 
 
@@ -107,9 +108,9 @@ def test_a_project_naming_an_unknown_connection_says_what_is_known(tmp_path, mon
     d = tmp_path / ".portia"
     catalog.init_project("x", portia_dir=d)
     proj = d / "project.yaml"
-    data = yaml.safe_load(proj.read_text())
+    data = yaml.safe_load(proj.read_text(encoding="utf-8"))
     data["connection"] = "ghost"
-    proj.write_text(yaml.safe_dump(data))
+    proj.write_text(yaml.safe_dump(data), encoding="utf-8")
     monkeypatch.setattr(registry, "CONNECTIONS", tmp_path / "c.yaml")
     registry.save(_conn("prod"), tmp_path / "c.yaml")
     with pytest.raises(ConnectorUnavailable, match="ghost.*Known: prod"):
@@ -120,9 +121,9 @@ def test_a_project_naming_a_known_connection_resolves_without_connecting(tmp_pat
     d = tmp_path / ".portia"
     catalog.init_project("x", portia_dir=d)
     proj = d / "project.yaml"
-    data = yaml.safe_load(proj.read_text())
+    data = yaml.safe_load(proj.read_text(encoding="utf-8"))
     data["connection"] = "prod"
-    proj.write_text(yaml.safe_dump(data))
+    proj.write_text(yaml.safe_dump(data), encoding="utf-8")
     monkeypatch.setattr(registry, "CONNECTIONS", tmp_path / "c.yaml")
     registry.save(_conn("prod", database="ANALYTICS"), tmp_path / "c.yaml")
 
@@ -248,7 +249,7 @@ def test_a_connection_defaults_to_browser_sign_in_and_records_only_the_others(tm
     loaded = registry.load(path)
     assert loaded["sso"].auth == registry.BROWSER and not loaded["sso"].needs_secret
     assert loaded["pw"].auth == registry.PASSWORD and loaded["pw"].needs_secret
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     assert "auth: password" in text and "auth: browser" not in text
     with pytest.raises(ValueError, match="signs in with one of"):
         registry.save(_conn("bad", auth="magic"), path)
@@ -282,16 +283,19 @@ def test_the_hand_off_rides_the_backend_and_a_stale_target_key_is_dropped(tmp_pa
     d = tmp_path / ".portia"
     catalog.init_project("x", portia_dir=d)
     proj = d / "project.yaml"
-    proj.write_text(yaml.safe_dump({**yaml.safe_load(proj.read_text()), "target": "A.B"}))
+    proj.write_text(
+        yaml.safe_dump({**yaml.safe_load(proj.read_text(encoding="utf-8")), "target": "A.B"}),
+        encoding="utf-8",
+    )
     monkeypatch.setattr(registry, "CONNECTIONS", tmp_path / "c.yaml")
     registry.save(_conn("prod"), tmp_path / "c.yaml")
     catalog.set_connection("prod", agent_writes=True, portia_dir=d)
     assert catalog.project_settings(d)["agent_writes"] is True
-    assert "target" not in yaml.safe_load(proj.read_text())
+    assert "target" not in yaml.safe_load(proj.read_text(encoding="utf-8"))
     catalog.set_connection("prod", portia_dir=d)
     assert catalog.project_settings(d)["agent_writes"] is True, "a plain re-save keeps the hand-off"
     catalog.set_connection("prod", agent_writes=False, portia_dir=d)
-    assert "agent_writes" not in yaml.safe_load(proj.read_text())
+    assert "agent_writes" not in yaml.safe_load(proj.read_text(encoding="utf-8"))
 
     catalog.set_connection("prod", agent_writes=True, portia_dir=d)
     built = backend_for(d)
@@ -322,7 +326,7 @@ def test_a_connection_reads_its_providers_fields_as_attributes_and_refuses_a_str
 def test_a_record_names_its_kind_only_when_it_is_not_the_default(tmp_path):
     path = tmp_path / "c.yaml"
     registry.save(_conn(), path)
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     assert "kind:" not in text, "every file written before there was a second provider is Snowflake"
     assert registry.load(path)["prod"].kind == "snowflake"
 
@@ -393,7 +397,7 @@ def test_a_bigquery_connection_needs_a_project_and_a_key_file_only_for_a_service
     assert loaded["gcp"].kind == "bigquery" and loaded["gcp"].keyfile == "~/k.json"
     assert not loaded["gcp"].needs_secret, "a key file is a path, not something typed"
     assert loaded["tok"].needs_secret and loaded["tok"].secret_label == "Access token"
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     assert "kind: bigquery" in text and "auth: adc" not in text, "the default auth is left out"
 
 
@@ -409,9 +413,10 @@ def test_the_bigquery_provider_maps_its_levels_onto_portias_three():
 
 def test_gcloud_default_project_is_read_for_a_suggestion_and_never_written(tmp_path):
     (tmp_path / "configurations").mkdir()
-    (tmp_path / "active_config").write_text("work\n")
+    (tmp_path / "active_config").write_text("work\n", encoding="utf-8")
     (tmp_path / "configurations" / "config_work").write_text(
-        "[core]\naccount = jad@acme.com\nproject = acme-analytics\n[compute]\nregion = eu\n"
+        "[core]\naccount = jad@acme.com\nproject = acme-analytics\n[compute]\nregion = eu\n",
+        encoding="utf-8",
     )
     assert registry.gcloud_default_project(tmp_path) == "acme-analytics"
     (found,) = registry.bigquery_suggestions(tmp_path)
@@ -554,15 +559,19 @@ def test_an_entry_from_a_newer_build_is_skipped_and_kept(tmp_path):
                     "theirs": {"kind": "redshift", "cluster": "c-1"},
                 }
             }
-        )
+        ),
+        encoding="utf-8",
     )
 
     assert registry.names(path) == ["mine"]
 
     registry.save(registry.Connection(name="second", account="b", user="u", warehouse="w"), path)
-    written = yaml.safe_load(path.read_text())["connections"]
+    written = yaml.safe_load(path.read_text(encoding="utf-8"))["connections"]
     assert written["theirs"] == {"kind": "redshift", "cluster": "c-1"}, "kept as written"
     assert set(written) == {"mine", "second", "theirs"}
 
     assert registry.remove("mine", path) is True
-    assert set(yaml.safe_load(path.read_text())["connections"]) == {"second", "theirs"}
+    assert set(yaml.safe_load(path.read_text(encoding="utf-8"))["connections"]) == {
+        "second",
+        "theirs",
+    }

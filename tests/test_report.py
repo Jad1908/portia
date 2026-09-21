@@ -107,5 +107,5 @@ def test_writing_one_lands_a_timestamped_file(results, tmp_path):
     assert path.parent.name == "runs"
     assert path.suffix == ".md"
     assert ":" not in path.name, "colons aren't portable in filenames"
-    assert path.read_text().startswith("# orders.yaml — ")
-    assert "`specs/orders.yaml`" in path.read_text()
+    assert path.read_text(encoding="utf-8").startswith("# orders.yaml — ")
+    assert "`specs/orders.yaml`" in path.read_text(encoding="utf-8")
