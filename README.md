@@ -86,6 +86,30 @@ project to `sandbox/demo` and `devtools/demodata/DEMO.md` says what is planted i
 - **A journal and a log.** Every chat, indexing job and question asked of the data stays in the
   project.
 
+## Inside Claude Code
+
+portia's tools also run in your own Claude Code session, with no window. Install the two
+commands the plugin starts, then the plugin:
+
+```bash
+uv tool install "portia[agent,ui] @ git+https://github.com/Jad1908/portia"
+```
+
+```
+/plugin marketplace add Jad1908/portia
+/plugin install portia@portia
+```
+
+Claude then profiles, queries, charts and records steps through portia, and a hook holds a reply
+until it has reviewed what it asked, which is how findings get kept. Charts go to the window:
+`python -m portia.ui --project .` opens it and it follows the session within two seconds. With
+the window closed Claude says a chart is waiting.
+
+The difference from the app is one you should know. The app's copilot has no file access, so it
+cannot read raw data. Claude Code does have file access. The plugin refuses its file tools on
+indexed data and on portia's own files, and a shell command is not refused. See
+[`plugin/README.md`](plugin/README.md).
+
 ## Local models
 
 The copilot also runs on a model served on your machine by [Ollama](https://ollama.com) or

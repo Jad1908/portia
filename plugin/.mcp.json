@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "portia": {
+      "command": "portia-mcp",
+      "args": []
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "portia",
+  "version": "0.0.1",
+  "description": "portia's data tools inside Claude Code: profile sources, check joins, query and chart, and record a measured pipeline. Every number comes from a check, never from reading a file.",
+  "author": { "name": "Jad Aouad" },
+  "homepage": "https://github.com/Jad1908/portia",
+  "repository": "https://github.com/Jad1908/portia",
+  "license": "AGPL-3.0-only"
+}
