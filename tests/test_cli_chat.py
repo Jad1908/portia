@@ -59,3 +59,31 @@ def test_a_real_error_still_surfaces(monkeypatch):
     monkeypatch.setattr(chat, "run_and_render", broken)
     with pytest.raises(RuntimeError, match="the engine broke"):
         chat.run_turn("anything", model="m", effort=None, cwd=".", portia_dir=".portia")
+
+
+def test_a_project_can_be_described_with_nothing_to_index(tmp_path, monkeypatch, capsys):
+    """A warehouse project has no files. `--init` alone is a whole, successful call."""
+    import sys
+
+    from portia import catalog
+    from portia.cli import index
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["portia index", "--init", "Orders on a warehouse."])
+    index.main()
+    assert catalog.load_catalog(".portia")["project"] == "Orders on a warehouse."
+    assert "project context set" in capsys.readouterr().out
+
+
+def test_indexing_nothing_and_describing_nothing_is_refused(tmp_path, monkeypatch):
+    import sys
+
+    import pytest
+
+    from portia.cli import index
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["portia index"])
+    with pytest.raises(SystemExit) as refused:
+        index.main()
+    assert refused.value.code == 2

@@ -84,7 +84,11 @@ def sync_graph(portia_dir: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Index data into a portia project.")
-    parser.add_argument("data", help="a data file, a directory of them, or a glob")
+    parser.add_argument(
+        "data",
+        nargs="?",
+        help="a data file, a directory of them, or a glob (omit with --init to only describe)",
+    )
     parser.add_argument(
         "--init", metavar="CONTEXT", help="set the project context non-interactively"
     )
@@ -99,11 +103,19 @@ def main() -> None:
     add_spend_arguments(parser)
     args = parser.parse_args()
 
+    if args.data is None and args.init is None:
+        parser.error("name the data to index, or pass --init to describe the project")
     if args.init is not None:
         init_project(args.init, portia_dir=args.dir)
         print(f"project context set → {args.dir}/project.yaml\n")
     else:
         ensure_project_context(args.dir)
+    if args.data is None:
+        # A warehouse project has no files: its tables arrive through
+        # `connect scope`. Describing it is the whole of this call, and ending
+        # on *no supported data files* with a failing exit read as a failed
+        # install to the agent doing it (`INSTALL.md`).
+        return
 
     paths = resolve(args.data)
     names = []

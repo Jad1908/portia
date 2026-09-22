@@ -6,19 +6,18 @@ and measured before it was written.
 
 ## Install
 
-The plugin starts two commands, `portia-mcp` and `portia-hook`, so they have to be
-on your `PATH` first:
+The plugin starts two commands, `portia-mcp` and `portia-hook`, and its skill uses a
+third, `portia`. All three have to be on your `PATH` first:
 
 ```sh
-uv tool install "portia[agent,ui] @ git+https://github.com/Jad1908/portia"
+uv tool install "portia[agent,ui,graph] @ git+https://github.com/Jad1908/portia"
+claude plugin marketplace add Jad1908/portia
+claude plugin install portia@portia
 ```
 
-Then, in Claude Code:
-
-```
-/plugin marketplace add Jad1908/portia
-/plugin install portia@portia
-```
+Add `snowflake` or `bigquery` inside the brackets for a warehouse. Then start a new Claude
+Code session. The repository's `INSTALL.md` is the full guide, written so an agent can
+follow it.
 
 Open Claude Code in a folder that holds your data and say what you want from it.
 
@@ -42,7 +41,7 @@ A chart Claude draws goes to portia's window. If the window is closed the chart
 waits on disk and Claude tells you so. Open it with:
 
 ```sh
-uv run python -m portia.ui --project .
+portia ui --project .
 ```
 
 The window follows the session within a couple of seconds: charts open as tabs,
