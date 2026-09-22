@@ -23,6 +23,8 @@ dependencies = [
 # tools are declared with the SDK's decorator, and the SDK brings `mcp`.
 [project.scripts]
 portia-mcp = "portia.cli.serve:main"
+# The two rules a tool server cannot hold, as Claude Code hooks (`portia/cli/hook.py`).
+portia-hook = "portia.cli.hook:main"
 
 [project.optional-dependencies]
 dev = [
