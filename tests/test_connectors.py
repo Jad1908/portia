@@ -575,3 +575,115 @@ def test_an_entry_from_a_newer_build_is_skipped_and_kept(tmp_path):
         "second",
         "theirs",
     }
+
+
+# --- signing in the way Snowflake's own file says (`docs/HEADLESS.md` §7) ----------
+
+
+def _vendor_file(tmp_path, monkeypatch, body):
+    monkeypatch.setenv("SNOWFLAKE_HOME", str(tmp_path))
+    (tmp_path / "connections.toml").write_text(body, encoding="utf-8")
+
+
+VENDOR = """
+[demo]
+account = "acme-eu"
+user = "jad"
+password = "hunter2"
+warehouse = "WH_S"
+role = "ANALYST"
+"""
+
+
+def test_a_file_connection_hands_the_connector_a_name_and_nothing_else():
+    """The connector merges what it is passed *over* the entry, so a field portia
+    recorded would overrule a file its owner has since edited. And no secret is
+    in what portia sends, because portia never had one."""
+    sent = snowflake.login_fields(_conn("demo", auth=registry.FILE, role="STALE_ROLE"))
+    assert sent == {"connection_name": "demo", "application": snowflake.APPLICATION}
+
+
+def test_the_entry_may_be_called_something_else_than_the_connection():
+    sent = snowflake.login_fields(_conn("work", auth=registry.FILE, profile="demo"))
+    assert sent["connection_name"] == "demo"
+
+
+def test_a_file_connection_needs_nothing_typed():
+    c = _conn("demo", auth=registry.FILE)
+    assert not c.needs_secret and c.secret_label is None
+    assert not snowflake.Pool(c).needs_secret
+
+
+def test_a_file_connection_fills_what_nobody_typed_from_the_entry(tmp_path, monkeypatch):
+    _vendor_file(tmp_path, monkeypatch, VENDOR)
+    bare = registry.Connection(name="demo", auth=registry.FILE)
+    filled = registry.filled_from_vendor(bare)
+    filled.check()
+    assert (filled.account, filled.user, filled.warehouse, filled.role) == (
+        "acme-eu",
+        "jad",
+        "WH_S",
+        "ANALYST",
+    )
+    assert "hunter2" not in repr(filled) and "password" not in filled.fields
+
+
+def test_what_was_typed_wins_over_the_entry_and_other_methods_are_left_alone(tmp_path, monkeypatch):
+    _vendor_file(tmp_path, monkeypatch, VENDOR)
+    typed = registry.Connection(name="demo", auth=registry.FILE, role="LOADER")
+    assert registry.filled_from_vendor(typed).role == "LOADER"
+    browser = registry.Connection(name="demo", auth=registry.BROWSER)
+    assert registry.filled_from_vendor(browser) is browser
+
+
+def test_an_entry_that_is_not_in_the_file_is_refused_by_the_check_it_always_was(
+    tmp_path, monkeypatch
+):
+    _vendor_file(tmp_path, monkeypatch, VENDOR)
+    absent = registry.filled_from_vendor(registry.Connection(name="nope", auth=registry.FILE))
+    with pytest.raises(ValueError, match="Missing: account"):
+        absent.check()
+
+
+def test_a_file_connection_round_trips_through_the_registry(tmp_path):
+    path = tmp_path / "c.yaml"
+    registry.save(_conn("work", auth=registry.FILE, profile="demo"), path)
+    got = registry.get("work", path)
+    assert got.auth == registry.FILE and got.profile == "demo"
+
+
+def test_the_connect_command_refuses_a_typed_secret_where_nobody_can_type(monkeypatch):
+    """A host's shell has no terminal. `getpass` would wait on a prompt nothing answers."""
+    import io
+    import sys
+
+    from portia.cli import connect as connect_cli
+
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    with pytest.raises(SystemExit, match="no terminal here"):
+        connect_cli._secret_for(_conn(auth=registry.PASSWORD))
+    assert connect_cli._secret_for(_conn(auth=registry.FILE)) is None
+
+
+def test_a_file_written_in_config_tomls_form_is_said_in_words(tmp_path, monkeypatch):
+    """The first real drive: `[connections.demo]` reads as a connection called
+    *connections*, offered with every field missing and unopenable by name."""
+    _vendor_file(tmp_path, monkeypatch, VENDOR.replace("[demo]", "[connections.demo]"))
+    (tmp_path / "connections.toml").chmod(0o600)
+    (problem,) = registry.snowflake_file_problems()
+    assert "[connections.demo]" in problem and "it is [demo]" in problem
+    assert "hunter2" not in problem
+
+
+def test_a_file_other_users_can_read_is_said_with_the_command_that_fixes_it(tmp_path, monkeypatch):
+    _vendor_file(tmp_path, monkeypatch, VENDOR)
+    (tmp_path / "connections.toml").chmod(0o644)
+    (problem,) = registry.snowflake_file_problems()
+    assert "chmod 0600" in problem
+    (tmp_path / "connections.toml").chmod(0o600)
+    assert registry.snowflake_file_problems() == []
+
+
+def test_no_file_is_no_problem(tmp_path, monkeypatch):
+    monkeypatch.setenv("SNOWFLAKE_HOME", str(tmp_path))
+    assert registry.snowflake_file_problems() == []

@@ -304,7 +304,21 @@ def suggestions() -> list[Connection]:
 #: account password (the connector runs the account's MFA on top of it), or a
 #: programmatic access token.
 BROWSER, PASSWORD, TOKEN = "browser", "password", "token"
-AUTH_METHODS = (BROWSER, PASSWORD, TOKEN)
+
+#: Sign in the way **Snowflake's own `connections.toml` says**, by the entry's
+#: name *(2026-09-19, `docs/HEADLESS.md` §7)*. The connector reads its own file,
+#: so whatever that entry holds works: a password, a key pair, OAuth, the
+#: authenticator a company's admins set up. **portia is handed none of it**: it
+#: passes a name, and *nothing in here is a credential* stays true.
+#:
+#: It exists for a host with no window. A typed secret is held on the pool, in
+#: the memory of the process that asked for it, and under `cli/serve.py` there
+#: is no dialog to ask and no terminal a host's shell can answer. Asking for it
+#: in the chat was turned down: a password pasted into a conversation is in its
+#: transcript. The person who already keeps this file for dbt and `snow` types
+#: nothing anywhere.
+FILE = "file"
+AUTH_METHODS = (BROWSER, PASSWORD, TOKEN, FILE)
 
 #: What a Snowflake connection must say (`CONNECTOR.md` §2.4). ``user`` is
 #: required because browser SSO still wants the login name — the connector
@@ -372,6 +386,70 @@ def snowflake_suggestions(path: Path | None = None) -> list[Connection]:
     return out
 
 
+def snowflake_file_problems(path: Path | None = None) -> list[str]:
+    """What is wrong with Snowflake's own file, in words, or nothing.
+
+    **Both found on the first real drive of :data:`FILE`, 2026-09-19.** The file
+    was written as ``[connections.demo]``, which is the header `config.toml` wants
+    and which `connections.toml` reads as one connection called *connections*
+    holding a table called *demo*: `suggest` offered that with every field
+    missing, and the connector would have refused ``demo`` as an unknown name.
+    And it was readable by other users, which the connector warns about on every
+    open, in a paragraph on stderr nobody reads.
+
+    Facts about the file, never its values: nothing here returns a field's content.
+    """
+    target = path or snowflake_connections_file()
+    try:
+        raw = tomllib.loads(target.read_text(encoding="utf-8"))
+        mode = target.stat().st_mode
+    except (FileNotFoundError, tomllib.TOMLDecodeError, OSError, UnicodeDecodeError):
+        return []
+    problems = []
+    for name, fields in raw.items():
+        nested = (
+            [k for k, v in fields.items() if isinstance(v, dict)]
+            if isinstance(fields, dict)
+            else []
+        )
+        if nested and len(nested) == len(fields):
+            wrote, wants = f"[{name}.{nested[0]}]", f"[{nested[0]}]"
+            problems.append(
+                f"{target} has a section written {wrote}. That is config.toml's form; "
+                f"in connections.toml it is {wants}, or the entry cannot be opened by name."
+            )
+    if os.name == "posix" and mode & 0o077:
+        problems.append(
+            f"{target} can be read by other users, which Snowflake's connector objects to: "
+            f'chmod 0600 "{target}"'
+        )
+    return problems
+
+
+def filled_from_vendor(connection: Connection) -> Connection:
+    """A :data:`FILE` connection with the fields nobody typed read off the vendor's entry.
+
+    Under :data:`FILE` the entry in `connections.toml` is the truth, so asking
+    somebody to retype its account, user and warehouse to satisfy
+    `Connection.check` would be asking them to keep two copies in step by hand.
+    What is copied is what `snowflake_suggestions` offers, which is never a
+    secret. A field that *was* typed wins, and an entry that is not in the file
+    changes nothing here: `check` then names what is missing.
+    """
+    if connection.auth != FILE:
+        return connection
+    wanted = connection.fields.get("profile") or connection.name
+    offered = next((c for c in connection.provider.suggest() if c.name == wanted), None)
+    if offered is None:
+        return connection
+    return Connection(
+        name=connection.name,
+        kind=connection.kind,
+        auth=connection.auth,
+        **{**offered.fields, **connection.fields},
+    )
+
+
 def _opt(value: object) -> str | None:
     return str(value) if value not in (None, "") else None
 
@@ -387,11 +465,16 @@ SNOWFLAKE = Provider(
         Field("role", "Role"),
         Field("database", "Database"),
         Field("schema", "Schema"),
+        # Which entry of `connections.toml` to open under :data:`FILE`. Left
+        # empty it is the connection's own name, which is what a connection
+        # made from a suggestion already has.
+        Field("profile", "Name in connections.toml", False, "my_connection"),
     ),
     auth=(
         Auth(BROWSER, "Browser sign-in"),
         Auth(PASSWORD, "Password", secret="Password"),
         Auth(TOKEN, "Access token", secret="Access token"),
+        Auth(FILE, "connections.toml"),
     ),
     summary=lambda c: f"{c.user or ''}@{c.account or ''}",
     suggest=snowflake_suggestions,

@@ -43,7 +43,7 @@ from portia.connectors.pool import (  # noqa: F401 — reached through this modu
     pool_of,
     rewrite,
 )
-from portia.connectors.registry import Connection
+from portia.connectors.registry import FILE, Connection
 from portia.core import dialect
 from portia.core.backend import Backend
 from portia.core.table import quote_literal
@@ -277,8 +277,10 @@ def open_raw(connection: Connection, secret: str | None = None) -> Any:
     popup is per connect. A password goes to the default authenticator, which
     runs the account's MFA on top of it. A programmatic access token goes to
     the token authenticator. ``application`` is what the account's history
-    shows. :func:`login_fields` is the pure half, so a test can read what would
-    be sent without a driver.
+    shows. Under `registry.FILE` the connector is given the name of an entry in
+    its own `connections.toml` and reads the rest itself, secret included.
+    :func:`login_fields` is the pure half, so a test can read what would be sent
+    without a driver.
     """
     connection.check()
     driver = _driver()
@@ -287,6 +289,16 @@ def open_raw(connection: Connection, secret: str | None = None) -> Any:
 
 def login_fields(connection: Connection, secret: str | None = None) -> dict[str, Any]:
     """What ``connect`` is called with. The secret is in here and nowhere durable."""
+    if connection.auth == FILE:
+        # **The name and nothing else.** The connector merges what is passed
+        # here *over* the entry (`{**connections[name], **kwargs}`), so sending
+        # the account, the user or the role portia recorded would quietly
+        # overrule a file its owner has since edited. Under this method the
+        # file is the truth and portia's copy of those fields is a label.
+        return {
+            "connection_name": connection.profile or connection.name,
+            "application": APPLICATION,
+        }
     fields: dict[str, Any] = {
         "account": connection.account,
         "user": connection.user,

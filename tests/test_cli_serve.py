@@ -333,3 +333,114 @@ def test_a_cancelled_request_stops_the_query_and_not_only_the_wait(sales):
     (result,) = (e for e in runlog.read(path).events if e.kind == events.TOOL_RESULT)
     assert result.data["is_error"]
     assert "Stop" in result.data["text"]
+
+
+# --- a warehouse, with no window to sign in through (`docs/HEADLESS.md` §7) --------
+
+
+@pytest.fixture
+def warehouse(sales, tmp_path, monkeypatch):
+    """``name(auth)``: the served project, pointed at a Snowflake connection signing in that way."""
+    from portia import catalog, connectors
+    from portia.connectors import registry
+
+    monkeypatch.setattr(registry, "CONNECTIONS", tmp_path / "connections.yaml")
+
+    def name(auth, connection="demo"):
+        registry.save(
+            registry.Connection(
+                name=connection, auth=auth, account="acme-eu", user="jad", warehouse="WH_S"
+            )
+        )
+        catalog.set_connection(connection, portia_dir=sales)
+        return sales
+
+    yield name
+    connectors.deactivate()
+    serve._unusable.clear()
+
+
+def _brief(portia_dir):
+    async def pull(client, session):
+        return (await client.call_tool(serve.BRIEF_TOOL, {})).content[0].text
+
+    return drive(portia_dir, pull)
+
+
+def test_on_files_the_brief_says_nothing_about_signing_in(sales):
+    assert "Signing in" not in _brief(sales)
+
+
+def test_the_brief_warns_that_a_browser_will_open_before_it_does(warehouse):
+    from portia.connectors import registry
+
+    brief = _brief(warehouse(registry.BROWSER))
+    assert "Signing in to `demo`" in brief and "browser window" in brief
+    assert "never given a credential" in brief
+
+
+def test_a_file_connection_says_nothing_is_typed_and_the_file_is_not_to_be_opened(warehouse):
+    from portia.connectors import registry
+
+    brief = _brief(warehouse(registry.FILE))
+    assert "connections.toml" in brief and "connect suggest" in brief
+    assert "browser window" not in brief
+
+
+def test_a_typed_password_is_said_to_be_unusable_before_the_first_refusal(warehouse):
+    from portia.connectors import registry
+
+    brief = _brief(warehouse(registry.PASSWORD))
+    assert "cannot be opened from here" in brief and "password" in brief
+    assert "Do not ask the user for it" in brief
+    assert "--auth file" in brief
+
+
+def test_the_refusal_a_host_reads_never_says_enter_it(warehouse):
+    """`SecretRequired` says *enter it to connect*. Here there is nowhere to."""
+    from portia.connectors import registry
+
+    async def ask(client, session):
+        result = await count(client)
+        return result.isError, result.content[0].text, session.log.path
+
+    failed, text, path = drive(warehouse(registry.PASSWORD), ask)
+    assert failed
+    assert "enter it" not in text and "SecretRequired" not in text
+    assert "Do not ask the user for it" in text and "`demo`" in text
+    (logged,) = (e for e in runlog.read(path).events if e.kind == events.TOOL_RESULT)
+    assert logged.data["text"] == text, "the log holds what the model read"
+
+
+def test_the_server_follows_a_connection_chosen_halfway_through_a_session(warehouse, sales):
+    """`connect use` runs in another process, after this one started on files."""
+    from portia.connectors import registry
+    from portia.core import backend
+
+    async def halfway(client, session):
+        before = (await client.call_tool(serve.BRIEF_TOOL, {})).content[0].text
+        warehouse(registry.FILE)  # the other process: `connect add`, `connect use`
+        after = (await client.call_tool(serve.BRIEF_TOOL, {})).content[0].text
+        return before, after, backend.active()
+
+    before, after, active = drive(sales, halfway)
+    assert "Signing in" not in before
+    assert "Signing in to `demo`" in after
+    assert active.remote and active.label == "demo"
+
+
+def test_a_connection_this_machine_does_not_have_is_said_and_the_server_still_serves(
+    sales, tmp_path, monkeypatch
+):
+    from portia import catalog, connectors
+    from portia.connectors import registry
+
+    monkeypatch.setattr(registry, "CONNECTIONS", tmp_path / "connections.yaml")
+    catalog.set_connection("somebody-elses", portia_dir=sales)
+    try:
+        brief = _brief(sales)
+    finally:
+        connectors.deactivate()
+        serve._unusable.clear()
+    assert "`somebody-elses` is not usable on this machine" in brief
+    assert "orders" in brief, "the catalog still reads"

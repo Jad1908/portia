@@ -78,6 +78,40 @@ and they print facts, never rows.
   as a graph, the catalog, the findings, the charts, and this session's tool calls as
   a read-only chat. It follows what you do within a couple of seconds.
 
+## When the data is in a warehouse
+
+A project is on files or on one warehouse, never both, and `get_context` says which.
+On a warehouse nothing is downloaded: every check runs there, under the user's own
+role, and every call is on their meter. The brief says what a question costs on that
+engine. Read it before you profile anything.
+
+**You never handle a credential.** Do not ask for a password, a token or a key, and do
+not accept one pasted into the chat. A secret in a conversation is in its transcript.
+If a user offers one, say that and point them at the two ways below.
+
+Setting a project up is the user's machine talking to their warehouse, through
+commands that print no secret:
+
+1. `uv run python -m portia.cli.connect suggest` lists the connections their own tools
+   already describe: Snowflake's `connections.toml`, the Google Cloud SDK's project.
+2. `uv run python -m portia.cli.connect add <name> --auth <how>` saves one for portia.
+   `connect providers` lists each warehouse's fields and ways to sign in. On Snowflake
+   prefer `--auth file`, which signs in the way their `connections.toml` entry says and
+   needs nothing else typed, or `--auth browser` for a company sign-in. On BigQuery the
+   default uses the Google Cloud sign-in already on the machine.
+3. `uv run python -m portia.cli.connect use <name>` points this project at it.
+4. `uv run python -m portia.cli.connect browse <name> [DB[.SCHEMA]]` lists what is
+   there, and `connect scope DB.SCHEMA.TABLE ...` brings tables into the project as
+   metadata, with no scan. A profile of a warehouse table is a scan and costs money:
+   ask before the first one, and name the table.
+
+The tools follow `connect use` on their next call. Call `get_context` again after it:
+the brief changes, and its last section says how the new connection signs in.
+
+The brief ends with how this connection signs in. If it says a browser window will
+open, tell the user before your first call that reaches the warehouse. If it says the
+connection cannot be opened from here, stop and tell them, with the two ways that work.
+
 ## After indexing: the read
 
 Indexing measures. Reading is yours, and it is where a project starts. Once the
