@@ -457,7 +457,11 @@ class LlamaCpp(Provider):
         except (ProviderUnavailable, LlamaError):
             pass
         state = health.get("status") or "?"
-        return Status(reachable=True, detail=f"llama-server {build} at {host()} ({state})".strip())
+        return Status(
+            reachable=True,
+            detail=f"llama-server {build} at {host()} ({state})".strip(),
+            version=f"llama-server {build}".strip(),
+        )
 
     def models(self) -> list[Model]:
         listed = _request("/v1/models").get("data") or []

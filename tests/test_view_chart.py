@@ -159,7 +159,9 @@ def test_a_model_that_cannot_see_is_not_offered_it():
     assert "view_chart" in tools.descriptions(sees_images=True)
     assert "view_chart" not in tools.descriptions(sees_images=False)
     blind = {t.name for t in tools.offered(sees_images=False)}
-    assert blind == {t.name for t in tools.ALL_TOOLS} - {"view_chart"}
+    assert blind == {t.name for t in tools.ALL_TOOLS} - {"view_chart"} - {
+        t.name for t in tools.QUESTION_TOOLS
+    }
 
 
 def test_which_providers_see():

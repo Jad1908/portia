@@ -673,8 +673,14 @@ def _provider_pick(kind: str, on_provider, *, fixed: bool) -> None:
     # Closed, the control is the glyph and the arrow: the display value is
     # blank and the mark sits in the field's prepend slot. Open, the options
     # are the names (the user's call, 2026-09-14).
+    # The kinds the machine's settings enable (`providers.offered_kinds`, the
+    # dashboard in Settings), plus the one picked, so a chat on a kind since
+    # switched off still says what it runs on.
+    kinds = list(providers.offered_kinds())
+    if kind not in kinds:
+        kinds.append(kind)
     select = ui.select(
-        {each: providers.get(each).label for each in providers.KINDS},
+        {each: providers.get(each).label for each in kinds},
         value=kind,
         on_change=lambda e: on_provider(e.value),
     ).props('borderless dense options-dense display-value=""')

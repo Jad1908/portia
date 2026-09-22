@@ -42,6 +42,13 @@ agent = [
 ui = [
     "nicegui>=2.0",
 ]
+# The Codex harness (docs/PROVIDERS.md §9): OpenAI's SDK drives `codex
+# app-server`, and portia's tools reach it over a loopback MCP server, which
+# the `agent` extra's `mcp` already serves. Optional like every provider.
+codex = [
+    "claude-agent-sdk>=0.2.128",
+    "openai-codex>=0.156",
+]
 # The knowledge graph (docs/KNOWLEDGE_GRAPH.md). Optional on purpose, §6.6: a
 # stopped container must not break the product, so nothing outside
 # `portia/knowledge/store.py` imports the driver.

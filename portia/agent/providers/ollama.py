@@ -150,7 +150,7 @@ class Ollama(Provider):
             version = _request("/api/version").get("version") or "?"
         except ProviderUnavailable as exc:
             return Status(reachable=False, detail=str(exc))
-        return Status(reachable=True, detail=f"Ollama {version} at {host()}")
+        return Status(reachable=True, detail=f"Ollama {version} at {host()}", version=str(version))
 
     def models(self) -> list[Model]:
         listed = _request("/api/tags").get("models") or []

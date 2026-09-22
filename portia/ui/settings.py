@@ -17,10 +17,11 @@ browse through the repo with a count against each folder, and a second picker
 here would be a second opinion about what counts as a data folder, so this tab
 says what it is and hands you to the panel that sets it.
 
-Five **sections**, in the order they are worth changing: **Project** (where you
+Six **sections**, in the order they are worth changing: **Project** (where you
 are and what it is about) · **Copilot** (what a turn spends, and which writes
-stop) · **Data** (what arrives, and where it lands) · **Appearance** · **Help**
-(the way to report a problem, `ui/feedback.py`). A list down
+stop) · **Providers** (where a model can come from, and how each is,
+`ui/providers.py`) · **Data** (what arrives, and where it lands) ·
+**Appearance** · **Help** (the way to report a problem, `ui/feedback.py`). A list down
 the left and one section's settings on the right *(2026-09-04)* — an editor's
 settings page rather than a tab strip over a stack, because the list can hold a
 glyph and stays readable at eight sections where a strip is scrolling at five.
@@ -138,10 +139,11 @@ def open_dialog() -> None:
 #: The sections, in the order they are worth changing, and their glyphs.
 #: A tuple rather than a dict so the order is the declaration — a settings panel
 #: whose sections move when someone re-sorts a dict is one you have to re-learn.
-TABS = ("Project", "Copilot", "Data", "Appearance", "Help")
+TABS = ("Project", "Copilot", "Providers", "Data", "Appearance", "Help")
 _ICONS = {
     "Project": "folder",
     "Copilot": "forum",
+    "Providers": "hub",
     "Data": "table_chart",
     "Appearance": "palette",
     "Help": "help_outline",
@@ -243,6 +245,20 @@ def _copilot() -> None:
             switch.on_value_change(lambda e, name=tool: _set_confirm(name, bool(e.value)))
 
 
+def _providers() -> None:
+    """Every provider, how it is, and whether the picker offers it (`ui/providers.py`).
+
+    Its own section rather than more rows under Copilot *(2026-09-22)*: the
+    Copilot section is what one exchange spends, and this is the machine's
+    account of where a model can come from at all, which is read when
+    something is missing from the picker and edited once.
+    """
+    from portia.ui import providers as providers_ui
+
+    with c.setting(providers_ui.TITLE, providers_ui.WHY):
+        providers_ui.section(_panel.refresh)
+
+
 def _data() -> None:
     """Which folder is the data, what arrives, and what reading it costs.
 
@@ -310,6 +326,7 @@ def _help() -> None:
 _BODY = {
     "Project": _project,
     "Copilot": _copilot,
+    "Providers": _providers,
     "Data": _data,
     "Appearance": _appearance,
     "Help": _help,

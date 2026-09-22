@@ -41,7 +41,7 @@ from typing import Any
 from claude_agent_sdk import ToolAnnotations, create_sdk_mcp_server, tool
 
 from portia import spec
-from portia.agent import chartspec, drawn, handlers, prompts
+from portia.agent import ask, chartspec, drawn, handlers, prompts
 from portia.core import cancel, columnar
 from portia.core.serialize import to_json_compact
 
@@ -200,6 +200,23 @@ async def _evidence(
         text = encode(await asyncio.to_thread(stoppable))
     except cancel.Cancelled:
         return _stopped()
+    except Exception as exc:  # noqa: BLE001 - surfaced to the agent, not swallowed
+        return _failed(exc)
+    return _ok(text) if len(text) <= RESULT_BUDGET else _too_large(len(text))
+
+
+async def _awaited(
+    call: Callable[[], Any], *, encode: Callable[[Any], str] = to_json_compact
+) -> dict[str, Any]:
+    """`_evidence` for a tool whose work is waiting, not computing.
+
+    The one tool that awaits the human rather than a query (`ask_user`) has
+    nothing to put on a thread, and parking a worker for the length of a
+    human's think would be a thread held for nothing. Same encoder choice and
+    the same size rule as `_evidence`, so no handler encodes for itself.
+    """
+    try:
+        text = encode(await call())
     except Exception as exc:  # noqa: BLE001 - surfaced to the agent, not swallowed
         return _failed(exc)
     return _ok(text) if len(text) <= RESULT_BUDGET else _too_large(len(text))
@@ -855,6 +872,62 @@ def _dir(args: dict[str, Any]) -> dict[str, str]:
     return {"portia_dir": args["portia_dir"]} if args.get("portia_dir") else {}
 
 
+#: The question, as a tool, for the harness that has no question of its own
+#: (`agent/ask.py`, `docs/PROVIDERS.md` §9.2). The Claude harness has
+#: ``AskUserQuestion`` built in and never sees this one; Codex is offered it in
+#: its place. The schema is ``AskUserQuestion``'s ``questions`` shape, so the
+#: window's form and every log reader draw it unchanged. **Read-only on
+#: purpose**: it writes nothing, and on Codex the read-only hint is what lets a
+#: call run without an approval stopping it, which for a question would be an
+#: approval to ask for an approval.
+QUESTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "questions": {
+            "type": "array",
+            "description": "One to four questions",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "header": {"type": "string", "description": "Short label, 12 chars or fewer"},
+                    "question": {"type": "string", "description": "The question, one sentence"},
+                    "options": {
+                        "type": "array",
+                        "description": "Two to four answers to pick from",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "label": {"type": "string"},
+                                "description": {"type": "string"},
+                            },
+                            "required": ["label", "description"],
+                        },
+                    },
+                    "multiSelect": {
+                        "type": "boolean",
+                        "description": "More than one may be picked",
+                    },
+                },
+                "required": ["header", "question", "options"],
+            },
+        }
+    },
+    "required": ["questions"],
+}
+
+
+@tool(
+    "ask_user",
+    prompts.tool("ask_user"),
+    QUESTION_SCHEMA,
+    annotations=_READ_ONLY,
+)
+async def ask_user(args: dict[str, Any]) -> dict[str, Any]:
+    """The human's answers, as text. Waits as long as they take; a cancelled
+    request (Stop) unwinds through here as the SDK's own cancellation."""
+    return await _awaited(lambda: ask.ask_now(list(args.get("questions") or [])))
+
+
 #: Auto-approved. Writes are listed separately so the session can route them
 #: through the permission flow instead.
 #:
@@ -881,7 +954,13 @@ READ_TOOLS = [
 ]
 WRITE_TOOLS = [set_interpretation, set_group, record_step, record_finding]
 
-ALL_TOOLS = [*READ_TOOLS, *WRITE_TOOLS]
+#: The question tool, offered only to the harness that has no question of its
+#: own (`ask_user` above). Not a read and not a write: it changes nothing and
+#: is never gated, and the Claude harness must not see it beside
+#: ``AskUserQuestion`` or the model has two ways to ask and picks at random.
+QUESTION_TOOLS = [ask_user]
+
+ALL_TOOLS = [*READ_TOOLS, *WRITE_TOOLS, *QUESTION_TOOLS]
 
 #: Tools whose answer is a picture. **Offered only to a model that can see one**
 #: (`providers.Provider.sees_images`): a text-only model handed an image block
@@ -890,14 +969,19 @@ ALL_TOOLS = [*READ_TOOLS, *WRITE_TOOLS]
 VISION_TOOLS = [view_chart]
 
 
-def offered(*, sees_images: bool = True) -> list:
-    """The tools a session gets, given what its model can take in."""
+def offered(*, sees_images: bool = True, asks: bool = False) -> list:
+    """The tools a session gets, given what its model can take in and which harness drives it.
+
+    ``asks`` is the Codex harness: it gets `ask_user`, because it has no
+    question tool of its own. The Claude harness never does.
+    """
+    tools = [*READ_TOOLS, *WRITE_TOOLS] + (list(QUESTION_TOOLS) if asks else [])
     if sees_images:
-        return list(ALL_TOOLS)
-    return [t for t in ALL_TOOLS if t not in VISION_TOOLS]
+        return tools
+    return [t for t in tools if t not in VISION_TOOLS]
 
 
-def descriptions(*, sees_images: bool = True) -> dict[str, str]:
+def descriptions(*, sees_images: bool = True, asks: bool = False) -> dict[str, str]:
     """Every tool description as the model receives it, keyed by tool name.
 
     Read off the registered tools rather than out of ``prompts/tools/``, because
@@ -911,7 +995,7 @@ def descriptions(*, sees_images: bool = True) -> dict[str, str]:
     *find* the prompts but not to read them without leaving what you are doing.
     Nothing in the loop calls this.
     """
-    return {t.name: str(t.description or "") for t in offered(sees_images=sees_images)}
+    return {t.name: str(t.description or "") for t in offered(sees_images=sees_images, asks=asks)}
 
 
 def qualified(name: str) -> str:
@@ -919,8 +1003,13 @@ def qualified(name: str) -> str:
     return f"mcp__{SERVER_NAME}__{name}"
 
 
-def build_server(*, sees_images: bool = True):
-    """The in-process MCP server the agent talks to. Runs inside this process."""
+def build_server(*, sees_images: bool = True, asks: bool = False):
+    """The in-process MCP server the agent talks to. Runs inside this process.
+
+    The Claude SDK bridges it to its binary itself; the Codex harness serves the
+    same object over a loopback port (`agent/loopback.py`), and asks for
+    `ask_user` in the list.
+    """
     return create_sdk_mcp_server(
-        name=SERVER_NAME, version="0.1.0", tools=offered(sees_images=sees_images)
+        name=SERVER_NAME, version="0.1.0", tools=offered(sees_images=sees_images, asks=asks)
     )

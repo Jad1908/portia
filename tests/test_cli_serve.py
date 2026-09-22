@@ -118,7 +118,9 @@ def test_a_host_is_not_offered_the_tool_that_reads_the_windows_memory(sales):
     async def names(client, session):
         return {t.name for t in (await client.list_tools()).tools}
 
-    assert drive(sales, names) == {t.name for t in tools.ALL_TOOLS} - {"view_chart"}
+    assert drive(sales, names) == {t.name for t in tools.ALL_TOOLS} - {"view_chart"} - {
+        t.name for t in tools.QUESTION_TOOLS
+    }
 
 
 def test_the_instructions_arrive_with_the_connection(sales):

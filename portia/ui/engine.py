@@ -52,6 +52,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from datetime import datetime
@@ -327,6 +328,54 @@ def _ask_provider(provider: Any) -> tuple[Any, list[Any]]:
     except RuntimeError as exc:
         # `ProviderUnavailable` and a provider's own error are both this.
         return providers.Status(reachable=False, detail=str(exc)), []
+
+
+async def check_providers(app: App) -> None:
+    """Ask every provider how it is, off the loop, and stamp when (`ui/providers.py`).
+
+    `Provider.status` is a subprocess for the two harnesses (`codex --version`,
+    `codex login status`, the Claude binary's own report) and a request for
+    the two servers, so it never runs in a render. Each kind's answer lands in
+    `App.provider_status` as it comes; a provider that raises is recorded as
+    not reachable in its own words, for `list_models`' reason.
+    """
+    from portia.agent import providers
+
+    app.providers_checking = True
+    try:
+        for kind in providers.KINDS:
+            try:
+                app.provider_status[kind] = await asyncio.to_thread(providers.get(kind).status)
+            except Exception as exc:  # noqa: BLE001 - one provider failing is that provider's line
+                app.provider_status[kind] = providers.Status(reachable=False, detail=str(exc))
+        app.providers_checked_at = time.monotonic()
+    finally:
+        app.providers_checking = False
+
+
+def load_provider_settings(app: App) -> dict[str, Any]:
+    """The machine's provider settings, read once onto the app and reread after a save."""
+    from portia.agent import providers
+
+    app.provider_settings = providers.load_settings()
+    return app.provider_settings
+
+
+def save_provider_settings(app: App, kind: str, **changes: Any) -> None:
+    """Change one provider's settings and write the file (`providers.SETTINGS`).
+
+    ``changes`` are `providers.Settings` fields: ``enabled``, ``binary``,
+    ``home`` or ``env``. Everything else in the file is kept as it was.
+    """
+    import dataclasses
+
+    from portia.agent import providers
+
+    settings = app.provider_settings or load_provider_settings(app)
+    current = settings.get(kind, providers.Settings())
+    settings[kind] = dataclasses.replace(current, **changes)
+    providers.save_settings(settings)
+    load_provider_settings(app)
 
 
 async def start_server(app: App) -> bool:

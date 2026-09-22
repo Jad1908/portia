@@ -1097,6 +1097,100 @@ body.body--dark .p-panel {
   justify-content: flex-end;
 }
 
+/* ── Settings → Providers (ui/providers.py, docs/PROVIDERS.md §9.5) ─────────
+ * A list of every provider down the left and the picked one's detail on the
+ * right, inside the settings body. A row is the glyph, the name over one line
+ * of state, and the enabled switch; the light says measured state and the
+ * switch says preference, apart. Kind, never rank: same glyph size, no colour
+ * but the light's. */
+.providers-head {
+  align-items: center;
+  min-height: 24px;
+}
+.providers-layout {
+  display: flex;
+  gap: var(--sp-lg);
+  align-items: flex-start;
+}
+.providers-list {
+  flex: 0 0 236px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-right: 1px solid var(--hairline-soft);
+  padding-right: var(--sp-md);
+}
+.provider-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  padding: var(--sp-xs) var(--sp-sm);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  min-width: 0;
+}
+.provider-row:hover {
+  background: var(--surface-hover);
+}
+.provider-row--selected,
+.provider-row--selected:hover {
+  background: var(--accent-wash);
+}
+.provider-row .provider-glyph {
+  color: var(--body);
+}
+.provider-row-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.provider-row-name {
+  font: var(--t-body-md);
+  color: var(--ink);
+}
+.provider-row-state {
+  align-items: center;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+.provider-row-line {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.provider-row-switch {
+  flex: 0 0 auto;
+}
+.provider-detail {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-sm);
+}
+.provider-detail-head {
+  align-items: center;
+}
+.provider-detail-head .provider-glyph {
+  width: 18px;
+  height: 18px;
+  color: var(--body);
+}
+.provider-var {
+  align-items: flex-end;
+}
+.provider-var .field {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.provider-var > .p-mono {
+  flex: 0 0 auto;
+  padding-bottom: 6px;
+}
+
 /* One setting: a title, what it does, and the control under them
  * (`c.setting`). The description is `{colors.mute}` because it is a fact about
  * the setting and not the setting; the control is what you act on. */
@@ -5071,6 +5165,10 @@ body.tab-dragging .tab-drop {
 .provider-glyph-anthropic {
   -webkit-mask-image: url(/portia-assets/providers/anthropic.svg);
   mask-image: url(/portia-assets/providers/anthropic.svg);
+}
+.provider-glyph-codex {
+  -webkit-mask-image: url(/portia-assets/providers/codex.svg);
+  mask-image: url(/portia-assets/providers/codex.svg);
 }
 .provider-glyph-ollama {
   -webkit-mask-image: url(/portia-assets/providers/ollama.svg);

@@ -5005,6 +5005,8 @@ def test_the_first_send_after_opening_resumes_and_appends(tmp_path, monkeypatch)
 
     class FakeSession:
         Conversation = FakeConversation
+        # The window opens a chat through the harness factory (`PROVIDERS.md` §9).
+        conversation = staticmethod(lambda **kw: FakeConversation(**kw))
 
     import portia.agent
 
@@ -5802,7 +5804,9 @@ def test_the_provider_is_picked_from_a_select_and_the_glyph_stays():
     from portia.ui import components
 
     source = inspect.getsource(components._provider_pick)
-    assert "ui.select(" in source and "providers.KINDS" in source
+    # The kinds are the machine's enabled ones (`providers.offered_kinds`,
+    # Settings → Providers), never the whole list by name (2026-09-22).
+    assert "ui.select(" in source and "providers.offered_kinds()" in source
     assert "provider_glyph(kind)" in source
     assert not hasattr(components, "_provider_segments")
     # Closed it is the glyph and the arrow: the mark is in the prepend slot

@@ -40,9 +40,16 @@ def test_the_default_is_the_provider_the_loop_was_built_on():
 def test_nothing_in_the_package_imports_the_sdk():
     """The picker lists models and checks a fit without the ``agent`` extra."""
     import inspect
+    import re
 
-    for module in (providers, anthropic, ollama, llamacpp):
-        assert "claude_agent_sdk" not in inspect.getsource(module)
+    from portia.agent.providers import codex as codex_provider
+
+    # At module level: a lazy import inside the one call that lists an
+    # account's models is the seam working as intended.
+    for module in (providers, anthropic, ollama, llamacpp, codex_provider):
+        source = inspect.getsource(module)
+        assert not re.search(r"^(import|from) claude_agent_sdk", source, re.M), module.__name__
+        assert not re.search(r"^(import|from) openai_codex", source, re.M), module.__name__
 
 
 def test_the_binary_variables_are_written_once_and_shared_by_every_local_provider():
@@ -61,13 +68,14 @@ def test_the_anthropic_provider_sets_no_environment_variable():
     assert anthropic.PROVIDER.env() == {}
 
 
-def test_the_anthropic_provider_measures_nothing():
-    """And composes nothing: the prompt's length is never asked for."""
+def test_the_anthropic_provider_composes_nothing_before_a_send():
+    """The prompt's length is never asked for: nothing about the account can be
+    measured before the binary starts. What *is* measured is the binary's own
+    report of itself (`status`), for the providers dashboard."""
 
     def never() -> int:
         raise AssertionError("the prompt was composed for a provider that cannot use it")
 
-    assert anthropic.PROVIDER.status().reachable is None
     check = anthropic.PROVIDER.preflight("claude-haiku-4-5", prompt_chars=never)
     assert check.ok and check.facts == {} and check.remedy == ""
     assert anthropic.PROVIDER.add_command("claude-opus-5") is None
@@ -596,3 +604,167 @@ def test_started_says_whether_this_process_holds_the_server(monkeypatch):
     assert not llamacpp.PROVIDER.started()
     monkeypatch.setattr(llamacpp, "running", lambda: 4242)
     assert llamacpp.PROVIDER.started()
+
+
+# --- codex: the second harness (docs/PROVIDERS.md §9) -------------------------------
+
+from portia.agent.providers import codex as codex_provider  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def no_machine_settings(monkeypatch, tmp_path):
+    """The machine's real `~/.config/portia/providers.yaml` and Codex home never reach a test."""
+    monkeypatch.setattr(providers, "SETTINGS", tmp_path / "providers.yaml")
+    monkeypatch.setattr(codex_provider, "HOME", tmp_path / "codex-home")
+    monkeypatch.setattr(codex_provider, "LOGIN_HOME", tmp_path / "dot-codex")
+
+
+def test_the_anthropic_status_is_the_binarys_own_report(monkeypatch):
+    monkeypatch.setattr(anthropic, "binary", lambda: "/bin/claude")
+    monkeypatch.setattr(anthropic, "version", lambda: "2.1.280 (Claude Code)")
+    monkeypatch.setattr(anthropic, "signed_in", lambda: (True, "signed in · claude.ai max"))
+    status = anthropic.PROVIDER.status()
+    assert status.reachable is True and status.version == "2.1.280 (Claude Code)"
+    assert status.account == "signed in · claude.ai max"
+    monkeypatch.setattr(anthropic, "signed_in", lambda: (None, ""))
+    assert anthropic.PROVIDER.status().reachable is None
+    monkeypatch.setattr(anthropic, "signed_in", lambda: (False, "not signed in"))
+    assert anthropic.PROVIDER.status().remedy == anthropic.SIGN_IN_REMEDY
+    monkeypatch.setattr(anthropic, "binary", lambda: None)
+    assert anthropic.PROVIDER.status().remedy == anthropic.INSTALL_REMEDY
+
+
+def test_the_sign_in_report_never_carries_the_email(monkeypatch):
+    monkeypatch.setattr(
+        anthropic,
+        "_run",
+        lambda *a: (
+            0,
+            '{"loggedIn": true, "authMethod": "claude.ai", "subscriptionType": "max", "email": "x@y"}',
+        ),
+    )
+    assert anthropic.signed_in() == (True, "signed in · claude.ai max")
+    monkeypatch.setattr(anthropic, "_run", lambda *a: (1, "unknown command"))
+    assert anthropic.signed_in() == (None, "")
+
+
+def test_the_codex_provider_is_the_one_on_the_other_harness():
+    assert codex_provider.PROVIDER.harness == providers.CODEX
+    assert all(
+        providers.get(k).harness == providers.CLAUDE for k in providers.KINDS if k != "codex"
+    )
+    assert codex_provider.PROVIDER.honours_effort and not codex_provider.PROVIDER.metered
+
+
+def test_settings_default_to_every_kind_offered_and_round_trip(tmp_path):
+    assert providers.offered_kinds() == providers.KINDS
+    loaded = providers.load_settings()
+    loaded["ollama"] = providers.Settings(enabled=False)
+    loaded["codex"] = providers.Settings(
+        binary="/opt/codex", env={"OPENAI_BASE_URL": "http://x/v1"}
+    )
+    providers.save_settings(loaded)
+    again = providers.load_settings()
+    assert again["ollama"].enabled is False
+    assert again["codex"] == providers.Settings(
+        binary="/opt/codex", env={"OPENAI_BASE_URL": "http://x/v1"}
+    )
+    assert providers.offered_kinds() == ("anthropic", "codex", "llamacpp")
+
+
+def test_with_everything_switched_off_the_default_is_still_offered():
+    providers.save_settings({k: providers.Settings(enabled=False) for k in providers.KINDS})
+    assert providers.offered_kinds() == (providers.DEFAULT_KIND,)
+
+
+def test_a_missing_binary_is_a_status_with_the_install_line(monkeypatch):
+    monkeypatch.setattr(codex_provider, "bundled_binary", lambda: None)
+    monkeypatch.setattr(codex_provider.shutil, "which", lambda name: None)
+    status = codex_provider.PROVIDER.status()
+    assert status.reachable is False and status.remedy == codex_provider.INSTALL_REMEDY
+    check = codex_provider.PROVIDER.preflight("x", prompt_chars=lambda: 10)
+    assert not check.ok and check.remedy == codex_provider.INSTALL_REMEDY
+
+
+def test_the_home_is_portias_with_the_users_sign_in_linked_in(tmp_path):
+    (tmp_path / "dot-codex").mkdir()
+    (tmp_path / "dot-codex" / "auth.json").write_text("{}", encoding="utf-8")
+    home = codex_provider.home()
+    assert home == tmp_path / "codex-home"
+    link = home / "auth.json"
+    assert link.is_symlink() and link.resolve() == (tmp_path / "dot-codex" / "auth.json").resolve()
+    assert codex_provider.process_env()["CODEX_HOME"] == str(home)
+
+
+def test_a_base_url_routes_codex_to_a_local_server_and_needs_no_sign_in(monkeypatch):
+    providers.save_settings(
+        {"codex": providers.Settings(env={"OPENAI_BASE_URL": "http://127.0.0.1:11434/v1/"})}
+    )
+    monkeypatch.setattr(codex_provider, "binary", lambda: "/bin/codex")
+    monkeypatch.setattr(codex_provider, "version", lambda: "codex-cli 0.156.0")
+    assert codex_provider.base_url() == "http://127.0.0.1:11434/v1"
+    lines = codex_provider.overrides("http://127.0.0.1:5/mcp")
+    assert 'model_providers.portia.base_url="http://127.0.0.1:11434/v1"' in lines
+    assert 'model_provider="portia"' in lines
+    assert 'mcp_servers.portia.url="http://127.0.0.1:5/mcp"' in lines
+    assert "OPENAI_BASE_URL" not in codex_provider.process_env()
+    status = codex_provider.PROVIDER.status()
+    assert status.reachable is True and status.version == "codex-cli 0.156.0"
+
+
+def test_every_non_negotiable_is_in_the_overrides():
+    lines = codex_provider.overrides("http://127.0.0.1:5/mcp")
+    for needed in (
+        'approval_policy="on-request"',
+        'sandbox_mode="read-only"',
+        "features.shell_tool=false",
+        'web_search="disabled"',
+        "tools.experimental_request_user_input.enabled=false",
+        "skills.include_instructions=false",
+        "project_doc_max_bytes=0",
+        f"mcp_servers.portia.tool_timeout_sec={codex_provider.TOOL_TIMEOUT_SEC}",
+    ):
+        assert needed in lines
+    assert not any(line.startswith("model_provider=") for line in lines)
+
+
+def test_a_signed_out_account_is_refused_in_codexs_own_words(monkeypatch):
+    monkeypatch.setattr(codex_provider, "binary", lambda: "/bin/codex")
+    monkeypatch.setattr(codex_provider, "version", lambda: "codex-cli 0.156.0")
+    monkeypatch.setattr(codex_provider, "signed_in", lambda: (False, "Not logged in"))
+    status = codex_provider.PROVIDER.status()
+    assert status.reachable is False and status.detail == "Not logged in"
+    assert status.remedy == codex_provider.SIGN_IN_REMEDY
+    check = codex_provider.PROVIDER.preflight("x", prompt_chars=lambda: 10)
+    assert not check.ok and check.facts["signed_in"] is False
+    monkeypatch.setattr(codex_provider, "signed_in", lambda: (True, "Logged in using ChatGPT"))
+    assert codex_provider.PROVIDER.status().account == "Logged in using ChatGPT"
+    assert codex_provider.PROVIDER.preflight("x", prompt_chars=lambda: 10).ok
+
+
+def test_a_local_ollama_route_measures_fit_the_way_ollama_does(monkeypatch, server):
+    providers.save_settings(
+        {"codex": providers.Settings(env={"OPENAI_BASE_URL": "http://127.0.0.1:11434/v1"})}
+    )
+    monkeypatch.setattr(codex_provider, "binary", lambda: "/bin/codex")
+    monkeypatch.delenv(ollama.HOST_VAR, raising=False)
+    server(models=[QWEN], running=[_entry("qwen3:8b", 5_569_815_510, ctx=4096)])
+    check = codex_provider.PROVIDER.preflight("qwen3:8b", prompt_chars=lambda: 60_000)
+    assert not check.ok and "4,096-token context" in check.reason
+    assert check.facts["base_url"] == "http://127.0.0.1:11434/v1"
+
+
+def test_the_local_model_list_is_the_servers_v1_models(monkeypatch):
+    providers.save_settings(
+        {"codex": providers.Settings(env={"OPENAI_BASE_URL": "http://127.0.0.1:9/v1"})}
+    )
+    monkeypatch.setattr(
+        codex_provider, "_local_models", lambda url: [providers.Model("b"), providers.Model("a")]
+    )
+    assert [m.name for m in codex_provider.PROVIDER.models()] == ["b", "a"]
+    assert codex_provider.PROVIDER.default_model == "b"
+
+
+def test_codex_names_the_variables_it_reads():
+    notes = codex_provider.PROVIDER.env_notes()
+    assert set(notes) == {"OPENAI_BASE_URL", "OPENAI_API_KEY"}
