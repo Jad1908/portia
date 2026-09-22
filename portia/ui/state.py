@@ -346,6 +346,10 @@ class Chat:
     #: session id, anything under the pre-rename folder, or a resume the SDK
     #: refused. The row carries a chip and the composer's place says which.
     legacy: str = ""
+    #: Who drove this chat when it was not portia (`runlog.HOSTED`), or ``""``.
+    #: Its chip names the host, because *legacy* would say the wrong thing about
+    #: a chat from this morning.
+    host: str = ""
     #: The log as read back from disk for a chat opened from the list, drawn
     #: through `transcript.replay` above the live ``rows``. ``None`` for a chat
     #: this process started.

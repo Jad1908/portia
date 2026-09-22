@@ -55,6 +55,10 @@ _LOG_KIND_FOR = {
 LEGACY_PRE_RENAME = "written before chats could be picked up"
 LEGACY_NO_SESSION = "no session id was recorded for it"
 LEGACY_REFUSED = "the SDK could not resume it: {error}"
+#: A chat somebody else drove (`runlog.HOSTED`). Not legacy in age, and read-only
+#: for the plainest reason of the four: the conversation is not portia's to
+#: continue, and the tool calls are the only part of it that came through here.
+LEGACY_HOSTED = "it was held in {host} and goes on there; these are its tool calls"
 
 #: What the composer says while a local model loads before the first message.
 _LOADING = "loading {model}"
@@ -349,6 +353,8 @@ def open_from_disk(path: Path) -> Chat:
     legacy = ""
     if listing["legacy"]:
         legacy = LEGACY_PRE_RENAME
+    elif listing.get("host"):
+        legacy = LEGACY_HOSTED.format(host=runlog.host_label(listing["host"]))
     elif kind == state.GOAL and not summary.get("session_id"):
         legacy = LEGACY_NO_SESSION
     chat = APP.new_chat(
@@ -362,6 +368,7 @@ def open_from_disk(path: Path) -> Chat:
         logged=logged,
         prior=summary,
         legacy=legacy,
+        host=listing.get("host") or "",
     )
     APP.show_chat(chat)
     return chat
