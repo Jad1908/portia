@@ -821,6 +821,11 @@ def _discard_chart(key: str) -> None:
     """
     from portia.ui import workflow
 
+    # A chart a host drew is on disk too, and would come back on the next look
+    # at the folder if only the tab went (`engine.take_drawn`).
+    chart = APP.chart(key)
+    if chart is not None:
+        engine.unstash(APP, chart)
     APP.retire_chart(key)
     pane.refresh()
     workflow.pane.refresh()

@@ -6100,3 +6100,94 @@ def test_a_warehouse_project_lists_no_local_file_as_a_source(tmp_path, monkeypat
     engine_module.refresh_catalog(app)
     names = [s.name for s in engine_module.source_states(app)]
     assert names.count("forecast_runs") == 2
+
+
+# --- charts a host drew, arriving through `.portia/drawn/` --------------------
+
+
+def _stash(root, tab="rates", rate=1):
+    from portia import figures
+
+    return figures.stash(
+        {
+            "tab": tab,
+            "question": "how do rates differ?",
+            "sql": "SELECT 1",
+            "inputs": ["t"],
+            "vega": {"mark": "bar"},
+            "columns": ["RISK", "rate"],
+            "rows": [{"RISK": "a", "rate": rate}],
+        },
+        root / ".portia",
+    )
+
+
+def test_opening_a_project_lists_what_a_host_drew_and_opens_none_of_it(tmp_path, monkeypatch):
+    """Drawn while no window was open. Unsaved charts in the gallery, not forty tabs."""
+    monkeypatch.chdir(tmp_path)
+    _stash(tmp_path)
+    app = App()
+    engine_module.open_project(tmp_path, app)
+    (chart,) = app.charts
+    assert chart.name == "rates" and chart.stashed and chart.closed
+    assert app.tabs == []
+
+
+def test_a_chart_is_taken_once_and_again_only_when_it_is_drawn_again(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    app = App()
+    engine_module.open_project(tmp_path, app)
+    _stash(tmp_path)
+    assert [c.name for c in engine_module.take_drawn(app)] == ["rates"]
+    assert engine_module.take_drawn(app) == []
+    time.sleep(0.01)
+    _stash(tmp_path, rate=2)
+    (again,) = engine_module.take_drawn(app)
+    assert again.rows == [{"RISK": "a", "rate": 2}]
+
+
+def test_keeping_or_discarding_a_hosts_chart_takes_its_stash(tmp_path, monkeypatch):
+    """One picture is never two artifacts, and a discarded one must not come back."""
+    from portia import figures
+
+    monkeypatch.chdir(tmp_path)
+    app = App()
+    engine_module.open_project(tmp_path, app)
+    _stash(tmp_path, "kept")
+    _stash(tmp_path, "dropped")
+    kept, dropped = sorted(engine_module.take_drawn(app), key=lambda c: c.name == "dropped")
+    engine_module.save_figure(app, kept)
+    engine_module.unstash(app, kept)
+    engine_module.unstash(app, dropped)
+    assert figures.stashed(app.catalog_dir) == []
+    assert [f["name"] for f in figures.load_all(tmp_path)] == ["kept"]
+    assert engine_module.take_drawn(app) == []
+
+
+def test_the_window_says_it_is_open_and_stops_saying_so_when_it_leaves(tmp_path, monkeypatch):
+    from portia.agent import drawn
+
+    monkeypatch.chdir(tmp_path)
+    app = App()
+    app.url = "http://127.0.0.1:8080"
+    engine_module.open_project(tmp_path / "one", app)
+    assert drawn.watching(tmp_path / "one" / ".portia") == {
+        "window": "open",
+        "url": "http://127.0.0.1:8080",
+    }
+    engine_module.open_project(tmp_path / "two", app)
+    assert drawn.watching(tmp_path / "one" / ".portia")["window"] == "closed"
+    assert drawn.watching(tmp_path / "two" / ".portia")["window"] == "open"
+
+
+def test_the_windows_own_announcement_does_not_make_it_redraw(tmp_path, monkeypatch):
+    from portia.agent import drawn
+
+    monkeypatch.chdir(tmp_path)
+    app = App()
+    engine_module.open_project(tmp_path, app)
+    before = engine_module.artifact_stamp(app)
+    drawn.announce(app.catalog_dir, "http://somewhere-else")
+    assert engine_module.artifact_stamp(app) == before
+    _stash(tmp_path)
+    assert engine_module.artifact_stamp(app) != before, "a drawn chart is a change"

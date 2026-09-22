@@ -459,6 +459,10 @@ def _receipt(chart: dict) -> dict:
     # still fix the last six once the third has said it broke.
     if failures := drawn.take_failures():
         receipt["render_failures"] = failures
+    # Whether anybody can see it, when the surface is another process
+    # (`drawn.audience`). Absent in the app, where the window drew it.
+    if (seen := drawn.audience()) is not None:
+        receipt["shown"] = seen
     return receipt
 
 
