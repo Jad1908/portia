@@ -46,5 +46,34 @@ def test_a_profile_runs_in_snowflakes_dialect(snowflake_session):
     assert by_name["S"]["n_distinct"] == 3
 
 
+#: Two million generated rows of about a million, at scale 10. Snowflake keeps
+#: each as the integer 10^16, so the squares sum to about 2 * 10^38, past the
+#: 38 digits a ``NUMBER`` holds. No table is read and the scan is generated.
+_WIDE_NUMBER = (
+    "SELECT (1000000 + seq4())::NUMBER(38,10) AS revenue FROM TABLE(GENERATOR(ROWCOUNT => 2000000))"
+)
+
+
+def test_a_wide_number_overflows_snowflakes_own_stddev(snowflake_session):
+    """The premise, kept as a test: if Snowflake ever stops overflowing here,
+    `Snowflake.as_float` is a cast with no reason left and this says so."""
+    import pytest
+
+    with pytest.raises(Exception, match="out of representable range"):
+        snowflake_session.execute(f"SELECT stddev_samp(revenue) FROM ({_WIDE_NUMBER})").fetchone()
+
+
+def test_a_profile_survives_a_number_whose_squares_pass_38_digits(snowflake_session):
+    """One such column cost a real table its whole profile (2026-09-21): every
+    column rides in one statement, and ``stddev_samp`` over a ``NUMBER`` sums
+    squares in fixed point (`core/dialect.Snowflake.as_float`)."""
+    profile = profiling.profile(Table(name="wide", query=_WIDE_NUMBER, con=snowflake_session))
+    (column,) = profile["columns"]
+    assert profile["n_rows"] == 2_000_000
+    assert column["min"] == 1_000_000 and column["max"] == 2_999_999
+    assert column["mean"] == 1_999_999.5
+    assert 577_000 < column["std"] < 578_000  # a uniform spread of 2M: 2e6 / sqrt(12)
+
+
 def test_browsing_lists_databases(snowflake_session):
     assert snowflake_session.databases(), "a session can always see at least one database"

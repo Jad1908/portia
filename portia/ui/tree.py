@@ -157,7 +157,7 @@ def build(
     readable: Collection[str],
     data_root: str | None = None,
 ) -> tuple[Node, ...]:
-    """Walk ``root`` and keep what portia can say something about.
+    """The project's tree: what portia knows, plus what it could read under the data folder.
 
     ``known`` maps a repo-relative path to ``(kind, ident)`` — the classification
     the engine supplies (`engine.known_files`). ``readable`` is the loader's
@@ -168,10 +168,34 @@ def build(
     files under it are kept for being *readable*; a file portia already knows is
     kept wherever it is. ``None`` — the state of a project that has never been
     told — means the whole repo, as it did before the field existed.
+
+    **Only the data folder is walked** *(2026-09-21)*. This walked the whole
+    project and kept what matched, on the event loop, at every redraw of the
+    left pane. The first project opened inside a real work repository is what
+    that cost: 240,000 files is four seconds a draw, a warehouse project walks
+    them to keep **nothing** (it passes no readable suffix), and *Open the
+    workspace* during an indexing run held the loop until the browser dropped
+    its connection. A known file needs no walk to be found, because its path is
+    the key it arrives under, so the two halves are read apart: known paths are
+    placed directly, and the disk is searched under ``data_root`` only. With no
+    ``data_root`` and a readable suffix that is still the whole repo, which is
+    what *anywhere* means; setting the folder is the way out, and a warehouse
+    project never pays it.
     """
     root = Path(root)
     suffixes = frozenset(s.lower() for s in readable)
-    return _walk(root, root, dict(known), suffixes, _scope(data_root))
+    scope = _scope(data_root)
+    files: dict[str, tuple[str, str]] = {}
+    if suffixes and (scope is None or _reachable(root, scope)):
+        start = root / scope if scope else root
+        found = _data_files(start, suffixes) if start.is_dir() else _one_file(start, suffixes)
+        for path in found:
+            rel = path.relative_to(root).as_posix()
+            files[rel] = (DATA, rel)
+    for rel, classified in known.items():
+        if _reachable(root, rel) and (root / rel).is_file():
+            files[rel] = classified
+    return _assemble(files)
 
 
 def _scope(data_root: str | None) -> str | None:
@@ -184,39 +208,58 @@ def _scope(data_root: str | None) -> str | None:
     return None if cleaned in ("", ".") else cleaned
 
 
-def _in_scope(rel: str, scope: str | None) -> bool:
-    return scope is None or rel == scope or rel.startswith(scope + "/")
+def _one_file(path: Path, readable: frozenset[str]) -> tuple[Path, ...]:
+    """A data folder that is one file: the old walk matched ``rel == scope`` too."""
+    return (path,) if path.is_file() and path.suffix.lower() in readable else ()
 
 
-def _walk(
-    directory: Path,
-    root: Path,
-    known: dict[str, tuple[str, str]],
-    readable: frozenset[str],
-    scope: str | None,
-) -> tuple[Node, ...]:
+def _reachable(root: Path, rel: str) -> bool:
+    """Whether the walk this replaced would have arrived at ``rel``.
+
+    It never entered a hidden directory, the two skipped names, or a linked
+    directory (`is_dir()` follows symlinks, and a link pointing at an ancestor
+    is a walk that does not terminate). A known file under one of those stayed
+    off the pane, and still does.
+    """
+    parts = Path(rel).parts
+    at = root
+    for part in parts[:-1]:
+        at = at / part
+        if _skipped(part) or at.is_symlink():
+            return False
+    return bool(parts)
+
+
+def _assemble(files: Mapping[str, tuple[str, str]]) -> tuple[Node, ...]:
+    """Paths into nodes. A folder exists because something under it was kept.
+
+    Folders first, then files, each alphabetical without regard to case — the
+    convention every file browser uses, and the only ordering in this pane.
+    Nothing here sorts by anything measured (`DESIGN.md` → colour and prominence
+    communicate kind, never rank).
+    """
+    nested: dict = {}
+    for rel in files:
+        at = nested
+        for part in Path(rel).parts[:-1]:
+            at = at.setdefault(part, {})
+        at[Path(rel).name] = rel
+    return _nodes(nested, "", files)
+
+
+def _nodes(level: dict, prefix: str, files: Mapping[str, tuple[str, str]]) -> tuple[Node, ...]:
     folders: list[Node] = []
-    files: list[Node] = []
-    for entry in _listdir(directory):
-        rel = entry.relative_to(root).as_posix()
-        # `is_dir()` follows symlinks, and a link pointing at an ancestor is a
-        # walk that does not terminate. Not drawing linked directories is the
-        # cheap answer; nothing in a portia project needs one.
-        if entry.is_dir():
-            if entry.is_symlink() or _skipped(entry.name):
-                continue
-            children = _walk(entry, root, known, readable, scope)
-            if children:
-                folders.append(Node(rel=rel, name=entry.name, kind=FOLDER, children=children))
-        elif rel in known:
-            kind, ident = known[rel]
-            files.append(Node(rel=rel, name=entry.name, kind=kind, ident=ident))
-        elif entry.suffix.lower() in readable and _in_scope(rel, scope):
-            files.append(Node(rel=rel, name=entry.name, kind=DATA, ident=rel))
-    # Folders first, then files — the convention every file browser uses, and the
-    # only ordering in this pane. Nothing here sorts by anything measured
-    # (`DESIGN.md` → colour and prominence communicate kind, never rank).
-    return (*folders, *files)
+    leaves: list[Node] = []
+    for name in sorted(level, key=str.lower):
+        below = level[name]
+        rel = f"{prefix}{name}"
+        if isinstance(below, dict):
+            children = _nodes(below, f"{rel}/", files)
+            folders.append(Node(rel=rel, name=name, kind=FOLDER, children=children))
+        else:
+            kind, ident = files[rel]
+            leaves.append(Node(rel=rel, name=name, kind=kind, ident=ident))
+    return (*folders, *leaves)
 
 
 def _skipped(name: str) -> bool:

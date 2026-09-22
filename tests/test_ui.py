@@ -253,11 +253,11 @@ def test_indexing_reports_each_file_as_it_goes(tmp_path, monkeypatch):
     catalog.init_project("test", portia_dir=app.portia_dir)
 
     seen: list[tuple[int, int, str]] = []
-    names = asyncio.run(
+    ran = asyncio.run(
         engine.index(sorted(tmp_path.glob("*.csv")), app, on_progress=lambda *a: seen.append(a))
     )
 
-    assert names == ["s0", "s1", "s2"]
+    assert ran.names == ["s0", "s1", "s2"] and ran.failed == []
     assert seen == [(0, 3, "s0"), (1, 3, "s1"), (2, 3, "s2")]
     assert len(app.sources) == 3  # and the catalog really was refreshed
 
@@ -2802,7 +2802,7 @@ def test_indexing_stops_between_files_and_reports_what_it_profiled(monkeypatch):
             stop.cancel()
 
     try:
-        names = asyncio.run(engine_module.index(paths, app, on_progress=say, stop=stop))
+        names = asyncio.run(engine_module.index(paths, app, on_progress=say, stop=stop)).names
     finally:
         stop.close()
 
@@ -2818,7 +2818,9 @@ def test_only_the_files_that_were_profiled_stop_being_outstanding():
     from portia.ui import screens
 
     source = inspect.getsource(screens._index_and_interpret)
-    assert "paths[: len(names)]" in source
+    # What the engine says finished, by name. It was `paths[: len(names)]` until
+    # a file could fail without ending the run, and a prefix stopped being true.
+    assert "for p in done_paths" in source and "paths[: len(names)]" not in source.split('"""')[2]
 
 
 def test_stopping_indexing_does_not_spend_money_on_interpretation():
@@ -4802,7 +4804,7 @@ def test_index_on_the_tab_scans_a_ticked_metadata_only_table(tmp_path, monkeypat
             on_progress(i, len(names), name)
             statuses.append(app_.indexing_status)
             scanned.append(name)
-        return names
+        return engine_module.Indexed(names=list(names), items=list(names), failed=[])
 
     async def fake_index(paths, app_, **kw):
         raise AssertionError("no file was ticked, so nothing local should be profiled")
@@ -4839,11 +4841,13 @@ def test_adding_warehouse_tables_scans_them_only_when_the_switch_says_so(tmp_pat
     scanned: list[list[str]] = []
 
     async def fake_scope(app_, names, *, on_progress=None, stop=None):
-        return [n.split(".")[-1] for n in names]
+        return engine_module.Indexed(
+            names=[n.split(".")[-1] for n in names], items=list(names), failed=[]
+        )
 
     async def fake_profile_tables(app_, names, *, on_progress=None, stop=None):
         scanned.append(list(names))
-        return names
+        return engine_module.Indexed(names=list(names), items=list(names), failed=[])
 
     async def fake_start(*a, **k):
         raise AssertionError("the read is off")
@@ -5939,3 +5943,160 @@ def test_a_status_light_is_a_closed_list_of_kinds_and_only_live_moves():
     assert "c.LIVE" in inspect.getsource(transcript._dot)
     for module in (artifacts, settings):
         assert "c.ON if APP.connected else c.OFF" in inspect.getsource(module)
+
+
+# --- one table failing is not the run failing (2026-09-21) -------------------------
+
+
+class _OneTableOverflows(_MetadataOnlyWarehouse):
+    """A warehouse whose ``BROKEN`` table cannot be scanned, as Snowflake's could not."""
+
+    remote = True
+
+    def table_facts(self, qualified):
+        return {**super().table_facts(qualified), "at": "2026-09-21T10:00:00"}
+
+
+def test_one_table_failing_its_profile_does_not_end_the_run(tmp_path, monkeypatch):
+    """The first real Snowflake account: thirty tables, the eleventh overflowed
+    in the warehouse, and the exception left the loop. Nineteen tables were
+    never tried, the catalog was never reloaded so the ten that *had* finished
+    drew as metadata only with their profiles on disk, and nothing said why.
+    In this fixture the table that fails is in upper case, as the real one was."""
+    import asyncio
+
+    app = _warehouse_project(
+        tmp_path, monkeypatch, "memory.sales.first", "memory.sales.BROKEN", "memory.sales.third"
+    )
+
+    seen_mid_run: list[bool] = []
+
+    def profile_remote(name, con, *, portia_dir):
+        if name == "third":
+            # A left pane opened now draws the first table as profiled: most of
+            # an hour of scans is too long to wait for the run's end to say so.
+            seen_mid_run.append(catalog.is_profiled(app.sources["first"]))
+        if name == "BROKEN":
+            raise RuntimeError(
+                "Number out of representable range: type FIXED[SB16](38,0)\nLINE 1: SELECT"
+            )
+        path = tmp_path / ".portia" / "sources" / f"{name}.yaml"
+        catalog._write(path, dict(catalog._read(path), profiled={"at": "2026-09-21T10:00:00"}))
+        return {}
+
+    monkeypatch.setattr(engine_module.catalog, "profile_remote", profile_remote)
+    monkeypatch.setattr(engine_module, "connect", lambda: object())
+    monkeypatch.setattr(engine_module, "sync_knowledge", lambda app_: "")
+    seen: list[str] = []
+
+    ran = asyncio.run(
+        engine_module.profile_tables(
+            app, ["first", "BROKEN", "third"], on_progress=lambda d, t, n: seen.append(n)
+        )
+    )
+
+    assert seen == ["first", "BROKEN", "third"], "the table after the failure is still tried"
+    assert seen_mid_run == [True]
+    assert ran.names == ["first", "third"] and ran.failed == ["BROKEN"]
+    assert ran.items == ["first", "third"], "what finished, by name: not a prefix of what was asked"
+    # One line, and not the statement DuckDB or a driver quotes back under it.
+    assert app.indexing_failed == {
+        "BROKEN": "RuntimeError: Number out of representable range: type FIXED[SB16](38,0)"
+    }
+    # The window's catalog is what is on disk: the two that finished are profiled.
+    profiled = {r.name: r.profiled for r in engine_module.source_states(app)}
+    assert profiled == {"first": True, "BROKEN": False, "third": True}
+    assert catalog.is_profiled(app.sources["first"]), "reloaded, not only written"
+
+    # A later success clears the sentence; nothing else does.
+    monkeypatch.setattr(engine_module.catalog, "profile_remote", lambda *a, **k: {})
+    asyncio.run(engine_module.profile_tables(app, ["BROKEN"]))
+    assert app.indexing_failed == {}
+
+
+def test_a_stop_is_still_not_a_failure(tmp_path, monkeypatch):
+    import asyncio
+
+    from portia.core import cancel
+
+    app = _warehouse_project(tmp_path, monkeypatch, "memory.sales.first", "memory.sales.second")
+
+    def profile_remote(name, con, *, portia_dir):
+        raise cancel.Cancelled()
+
+    monkeypatch.setattr(engine_module.catalog, "profile_remote", profile_remote)
+    monkeypatch.setattr(engine_module, "connect", lambda: object())
+    monkeypatch.setattr(engine_module, "sync_knowledge", lambda app_: "")
+    seen: list[str] = []
+
+    ran = asyncio.run(
+        engine_module.profile_tables(
+            app, ["first", "second"], on_progress=lambda d, t, n: seen.append(n)
+        )
+    )
+    assert seen == ["first"], "a stop ends the run where a failure does not"
+    assert ran.names == [] and ran.failed == [] and app.indexing_failed == {}
+
+
+def test_the_indexing_tab_takes_its_spinner_down_when_the_run_raises(tmp_path, monkeypatch):
+    """The spinner the user found still turning over a job that had died: the
+    status was cleared in a ``finally`` and the panes were refreshed after it."""
+    import asyncio
+
+    from nicegui import core
+
+    from portia.ui import artifacts, transcript
+
+    app = _warehouse_project(tmp_path, monkeypatch, "memory.sales.orders")
+    app.index_ticks = frozenset({"orders"})
+    refreshed: list[str] = []
+
+    async def fake_profile_tables(app_, names, *, on_progress=None, stop=None):
+        raise RuntimeError("the engine itself broke")
+
+    monkeypatch.setattr(engine_module, "profile_tables", fake_profile_tables)
+    monkeypatch.setattr(
+        transcript.pane, "refresh", lambda *a, **k: refreshed.append(app.indexing_status)
+    )
+    monkeypatch.setattr(artifacts.pane, "refresh", lambda *a, **k: None)
+    monkeypatch.setattr(transcript._index_actions, "refresh", lambda *a, **k: None)
+    monkeypatch.setattr(ui, "notify", lambda *a, **k: None)
+
+    async def press() -> None:
+        monkeypatch.setattr(core, "loop", asyncio.get_running_loop())
+        with pytest.raises(RuntimeError):
+            await transcript._index_ticked()
+
+    with _as_app(transcript, app):
+        asyncio.run(press())
+    assert refreshed == [""], "the pane is redrawn once the status is clear, error or not"
+
+
+def test_a_warehouse_project_lists_no_local_file_as_a_source(tmp_path, monkeypatch):
+    """A project folder on a work machine is a repository. With no `data_dir`
+    the walk is the whole root, so thirty scoped tables were listed among
+    seventy stray files by stem: *forecast_runs* ten times, each
+    tickable for an Index that would have profiled it into a project that
+    cannot join it to anything. The left tree already drew none of them."""
+    app = _warehouse_project(tmp_path, monkeypatch, "memory.sales.ORDERS")
+    for run in ("run1", "run2"):
+        (tmp_path / "experiments" / run).mkdir(parents=True)
+        pd.DataFrame({"x": [1]}).to_csv(
+            tmp_path / "experiments" / run / "forecast_runs.csv", index=False
+        )
+
+    assert [s.name for s in engine_module.source_states(app)] == ["ORDERS"]
+    in_the_tree = [
+        n.ident
+        for db in engine_module.warehouse_tree(app)
+        for sch in db.children
+        for n in sch.children
+    ]
+    assert in_the_tree == ["ORDERS"], "the tab and the left pane list the same tables"
+    assert engine_module.project_tree(app) == ()
+
+    # A local project still lists what it has not indexed.
+    catalog.set_connection(None, portia_dir=app.portia_dir)
+    engine_module.refresh_catalog(app)
+    names = [s.name for s in engine_module.source_states(app)]
+    assert names.count("forecast_runs") == 2

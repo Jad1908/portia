@@ -325,3 +325,64 @@ def test_the_picker_never_walks_into_a_hidden_or_linked_directory(tmp_path):
 
     assert [ch.name for ch in tree.choices(tmp_path, "", READABLE)] == ["data"]
     assert len(tree.data_files(tmp_path, READABLE)) == 1
+
+
+# --- only the data folder is walked (2026-09-21) --------------------------------
+
+
+def _listed(monkeypatch) -> list[str]:
+    """Every directory `tree` lists from here on, by name."""
+    seen: list[str] = []
+    real = tree._listdir
+
+    def spy(directory):
+        seen.append(directory.name)
+        return real(directory)
+
+    monkeypatch.setattr(tree, "_listdir", spy)
+    return seen
+
+
+def test_a_project_with_nothing_readable_lists_no_directory(tmp_path, monkeypatch):
+    """A warehouse project passes no suffix, and it walked the whole repository
+    to keep nothing: four seconds a draw on 240,000 files, on the event loop,
+    until the browser dropped its connection. A known file is found by its path."""
+    _project(tmp_path)
+    (tmp_path / "specs" / "STG_ORDERS.yaml").write_text("steps: []\n", encoding="utf-8")
+    known = {
+        "specs/STG_ORDERS.yaml": (state.SPEC, "STG_ORDERS"),
+        "specs/gone.yaml": (state.SPEC, "gone"),
+    }
+    seen = _listed(monkeypatch)
+
+    (specs,) = tree.build(tmp_path, known, ())
+
+    assert seen == [], "no directory was listed"
+    assert [(n.rel, n.ident) for n in specs.children] == [("specs/STG_ORDERS.yaml", "STG_ORDERS")]
+
+
+def test_the_disk_is_searched_under_the_data_folder_only(tmp_path, monkeypatch):
+    _project(tmp_path)
+    (tmp_path / "notebooks" / "deep").mkdir(parents=True)
+    (tmp_path / "notebooks" / "deep" / "export.csv").write_text("a\n1\n", encoding="utf-8")
+    seen = _listed(monkeypatch)
+
+    nodes = tree.build(tmp_path, {}, READABLE, "data")
+
+    assert [n.name for n in nodes] == ["data"]
+    assert "notebooks" not in seen and "deep" not in seen and tmp_path.name not in seen
+
+
+def test_a_known_file_behind_a_hidden_or_linked_folder_stays_off_the_pane(tmp_path):
+    """The walk never arrived there, and placing known paths directly must not
+    start drawing the catalog's own YAML."""
+    _project(tmp_path)
+    (tmp_path / ".portia" / "sources").mkdir(parents=True)
+    (tmp_path / ".portia" / "sources" / "orders.yaml").write_text("a: 1\n", encoding="utf-8")
+    (tmp_path / "linked").symlink_to(tmp_path / "data", target_is_directory=True)
+    known = {
+        ".portia/sources/orders.yaml": (state.SOURCE, "orders"),
+        "linked/orders.csv": (state.SOURCE, "orders"),
+    }
+
+    assert tree.build(tmp_path, known, ()) == ()

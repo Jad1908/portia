@@ -80,6 +80,20 @@ def test_a_profile_under_snowflakes_dialect_writes_no_duckdb_only_sql():
     assert "count_if" in text and "percentile_cont" in text
 
 
+def test_snowflake_takes_a_numbers_moments_in_floating_point():
+    """Snowflake sums a ``NUMBER``'s squares as a 38-digit integer, so
+    ``stddev_samp`` over a wide revenue column overflowed and took the whole
+    table's profile with it (2026-09-21, a real account). The two sums are cast;
+    what picks a value rather than summing stays on the column itself."""
+    exprs = profiling._stat_exprs({"REVENUE": profiling.FLOAT}, dialect.SNOWFLAKE)
+    assert exprs["c0_mean"] == 'avg(CAST("REVENUE" AS DOUBLE))'
+    assert exprs["c0_std"] == 'stddev_samp(CAST("REVENUE" AS DOUBLE))'
+    assert exprs["c0_min"] == 'min("REVENUE")' and exprs["c0_max"] == 'max("REVENUE")'
+    assert exprs["c0_median"] == 'percentile_cont(0.5) WITHIN GROUP (ORDER BY "REVENUE")'
+    # Locally the statement is the one every golden profile was measured with.
+    assert profiling._stat_exprs({"REVENUE": profiling.FLOAT})["c0_std"] == 'stddev_samp("REVENUE")'
+
+
 def test_kind_of_reads_snowflakes_number_by_its_scale():
     assert profiling.kind_of("NUMBER(38,0)") == profiling.INTEGER
     assert profiling.kind_of("NUMBER(10,2)") == profiling.FLOAT

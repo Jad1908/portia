@@ -1922,7 +1922,15 @@ def _unindexed_inspector(rel: str) -> None:
 async def _index(path: Path) -> None:
     from portia.ui import artifacts
 
-    await engine.index([path], APP)
+    ran = await engine.index([path], APP)
+    if ran.failed:
+        # `engine.index` keeps a failure rather than raising it, so *Profiled*
+        # here would be a toast about a file nothing could read.
+        ui.notify(
+            f"Could not index {path.stem}. {APP.indexing_failed.get(path.stem, '')}",
+            type="negative",
+        )
+        return
     APP.select(SOURCE, path.stem)
     artifacts.pane.refresh()
     pane.refresh()
