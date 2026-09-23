@@ -1350,11 +1350,11 @@ def test_every_settings_tab_has_something_to_draw():
 
 
 def test_picking_a_setting_does_not_throw_you_back_to_the_first_tab(monkeypatch):
-    """Picking a theme or an effort refreshes the whole panel. If the showing tab
+    """Picking a theme or an effort redraws the section. If the showing tab
     were rebuilt with it, every pick would bounce you back to Project."""
     from portia.ui import settings
 
-    monkeypatch.setattr(settings._panel, "refresh", lambda *a, **k: None)
+    monkeypatch.setattr(settings._section, "refresh", lambda *a, **k: None)
     monkeypatch.setattr(settings.theme, "set_mode", lambda *a, **k: None)
     monkeypatch.setattr(settings, "_TAB", "Appearance")
 
@@ -1363,6 +1363,99 @@ def test_picking_a_setting_does_not_throw_you_back_to_the_first_tab(monkeypatch)
 
     settings._set_effort("high")
     assert settings._TAB == "Appearance"
+
+
+def test_a_click_in_settings_redraws_the_section_and_never_the_card(monkeypatch):
+    """Switching section, or changing a theme or an effort, used to rebuild the
+    whole panel, title and list and Close included (2026-09-23, the user: *the
+    whole card rerenders instead of just switching*). The section redraws; the
+    card around it is drawn when the dialog opens and at no other time."""
+    from portia.ui import settings
+
+    def card_redrawn(*a, **k):
+        raise AssertionError("the whole settings card was redrawn")
+
+    sections = []
+    monkeypatch.setattr(settings._panel, "refresh", card_redrawn)
+    monkeypatch.setattr(settings._section, "refresh", lambda *a, **k: sections.append(1))
+    monkeypatch.setattr(settings.theme, "set_mode", lambda *a, **k: None)
+    monkeypatch.setattr(settings, "_TAB", "Project")
+
+    settings._show_tab("Copilot")
+    settings._show_tab("Copilot")  # already showing: nothing to draw
+    settings._set_theme("light")
+    settings._set_effort("high")
+
+    assert settings._TAB == "Copilot"
+    assert len(sections) == 3
+
+
+def test_picking_a_provider_redraws_its_detail_and_nothing_else(monkeypatch):
+    """Settings → Providers: a click on a row switches the detail on the right.
+    It used to redraw the whole settings panel, rows and header included."""
+    from portia.ui import providers as providers_ui
+    from portia.ui.state import APP
+
+    def redrawn(what):
+        def fail(*a, **k):
+            raise AssertionError(f"{what} was redrawn")
+
+        return fail
+
+    details = []
+    monkeypatch.setattr(providers_ui._dashboard, "refresh", redrawn("the dashboard"))
+    monkeypatch.setattr(providers_ui._detail_view, "refresh", lambda *a, **k: details.append(1))
+    monkeypatch.setattr(APP, "provider_pick", "anthropic")
+
+    providers_ui._pick("codex")
+    providers_ui._pick("codex")
+
+    assert APP.provider_pick == "codex"
+    assert details == [1]
+
+
+def test_the_settings_body_lays_its_sections_out_as_the_composer_does_not():
+    """Three rules measured in a browser on 2026-09-23. The effort segments'
+    `spend-detail` is a full line in the composer's wrapping row, and inside a
+    `setting` (a column) the same 100% became a height, so the segments sat on
+    the next setting's title. A section is never squeezed to fit the box. And
+    the providers dashboard is stretched to the body, or its rows' unwrapped
+    status lines set its width and push the detail off the right edge."""
+    import re
+
+    from portia.ui import theme
+
+    css = theme.CSS.read_text(encoding="utf-8")
+
+    def block(selector):
+        found = re.search(re.escape(selector) + r" \{([^}]*)\}", css)
+        assert found, f"{selector} is not styled"
+        return found.group(1)
+
+    assert "flex: 0 0 auto" in block(".setting > .spend-detail")
+    assert "flex-shrink: 0" in block(".settings-body > *")
+    assert "align-self: stretch" in block(".providers-layout")
+    assert "flex-wrap: nowrap" in block(".provider-row .provider-row-state")
+    # The section list is a rail of glyphs, its names in tooltips (the user's
+    # call, 2026-09-23), qualified so `.artifact-row .artifact-body` below it
+    # does not draw them back.
+    assert "display: none" in block(".settings-nav .artifact-row .artifact-body")
+    # The variables are one grid, so a name sits level with its box.
+    assert "display: grid" in block(".provider-vars")
+
+
+def test_the_providers_detail_says_what_a_field_is_for_on_hover():
+    """A caption under every field was most of what the detail showed (the
+    user, 2026-09-23): the sentences are `help_tip`s beside the names now."""
+    import inspect
+
+    from portia.ui import providers as providers_ui
+
+    source = inspect.getsource(providers_ui._detail)
+    assert "hint=" not in source
+    assert "help=why" in source
+    assert "c.help_tip(notes[key])" in source
+    assert "c.caption(VARIABLES_WHY)" not in source
 
 
 def test_the_settings_sections_reuse_the_left_panes_row_vocabulary():
@@ -3450,9 +3543,11 @@ def test_the_destination_of_the_flow_does_not_pulse():
 def test_the_flow_stops_for_anyone_who_asked_it_to():
     """The path still lights — the statement survives; only the motion goes."""
     css = (Path(c.__file__).parent / "assets" / "portia.css").read_text(encoding="utf-8")
-    reduced = css[css.index("prefers-reduced-motion") :]
+    # Every reduced-motion block, not the first: the theme previews in Settings
+    # carry one of their own (2026-09-23) and sit earlier in the file.
+    blocks = [chunk[:600] for chunk in css.split("prefers-reduced-motion")[1:]]
     for selector in (".graph-node--lit .model-card", ".graph-edges path.is-lit"):
-        assert selector in reduced[:600]
+        assert any(selector in block for block in blocks)
 
 
 def test_a_spec_row_carries_its_name_for_the_client_to_read(tmp_path, monkeypatch):
@@ -4181,10 +4276,85 @@ def test_every_switchable_write_is_labelled_by_what_it_writes():
         assert "_" not in label
 
 
-def test_the_settings_panel_says_what_the_mode_you_are_in_does():
+def test_the_settings_panel_carries_no_sentence_under_a_setting():
+    """The user went through the panel line by line (2026-09-23) and deleted
+    each description or moved it into a `help_tip`. A `_WHY` constant is the
+    shape one took; a new one belongs in ``help=`` or nowhere."""
+    import inspect
+
+    from portia.ui import feedback, settings
+
+    assert not [name for name in vars(settings) if name.endswith("_WHY")]
+    assert "NOTHING_SENT" not in vars(feedback)
+    source = inspect.getsource(settings)
+    assert "c.setting(BRIEF_WHAT, help=BRIEF_HELP)" in source
+
+
+def test_the_catalog_switches_wait_behind_customize(monkeypatch):
+    """Folded by default, and a redraw of the section does not fold them back."""
     from portia.ui import settings
 
-    assert set(settings.MODE_WHY) == set(state.MODES)
+    monkeypatch.setattr(settings._section, "refresh", lambda *a, **k: None)
+    monkeypatch.setattr(settings, "_CUSTOMIZING", False)
+    settings._toggle_customize()
+    assert settings._CUSTOMIZING is True
+    settings._toggle_customize()
+    assert settings._CUSTOMIZING is False
+
+
+def test_where_the_data_lives_cannot_be_changed_from_settings_once_pinned(monkeypatch):
+    """A project reads from one place (`engine.can_change_data`): the other side
+    of the Data section's choice is disabled once a source is in, and a press
+    that reaches `_choose_data` anyway changes nothing."""
+    from portia.ui import settings
+    from portia.ui.state import APP
+
+    chosen = []
+    monkeypatch.setattr(settings.engine, "can_change_data", lambda app: False)
+    monkeypatch.setattr(settings.engine, "choose_data", lambda mode, app: chosen.append(mode))
+    monkeypatch.setattr(APP, "data_mode", state.LOCAL_DATA)
+
+    settings._choose_data(state.WAREHOUSE_DATA)
+
+    assert chosen == []
+    assert APP.data_mode == state.LOCAL_DATA
+
+
+def test_the_theme_previews_restate_the_tokens_they_draw():
+    """A light card stays light in dark mode, so its palette cannot read the
+    tokens and restates them. Each restated value is held to its token here."""
+    import re
+
+    from portia.ui import theme
+
+    css = theme.CSS.read_text(encoding="utf-8")
+
+    def block(selector):
+        found = re.search(re.escape(selector) + r" \{([^}]*)\}", css)
+        assert found, f"{selector} is not styled"
+        return dict(re.findall(r"(--[\w-]+):\s*([^;]+);", found.group(1)))
+
+    pairs = {
+        "--tp-canvas": "--canvas",
+        "--tp-surface": "--surface",
+        "--tp-hairline": "--hairline",
+        "--tp-ink": "--ink",
+        "--tp-stone": "--stone",
+        "--tp-accent": "--accent-text",
+    }
+    for preview, tokens in ((".tp-light", ":root"), (".tp-dark", "body.body--dark")):
+        restated, real = block(preview), block(tokens)
+        for mine, theirs in pairs.items():
+            assert restated[mine] == real[theirs], (preview, mine)
+    assert settings_spider_exists()
+
+
+def settings_spider_exists():
+    from portia.ui import settings
+
+    return settings.SPIDER.is_file() and "currentColor" in settings.SPIDER.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_notes_are_drawn_dated_in_the_order_they_were_learned():

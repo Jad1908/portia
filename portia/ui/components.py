@@ -90,6 +90,7 @@ def field(
     *,
     required: bool = False,
     hint: str = "",
+    help: str = "",
     value: str = "",
     placeholder: str = "",
     mono: bool = False,
@@ -104,13 +105,21 @@ def field(
     wash on focus — rather than Quasar's 56px default, which read as a form
     built from someone else's kit. ``secret`` draws a password box with the
     reveal toggle; what is typed there is never written anywhere by portia.
+
+    ``help`` is ``hint`` folded into a `help_tip` beside the label, for a form
+    dense enough that a sentence under every box is most of what it shows (the
+    providers dashboard, 2026-09-23). An empty ``label`` draws the box alone,
+    for a row whose first cell already names it.
     """
     with ui.element("div").classes("field"):
-        with ui.element("div").classes("field-label"):
-            ui.label(label)
-            ui.label("required" if required else "optional").classes(
-                "field-required" if required else "field-optional"
-            )
+        if label:
+            with ui.element("div").classes("field-label"):
+                ui.label(label)
+                if help:
+                    help_tip(help)
+                ui.label("required" if required else "optional").classes(
+                    "field-required" if required else "field-optional"
+                )
         box = ui.input(
             value=value, placeholder=placeholder, password=secret, password_toggle_button=secret
         )
@@ -121,6 +130,20 @@ def field(
         if hint:
             ui.label(hint).classes("field-hint")
     return box
+
+
+def help_tip(text: str) -> ui.icon:
+    """A small *?* beside a name, saying on hover what the name is for.
+
+    For what would otherwise be a caption under every field of a dense form.
+    The sentence is not on screen anywhere else, which is the one condition
+    under which a tooltip earns its place (`hint`'s rule). Instant rather than
+    delayed: a mark this small is aimed at, never crossed on the way past.
+    """
+    icon = ui.icon("help_outline").classes("help-tip")
+    with icon:
+        ui.tooltip(text).props("max-width=300px").classes("help-tip-text")
+    return icon
 
 
 #: The glyph each alert kind carries. Kind, never rank: an error is not louder
@@ -779,22 +802,42 @@ def approval_mode(app, on_change: Callable[[], Any] | None = None) -> ui.select:
     return select
 
 
-def setting(title: str, description: str = "") -> ui.element:
-    """One setting: what it is, what it does, and the control that changes it.
+def setting(title: str, description: str = "", *, help: str = "") -> ui.element:
+    """One setting: what it is, and the control that changes it.
 
     **One row shape for every preference** *(2026-09-04)*. The settings panel
     was captions and controls in whatever order each tab happened to stack them,
-    so the same kind of thing read three ways. A setting is a title, a line
-    saying what it does, and the control under them — the shape every editor's
-    settings page uses — and the caller opens this and puts the control inside.
-    The description is a fact about the setting, never advice about its value.
+    so the same kind of thing read three ways. A setting is a title and the
+    control under it, and the caller opens this and puts the control inside.
+
+    **Most settings carry no sentence at all** *(2026-09-23, the user, line by
+    line)*. A description under every title was most of what the panel showed;
+    they were deleted where the control says it, and moved into ``help``, a
+    `help_tip` beside the title, where the definition is worth having on hover.
+    ``description`` stays for a line that has to be read without asking.
     """
     row = ui.element("div").classes("setting")
     with row:
-        ui.label(title).classes("setting-title")
+        with ui.element("div").classes("row-gap-xs setting-head"):
+            ui.label(title).classes("setting-title")
+            if help:
+                help_tip(help)
         if description:
             ui.label(description).classes("setting-why pre-wrap")
     return row
+
+
+def state_pill(value: str) -> ui.element:
+    """A setting's value when it is an *absence*: *not set*, *not connected*.
+
+    Set in the mono face beside real values, an absence read as one more value
+    (`not set, the whole repo` looked like a folder called that, the user,
+    2026-09-23). A pill with an off `status_light` says it is a state.
+    """
+    with ui.element("div").classes("state-pill") as pill:
+        status_light(OFF)
+        ui.label(value)
+    return pill
 
 
 def menu_row(icon: str, label: str, on_click: Callable[..., Any]) -> ui.element:
