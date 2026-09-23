@@ -6195,10 +6195,15 @@ def test_the_pickers_one_control_reads_start_or_stop_by_state_and_always_opens_t
     from portia.agent.providers import llamacpp
     from portia.ui import components
 
-    source = inspect.getsource(components.model_effort)
+    source = inspect.getsource(components.server_controls)
     for name in ("START_SERVER", "STOP_SERVER", "STARTING_SERVER", "provider.started()"):
         assert name in source, name
     assert source.count("on_start(kind)") == 2, "both labels open the same panel"
+    # Under the picker for the picked provider, and inside the open picker on
+    # the provider's own panel, which is the only way to it while another
+    # provider is picked (2026-09-23).
+    assert "server_controls(kind, on_start)" in inspect.getsource(components.model_effort)
+    assert "server_controls(kind, on_start)" in inspect.getsource(components._model_panel)
     assert not providers.get("anthropic").started() and not providers.get("ollama").started()
     assert not llamacpp.PROVIDER.started()
 
@@ -6504,3 +6509,108 @@ def test_a_name_picked_before_its_list_arrived_reads_as_its_label():
     assert c.shown_name("gpt-6-sol", [], "codex") == "GPT-6 Sol"
     assert c.shown_name("claude-opus-5-5", None, "anthropic") == "Claude Opus 5.5"
     assert c.shown_name("qwen3:8b", None, "ollama") == "qwen3:8b"
+
+
+# --- the open picker survives a listing (2026-09-23) ------------------------------
+
+
+def _draw_picker(fresh, **kw):
+    from portia.ui import state
+
+    original, state.APP = state.APP, fresh
+    try:
+        with ui.element("div") as slot:
+            c.model_effort(fresh, lambda effort: None, on_provider=lambda *a: None, **kw)
+    finally:
+        state.APP = original
+    return slot
+
+
+def test_a_listing_redraws_an_open_picker_in_place_and_the_pane_once_it_shuts(monkeypatch):
+    """Pressing *List models* shut the menu it was pressed in, because the
+    listing redrew the pane and the pane is what the menu hangs from."""
+    from portia.ui import state
+
+    slot = _draw_picker(state.App(provider="anthropic", model="claude-sonnet-5"))
+    menu = next(e for e in slot.descendants() if "modelpick-menu" in e.classes)
+    bodies: list[str] = []
+    panes: list[str] = []
+    monkeypatch.setattr(c, "_PICKERS", [(menu, lambda: bodies.append("body"))])
+    monkeypatch.setattr(c, "_HELD", [])
+
+    def pane() -> None:
+        panes.append("pane")
+
+    c.redraw_behind_picker(pane)
+    assert panes == ["pane"], "shut, a redraw runs at once"
+
+    menu.value = True
+    c.redraw_behind_picker(pane)
+    c.redraw_behind_picker(pane)
+    assert bodies == ["body", "body"] and panes == ["pane"], "open, the body redraws alone"
+    menu.value = False
+    assert panes == ["pane", "pane"], "shut again, the pane redraws once"
+
+
+def test_a_menu_deleted_with_its_pane_does_not_hold_redraws_forever(monkeypatch):
+    from portia.ui import state
+
+    slot = _draw_picker(state.App(provider="anthropic", model="claude-sonnet-5"))
+    menu = next(e for e in slot.descendants() if "modelpick-menu" in e.classes)
+    menu.value = True
+    monkeypatch.setattr(c, "_PICKERS", [(menu, lambda: None)])
+    monkeypatch.setattr(c, "_HELD", [])
+    panes: list[str] = []
+    c.redraw_behind_picker(lambda: panes.append("pane"))
+    assert panes == []
+    slot.delete()
+    c._flush_behind_picker()
+    assert panes == ["pane"]
+
+
+def test_every_listing_host_goes_through_the_picker_helper():
+    import inspect
+
+    from portia.ui import screens, settings, transcript
+
+    for module in (settings, transcript, screens):
+        source = inspect.getsource(module._list_models)
+        assert "c.list_models_behind_picker(" in source, module.__name__
+        assert "engine.list_models" not in source, module.__name__
+
+
+def test_llamacpp_can_be_started_from_inside_the_picker_while_another_is_picked():
+    """You cannot pick a model off a server that is not running, so the start
+    panel has to be reachable from llama.cpp's own panel (2026-09-23)."""
+    from portia.agent import providers
+    from portia.ui import state
+
+    fresh = state.App(provider="anthropic", model="claude-sonnet-5")
+    fresh.provider_status["llamacpp"] = providers.Status(reachable=False, detail="down")
+    fresh.provider_models["llamacpp"] = []
+    started: list[str] = []
+    slot = _draw_picker(
+        fresh, on_refresh=lambda kind: None, on_start=lambda kind: started.append(kind)
+    )
+    panel = next(
+        e
+        for e in slot.descendants()
+        if "modelpick-panel" in e.classes and e.props["data-modelpick-panel"] == "llamacpp"
+    )
+    labels = [e.text for e in panel.descendants() if isinstance(e, ui.button)]
+    assert c.START_SERVER in labels and "List models" in labels
+    ollama = next(
+        e
+        for e in slot.descendants()
+        if "modelpick-panel" in e.classes and e.props["data-modelpick-panel"] == "ollama"
+    )
+    assert c.START_SERVER not in [e.text for e in ollama.descendants() if isinstance(e, ui.button)]
+
+
+def test_a_started_server_moves_the_model_with_the_provider():
+    import inspect
+
+    from portia.ui import screens
+
+    source = inspect.getsource(screens._start_server)
+    assert "APP.model = llamacpp.PROVIDER.default_model" in source

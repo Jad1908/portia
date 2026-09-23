@@ -521,9 +521,7 @@ def _list_models_clicked(kind: str) -> None:
 async def _list_models(kind: str) -> None:
     from portia.ui import transcript
 
-    await engine.list_models(APP, kind)
-    _redraw()
-    transcript.pane.refresh()
+    await c.list_models_behind_picker(kind, _redraw, transcript.pane.refresh)
 
 
 async def _switch_project() -> None:

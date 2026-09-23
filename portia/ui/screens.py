@@ -2055,7 +2055,12 @@ async def _start_server() -> None:
     _redraw_pickers()
     ok = await engine.start_server(APP)
     if ok:
+        # The model moves with the provider, to the one the server loaded: a
+        # start pressed inside the picker happens while another provider is
+        # picked, and the provider alone left a Claude name on llama.cpp
+        # (2026-09-23). The listing that just ran is what names it.
         APP.provider = llamacpp.PROVIDER.kind
+        APP.model = llamacpp.PROVIDER.default_model
     _server_panel.refresh()
     _redraw_pickers()
 
@@ -2337,8 +2342,7 @@ def _list_models_clicked(kind: str) -> None:
 
 
 async def _list_models(kind: str) -> None:
-    await engine.list_models(APP, kind)
-    _refresh()
+    await c.list_models_behind_picker(kind, _refresh)
 
 
 def _stop_indexing() -> None:

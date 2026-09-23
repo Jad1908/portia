@@ -602,6 +602,7 @@ def model_effort(
             listed,
             on_provider,
             on_refresh,
+            on_start,
             switchable=not provider_fixed and on_provider is not None,
             parked=provider_fixed,
         )
@@ -623,17 +624,8 @@ def model_effort(
     # while the one this window started is up, and the sentence with a
     # spinner in between, so a press is never followed by silence (the user,
     # 2026-09-14). Starting and stopping happen in the panel and only there.
-    if provider.starts and on_start is not None and not provider_fixed:
-        from portia.ui.state import STARTING
-
-        if APP.server_status == STARTING:
-            with ui.element("div").classes("row-gap-xs"):
-                ui.spinner(size="xs")
-                caption(STARTING_SERVER)
-        elif provider.started():
-            button(STOP_SERVER, lambda: on_start(kind), icon="stop", micro=True)
-        elif status is not None and status.reachable is False:
-            button(START_SERVER, lambda: on_start(kind), icon="play_arrow", micro=True)
+    if not provider_fixed:
+        server_controls(kind, on_start)
     with ui.element("div").classes("spend-detail"):
         if not provider.honours_effort:
             # Nothing, at the row's height. It said *Effort is a Claude
@@ -707,6 +699,7 @@ def model_menu(
     listed: list | None,
     on_provider: Callable[..., Any] | None,
     on_refresh: Callable[[str], Any] | None,
+    on_start: Callable[[str], Any] | None = None,
     *,
     switchable: bool,
     parked: bool,
@@ -726,6 +719,13 @@ def model_menu(
     whatever carries the picker, since the notes and the effort row are that
     provider's; a pick on the same provider moves ``app.model`` and redraws
     this control alone.
+
+    **The open menu survives a listing** *(2026-09-23, the user: pressing List
+    models closed it)*. The menu's body is a refreshable of its own and is
+    registered in `_PICKERS`; a listing redraws the pane holding the picker
+    through `redraw_behind_picker`, which redraws an open body in place and
+    holds the pane's redraw until the menu closes, since rebuilding the pane
+    rebuilds the button the menu hangs from.
 
     ``switchable`` false draws the rail with the one mark: a chat with a
     parked client can change model and never provider (`PROVIDERS.md` §4.2).
@@ -755,51 +755,70 @@ def model_menu(
         kinds = list(providers.offered_kinds()) if switchable else [kind]
         if kind not in kinds:
             kinds.append(kind)
-        with trigger, ui.menu().classes("modelpick-menu").props("no-focus"):
-            with ui.element("div").classes("modelpick").props("data-modelpick"):
-                with ui.element("div").classes("modelpick-rail"):
+        with trigger, ui.menu().classes("modelpick-menu").props("no-focus") as menu:
+            body(kinds, menu)
+        _PICKERS.append((menu, body.refresh))
+        menu.on_value_change(lambda e: None if e.value else _flush_behind_picker())
+
+    @ui.refreshable
+    def body(kinds: list[str], menu: ui.menu) -> None:
+        with ui.element("div").classes("modelpick").props("data-modelpick"):
+            with ui.element("div").classes("modelpick-rail"):
+                for each in kinds:
+                    rail = ui.element("button").classes("modelpick-rail-item")
+                    rail.props(f"type=button data-modelpick-rail={each}")
+                    if each == kind:
+                        rail.props("data-active")
+                    with rail:
+                        provider_glyph(each)
+            with ui.element("div").classes("modelpick-main"):
+                ui.element("input").classes("modelpick-search").props(
+                    f"type=text placeholder={prop_value(_SEARCH_MODELS)}"
+                    " data-modelpick-search autocomplete=off spellcheck=false"
+                )
+                with ui.element("div").classes("modelpick-list"):
                     for each in kinds:
-                        rail = ui.element("button").classes("modelpick-rail-item")
-                        rail.props(f"type=button data-modelpick-rail={each}")
-                        if each == kind:
-                            rail.props("data-active")
-                        with rail:
-                            provider_glyph(each)
-                with ui.element("div").classes("modelpick-main"):
-                    ui.element("input").classes("modelpick-search").props(
-                        f"type=text placeholder={prop_value(_SEARCH_MODELS)}"
-                        " data-modelpick-search autocomplete=off spellcheck=false"
-                    )
-                    with ui.element("div").classes("modelpick-list"):
-                        for each in kinds:
-                            mine = listed if each == kind else _drawn_list(each)
-                            # An empty list is drawn as its reason, never as
-                            # the one name still picked over it: the closed
-                            # button says *no models*, and the open one has
-                            # to agree with it.
-                            keep = each == kind and (parked or mine != [])
-                            _model_panel(
-                                each,
-                                app.model if keep else "",
-                                mine,
-                                picked=each == kind,
-                                on_pick=_pick,
-                                on_refresh=on_refresh if switchable or each == kind else None,
-                            )
-                        typed = ui.element("div").classes("modelpick-row modelpick-typed")
-                        typed.props("data-modelpick-typed data-hide")
-                        with typed:
-                            with ui.element("div").classes("modelpick-row-text"):
-                                ui.label("").classes("modelpick-row-name")
-                                caption(_USE_TYPED)
-                        # The name is the client's until it is picked, so it
-                        # travels with the press rather than through a binding
-                        # that would round-trip every keystroke.
-                        typed.on(
-                            "click",
-                            lambda e: _pick(*_typed_pick(e.args)),
-                            js_handler=_TYPED_JS,
+                        # Read afresh, not from the render that drew the button:
+                        # this body is redrawn by a listing while it is open.
+                        mine = _drawn_list(each)
+                        # An empty list is drawn as its reason, never as the
+                        # one name still picked over it: the closed button says
+                        # *no models*, and the open one has to agree with it.
+                        keep = each == kind and (parked or mine != [])
+                        _model_panel(
+                            each,
+                            app.model if keep else "",
+                            mine,
+                            picked=each == kind,
+                            on_pick=_pick,
+                            on_refresh=on_refresh if switchable or each == kind else None,
+                            on_start=_starter(menu) if switchable or each == kind else None,
                         )
+                    typed = ui.element("div").classes("modelpick-row modelpick-typed")
+                    typed.props("data-modelpick-typed data-hide")
+                    with typed:
+                        with ui.element("div").classes("modelpick-row-text"):
+                            ui.label("").classes("modelpick-row-name")
+                            caption(_USE_TYPED)
+                    # The name is the client's until it is picked, so it
+                    # travels with the press rather than through a binding
+                    # that would round-trip every keystroke.
+                    typed.on(
+                        "click",
+                        lambda e: _pick(*_typed_pick(e.args)),
+                        js_handler=_TYPED_JS,
+                    )
+
+    def _starter(menu: ui.menu) -> Callable[[str], Any] | None:
+        """The start panel, opened over a shut menu: it is a dialog of its own."""
+        if on_start is None:
+            return None
+
+        def start(which: str) -> None:
+            menu.close()
+            on_start(which)
+
+        return start
 
     def _pick(picked_kind: str, name: str) -> None:
         if not name:
@@ -807,11 +826,100 @@ def model_menu(
         if picked_kind != kind:
             if on_provider is not None:
                 on_provider(picked_kind, name)
-            return
-        app.model = name
-        draw.refresh()
+        else:
+            app.model = name
+            draw.refresh()
+        # The menu this came from is gone without saying it closed, so what
+        # waited on it runs now.
+        _flush_behind_picker()
 
     draw()
+
+
+#: Every drawn picker's menu and the redraw of its body. Pruned as panes are
+#: rebuilt, because a menu deleted with its pane never says it closed.
+_PICKERS: list[tuple[Any, Callable[[], Any]]] = []
+#: Pane redraws held while a picker's menu is open, run once it closes.
+_HELD: list[Callable[[], Any]] = []
+
+
+def _open_pickers() -> list[tuple[Any, Callable[[], Any]]]:
+    _PICKERS[:] = [(menu, redraw) for menu, redraw in _PICKERS if not menu.is_deleted]
+    return [(menu, redraw) for menu, redraw in _PICKERS if menu.value]
+
+
+def redraw_behind_picker(*redraws: Callable[[], Any]) -> None:
+    """Redraw panes that hold a model picker, without shutting an open one.
+
+    Rebuilding a pane rebuilds the button a picker's menu hangs from, and the
+    menu goes with it: pressing *List models* shut the menu the list was for
+    (the user, 2026-09-23). So while a menu is open its body is redrawn in
+    place and the panes' redraws wait for it to close. With none open they run
+    at once, which is every redraw that is not a listing somebody is watching.
+    """
+    live = _open_pickers()
+    if not live:
+        for redraw in redraws:
+            redraw()
+        return
+    for _, body in live:
+        body()
+    for redraw in redraws:
+        if redraw not in _HELD:
+            _HELD.append(redraw)
+
+
+def _flush_behind_picker() -> None:
+    if _open_pickers() or not _HELD:
+        return
+    held = list(_HELD)
+    _HELD.clear()
+    for redraw in held:
+        redraw()
+
+
+async def list_models_behind_picker(kind: str, *redraws: Callable[[], Any]) -> None:
+    """Ask one provider for its list, and redraw what shows it before and after.
+
+    Marked as listing *before* the first redraw, so the spinner is on screen
+    for the whole call: `engine.list_models` marks it itself, but only once it
+    is running, after a redraw made first has already drawn no spinner.
+    """
+    from portia.ui import engine
+    from portia.ui.state import APP
+
+    APP.models_listing |= {kind}
+    redraw_behind_picker(*redraws)
+    await engine.list_models(APP, kind)
+    redraw_behind_picker(*redraws)
+
+
+def server_controls(kind: str, on_start: Callable[[str], Any] | None) -> None:
+    """*Start the server…*, *Stop the server…*, or *starting* with a spinner.
+
+    For a provider portia can start (`PROVIDERS.md` §4.9), where the remedy
+    would otherwise be a command to type. Drawn under the picker for the
+    picked provider and inside the open picker on that provider's panel, which
+    is the only way to it while another provider is picked: you cannot pick a
+    model from a server that is not running (2026-09-23). One control, always
+    opening the start panel, so a press is never followed by silence (the
+    user, 2026-09-14). Starting and stopping happen in the panel and only there.
+    """
+    from portia.agent import providers
+    from portia.ui.state import APP, STARTING
+
+    provider = providers.get(kind)
+    if not provider.starts or on_start is None:
+        return
+    status = APP.provider_status.get(kind)
+    if APP.server_status == STARTING:
+        with ui.element("div").classes("row-gap-xs"):
+            ui.spinner(size="xs")
+            caption(STARTING_SERVER)
+    elif provider.started():
+        button(STOP_SERVER, lambda: on_start(kind), icon="stop", micro=True)
+    elif status is not None and status.reachable is False:
+        button(START_SERVER, lambda: on_start(kind), icon="play_arrow", micro=True)
 
 
 def _typed_pick(args) -> tuple[str, str]:
@@ -827,6 +935,7 @@ def _model_panel(
     picked: bool,
     on_pick: Callable[[str, str], Any],
     on_refresh: Callable[[str], Any] | None,
+    on_start: Callable[[str], Any] | None = None,
 ) -> None:
     """One provider's models inside the open picker, shown while its rail mark is."""
     from dataclasses import replace
@@ -868,6 +977,7 @@ def _model_panel(
                 ui.icon("check").classes("modelpick-check")
         r.on("click", lambda k=kind, n=model.name: on_pick(k, n))
 
+    listing = kind in APP.models_listing
     with panel:
         for model in rows:
             row(model, old=False)
@@ -881,19 +991,32 @@ def _model_panel(
                 ui.icon("chevron_right").classes("modelpick-fold-caret")
             for model in legacy:
                 row(model, old=True)
-        if not rows and not legacy:
-            status = APP.provider_status.get(kind)
-            with ui.element("div").classes("modelpick-empty"):
-                if kind in APP.models_listing:
+        empty = not rows and not legacy
+        # A provider with a server gets its controls at the foot of its list:
+        # the listing, asked again, and the server portia can start. Drawn
+        # under a full list too, because a model pulled or a server started
+        # since the page opened is exactly what a second listing is for.
+        if empty or provider.warms:
+            with ui.element("div").classes("modelpick-foot"):
+                status = APP.provider_status.get(kind)
+                if listing:
                     with ui.element("div").classes("row-gap-xs"):
                         ui.spinner(size="xs")
                         caption(_LISTING)
-                elif listed is None and status is None:
-                    caption(_NOT_LISTED)
-                else:
-                    caption(_provider_note(provider, listed, status) or _NO_MODELS_PLAIN)
-                if on_refresh is not None and kind not in APP.models_listing:
-                    button(_LIST_NOW, lambda k=kind: on_refresh(k), icon="refresh", micro=True)
+                elif empty:
+                    if listed is None and status is None:
+                        caption(_NOT_LISTED)
+                    else:
+                        caption(_provider_note(provider, listed, status) or _NO_MODELS_PLAIN)
+                with ui.element("div").classes("row-gap-xs"):
+                    if on_refresh is not None and not listing:
+                        button(
+                            _LIST_NOW if empty else _LIST_AGAIN_SHORT,
+                            lambda k=kind: on_refresh(k),
+                            icon="refresh",
+                            micro=True,
+                        )
+                    server_controls(kind, on_start)
 
 
 def _provider_note(provider, listed: list | None, status) -> str:
@@ -928,6 +1051,7 @@ _USE_TYPED = "Use this name"
 _LISTING = "listing…"
 _NOT_LISTED = "Not listed yet."
 _LIST_NOW = "List models"
+_LIST_AGAIN_SHORT = "List again"
 #: The typed row's press carries what was typed and which provider's list it
 #: was typed over, both written onto the row by `assets/modelpick.js`.
 _TYPED_JS = (

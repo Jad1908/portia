@@ -9,10 +9,14 @@
 // caret. The server draws every offered provider's list once, marks the
 // picked one `data-active`, and hears nothing until a row is pressed.
 //
-// Nothing here survives the menu closing, on purpose: Quasar mounts a menu's
-// content each time it opens, so every open starts on the server's picture
-// (the picked provider, an empty search, legacy folded unless the pick is in
-// it), which is the one worth starting from.
+// Every open starts on the server's picture (the picked provider, an empty
+// search, legacy folded unless the pick is in it), which is the one worth
+// starting from. **But a redraw while it is open keeps where you were**
+// *(2026-09-23)*: a listing asked for from inside the menu redraws its body in
+// place (`components.redraw_behind_picker`), and the new body would otherwise
+// jump back to the picked provider under the press that asked for Ollama's
+// list. So what the menu is looking at is remembered from the press that
+// opened it, and put back on a body that arrives while it is open.
 (() => {
   if (window.__portiaModelPick) return;
   window.__portiaModelPick = true;
@@ -20,6 +24,10 @@
   const SEARCH = "[data-modelpick-search]";
   const ROW = "[data-modelpick-row]";
   const TYPED = "[data-modelpick-typed]";
+
+  // Where the open menu is looking, or null for *the server's picture*.
+  let memory = null; // { view, query, folds: { kind: open } }
+  const remember = () => (memory = memory || { view: null, query: "", folds: {} });
 
   const menuOf = (el) => el.closest("[data-modelpick]");
   const activePanel = (menu) => menu.querySelector("[data-modelpick-panel][data-active]");
@@ -71,6 +79,45 @@
     setCursor(menu, query === "" ? null : reachable(menu)[0]);
   };
 
+  const show = (menu, kind) => {
+    menu.querySelectorAll("[data-modelpick-rail]").forEach((r) => {
+      r.toggleAttribute("data-active", r.dataset.modelpickRail === kind);
+    });
+    menu.querySelectorAll("[data-modelpick-panel]").forEach((p) => {
+      p.toggleAttribute("data-active", p.dataset.modelpickPanel === kind);
+    });
+  };
+
+  // A body the server drew while the menu was open: the provider, the folds
+  // and the search go back as they were, and so does the caret.
+  const restore = (menu) => {
+    if (memory === null) return;
+    if (memory.view && menu.querySelector(`[data-modelpick-panel="${memory.view}"]`)) {
+      show(menu, memory.view);
+    }
+    Object.entries(memory.folds).forEach(([kind, open]) => {
+      menu.querySelector(`[data-modelpick-panel="${kind}"]`)?.toggleAttribute("data-legacy-open", open);
+    });
+    const box = menu.querySelector(SEARCH);
+    if (box) {
+      box.value = memory.query;
+      box.focus();
+      box.setSelectionRange(box.value.length, box.value.length);
+    }
+    filter(menu);
+  };
+
+  new MutationObserver((records) => {
+    if (memory === null) return;
+    for (const record of records) {
+      for (const node of record.addedNodes) {
+        if (!(node instanceof Element)) continue;
+        const menu = node.matches("[data-modelpick]") ? node : node.querySelector("[data-modelpick]");
+        if (menu) restore(menu);
+      }
+    }
+  }).observe(document.body, { childList: true, subtree: true });
+
   document.addEventListener("click", (event) => {
     const target = event.target;
     if (!(target instanceof Element)) return;
@@ -79,6 +126,7 @@
     // Quasar mounts it a frame or two after the press, so this looks for it
     // for a few frames rather than guessing one.
     if (target.closest("[data-modelpick-trigger]")) {
+      memory = null;
       let tries = 0;
       const focus = () => {
         const box = document.querySelector(`.q-menu ${SEARCH}`);
@@ -94,12 +142,8 @@
       const menu = menuOf(rail);
       if (!menu) return;
       const kind = rail.dataset.modelpickRail;
-      menu.querySelectorAll("[data-modelpick-rail]").forEach((r) => {
-        r.toggleAttribute("data-active", r === rail);
-      });
-      menu.querySelectorAll("[data-modelpick-panel]").forEach((p) => {
-        p.toggleAttribute("data-active", p.dataset.modelpickPanel === kind);
-      });
+      remember().view = kind;
+      show(menu, kind);
       filter(menu);
       menu.querySelector(SEARCH)?.focus();
       return;
@@ -107,7 +151,11 @@
 
     const fold = target.closest("[data-modelpick-fold]");
     if (fold) {
-      fold.closest("[data-modelpick-panel]")?.toggleAttribute("data-legacy-open");
+      const panel = fold.closest("[data-modelpick-panel]");
+      if (panel) {
+        const open = panel.toggleAttribute("data-legacy-open");
+        remember().folds[panel.dataset.modelpickPanel] = open;
+      }
     }
   });
 
@@ -115,7 +163,10 @@
     const target = event.target;
     if (target instanceof Element && target.matches(SEARCH)) {
       const menu = menuOf(target);
-      if (menu) filter(menu);
+      if (menu) {
+        remember().query = target.value;
+        filter(menu);
+      }
     }
   });
 

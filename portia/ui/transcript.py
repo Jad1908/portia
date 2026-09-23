@@ -1124,13 +1124,14 @@ def _list_models_clicked(kind: str) -> None:
 
 
 async def _list_models(kind: str) -> None:
-    """Read one provider's list off the loop and redraw whatever shows it."""
+    """Read one provider's list off the loop and redraw whatever shows it.
+
+    Through `c.list_models_behind_picker`, so a listing asked for from inside
+    an open picker redraws that picker and leaves it open.
+    """
     from portia.ui import settings
 
-    pane.refresh()
-    await engine.list_models(APP, kind)
-    pane.refresh()
-    settings.refresh_if_open()
+    await c.list_models_behind_picker(kind, pane.refresh, settings.refresh_if_open)
 
 
 def list_models_in_background() -> None:

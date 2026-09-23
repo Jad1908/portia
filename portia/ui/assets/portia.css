@@ -5765,12 +5765,24 @@ body.tab-dragging .tab-drop {
 [data-searching] .modelpick-row[data-hide] {
   display: none;
 }
-.modelpick-empty {
+/* A provider with a server ends its list on the listing and the server: the
+ * reason when there is nothing, *List models* or *List again*, and for the
+ * one portia can start, Start or Stop. Ruled off from the rows above it when
+ * there are any, because it acts on the list rather than being a member. */
+.modelpick-foot {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: var(--sp-sm);
   padding: var(--sp-sm);
+}
+.modelpick-row + .modelpick-foot {
+  margin-top: var(--sp-xs);
+  border-top: 1px solid var(--hairline);
+  padding-top: var(--sp-md);
+}
+[data-searching] .modelpick-foot {
+  display: none;
 }
 /* One slot for the listing spinner and the refresh button, drawn whether or
  * not either is: the indicator changes, the controls around it stay put. It
