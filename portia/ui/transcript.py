@@ -207,7 +207,7 @@ def stream_view() -> None:
         replay(chat.logged)
         if chat.rows:
             c.caption(_PICKED_UP)
-    elif not chat.rows and not _starting(chat) and not _failed(chat):
+    elif not chat.rows and not _starting(chat) and not _failed(chat) and not _profiled(chat):
         c.empty_note(_IDLE_JOB if chat.is_job else _IDLE)
     chat.settled = settled_before(chat.rows, busy=chat.busy)
     # `contents`, so the rows inside sit in the scroll region's own stack
@@ -235,6 +235,12 @@ def tail_view() -> None:
         _turn_ended(chat)
     elif _failed(chat):
         _exchange_failed(chat)
+
+
+def _profiled(chat) -> bool:
+    """A job with profiling on its record and no exchange yet: the header says
+    what is happening, and *nothing recorded* under it would be false."""
+    return chat.is_job and chat.exchange is None and bool(chat.waiting or chat.prelude)
 
 
 def _failed(chat) -> bool:
@@ -366,9 +372,15 @@ def _chat_list() -> None:
     """
     with c.scroll_area("chats", classes="chat-list"):
         _pinned_sources_row()
+        # A job waiting on profiling has no file yet and is running now, so it
+        # is the first row and carries the light (`_job_row`).
+        waiting = [chat for chat in APP.chats if chat.waiting and chat.path is None]
+        for chat in waiting:
+            _job_row(chat)
         paths = engine.logs_in(APP)
         if not paths:
-            c.empty_note(_NO_CHATS)
+            if not waiting:
+                c.empty_note(_NO_CHATS)
             return
         today = date.today()
         group = None
@@ -395,8 +407,33 @@ def _pinned_sources_row() -> None:
         job = APP.live_job
         if job is not None:
             _dot(job)
+        elif APP.indexing_status:
+            # Profiling, with no job waiting on it: the light says an indexing
+            # is running the way a chat's row says a chat is (2026-09-23).
+            c.status_light(c.LIVE, _PROFILING)
         # It opens a view, where every row under it opens a thread.
         ui.icon("chevron_right").classes("chat-row-open")
+
+
+def _job_row(chat) -> None:
+    """A job this process holds, as one row: the list's row for a job waiting on
+    profiling (`Chat.waiting`, no file yet), and the sources view's row for the
+    job that is running. Same row as every other job, the light live, and a
+    click opens it on whatever it holds so far."""
+    row = ui.element("div").classes("chat-row")
+    c.enters(row, f"chat:{chat.ident}")
+    with row:
+        ui.icon(_JOB_ICON).classes("chat-row-icon")
+        with ui.element("div").classes("chat-row-body"):
+            ui.label(chat.title or _UNTITLED).classes("chat-row-title")
+            ui.label(_PROFILING if chat.waiting else _RUNNING).classes("chat-row-meta")
+        _dot(chat)
+    row.on("click", lambda ch=chat: _open_held(ch))
+
+
+def _open_held(chat) -> None:
+    APP.show_chat(chat)
+    pane.refresh()
 
 
 def _day_label(started: str | None, today: date) -> str:
@@ -476,6 +513,8 @@ def _dot(chat) -> None:
         c.status_light(c.WAITING, _WAITING)
     elif chat.busy:
         c.status_light(c.LIVE, _RUNNING)
+    elif chat.waiting:
+        c.status_light(c.LIVE, _PROFILING)
 
 
 def _open_row(path: Path) -> None:
@@ -581,20 +620,72 @@ def _elsewhere(chat):
     waiting = [other for other in APP.waiting if other is not chat]
     if waiting:
         return waiting[0]
-    live = APP.live
+    live = APP.live or APP.profiling
     return live if live is not None and live is not chat else None
 
 
 def _job_header(chat) -> None:
-    """A job's banner, and Stop while it runs — it has no composer to carry one."""
+    """A job's banner, and Stop while it runs — it has no composer to carry one.
+
+    **Before the exchange, the job is profiling's** *(2026-09-23)*: the banner
+    says it is waiting, the lines profiling has written so far sit under it
+    and grow as it goes, and the live line carries the status and the Stop
+    that stops profiling. Once the read has started the same lines fold shut
+    under the exchange's own banner, because they are what happened in this
+    job and the transcript under them is what is happening now.
+    """
     with ui.element("div").classes("p-pad stack-md index-header"):
-        _exchange_banner(chat.exchange)
-        if chat.busy:
-            with ui.element("div").classes("row-gap-sm"):
-                ui.spinner(size="sm")
-                c.caption("working")
-                c.button("Stop", _stop, kind="tertiary", icon="stop")
+        if chat.exchange is None:
+            _prelude_view(chat)
+        else:
+            _exchange_banner(chat.exchange)
+            if chat.busy:
+                with ui.element("div").classes("row-gap-sm"):
+                    ui.spinner(size="sm")
+                    c.caption("working")
+                    c.button("Stop", _stop, kind="tertiary", icon="stop")
+            if chat.prelude:
+                c.collapsed(
+                    _PRELUDE_DONE.format(n=c.count(len(chat.prelude), "line")),
+                    lambda: _prelude_lines(chat),
+                )
     c.rule()
+
+
+@ui.refreshable
+def _prelude_view(chat) -> None:
+    """What profiling is doing, in the job that waits on it — the per-hop redraw.
+
+    Its own refreshable so a hop redraws this block and nothing around it
+    (`indexing_moved`), the way `_index_progress` is the sources view's. The
+    live line is the one status field every surface draws (`App.indexing_status`),
+    and empty while the job waits for a running chat to end instead.
+    """
+    with ui.element("div").classes("exchange-banner"):
+        with ui.element("div").classes("row-gap-sm"):
+            ui.icon(_BANNER_ICON[chat.kind]).classes("fact-icon")
+            ui.label(_BANNER_TITLE[chat.kind]).classes("t-body-strong c-ink")
+        c.caption(_WAITING_WHY if chat.waiting else _NO_READ_WHY)
+    _prelude_lines(chat)
+    if not chat.waiting:
+        return
+    c.failures(APP.indexing_failed)
+    with ui.element("div").classes("row-gap-sm indexing-status"):
+        ui.spinner(size="sm")
+        c.text(APP.indexing_status or _WAITING_TURN, color="c-mute")
+        if APP.indexing_stop is not None:
+            c.button("Stop", _stop_indexing, kind="tertiary", icon="stop")
+
+
+def _prelude_lines(chat) -> None:
+    """Profiling's lines, one per row, in a box of fixed height that follows its
+    own foot: a name too long for the row is cut, never wrapped, so the block
+    keeps one size from the first table to the last (the user's call)."""
+    if not chat.prelude:
+        return
+    with c.scroll_area(f"prelude:{chat.key}", classes="indexing-log", stick=True):
+        for line in chat.prelude:
+            c.mono(line, color="c-mute", small=True)
 
 
 def _legacy_note(chat) -> None:
@@ -617,17 +708,19 @@ def _sources_view() -> None:
             ui.icon("arrow_back").classes("chat-back-icon")
             ui.label(_CHATS).classes("chat-back-label")
         ui.label(_SOURCES_TITLE).classes("chat-header-title")
-    job = APP.live_job
+    job = APP.live_job or APP.profiling
     with ui.element("div").classes("p-pad stack-md index-header index-header--list"):
         if job is not None:
-            _exchange_banner(job.exchange)
-            with ui.element("div").classes("row-gap-sm"):
-                ui.spinner(size="sm")
-                c.caption("working")
-                c.button("Stop", _stop, kind="tertiary", icon="stop")
-        else:
-            c.caption(_INDEX_WHAT)
-            _source_states()
+            # **A running job is a row here, never the job itself** *(2026-09-23,
+            # the user's report)*. This view drew the job's banner, *working*
+            # and Stop, and none of its rows, and nothing refreshed it: whoever
+            # followed profiling from here saw the read start and then nothing
+            # move, and had to go back to the list and open the job to see its
+            # tool calls. The row says a job is running and opens it in one
+            # click; the job's own pane is the one place its rows are drawn.
+            _job_row(job)
+        c.caption(_INDEX_WHAT)
+        _source_states()
     c.rule()
 
 
@@ -785,20 +878,42 @@ def _index_actions() -> None:
         c.caption(_INDEX_COST_REMOTE if remote else _INDEX_COST)
 
 
+@ui.refreshable
 def _index_progress() -> None:
     """What Index is doing, while it does it. The add-data panel's line, here.
 
     One field (`APP.indexing_status`), drawn wherever indexing can be started
     from: a warehouse profile is minutes on the meter, and this tab used to
     run one with nothing on it moving (2026-09-07).
+
+    **Its own refreshable, redrawn from every hop wherever the hop came from**
+    *(2026-09-23)*. A run started on the add-data screen redrew that screen's
+    line only, so somebody who opened the workspace mid-run found this line
+    stuck on the count it was drawn with, and it moved only when they reloaded
+    the page or reopened the view (the user's report). `indexing_moved` is the
+    one call every hop makes.
     """
-    if not APP.indexing_status:
+    # A running job says so on its own row above the list, and the read's
+    # status sentence is written for the add-data screen (*open the workspace*).
+    if not APP.indexing_status or APP.live_job is not None:
         return
     with ui.element("div").classes("row-gap-sm indexing-status"):
         ui.spinner(size="sm")
         c.text(APP.indexing_status, color="c-mute")
         if APP.indexing_stop is not None:
             c.button("Stop", _stop_indexing, kind="tertiary", icon="stop")
+
+
+def indexing_moved() -> None:
+    """Profiling moved: redraw what this pane draws of it, and nothing else.
+
+    The sources view's line and the waiting job's block. A refreshable with
+    no target on screen is a no-op, so this is safe from any surface. The
+    add-data screen calls it from its own redraw (`screens._redraw_indexing`)
+    and the sources view's Index button from its hops.
+    """
+    _index_progress.refresh()
+    _prelude_view.refresh()
 
 
 def _stop_indexing() -> None:
@@ -838,7 +953,8 @@ async def _index_ticked() -> None:
     def say(verb: str):
         def _say(done: int, total: int, name: str) -> None:
             APP.indexing_status = f"{verb} {name}, {done + 1} of {total}"
-            _index_actions.refresh()
+            # The line, not the buttons and the picker around it.
+            indexing_moved()
             artifacts.pane.refresh()
 
         return _say
@@ -1763,9 +1879,12 @@ def _row(row: Any, *, job: bool = False) -> None:
 def _event(event: events.Event, *, key: str = "think", job: bool = False) -> None:
     kind = event.kind
     if kind == events.PROMPT:
-        # An indexing job's prompt is the app's own template, not a message —
-        # so it is a shut disclosure rather than the thing you read first.
-        _job_instruction(event.data) if job else _prompt_row(event.data)
+        # An indexing job's prompt is the app's own template, not a message.
+        # It was a shut disclosure here until 2026-09-23 and is nothing now
+        # (the user's call): the banner says what the job is, the log keeps
+        # the text, and `devtools.audit` shows it to whoever tunes it.
+        if not job:
+            _prompt_row(event.data)
         return
     if kind == events.TOOL_CALL:
         _tool_card(event.data, None, DROPPED)
@@ -1876,26 +1995,6 @@ def _exchange_end(data: dict) -> None:
         c.caption(f"ended ({subtype}){spend}")
     elif spend:
         c.caption(spend.removeprefix(" · "))
-
-
-def _job_instruction(data: dict) -> None:
-    """The task prompt the **app** sent to open a job — kept, and shut.
-
-    `prompt-row` is *what the human said* (`DESIGN.md`), and on an indexing job
-    nobody said it: the text is `prompts/tasks/index_batch.md`, sent by the
-    window on your behalf. Drawn as a message it was forty lines of instruction
-    standing exactly where a human's own sentence stands in a chat — above
-    everything the job then did, and the first thing the eye lands on.
-
-    The `exchange-banner` above already says what this job is and why, so the
-    instruction is a detail rather than the message. Nothing is dropped: prompt
-    text is the least stable, most performance-sensitive part of the system
-    (`CLAUDE.md`), and being able to read what a run was actually given is the
-    point of logging it at all.
-    """
-    with ui.element("div").classes("transcript-row"):
-        c.collapsed(_INSTRUCTION, lambda: c.markdown(str(data.get("text", ""))))
-        c.caption(_model_line(data))
 
 
 def _model_line(data: dict) -> str:
@@ -2608,6 +2707,15 @@ _BANNER_WHY = {
 
 _RUNNING = "running"
 _WAITING = "waiting for you"
+#: Profiling is running: on the light of the job waiting on it, of the pinned
+#: sources row, and of the back control inside another chat.
+_PROFILING = "profiling"
+_WAITING_WHY = "Waiting for profiling to finish. The copilot reads the sources when it has."
+_NO_READ_WHY = "Profiling ended, and no read followed."
+#: The waiting job's live line when profiling is done and a chat is running:
+#: the read starts when that chat's exchange ends.
+_WAITING_TURN = "waiting for the running chat to end"
+_PRELUDE_DONE = "profiling, before the read · {n}"
 
 #: The list (`docs/CHAT_SESSIONS.md` §3.2). One glyph per kind, and the same
 #: two the left pane used for the same two things.
@@ -2663,7 +2771,6 @@ _WAITING_FOR = {
 
 #: What an indexing job was told to do. The app wrote it, not the human, so it
 #: is named as an instruction rather than shown as a message.
-_INSTRUCTION = "the instruction this job was given"
 
 #: A folded run of finished calls, and one of writes already allowed. Plural
 #: throughout: `GROUP_MIN` is 2, so neither has to say "1".

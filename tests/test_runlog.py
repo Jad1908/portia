@@ -710,6 +710,28 @@ def test_deleting_a_log_takes_its_title_with_it(tmp_path):
     runlog.delete(log.path, tmp_path)  # idempotent
 
 
+def test_an_indexing_log_is_named_by_its_batch_never_by_the_template(tmp_path):
+    """A log written with the batch in its header, and one from before the
+    header carried it, both read as *Indexing …* in the list."""
+    named = _chat(
+        tmp_path,
+        cwd=tmp_path,
+        kind=runlog.INDEXING,
+        label="orders, invoices",
+        prompt="These sources were just indexed: 'orders', 'invoices'.\n\nRead them.",
+    )
+    assert runlog.read_listing(named.path, tmp_path)["title"] == "Indexing orders, invoices"
+
+    old = _chat(
+        tmp_path,
+        cwd=tmp_path,
+        kind=runlog.INDEXING,
+        prompt="These sources were just indexed: 'a', 'b'.\n\nRead them.",
+    )
+    assert runlog.read_listing(old.path, tmp_path)["title"] == "Indexing a, b"
+    assert runlog.job_title("") == "Indexing"
+
+
 def test_an_indexing_log_records_the_tools_the_job_was_offered(tmp_path):
     """A job reads (`tools.BUILD_TOOLS`), and line two has to say what *its*
     model read, not what a chat's would have."""

@@ -51,6 +51,7 @@ would be least visible.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -215,8 +216,14 @@ def start(
     provider: str | None = None,
     host: str | None = None,
     prompts: dict[str, Any] | None = None,
+    label: str | None = None,
 ) -> Log:
     """Open a log for one **chat** and write its header.
+
+    ``label`` is what a job is about — the sources an indexing job reads — and
+    it goes in the header because it is true of the whole file and it is what
+    the list names the job by (`job_title`). A chat has none: it is named by
+    what the human said.
 
     ``host`` and ``prompts`` are for a conversation portia does not drive
     (:data:`HOSTED`): who does, and what portia gave *that* model to read, which
@@ -251,6 +258,8 @@ def start(
     }
     if host:
         header[HOSTED] = host
+    if label:
+        header["label"] = label
     log.write(HEADER, header)
     # A job reads: its model is offered no build tool, and the record says so.
     read = prompts_read(portia_dir, provider, builds=kind == CHAT)
@@ -509,6 +518,12 @@ def read_listing(path: str | Path, portia_dir: str | Path | None = None) -> dict
     kind = header.get("kind")
     given = titles(portia_dir)[title_key(path)] if portia_dir is not None else None
     prompt = str(opened.get("text") or header.get("prompt") or "")
+    # **A job is named by what it read, never by the instruction it was sent**
+    # *(2026-09-23, the user's report)*. The first line of an indexing job's
+    # prompt is the app's own template, so every job in the list, and the
+    # header of every one opened, read *These sources were just indexed:
+    # 'A', 'B', …* — the one line of the file with nothing in it.
+    named = job_title(header.get("label") or _names_in(prompt)) if kind == INDEXING else ""
     return {
         "name": path.stem,
         "kind": kind if kind in KINDS else CHAT,
@@ -519,7 +534,7 @@ def read_listing(path: str | Path, portia_dir: str | Path | None = None) -> dict
         # the Anthropic default by whoever draws it, because it was.
         "provider": opened.get("provider"),
         "prompt": prompt,
-        "title": given or first_line(prompt) or _hosted_title(header) or path.stem,
+        "title": given or named or first_line(prompt) or _hosted_title(header) or path.stem,
         "legacy": path.parent.name == LEGACY_DIR,
         # Who drove it, when that was not portia (:data:`HOSTED`). Read-only
         # here like a legacy log, and for a different reason the surface states.
@@ -545,6 +560,25 @@ def _hosted_title(header: dict[str, Any]) -> str:
 def first_line(text: str) -> str:
     """What a list calls a prompt: its first line, or nothing."""
     return text.strip().splitlines()[0].strip() if text.strip() else ""
+
+
+#: What an indexing job is called: the sources it read, after the one word
+#: that says what kind of thing it was. Nothing else names it.
+JOB_TITLE = "Indexing {label}"
+JOB_TITLE_BARE = "Indexing"
+
+
+def job_title(label: str) -> str:
+    """The name of an indexing job, off the batch it was about."""
+    return JOB_TITLE.format(label=label) if label else JOB_TITLE_BARE
+
+
+def _names_in(prompt: str) -> str:
+    """The batch, read out of a job's prompt, for a log written before the header
+    carried it: the template quotes each name, and this is the one place that
+    shape is relied on, over files that are already written."""
+    names = re.findall(r"'([^']+)'", first_line(prompt))
+    return ", ".join(names)
 
 
 def title_key(path: str | Path) -> str:

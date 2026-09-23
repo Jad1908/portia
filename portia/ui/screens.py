@@ -1409,10 +1409,11 @@ async def _scope_and_interpret(names: list[str], *, in_dialog: bool = False) -> 
     if not names:
         return
 
+    job = _waiting_job(len(names), "table")
+
     def say(verb: str):
         def _say(done: int, total: int, name: str) -> None:
-            APP.indexing_status = f"{verb} {name}, {done + 1} of {total}"
-            _progress.refresh()
+            _profiling_moved(job, f"{verb} {name}, {done + 1} of {total}")
             # Somebody who left for the workspace mid-run sees each table's
             # profile land as it does (`engine._hops`, ``reload_each``).
             if APP.left_add_data:
@@ -1420,9 +1421,8 @@ async def _scope_and_interpret(names: list[str], *, in_dialog: bool = False) -> 
 
         return _say
 
-    APP.indexing_status = f"Scoping {c.count(len(names), 'table')}…"
+    _profiling_moved(job, f"Scoping {c.count(len(names), 'table')}…")
     stop = APP.indexing_stop = cancel.Scope()
-    _progress.refresh()
     scoped: list[str] = []
     added: list[str] = []
     profiled: list[str] = []
@@ -1434,15 +1434,14 @@ async def _scope_and_interpret(names: list[str], *, in_dialog: bool = False) -> 
             ran = await engine.profile_tables(APP, scoped, on_progress=say("Profiling"), stop=stop)
             profiled, failed = ran.names, [*failed, *ran.failed]
     finally:
-        APP.indexing_status = ""
+        _profiling_moved(job, "")
         APP.indexing_stop = None
         _pressed_done()
         stop.close()
-        _progress.refresh()
-    ui.notify(
-        _scoped_note(len(scoped), len(profiled), reading=_will_read(stop), failed=len(failed)),
-        type="warning" if failed else None,
-    )
+        _redraw_indexing()
+    note = _scoped_note(len(scoped), len(profiled), reading=_will_read(stop), failed=len(failed))
+    ui.notify(note, type="warning" if failed else None)
+    _profiling_wrote(job, note)
     # What was scoped, by name: a table that failed stays ticked, and the ones
     # that finished are not a prefix of the list once one in the middle failed.
     APP.scope_ticks = APP.scope_ticks - set(added)
@@ -1455,8 +1454,10 @@ async def _scope_and_interpret(names: list[str], *, in_dialog: bool = False) -> 
     else:
         _refresh()
         _catch_up_workspace()
-    if not stop.cancelled:
-        await _interpret_pending()
+    if stop.cancelled or not APP.interpret:
+        _abandon(job, STOPPED_NO_READ if stop.cancelled else SWITCHED_OFF_NO_READ)
+        return
+    await _interpret_pending()
 
 
 def _will_read(stop: cancel.Scope) -> bool:
@@ -2961,13 +2962,13 @@ async def _index_and_interpret(paths: list[Path], *, in_dialog: bool = False) ->
     if not paths:
         return
 
-    def say(done: int, total: int, name: str) -> None:
-        APP.indexing_status = f"Profiling {name}, {done + 1} of {total}"
-        _progress.refresh()
+    job = _waiting_job(len(paths), "file")
 
-    APP.indexing_status = f"Reading {c.count(len(paths), 'file')}…"
+    def say(done: int, total: int, name: str) -> None:
+        _profiling_moved(job, f"Profiling {name}, {done + 1} of {total}")
+
+    _profiling_moved(job, f"Reading {c.count(len(paths), 'file')}…")
     stop = APP.indexing_stop = cancel.Scope()
-    _progress.refresh()
     names: list[str] = []
     done_paths: list[Path] = []
     failed: list[str] = []
@@ -2975,19 +2976,21 @@ async def _index_and_interpret(paths: list[Path], *, in_dialog: bool = False) ->
         ran = await engine.index(paths, APP, on_progress=say, stop=stop)
         names, done_paths, failed = ran.names, ran.items, ran.failed
     finally:
-        APP.indexing_status = ""
+        _profiling_moved(job, "")
         APP.indexing_stop = None
         _pressed_done()
         # Made here, closed here — a cancelled scope holds a thread that goes on
         # interrupting connections the next indexing run may reuse.
         stop.close()
-        _progress.refresh()
+        _redraw_indexing()
 
     # **What it profiled, not what was asked for.** A stopped run returns the
     # sources it did finish, and those are in the catalog and on the left pane —
     # saying "profiled 20 sources" because twenty were selected would be the one
     # number here that is not a measurement.
-    ui.notify(_profiled_note(len(names), len(failed)), type="warning" if failed else None)
+    note = _profiled_note(len(names), len(failed))
+    ui.notify(note, type="warning" if failed else None)
+    _profiling_wrote(job, note)
     APP.pending_interpret = [*APP.pending_interpret, *names]
     APP.indexed = len(names)
     # Profiled is done: it drops out of the outstanding list, which is what turns
@@ -3012,8 +3015,94 @@ async def _index_and_interpret(paths: list[Path], *, in_dialog: bool = False) ->
     # interpretation is a model turn that costs money, and running one on the
     # sources that happened to finish — immediately after the human asked the app
     # to stop — is the app spending their money to disagree with them.
-    if not stop.cancelled:
-        await _interpret_pending()
+    if stop.cancelled or not APP.interpret:
+        _abandon(job, STOPPED_NO_READ if stop.cancelled else SWITCHED_OFF_NO_READ)
+        return
+    await _interpret_pending()
+
+
+# --- the job, made before its exchange ----------------------------------------
+
+
+def _waiting_job(n: int, unit: str):
+    """The job this profiling is ahead of, made now so there is somewhere to stand.
+
+    **An indexing job used to begin when its model turn did** *(until
+    2026-09-23)*, so for the ten minutes a warehouse of thirty-nine tables
+    took to profile there was no job: the way out of this screen landed on the
+    chat list with nothing running in it, and the read arrived later in a row
+    nobody had seen start (the user's report). The job exists from the first
+    hop now, with `Chat.waiting` set and profiling's lines in its ``prelude``,
+    and `_interpret_pending` starts the exchange in that same chat.
+
+    ``None`` when no read is going to follow, because the switch is off: a job
+    that would wait for nothing is a row that ends with nothing in it. A batch
+    indexed while another batch is still waiting joins that job, as the read
+    itself takes both (`App.pending_interpret`).
+    """
+    if not APP.interpret:
+        return None
+    job = APP.profiling
+    if job is None:
+        job = APP.new_chat(
+            state.INDEXING, waiting=True, title=WAITING_TITLE.format(n=c.count(n, unit))
+        )
+    return job
+
+
+def _profiling_moved(job, status: str) -> None:
+    """One hop of profiling: what finished goes on the job's record, what is
+    happening now is the status line, and every surface drawing either redraws.
+
+    Empty ``status`` is the run ending: the last line lands on the record and
+    the status clears. The finished lines are the statuses in the order they
+    were on screen, which is the log of what profiling did and needs no second
+    sentence per source.
+    """
+    if job is not None and APP.indexing_status:
+        job.prelude.append(APP.indexing_status)
+    APP.indexing_status = status
+    _redraw_indexing()
+
+
+def _profiling_wrote(job, note: str) -> None:
+    """The toast's sentence, on the job's record too: the toast is gone in a
+    few seconds and the job is where somebody looks afterwards."""
+    if job is not None:
+        job.prelude.append(note)
+        _redraw_indexing()
+
+
+def _abandon(job, why: str) -> None:
+    """No read follows, so the job that was waiting for one ends here.
+
+    Said on its record, then dropped from the list unless it is the chat on
+    screen: a job nobody was looking at, that never did anything, is not a
+    row to keep; one somebody is looking at stays until they leave it, saying
+    what happened (`Chat.started`, `App.show_chat`).
+    """
+    if job is None:
+        return
+    job.waiting = False
+    job.prelude.append(why)
+    if APP.open is not job:
+        APP.forget(job)
+    _redraw_indexing()
+
+
+def _redraw_indexing() -> None:
+    """Profiling moved: every line drawing it, on every surface it is drawn on.
+
+    This screen's own line, and the transcript's two — the sources view's line
+    and the waiting job's block (`transcript.indexing_moved`). It used to be
+    this screen's alone, so somebody who left for the workspace mid-run saw
+    the sources view stuck on the count it was drawn with until they reloaded
+    the page (the user's report, 2026-09-23).
+    """
+    from portia.ui import transcript
+
+    _progress.refresh()
+    transcript.indexing_moved()
 
 
 def _profiled_note(done: int, failed: int) -> str:
@@ -3061,9 +3150,15 @@ def _leave(in_dialog: bool) -> None:
     # on the chat list with the job one more click away. A job still never
     # takes the screen by itself (`CHAT_SESSIONS.md` §3.5). This is a press,
     # on a button under a sentence about that job.
-    job = APP.live_job
+    # **And into the job that is waiting on profiling** *(2026-09-23)*: the
+    # button's caption says what is running, and the job holds the lines of
+    # it. With no job — the read switch off — the sources view has the same
+    # line and the same Stop, so that is where profiling is followed from.
+    job = APP.live_job or APP.profiling
     if job is not None:
         APP.show_chat(job)
+    elif APP.indexing_status:
+        APP.show_sources()
     APP.enter_workspace()
     app_module.shell.refresh()
 
@@ -3086,6 +3181,11 @@ async def _interpret_pending() -> None:
 
     while APP.interpret and APP.pending_interpret and not APP.busy:
         names, APP.pending_interpret = APP.pending_interpret, []
+        # The job that waited for this read, when profiling made one
+        # (`_waiting_job`); else the exchange opens a job of its own.
+        job = APP.profiling
+        if job is not None:
+            job.waiting = False
         APP.indexing_status = INTERPRETING.format(n=c.count(len(names), "source"))
         _redraw_progress()
         try:
@@ -3095,6 +3195,7 @@ async def _interpret_pending() -> None:
                 effort=APP.effort,
                 kind=state.INDEXING,
                 label=", ".join(names),
+                chat=job,
             )
         finally:
             APP.indexing_status = ""
@@ -3315,6 +3416,11 @@ NO_SUBFOLDERS = "No subfolders with readable data."
 NO_DATA_HERE = "nothing readable"
 MORE_FILES = "and {n} more"
 INTERPRETING = "The copilot is reading {n}. Open the workspace to follow it, or wait here."
+#: A job's name while profiling runs ahead of it; the read renames it by the
+#: batch (`runlog.job_title`).
+WAITING_TITLE = "Indexing {n}"
+STOPPED_NO_READ = "Stopped. Nothing was read."
+SWITCHED_OFF_NO_READ = "The copilot read is off. Nothing was read."
 DESTINATION_PLACEHOLDER = "the project root"
 DESTINATION_ROOT = "Leave empty to copy into the project root."
 PICK_WHICH = "Profile these files"

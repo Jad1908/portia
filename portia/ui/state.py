@@ -401,6 +401,19 @@ class Chat:
     #: knows. Both reset with the rows.
     settled: int = 0
     settled_slot: Any = None
+    #: **Profiling is running ahead of this job's exchange** *(2026-09-23)*. An
+    #: indexing job used to exist only from the moment its model turn started,
+    #: so for the ten minutes a warehouse took to profile there was nowhere to
+    #: stand: the way out of the add-data screen landed on the chat list with
+    #: nothing in it. The job is made when profiling starts now, waits here
+    #: with the profiling's lines in ``prelude``, and its exchange lands in
+    #: the same chat (`screens._waiting_job`). Cleared by the read starting,
+    #: or by the profiling ending with no read to follow.
+    waiting: bool = False
+    #: What profiling wrote into this job before its exchange: one line per
+    #: source as it went, and how it ended. Kept after the read starts, drawn
+    #: shut above the transcript, because it is what happened in this job.
+    prelude: list[str] = field(default_factory=list)
 
     @property
     def busy(self) -> bool:
@@ -433,8 +446,13 @@ class Chat:
 
     @property
     def started(self) -> bool:
-        """Whether anything has been sent — a chat with nothing in it is not listed."""
-        return bool(self.exchanges) or self.path is not None
+        """Whether anything has been sent — a chat with nothing in it is not listed.
+
+        A job waiting on profiling counts: it has no file yet and nothing sent,
+        and leaving it must not drop it (`App.show_chat`), because its exchange
+        is on its way.
+        """
+        return bool(self.exchanges) or self.path is not None or self.waiting
 
     @property
     def spent(self) -> float | None:
@@ -1661,6 +1679,12 @@ class App:
     def waiting(self) -> list[Chat]:
         """Every chat stopped on a decision — what the badges draw (§3.5)."""
         return [chat for chat in self.chats if chat.pending is not None]
+
+    @property
+    def profiling(self) -> Chat | None:
+        """The job waiting on profiling, if one is (`Chat.waiting`). At most one:
+        a batch indexed while another waits joins it rather than opening a second."""
+        return next((chat for chat in self.chats if chat.waiting), None)
 
     def chat_at(self, path: Path) -> Chat | None:
         """The in-process chat holding this log, if it has been opened here."""
