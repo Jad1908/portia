@@ -29,8 +29,16 @@ Each setting is one `c.setting` row: a title, what it does, and the control.
 
 The dialog is built once at page level — see `screens.build_add_dialog` for what
 happens to one created inside a refreshable — and its *contents* are the
-refreshable, so picking a theme can redraw the panel without rebuilding the
-overlay it is in.
+refreshable, so opening it can redraw the panel without rebuilding the overlay
+it is in.
+
+**A click redraws the section it is in and nothing around it** *(2026-09-23)*.
+Picking a section, a theme, an effort or a provider used to call
+`_panel.refresh()`, which rebuilt the title, the list and the Close button with
+the one section that changed: the whole card went out and came back for a
+press that meant *show me the next one*. The section is its own refreshable
+(`_section`), picking one moves the list's highlight on the rows that are
+already there, and `_panel.refresh()` runs only when the dialog opens.
 """
 
 from __future__ import annotations
@@ -154,6 +162,11 @@ _ICONS = {
 #: picking a theme does not throw you back to the first section.
 _TAB = TABS[0]
 
+#: The list's rows as last drawn, so picking a section moves the highlight on
+#: them rather than drawing the list again.
+_NAV_ROWS: dict[str, ui.element] = {}
+_SELECTED = "artifact-row--selected"
+
 
 @ui.refreshable
 def _panel() -> None:
@@ -172,15 +185,16 @@ def _panel() -> None:
         with ui.element("div").classes("settings-layout"):
             _nav()
             with ui.element("div").classes("settings-body"):
-                _BODY[_TAB]()
+                _section()
         with ui.element("div").classes("settings-foot"):
             c.button("Close", _close, kind="secondary")
 
 
 def _nav() -> None:
+    _NAV_ROWS.clear()
     with ui.element("div").classes("settings-nav"):
         for tab in TABS:
-            c.artifact_row(
+            _NAV_ROWS[tab] = c.artifact_row(
                 name=tab,
                 icon=_ICONS[tab],
                 selected=tab == _TAB,
@@ -188,10 +202,27 @@ def _nav() -> None:
             )
 
 
+@ui.refreshable
+def _section() -> None:
+    """The showing section's settings: the one part of the panel a click redraws."""
+    _BODY[_TAB]()
+
+
+def _redraw() -> None:
+    """After a control here changed something: this section, never the card around it."""
+    _section.refresh()
+
+
 def _show_tab(tab: str) -> None:
+    """Show another section: the highlight moves, and only the body is drawn again."""
     global _TAB
+    if tab == _TAB:
+        return
     _TAB = tab
-    _panel.refresh()
+    for name, row in _NAV_ROWS.items():
+        if not row.is_deleted:
+            row.classes(add=_SELECTED) if name == tab else row.classes(remove=_SELECTED)
+    _section.refresh()
 
 
 def _project() -> None:
@@ -256,7 +287,7 @@ def _providers() -> None:
     from portia.ui import providers as providers_ui
 
     with c.setting(providers_ui.TITLE, providers_ui.WHY):
-        providers_ui.section(_panel.refresh)
+        providers_ui.section()
 
 
 def _data() -> None:
@@ -353,7 +384,7 @@ def _mode_changed() -> None:
     """
     from portia.ui import transcript
 
-    _panel.refresh()
+    _redraw()
     transcript.pane.refresh()
 
 
@@ -365,17 +396,17 @@ def refresh_if_open() -> None:
     exists is the same as `_mode_changed`'s.
     """
     if _DIALOG is not None and not _DIALOG.is_deleted and _DIALOG.value:
-        _panel.refresh()
+        _redraw()
 
 
 def _set_theme(label: str) -> None:
     theme.set_mode(theme.MODE_VALUE[label])
-    _panel.refresh()
+    _redraw()
 
 
 def _set_effort(effort: str) -> None:
     APP.effort = effort
-    _panel.refresh()
+    _redraw()
 
 
 def _set_provider(kind: str) -> None:
@@ -383,7 +414,7 @@ def _set_provider(kind: str) -> None:
 
     APP.provider = kind
     APP.model = providers.get(kind).default_model
-    _panel.refresh()
+    _redraw()
     background_tasks.create(_list_models(kind))
 
 
@@ -397,7 +428,7 @@ async def _list_models(kind: str) -> None:
     from portia.ui import transcript
 
     await engine.list_models(APP, kind)
-    _panel.refresh()
+    _redraw()
     transcript.pane.refresh()
 
 

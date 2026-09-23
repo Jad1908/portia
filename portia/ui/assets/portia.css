@@ -1064,7 +1064,10 @@ body.body--dark .p-panel {
  * provider *inside* Copilot. A section taller than the box scrolls in
  * `settings-body`; the frame never moves (DESIGN.md → Layout stability). */
 .settings-panel {
-  width: 720px;
+  /* 840 rather than 720 since the Providers section (2026-09-23): a list and
+   * a detail side by side inside the body left the detail 240px, and its
+   * variable rows were a name, a box too narrow to read, and a button. */
+  width: 840px;
   max-width: 92vw;
 }
 .settings-layout {
@@ -1092,6 +1095,19 @@ body.body--dark .p-panel {
   padding-top: var(--sp-xs);
   overflow-y: auto;
 }
+/* A section scrolls; it is never squeezed. Flex items shrink by default, and a
+ * section taller than the box had its settings shrunk to share 480px, drawing
+ * each one's control over the title of the next (2026-09-23). */
+.settings-body > * {
+  flex-shrink: 0;
+}
+/* The effort segments' `spend-detail` is a full *line* in the composer's
+ * wrapping row (`flex: 1 0 100%`). Inside a `setting`, which is a column, the
+ * same 100% is a *height*: the row was sized to its setting and the segments
+ * sat on the next setting's title (2026-09-23, measured in Copilot). */
+.setting > .spend-detail {
+  flex: 0 0 auto;
+}
 .settings-foot {
   display: flex;
   justify-content: flex-end;
@@ -1107,13 +1123,20 @@ body.body--dark .p-panel {
   align-items: center;
   min-height: 24px;
 }
+/* Stretched to the body's width. A `setting` sizes its children to their
+ * content, and the content of a row whose status line never wraps is that
+ * whole line: the list grew to the longest sentence a provider said, and the
+ * detail was pushed past the right edge behind a scrollbar (2026-09-23). */
 .providers-layout {
   display: flex;
   gap: var(--sp-lg);
   align-items: flex-start;
+  align-self: stretch;
+  min-width: 0;
 }
 .providers-list {
-  flex: 0 0 236px;
+  flex: 0 0 216px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -1150,7 +1173,9 @@ body.body--dark .p-panel {
   font: var(--t-body-md);
   color: var(--ink);
 }
-.provider-row-state {
+/* Qualified by the row: `.row-gap-xs` is declared later at the same weight
+ * and its `wrap` won, so a long line put the light alone above it. */
+.provider-row .provider-row-state {
   align-items: center;
   min-width: 0;
   flex-wrap: nowrap;
@@ -1174,6 +1199,11 @@ body.body--dark .p-panel {
 }
 .provider-detail-head {
   align-items: center;
+}
+/* A button in the detail is its own width: the column stretches its children
+ * so the fields fill it, and *Start the server…* came out as a bar. */
+.provider-detail > .q-btn {
+  align-self: flex-start;
 }
 .provider-detail-head .provider-glyph {
   width: 18px;

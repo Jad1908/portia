@@ -1350,11 +1350,11 @@ def test_every_settings_tab_has_something_to_draw():
 
 
 def test_picking_a_setting_does_not_throw_you_back_to_the_first_tab(monkeypatch):
-    """Picking a theme or an effort refreshes the whole panel. If the showing tab
+    """Picking a theme or an effort redraws the section. If the showing tab
     were rebuilt with it, every pick would bounce you back to Project."""
     from portia.ui import settings
 
-    monkeypatch.setattr(settings._panel, "refresh", lambda *a, **k: None)
+    monkeypatch.setattr(settings._section, "refresh", lambda *a, **k: None)
     monkeypatch.setattr(settings.theme, "set_mode", lambda *a, **k: None)
     monkeypatch.setattr(settings, "_TAB", "Appearance")
 
@@ -1363,6 +1363,79 @@ def test_picking_a_setting_does_not_throw_you_back_to_the_first_tab(monkeypatch)
 
     settings._set_effort("high")
     assert settings._TAB == "Appearance"
+
+
+def test_a_click_in_settings_redraws_the_section_and_never_the_card(monkeypatch):
+    """Switching section, or changing a theme or an effort, used to rebuild the
+    whole panel, title and list and Close included (2026-09-23, the user: *the
+    whole card rerenders instead of just switching*). The section redraws; the
+    card around it is drawn when the dialog opens and at no other time."""
+    from portia.ui import settings
+
+    def card_redrawn(*a, **k):
+        raise AssertionError("the whole settings card was redrawn")
+
+    sections = []
+    monkeypatch.setattr(settings._panel, "refresh", card_redrawn)
+    monkeypatch.setattr(settings._section, "refresh", lambda *a, **k: sections.append(1))
+    monkeypatch.setattr(settings.theme, "set_mode", lambda *a, **k: None)
+    monkeypatch.setattr(settings, "_TAB", "Project")
+
+    settings._show_tab("Copilot")
+    settings._show_tab("Copilot")  # already showing: nothing to draw
+    settings._set_theme("light")
+    settings._set_effort("high")
+
+    assert settings._TAB == "Copilot"
+    assert len(sections) == 3
+
+
+def test_picking_a_provider_redraws_its_detail_and_nothing_else(monkeypatch):
+    """Settings → Providers: a click on a row switches the detail on the right.
+    It used to redraw the whole settings panel, rows and header included."""
+    from portia.ui import providers as providers_ui
+    from portia.ui.state import APP
+
+    def redrawn(what):
+        def fail(*a, **k):
+            raise AssertionError(f"{what} was redrawn")
+
+        return fail
+
+    details = []
+    monkeypatch.setattr(providers_ui._dashboard, "refresh", redrawn("the dashboard"))
+    monkeypatch.setattr(providers_ui._detail_view, "refresh", lambda *a, **k: details.append(1))
+    monkeypatch.setattr(APP, "provider_pick", "anthropic")
+
+    providers_ui._pick("codex")
+    providers_ui._pick("codex")
+
+    assert APP.provider_pick == "codex"
+    assert details == [1]
+
+
+def test_the_settings_body_lays_its_sections_out_as_the_composer_does_not():
+    """Three rules measured in a browser on 2026-09-23. The effort segments'
+    `spend-detail` is a full line in the composer's wrapping row, and inside a
+    `setting` (a column) the same 100% became a height, so the segments sat on
+    the next setting's title. A section is never squeezed to fit the box. And
+    the providers dashboard is stretched to the body, or its rows' unwrapped
+    status lines set its width and push the detail off the right edge."""
+    import re
+
+    from portia.ui import theme
+
+    css = theme.CSS.read_text(encoding="utf-8")
+
+    def block(selector):
+        found = re.search(re.escape(selector) + r" \{([^}]*)\}", css)
+        assert found, f"{selector} is not styled"
+        return found.group(1)
+
+    assert "flex: 0 0 auto" in block(".setting > .spend-detail")
+    assert "flex-shrink: 0" in block(".settings-body > *")
+    assert "align-self: stretch" in block(".providers-layout")
+    assert "flex-wrap: nowrap" in block(".provider-row .provider-row-state")
 
 
 def test_the_settings_sections_reuse_the_left_panes_row_vocabulary():

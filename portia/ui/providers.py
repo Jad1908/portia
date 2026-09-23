@@ -18,6 +18,13 @@ second, and the two are drawn apart.
 
 The state on `App` is read here and written by `ui/engine.py`; this module
 computes nothing (`CLAUDE.md` → `ui/engine.py`).
+
+**Picking a provider redraws its detail and nothing else** *(2026-09-23)*.
+Every control here used to redraw the whole settings panel, so a click on a
+row rebuilt the card it sat in. Three refreshables now, each the smallest
+thing a change can reach: `_dashboard` for a check, which changes every row,
+`_detail_view` for a pick or a variable, and a row's own line for its switch.
+The highlight moves on the rows already drawn, the settings nav's rule.
 """
 
 from __future__ import annotations
@@ -61,6 +68,12 @@ START_SERVER = "Start the server…"
 #: and what each is called on screen.
 _FIELDS = {"binary": (BINARY_WHAT, BINARY_WHY), "home": (HOME_WHAT, HOME_WHY)}
 
+#: The rows and their state lines as last drawn, by kind, so a pick moves the
+#: highlight and a switch rewrites one line without drawing the list again.
+_ROWS: dict[str, ui.element] = {}
+_LINES: dict[str, ui.label] = {}
+_SELECTED = "provider-row--selected"
+
 
 def ago(seconds: float | None) -> str:
     """*just now*, *3m ago*, *2h ago*: when the last check ran, for the header."""
@@ -81,17 +94,24 @@ def state_words(kind: str) -> tuple[str, str]:
     return (c.ON, REACHABLE) if status.reachable else (c.OFF, UNREACHABLE)
 
 
-def section(on_change) -> None:
+def section() -> None:
     """The whole section, inside the settings row that names it: the header, the list, the detail.
 
-    ``on_change`` redraws the settings panel; every control calls it after the
-    engine has written, so the panel never shows a value the file does not.
+    Every control redraws after the engine has written, so the section never
+    shows a value the file does not.
     """
-    settings = APP.provider_settings or engine.load_provider_settings(APP)
     if APP.providers_checked_at is None and not APP.providers_checking:
         # The first look runs the check by itself: a dashboard that opens on
         # *not checked yet* and a button is a dashboard that says nothing.
-        _check(on_change)
+        _check()
+    _dashboard()
+    c.caption(f"{SETTINGS_FILE} {providers.SETTINGS}")
+
+
+@ui.refreshable
+def _dashboard() -> None:
+    """The header, the list and the detail: what a check changes."""
+    settings = APP.provider_settings or engine.load_provider_settings(APP)
     with ui.element("div").classes("row-gap-sm providers-head"):
         checked = (
             None
@@ -103,43 +123,55 @@ def section(on_change) -> None:
             c.caption(CHECKING)
         else:
             c.caption(ago(checked))
-            c.button("", lambda: _check(on_change), icon="refresh", micro=True).tooltip(CHECK)
+            c.button("", _check, icon="refresh", micro=True).tooltip(CHECK)
+    _ROWS.clear()
+    _LINES.clear()
     with ui.element("div").classes("providers-layout"):
         with ui.element("div").classes("providers-list"):
             for kind in providers.KINDS:
-                _row(kind, settings[kind], on_change)
+                _row(kind, settings[kind])
         with ui.element("div").classes("provider-detail"):
-            _detail(APP.provider_pick, settings[APP.provider_pick], on_change)
-    c.caption(f"{SETTINGS_FILE} {providers.SETTINGS}")
+            _detail_view()
 
 
-def _row(kind: str, settings: providers.Settings, on_change) -> None:
-    provider = providers.get(kind)
-    light, word = state_words(kind)
+@ui.refreshable
+def _detail_view() -> None:
+    """The picked provider in full: what a pick, or a variable added or removed, changes."""
+    settings = APP.provider_settings or engine.load_provider_settings(APP)
+    _detail(APP.provider_pick, settings[APP.provider_pick])
+
+
+def _line(kind: str, enabled: bool) -> str:
+    """A row's one line of state: the measured word, or *not offered*, and what the provider said."""
     status = APP.provider_status.get(kind)
+    line = state_words(kind)[1] if enabled else DISABLED
+    if status is not None and status.detail:
+        line = f"{line} · {status.detail}"
+    return line
+
+
+def _row(kind: str, settings: providers.Settings) -> None:
+    provider = providers.get(kind)
+    light, _ = state_words(kind)
     selected = kind == APP.provider_pick
-    row = ui.element("div").classes(
-        "provider-row" + (" provider-row--selected" if selected else "")
-    )
+    row = ui.element("div").classes("provider-row" + (f" {_SELECTED}" if selected else ""))
     with row:
         c.provider_glyph(kind, tip=False)
         with ui.element("div").classes("provider-row-body"):
             ui.label(provider.label).classes("provider-row-name")
             with ui.element("div").classes("row-gap-xs provider-row-state"):
                 c.status_light(light)
-                line = word if settings.enabled else DISABLED
-                if status is not None and status.detail:
-                    line = f"{line} · {status.detail}"
-                c.caption(line).classes("provider-row-line")
+                _LINES[kind] = c.caption(_line(kind, settings.enabled)).classes("provider-row-line")
         switch = ui.switch().classes("p-toggle provider-row-switch")
         switch.value = settings.enabled
-        switch.on_value_change(lambda e, k=kind: _set_enabled(k, bool(e.value), on_change))
+        switch.on_value_change(lambda e, k=kind: _set_enabled(k, bool(e.value)))
         # The switch's own click must not also pick the row.
         switch.on("click.stop", lambda: None)
-    row.on("click", lambda k=kind: _pick(k, on_change))
+    row.on("click", lambda k=kind: _pick(k))
+    _ROWS[kind] = row
 
 
-def _detail(kind: str, settings: providers.Settings, on_change) -> None:
+def _detail(kind: str, settings: providers.Settings) -> None:
     provider = providers.get(kind)
     status = APP.provider_status.get(kind)
     light, word = state_words(kind)
@@ -177,7 +209,7 @@ def _detail(kind: str, settings: providers.Settings, on_change) -> None:
                 hint=why,
                 value=getattr(settings, name),
                 mono=True,
-                on_change=lambda e, k=kind, n=name: _set_field(k, n, str(e.value or ""), on_change),
+                on_change=lambda e, k=kind, n=name: _set_field(k, n, str(e.value or "")),
             )
     ui.label(VARIABLES).classes("setting-title")
     c.caption(VARIABLES_WHY)
@@ -190,15 +222,15 @@ def _detail(kind: str, settings: providers.Settings, on_change) -> None:
                 value=value,
                 mono=True,
                 secret=key.upper().endswith("KEY"),
-                on_change=lambda e, k=kind, n=key: _set_var(k, n, str(e.value or ""), on_change),
+                on_change=lambda e, k=kind, n=key: _set_var(k, n, str(e.value or "")),
             )
             box.classes("provider-var-value")
-            c.button(
-                "", lambda k=kind, n=key: _drop_var(k, n, on_change), icon="close", micro=True
-            ).tooltip(REMOVE)
+            c.button("", lambda k=kind, n=key: _drop_var(k, n), icon="close", micro=True).tooltip(
+                REMOVE
+            )
         if key in notes:
             c.caption(notes[key])
-    _adder(kind, on_change)
+    _adder(kind)
     unknown = [k for k in notes if k not in settings.env]
     if unknown:
         c.caption(KNOWN)
@@ -208,7 +240,7 @@ def _detail(kind: str, settings: providers.Settings, on_change) -> None:
         c.add_model_line(kind)
 
 
-def _adder(kind: str, on_change) -> None:
+def _adder(kind: str) -> None:
     """Two boxes and a button: a new variable, written on Add and never on a keystroke."""
     draft: dict[str, str] = {"name": "", "value": ""}
     with ui.element("div").classes("row-gap-sm provider-var provider-var-new"):
@@ -216,55 +248,63 @@ def _adder(kind: str, on_change) -> None:
         c.field(
             VALUE, mono=True, on_change=lambda e: draft.__setitem__("value", str(e.value or ""))
         )
-        c.button(ADD, lambda: _add_var(kind, draft, on_change), icon="add", micro=True)
+        c.button(ADD, lambda: _add_var(kind, draft), icon="add", micro=True)
 
 
 # --- what the controls do --------------------------------------------------------
 
 
-def _check(on_change) -> None:
+def _check() -> None:
     from nicegui import background_tasks
 
     async def go() -> None:
-        on_change()
+        _dashboard.refresh()
         await engine.check_providers(APP)
-        on_change()
+        _dashboard.refresh()
 
     background_tasks.create(go())
 
 
-def _pick(kind: str, on_change) -> None:
+def _pick(kind: str) -> None:
+    """Show another provider's detail: the highlight moves, and only the detail is drawn again."""
+    if kind == APP.provider_pick:
+        return
     APP.provider_pick = kind
-    on_change()
+    for name, row in _ROWS.items():
+        if not row.is_deleted:
+            row.classes(add=_SELECTED) if name == kind else row.classes(remove=_SELECTED)
+    _detail_view.refresh()
 
 
-def _set_enabled(kind: str, on: bool, on_change) -> None:
+def _set_enabled(kind: str, on: bool) -> None:
     engine.save_provider_settings(APP, kind, enabled=on)
-    on_change()
+    line = _LINES.get(kind)
+    if line is not None and not line.is_deleted:
+        line.set_text(_line(kind, on))
 
 
-def _set_field(kind: str, name: str, value: str, on_change) -> None:
+def _set_field(kind: str, name: str, value: str) -> None:
     engine.save_provider_settings(APP, kind, **{name: value.strip()})
 
 
-def _set_var(kind: str, key: str, value: str, on_change) -> None:
+def _set_var(kind: str, key: str, value: str) -> None:
     env = dict(APP.provider_settings[kind].env)
     env[key] = value
     engine.save_provider_settings(APP, kind, env=env)
 
 
-def _drop_var(kind: str, key: str, on_change) -> None:
+def _drop_var(kind: str, key: str) -> None:
     env = dict(APP.provider_settings[kind].env)
     env.pop(key, None)
     engine.save_provider_settings(APP, kind, env=env)
-    on_change()
+    _detail_view.refresh()
 
 
-def _add_var(kind: str, draft: dict[str, str], on_change) -> None:
+def _add_var(kind: str, draft: dict[str, str]) -> None:
     key = draft.get("name", "").strip()
     if not key:
         return
     env = dict(APP.provider_settings[kind].env)
     env[key] = draft.get("value", "")
     engine.save_provider_settings(APP, kind, env=env)
-    on_change()
+    _detail_view.refresh()
