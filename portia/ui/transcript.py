@@ -807,10 +807,8 @@ def _stop_indexing() -> None:
 
 
 def _set_indexing_effort(effort: str) -> None:
-    """Only the actions redraw — the list has not changed and rebuilding it
-    would scroll it back to the top for a control that sits below it."""
+    """Nothing redraws: the segment pressed has already moved (`c.segmented`)."""
     APP.effort = effort
-    _index_actions.refresh()
 
 
 def _set_indexing_provider(kind: str, model: str | None = None) -> None:
@@ -956,7 +954,6 @@ def _composer(chat) -> None:
     live = APP.live
     busy_here = chat is not None and chat.busy
     busy_elsewhere = live is not None and not busy_here
-    target = chat if chat is not None else APP
     c.rule()
     with ui.element("div").classes("p-pad stack-sm"):
         with ui.element("div").classes("composer"):
@@ -968,25 +965,9 @@ def _composer(chat) -> None:
             )
             for combination in SEND_KEYS:
                 field.on(combination, _go_from_key, js_handler=SEND_JS)
-            if APP.spend_alert is not None:
-                _spend_alert(*APP.spend_alert)
+            _spend_alert_slot()
             with ui.element("div").classes("composer-bar"):
-                with ui.element("div").classes("composer-spend"):
-                    parked = chat is not None and chat.open
-                    c.model_effort(
-                        target,
-                        _set_effort,
-                        effort_disabled=parked,
-                        on_provider=_set_provider,
-                        on_refresh=_list_models_clicked,
-                        on_start=_open_server_dialog,
-                        provider_fixed=parked,
-                    )
-                    # The third fact about how this message will run, beside
-                    # the other two (`c.approval_mode`). Read live by
-                    # `exchange.auto_allow`, so changing it applies to the
-                    # next write rather than the next chat.
-                    c.approval_mode(APP, _mode_changed)
+                _composer_spend(chat)
                 with ui.element("div").classes("composer-send"):
                     if busy_here:
                         # The spinner says it is alive and Stop names the only
@@ -1018,16 +999,69 @@ def _composer(chat) -> None:
                     c.caption(_busy_tip(live))
 
 
+@ui.refreshable
+def _composer_spend(chat) -> None:
+    """The provider, the model, the effort and the mode: what a pick in the composer redraws.
+
+    **Its own refreshable, not the pane** *(2026-09-23)*. A pick here redrew
+    `pane`, which is the chat list or the whole transcript above the composer:
+    161 elements rebuilt for an effort press on the list, measured, where the
+    press changed one segment.
+    """
+    parked = chat is not None and chat.open
+    with ui.element("div").classes("composer-spend"):
+        c.model_effort(
+            chat if chat is not None else APP,
+            _set_effort,
+            effort_disabled=parked,
+            on_provider=_set_provider,
+            on_refresh=_list_models_clicked,
+            on_start=_open_server_dialog,
+            provider_fixed=parked,
+        )
+        # The third fact about how this message will run, beside the other two
+        # (`c.approval_mode`). Read live by `exchange.auto_allow`, so changing
+        # it applies to the next write rather than the next chat.
+        _MODE_PICKER["composer"] = c.approval_mode(APP, _mode_changed)
+
+
+#: The composer's mode picker as drawn, so a mode moved elsewhere is shown in
+#: place (`show_mode`).
+_MODE_PICKER: dict[str, ui.select] = {}
+
+
+def show_mode() -> None:
+    """The mode moved somewhere else (Settings, a write card): the composer's picker says so."""
+    c.show_mode(_MODE_PICKER.get("composer"), APP)
+
+
+@ui.refreshable
+def _spend_alert_slot() -> None:
+    if APP.spend_alert is not None:
+        _spend_alert(*APP.spend_alert)
+
+
+def refresh_spend() -> None:
+    """Redraw this pane's pickers, the composer's and the Sources tab's, and nothing else.
+
+    For a provider or model moved here or somewhere else (Settings, the start
+    panel), and after a listing. Whichever of the two is not drawn is a no-op.
+    """
+    _spend_alert_slot.refresh()
+    _composer_spend.refresh()
+    _index_actions.refresh()
+
+
 def _mode_changed() -> None:
-    """The mode picker moved. Redraw the pane, and the settings panel if it is up.
+    """The mode picker moved: the settings panel's copy follows, if it is up.
 
     Two places show one setting (`CLAUDE.md` → `ui/settings.py`), and §14.4 is
-    what happens when one of them is left showing yesterday's value.
+    what happens when one of them is left showing yesterday's value. The
+    picker pressed shows its own value already, so nothing here is redrawn.
     """
     from portia.ui import settings
 
-    pane.refresh()
-    settings.refresh_if_open()
+    settings.show_mode()
 
 
 def _placeholder(chat) -> str:
@@ -1091,12 +1125,14 @@ def _exchange_banner(turn) -> None:
 
 
 def _set_effort(effort: str) -> None:
-    """The open chat's effort, or the default a new one starts with."""
+    """The open chat's effort, or the default a new one starts with.
+
+    Nothing is redrawn: the segment pressed has already moved (`c.segmented`).
+    """
     if APP.open is not None and APP.open.continuable:
         APP.open.effort = effort
     else:
         APP.effort = effort
-    pane.refresh()
 
 
 def _set_provider(kind: str, model: str | None = None) -> None:
@@ -1113,7 +1149,7 @@ def _set_provider(kind: str, model: str | None = None) -> None:
     target.provider = kind
     target.model = model or providers.get(kind).default_model
     APP.spend_alert = None
-    pane.refresh()
+    refresh_spend()
     background_tasks.create(_list_models(kind))
 
 
@@ -1131,7 +1167,7 @@ async def _list_models(kind: str) -> None:
     """
     from portia.ui import settings
 
-    await c.list_models_behind_picker(kind, pane.refresh, settings.refresh_if_open)
+    await c.list_models_behind_picker(kind, refresh_spend, settings.refresh_if_open)
 
 
 def list_models_in_background() -> None:
@@ -2229,7 +2265,23 @@ def _submit_answers(decision: Decision) -> None:
             ui.notify(_NOTHING_SAID)
             return
     decision.resolve(answers)
-    pane.refresh()
+    _decided()
+
+
+def _decided() -> None:
+    """A question answered or a write allowed: the card redraws as settled, and nothing else.
+
+    **The tail, not the pane** *(2026-09-23)*. Both redrew `pane`, which is the
+    whole transcript above the card and the composer below it, for a change to
+    the one card pressed. An undecided card is in the tail by construction
+    (`settled_before`), so the redraw a streamed event makes is the one this
+    needs: `exchange`'s, settle and then the tail.
+    """
+    chat = APP.open
+    if chat is not None and settle(chat):
+        tail_view.refresh()
+    else:
+        pane.refresh()
 
 
 def _answered(decision: Decision) -> None:
@@ -2335,7 +2387,9 @@ def _allow_all(decision: Decision) -> None:
 
     APP.autopilot = True
     _resolve_write(decision, True)
-    settings.refresh_if_open()
+    # The composer's mode picker says so too: redrawing the whole pane used to.
+    show_mode()
+    settings.show_mode()
 
 
 def _allow_always(decision: Decision) -> None:
@@ -2356,7 +2410,7 @@ def _allow_always(decision: Decision) -> None:
 
 def _resolve_write(decision: Decision, allowed: bool) -> None:
     decision.resolve(allowed)
-    pane.refresh()
+    _decided()
 
 
 def _resolved_write(decision: Decision) -> None:

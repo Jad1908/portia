@@ -212,6 +212,7 @@ def _workflow() -> None:
             _report_half()
 
 
+@ui.refreshable
 def _report_rail() -> None:
     """The way back to a closed report: what it is about, and a control to open it.
 
@@ -246,10 +247,62 @@ def _graph_half() -> None:
     with ui.element("div").classes("p-pane"):
         _graph_header(docs, placed)
         with ui.element("div").classes("graph-canvas"):
-            if placed.empty:
-                c.empty_note(_NO_SPECS)
-            else:
-                _graph(placed, docs, reads, hops)
+            _canvas(placed, docs, reads, hops)
+
+
+@ui.refreshable
+def _canvas(placed: graph.Layout, docs: dict, reads: dict, hops: dict[str, int]) -> None:
+    """What the canvas draws, inside the `.graph-canvas` that keeps the pan and zoom.
+
+    Its own refreshable for the table filter, whose ticks change what is drawn
+    and nothing else on the pane (`_set_visible_in_place`).
+    """
+    _STEP_ROWS.clear()
+    if placed.empty:
+        c.empty_note(_NO_SPECS)
+    else:
+        _graph(placed, docs, reads, hops)
+
+
+def _canvas_changed() -> None:
+    """A press on the canvas changed what it draws: its contents redraw, and nothing around them.
+
+    **A card press redrew the whole middle pane** *(until 2026-09-23)*: the
+    header, the filter, the zoom controls and the report with the one card
+    that opened, and `artifacts.pane` too, for the wash on one row. Opening a
+    card does move the grid, because cards are laid out by height, so the
+    canvas's contents redraw; the `.graph-canvas` around them keeps the pan and
+    zoom (`canvas.js`). Whatever else a press changes is its caller's to say.
+    """
+    _canvas.prune()
+    if not _canvas.targets:
+        pane.refresh()
+        return
+    docs, placed, reads = _layout()
+    _canvas.refresh(placed, docs, reads, _highlit(docs))
+    button = _VIEW_MENU.get("button")
+    if button is not None and not button.is_deleted:
+        button.set_text(_view_label(len(docs), len(placed.hidden)))
+    reset = _VIEW_MENU.get("reset")
+    if reset is not None and not reset.is_deleted:
+        reset.set_enabled(bool(APP.card_offsets))
+
+
+def _report_changed() -> None:
+    """Another spec picked: the report is about it now, open or shut."""
+    _report.refresh()
+    _report_rail.refresh()
+
+
+def _spec_changed() -> None:
+    """A card press picked another spec: the canvas, the report, the left pane's wash, the run bar."""
+    from portia.ui import app as app_module
+    from portia.ui import artifacts
+
+    _canvas_changed()
+    _report_changed()
+    artifacts.show_selection()
+    app_module.run_controls.refresh()
 
 
 def _layout(offsets: dict[str, tuple[int, int]] | None = None) -> tuple[dict, graph.Layout, dict]:
@@ -365,13 +418,11 @@ def _view_menu(docs: dict, placed: graph.Layout) -> None:
     keeps *Select all* and the count reachable instead of pushing them off the
     end of a menu.
     """
-    total = len(docs)
-    shown = total - len(placed.hidden)
-    label = (
-        _SHOWING_ALL.format(n=total) if not placed.hidden else _SHOWING.format(n=shown, of=total)
-    )
+    label = _view_label(len(docs), len(placed.hidden))
     button = c.button(label, None, icon="filter_list", micro=True)
     button.tooltip(_VIEW_TIP)
+    _VIEW_MENU.clear()
+    _VIEW_MENU["button"] = button
     with button:
         # **A trailing caret, because this one is easy to read as a caption.**
         # Every other control on this header is a verb or a glyph; this one is a
@@ -388,6 +439,29 @@ def _view_menu(docs: dict, placed: graph.Layout) -> None:
                     _view_row(name, docs[name], drawn)
 
 
+#: The filter menu as drawn, so a tick turns its rows and relabels its button
+#: in place and the menu stays open (`_set_visible_in_place`): the button, the
+#: head row's label, and per table ``row:<name>`` and ``tip:<name>``.
+_VIEW_MENU: dict[str, Any] = {}
+
+
+def _view_label(total: int, hidden: int) -> str:
+    return (
+        _SHOWING_ALL.format(n=total) if not hidden else _SHOWING.format(n=total - hidden, of=total)
+    )
+
+
+def _all_on(docs: dict) -> bool:
+    return APP.visible is None or set(APP.visible) >= set(docs)
+
+
+def _row_state(name: str, docs: dict) -> tuple[bool, bool]:
+    """``(on, chosen)``: drawn on the canvas, and ticked for itself rather than pulled in."""
+    if APP.visible is None:
+        return True, True
+    return name in graph.ancestry(docs, APP.visible), name in APP.visible
+
+
 def _select_all_row(docs: dict) -> None:
     """One toggle at the top: everything on, or everything off.
 
@@ -396,12 +470,13 @@ def _select_all_row(docs: dict) -> None:
     moment is the opposite one. Pinned above the scroll region because on a forty
     table project it is the row you most want to be able to reach.
     """
-    every = set(docs)
-    all_on = APP.visible is None or set(APP.visible) >= every
     with ui.element("div").classes("menu-row menu-row--head") as row:
         ui.icon("done_all").classes("menu-row-mark")
-        ui.label(_SELECT_NONE if all_on else _SELECT_ALL).classes("menu-row-name")
-    row.on("click", lambda: _select_all(not all_on))
+        _VIEW_MENU["head"] = ui.label(_SELECT_NONE if _all_on(docs) else _SELECT_ALL).classes(
+            "menu-row-name"
+        )
+    # Read at the press, not at the draw: the rows change under an open menu.
+    row.on("click", lambda: _select_all(not _all_on(engine.project_docs(APP))))
 
 
 def _view_row(name: str, doc: dict, drawn: set[str] | None) -> None:
@@ -421,9 +496,23 @@ def _view_row(name: str, doc: dict, drawn: set[str] | None) -> None:
         ui.element("div").classes("flex-1")
         if doc.get("layer"):
             c.chip(doc["layer"])
-    if on and not chosen:
-        row.tooltip(_VIEW_REQUIRED)
-    row.on("click", lambda n=name, v=on: _toggle_visible(n, not v))
+        # Always there, and silenced unless it applies, so a tick can turn it
+        # on or off in place.
+        tip = ui.tooltip(_VIEW_REQUIRED)
+    _silence(tip, not (on and not chosen))
+    _VIEW_MENU[f"row:{name}"] = row
+    _VIEW_MENU[f"tip:{name}"] = tip
+    row.on(
+        "click", lambda n=name: _toggle_visible(n, not _row_state(n, engine.project_docs(APP))[0])
+    )
+
+
+def _silence(tip: ui.tooltip, quiet: bool) -> None:
+    """A tooltip that no hover opens, or one that it does."""
+    if quiet:
+        tip.props("no-parent-event")
+    else:
+        tip.props(remove="no-parent-event")
 
 
 def _view_controls() -> None:
@@ -453,13 +542,14 @@ def _view_controls() -> None:
         c.button("Recenter", _recenter, icon="filter_center_focus", micro=True).tooltip(
             _RECENTER_TIP
         )
-        c.button(
+        _VIEW_MENU["reset"] = c.button(
             "Reset layout",
             reset_layout,
             icon="grid_on",
             micro=True,
             enabled=bool(APP.card_offsets),
-        ).tooltip(_RESET_LAYOUT_TIP)
+        )
+        _VIEW_MENU["reset"].tooltip(_RESET_LAYOUT_TIP)
 
 
 def _zoom_in() -> None:
@@ -497,18 +587,18 @@ def move_card(name: str, dx: int, dy: int) -> None:
         del offsets[name]
     _, placed, _ = _layout(offsets)
     if graph.overlapping(placed.nodes, name):
-        pane.refresh()
+        _canvas_changed()
         return
     APP.card_offsets = offsets
     engine.remember_layout(APP.root, offsets)
-    pane.refresh()
+    _canvas_changed()
 
 
 def reset_layout() -> None:
     """Every card back where the grid places it. The view is left where it is."""
     APP.card_offsets = {}
     engine.remember_layout(APP.root, {})
-    pane.refresh()
+    _canvas_changed()
 
 
 # --- the canvas --------------------------------------------------------------
@@ -838,6 +928,9 @@ def _step_row(position: int, step: dict) -> None:
         classes += " model-step--selected"
 
     with ui.element("div").classes(classes) as row:
+        if not blocking:
+            # A blocked row is never drawn selected, so it is never moved.
+            _STEP_ROWS.append((step_id, row))
         c.caption(str(position)).classes("model-step-n")
         ui.label(step_id).classes("model-row-name").tooltip(step_id)
         ui.element("div").classes("flex-1")
@@ -872,31 +965,49 @@ def _report_half() -> None:
     on the one screen where a step is reviewed before it is trusted.
     """
     with ui.element("div").classes("p-pane"):
-        _report_head()
-        # Keyed to the spec it reports on: selecting a step rebuilds this to move
-        # one highlight, and reading a twelve-step report should not mean being
-        # returned to step one every time you click a card (`c.scroll_area`).
-        with c.scroll_area(f"report:{spec_label(APP.spec_path)}", classes="p-pad stack-md"):
-            if APP.running:
-                # The same mark the action bar carries, and the same instance of
-                # it: `progress_note` is one refreshable drawn in both places, so
-                # the two cannot end up a second apart on the same run.
-                from portia.ui import app as app_module
+        _report()
 
-                app_module.progress_note()
-            if APP.run_error:
-                _run_error()
-            blocks = _blocks()
-            if not blocks:
-                c.empty_note(_NO_STEPS)
-                return
-            if APP.results:
-                _run_header()
-            elif not APP.running and not APP.run_error:
-                c.caption(_NOT_RUN)
-            for step, result in blocks:
+
+@ui.refreshable
+def _report() -> None:
+    """The report's head and its blocks: what picking another spec on the canvas redraws."""
+    _BLOCKS.clear()
+    _report_head()
+    # Keyed to the spec it reports on, so a redraw of this for another
+    # reason keeps where you were reading (`c.scroll_area`).
+    with c.scroll_area(f"report:{spec_label(APP.spec_path)}", classes="p-pad stack-md"):
+        if APP.running:
+            # The same mark the action bar carries, and the same instance of
+            # it: `progress_note` is one refreshable drawn in both places, so
+            # the two cannot end up a second apart on the same run.
+            from portia.ui import app as app_module
+
+            app_module.progress_note()
+        if APP.run_error:
+            _run_error()
+        blocks = _blocks()
+        if not blocks:
+            c.empty_note(_NO_STEPS)
+            return
+        if APP.results:
+            _run_header()
+        elif not APP.running and not APP.run_error:
+            c.caption(_NOT_RUN)
+        for step, result in blocks:
+            # A slot per block, so picking a step redraws the block it
+            # shuts and the one it opens and nothing else (`_select_step`).
+            with ui.element("div").classes("contents") as slot:
                 _step_block(step, result)
-            _journal_section()
+            _BLOCKS[step["id"]] = (slot, step, result)
+        _journal_section()
+
+
+#: The report's blocks as drawn, by step id: the slot each sits in and what drew it.
+_BLOCKS: dict[str, tuple[ui.element, dict, Any]] = {}
+#: The canvas cards' step rows as drawn, by step id, for the selected wash. Several
+#: cards can name the same step, and each is lit as it always was.
+_STEP_ROWS: list[tuple[str, ui.element]] = []
+_STEP_SELECTED = "model-step--selected"
 
 
 def _journal_section() -> None:
@@ -2113,8 +2224,28 @@ def _select_step(step_id: str) -> None:
     the point of there being one panel now: a card and a block are two views of
     a step, not two things to keep in sync.
     """
+    before = APP.selected_step
     APP.pick_step(step_id)
-    pane.refresh()
+    for picked, row in list(_STEP_ROWS):
+        if row.is_deleted:
+            continue
+        if picked == APP.selected_step:
+            row.classes(add=_STEP_SELECTED)
+        else:
+            row.classes(remove=_STEP_SELECTED)
+    for changed in {before, APP.selected_step} - {None}:
+        drawn = _BLOCKS.get(str(changed))
+        if drawn is None:
+            continue
+        slot, step, result = drawn
+        if slot.is_deleted:
+            pane.refresh()
+            return
+        # The block shutting and the block opening, each in its own slot: the
+        # rest of the report, and the canvas, stay as they are.
+        slot.clear()
+        with slot:
+            _step_block(step, result)
 
 
 def _open_model(name: str) -> None:
@@ -2125,9 +2256,6 @@ def _open_model(name: str) -> None:
     you asked to look inside that table, and having to click twice because the
     last click was on something else is the kind of state the canvas should hide.
     """
-    from portia.ui import app as app_module
-    from portia.ui import artifacts
-
     already_open = APP.spec_path is not None and APP.spec_path.stem == name
     if already_open and name in APP.expanded:
         APP.expanded = APP.expanded - {name}
@@ -2142,9 +2270,9 @@ def _open_model(name: str) -> None:
     if path is not None and not already_open:
         engine.select_spec(path, APP)
         APP.select(SPEC, path.name)
-    pane.refresh()
-    artifacts.pane.refresh()
-    app_module.run_controls.refresh()
+        _spec_changed()
+    else:
+        _canvas_changed()
 
 
 def _select_source(name: str) -> None:
@@ -2152,8 +2280,10 @@ def _select_source(name: str) -> None:
     from portia.ui import artifacts
 
     APP.select(SOURCE, name)
+    # The middle pane is about the file now, so it is drawn whole; the tree
+    # only moves its wash.
     pane.refresh()
-    artifacts.pane.refresh()
+    artifacts.show_selection()
 
 
 def _open_input(model: str, table: str) -> None:
@@ -2163,7 +2293,7 @@ def _open_input(model: str, table: str) -> None:
     always about one arrow. Clicking the open one shuts it.
     """
     APP.open_input = None if APP.open_input == (model, table) else (model, table)
-    pane.refresh()
+    _canvas_changed()
 
 
 def open_edge(value: str) -> None:
@@ -2187,7 +2317,9 @@ def open_edge(value: str) -> None:
     if path is not None and (APP.spec_path is None or APP.spec_path.stem != target):
         engine.select_spec(path, APP)
         APP.select(SPEC, path.name)
-    pane.refresh()
+        _spec_changed()
+    else:
+        _canvas_changed()
 
 
 def _toggle_visible(name: str, on: bool) -> None:
@@ -2205,7 +2337,7 @@ def _toggle_visible(name: str, on: bool) -> None:
         chosen |= {name}
     else:
         chosen -= graph.descendants(docs, [name])
-    _set_visible(frozenset(chosen))
+    _set_visible_in_place(frozenset(chosen))
 
 
 def _reveal_preview() -> None:
@@ -2220,11 +2352,11 @@ def _reveal_preview() -> None:
     docs = engine.project_docs(APP)
     if name not in docs:
         APP.previewing = None
-        pane.refresh()
+        _canvas_changed()
         return
     chosen = set(APP.visible) if APP.visible is not None else set(docs)
     APP.previewing = None
-    _set_visible(frozenset(chosen | graph.ancestry(docs, [name])))
+    _set_visible_in_place(frozenset(chosen | graph.ancestry(docs, [name])))
 
 
 def _select_all(on: bool) -> None:
@@ -2234,13 +2366,38 @@ def _select_all(on: bool) -> None:
     been chosen* and a table added to the project later is drawn without anyone
     having to re-tick anything (`graph._visible`).
     """
-    _set_visible(None if on else frozenset())
+    _set_visible_in_place(None if on else frozenset())
 
 
-def _set_visible(visible: frozenset[str] | None) -> None:
+def _set_visible_in_place(visible: frozenset[str] | None) -> None:
+    """A tick in the table filter: the canvas redraws, and the open menu stays open.
+
+    **It redrew the whole middle pane** *(until 2026-09-23)*, which rebuilt the
+    button the menu hangs from, so every tick shut the menu it was made in and
+    narrowing a forty-table canvas was forty trips to the button. Now the
+    canvas's contents redraw (`_canvas`), and the menu's rows, its head row and
+    the button's count are set in place.
+    """
     APP.visible = visible
     engine.remember_view(APP.root, visible)
-    pane.refresh()
+    button = _VIEW_MENU.get("button")
+    if button is None or button.is_deleted:
+        pane.refresh()
+        return
+    docs, placed, reads = _layout()
+    _canvas.refresh(placed, docs, reads, _highlit(docs))
+    button.set_text(_view_label(len(docs), len(placed.hidden)))
+    head = _VIEW_MENU.get("head")
+    if head is not None and not head.is_deleted:
+        head.set_text(_SELECT_NONE if _all_on(docs) else _SELECT_ALL)
+    for name in docs:
+        row, tip = _VIEW_MENU.get(f"row:{name}"), _VIEW_MENU.get(f"tip:{name}")
+        if row is None or row.is_deleted:
+            continue
+        on, chosen = _row_state(name, docs)
+        row.classes(add="menu-row--on") if on else row.classes(remove="menu-row--on")
+        if tip is not None and not tip.is_deleted:
+            _silence(tip, not (on and not chosen))
 
 
 def _result(step_id: str) -> Any | None:

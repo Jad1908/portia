@@ -35,7 +35,10 @@ coloured, sized or ordered by anything measured (`DESIGN.md`).
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
+from typing import Any
 
 from nicegui import ui
 
@@ -116,11 +119,41 @@ def pane() -> None:
     an unkeyed rebuild would send a long list back to the top each time you
     clicked something near the bottom of it (`components.scroll_area`).
     """
+    _SELECTABLE.clear()
     with c.scroll_area("artifacts"):
         _pinned()
         _tree()
         _warehouse_section()
     _add_data_affordance()
+
+
+#: Every row drawn that can be the selected one, with the question that says
+#: whether it is, so a selection made somewhere else moves the wash in place.
+_SELECTABLE: list[tuple[ui.element, Callable[[], bool]]] = []
+_SELECTED_ROW = "artifact-row--selected"
+
+
+def _row(is_selected: Callable[[], bool], **fields: Any) -> ui.element:
+    """`c.artifact_row` for a row that can be the selected one, remembered with its question."""
+    row = c.artifact_row(selected=is_selected(), **fields)
+    _SELECTABLE.append((row, is_selected))
+    return row
+
+
+def show_selection() -> None:
+    """Move the selected wash across the rows already drawn, and redraw none of them.
+
+    **For a selection made on the canvas** *(2026-09-23)*: pressing a card
+    picks its spec, and the tree has nothing else to say about it, so
+    redrawing this pane for one highlight rebuilt every row in it. Each row is
+    asked its own question again (`_row`).
+    """
+    _SELECTABLE[:] = [(row, ask) for row, ask in _SELECTABLE if not row.is_deleted]
+    for row, ask in _SELECTABLE:
+        if ask():
+            row.classes(add=_SELECTED_ROW)
+        else:
+            row.classes(remove=_SELECTED_ROW)
 
 
 # --- the warehouse (`docs/CONNECTOR.md` §2.13) -------------------------------
@@ -201,24 +234,24 @@ def _warehouse_node(node: tree.Node, depth: int) -> None:
         # spec until 2026-09-07, which left no way to see or ask for what portia
         # had measured about a table it had itself built.
         entry = catalog.load_models(APP.portia_dir).get(node.ident) or {}
-        row = c.artifact_row(
+        row = _row(
+            partial(APP.is_selected, BUILT, node.ident),
             name=node.name,
             icon=ICON[MODEL],
             depth=depth,
             note="" if catalog.is_profiled(entry) else NOT_PROFILED_NOTE,
-            selected=APP.is_selected(BUILT, node.ident),
             on_click=lambda n=node.ident: _select(BUILT, n),
         )
         c.enters(row, f"warehouse:{node.rel}")
         return
     if node.kind == state.SOURCE:
         entry = APP.sources.get(node.ident) or {}
-        row = c.artifact_row(
+        row = _row(
+            partial(APP.is_selected, SOURCE, node.ident),
             name=node.name,
             icon=ICON[SOURCE],
             depth=depth,
             note="" if catalog.is_profiled(entry) else NOT_PROFILED_NOTE,
-            selected=APP.is_selected(SOURCE, node.ident),
             on_click=lambda n=node.ident: _select(SOURCE, n),
         )
         # A table just scoped in from the add-data picker arrives (`c.enters`).
@@ -339,10 +372,10 @@ def _brief_row() -> None:
     dialog it used to live in. A paragraph you are meant to rewrite with the
     sources on screen beside it is not a thing to type into an overlay.
     """
-    row = c.artifact_row(
+    row = _row(
+        lambda: APP.is_selected(BRIEF, ""),
         name="Project brief",
         icon="notes",
-        selected=APP.is_selected(BRIEF, ""),
         on_click=lambda: _select(BRIEF, ""),
     )
     # The one tooltip left in this pane, because it is the one that says
@@ -363,14 +396,14 @@ def _pipeline_row() -> None:
     to itself. It is selected when nothing else is — the canvas is the pane's
     resting state, not a fourth kind of artifact.
     """
-    c.artifact_row(
-        name="Pipeline",
-        icon="account_tree",
+    _row(
         # A chart tab in front of the canvas means the canvas is not what you are
         # looking at, even though nothing on the left is selected. Reading
         # `selection` alone lit this row while a chart was on screen
         # (`docs/VISUALIZATION.md` §3.2).
-        selected=APP.selection is None and APP.active.get(APP.focus_group) == state.CANVAS,
+        lambda: APP.selection is None and APP.active.get(APP.focus_group) == state.CANVAS,
+        name="Pipeline",
+        icon="account_tree",
         on_click=_show_pipeline,
     )
 
@@ -399,10 +432,10 @@ def _knowledge_row() -> None:
     (`KNOWLEDGE_GRAPH.md` §6.9). Two rows, so neither has to pretend to be the
     other.
     """
-    c.artifact_row(
+    _row(
+        lambda: APP.is_selected(KNOWLEDGE, ""),
         name="Knowledge graph",
         icon="hub",
-        selected=APP.is_selected(KNOWLEDGE, ""),
         on_click=lambda: _select(KNOWLEDGE, ""),
     )
 
@@ -460,11 +493,11 @@ def _figures_header(saved: list[dict]) -> None:
     figure out of a folder has somewhere to land.
     """
     count = len(saved) + sum(1 for chart in APP.charts if not chart.saved)
-    row = c.artifact_row(
+    row = _row(
+        lambda: APP.is_selected(state.FIGURES, ""),
         name=GALLERY,
         icon="photo_library",
         meta=str(count) if count else "",
-        selected=APP.is_selected(state.FIGURES, ""),
         on_click=_toggle_gallery,
     )
     row.props('data-folder=""')
@@ -487,12 +520,12 @@ def _unsaved_row(chart) -> None:
     Not draggable. There is nowhere on disk to drag it *to* until it is saved,
     and a drag that silently saved would be a write nobody asked for.
     """
-    row = c.artifact_row(
+    row = _row(
+        partial(_showing, chart.key),
         name=chart.name,
         icon="error_outline" if chart.error else "insert_chart_outlined",
         note=chart.question,
         depth=1,
-        selected=_showing(chart.key),
         # One press previews it, two open it for keeps — `assets/pick.js` decides
         # which, before either reaches the server. Its identity here is the
         # chart's **position**, because a chart's name is a sentence the agent
@@ -595,16 +628,16 @@ def _figure_row(figure: dict, depth: int) -> None:
     reason: the rows are rebuilt between the press and the release.
     """
     path = figure["path"]
-    row = c.artifact_row(
-        name=figure.get("name") or Path(path).stem,
-        icon="insert_chart_outlined",
-        note=figure.get("notes") or "",
-        depth=depth,
+    row = _row(
         # **A figure is a tab, so the row is lit by the strip and not by the
         # selection** (§6.4). Selecting it would have put the picture in tab zero
         # and stood down whichever chart was in front of it, which is the pane
         # ignoring a click that was about neither.
-        selected=_showing(path),
+        partial(_showing, path),
+        name=figure.get("name") or Path(path).stem,
+        icon="insert_chart_outlined",
+        note=figure.get("notes") or "",
+        depth=depth,
         opens=f"figure:{path}",
     )
     row.props(f"draggable=true data-figure={c.prop_value(path)}")
@@ -897,13 +930,13 @@ def _folder(node: tree.Node, depth: int, stale: set[str]) -> None:
 
 
 def _file(node: tree.Node, depth: int, stale: set[str]) -> None:
-    row = c.artifact_row(
+    row = _row(
+        partial(APP.is_selected, node.kind, node.ident),
         name=node.name,
         icon=ICON.get(node.kind, ICON[UNINDEXED]),
         meta=_meta(node),
         note=_note(node, stale),
         depth=depth,
-        selected=APP.is_selected(node.kind, node.ident),
         # A spec is driven by `assets/pick.js`, which resolves click-versus-double
         # before either reaches the server. Wiring `on_click` as well would send
         # the light action a second time on the second press of a double.

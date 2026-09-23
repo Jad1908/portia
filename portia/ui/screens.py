@@ -678,10 +678,21 @@ def _in_repo() -> None:
     """
     with ui.element("div").classes("add-section"):
         _section_head(IN_REPO_HEADING)
-        if APP.data_dir and not APP.repicking:
-            _chosen_folder()
-        else:
-            _picker()
+        _repo_body()
+
+
+@ui.refreshable
+def _repo_body() -> None:
+    """The chosen folder's files, or the browser for picking one: what a folder press redraws.
+
+    **Browsing is this section's business and no other's** *(2026-09-23)*.
+    Every folder opened, every crumb, *Change…* and *Keep* redrew the whole
+    add-data card, the importer, the read switch and the buttons with it.
+    """
+    if APP.data_dir and not APP.repicking:
+        _chosen_folder()
+    else:
+        _picker()
 
 
 def _section_head(title: str) -> None:
@@ -956,7 +967,7 @@ def _tick(rel: str, on: bool) -> None:
 
 def _browse_to(rel: str) -> None:
     APP.browse_at = rel
-    _refresh()
+    _repo_body.refresh()
 
 
 def _choose_folder(rel: str) -> None:
@@ -972,19 +983,23 @@ def _choose_folder(rel: str) -> None:
     APP.repicking = False
     APP.indexed = None
     _seed_ticks()
-    _refresh()
+    # The files, and the button that counts them. The rest of the card is
+    # about other things.
+    _repo_body.refresh()
+    _progress.refresh()
+    _actions.refresh()
 
 
 def _repick() -> None:
     APP.repicking = True
     APP.browse_at = Path(APP.data_dir).parent.as_posix() if "/" in APP.data_dir else ""
     APP.browse_at = "" if APP.browse_at == "." else APP.browse_at
-    _refresh()
+    _repo_body.refresh()
 
 
 def _keep_folder() -> None:
     APP.repicking = False
-    _refresh()
+    _repo_body.refresh()
 
 
 def _seed_ticks() -> None:
@@ -1142,9 +1157,15 @@ def _warehouse_route() -> None:
     """
     with ui.element("div").classes("add-section"):
         _section_head(WAREHOUSE_HEADING)
-        _connection_state()
-        if APP.connected:
-            _scope_picker()
+        _warehouse_body()
+
+
+@ui.refreshable
+def _warehouse_body() -> None:
+    """The connection's line and the tree: what a listing, or a connect, redraws."""
+    _connection_state()
+    if APP.connected:
+        _scope_picker()
 
 
 def _connection_state() -> None:
@@ -1307,8 +1328,8 @@ async def _list_databases() -> None:
     has just closed under it, so the client is taken off the page if there is
     one and the listing goes ahead either way."""
     client = _page_client()
-    await _listing(client, engine.browse_remote(APP, "", _refresh))
-    _refresh()
+    await _listing(client, engine.browse_remote(APP, "", _warehouse_body.refresh))
+    _warehouse_body.refresh()
 
 
 async def _toggle_scope(key: str) -> None:
@@ -1550,51 +1571,130 @@ def _connect_panel() -> None:
     *optional* beside its label and nothing more; a failure is an `alert` above
     the button that failed.
     """
-    busy = APP.connection_status == state.CONNECTING
-    saved = engine.connection_suggestions()
-    picked = next((s for s in saved if s["name"] == APP.connect_pick), None)
     with ui.element("div").classes("p-panel p-panel--prose"):
         with ui.element("div").classes("p-panel-head"):
             ui.label(CONNECT_TITLE).classes("t-heading-md")
-            # One line, and only on the form: where what is typed there goes is
-            # the one thing on this dialog no title or mark can say. The list
-            # of connections and the list of providers explain themselves.
-            if APP.connect_new and _provider_of(APP.connect_form) is not None:
-                ui.label(CONNECT_SUB).classes("p-panel-sub")
+            _connect_sub()
         with ui.element("div").classes("p-panel-body"):
             if APP.connect_note:
                 c.alert(APP.connect_note, kind="info")
-            if APP.connect_new:
-                _connect_form()
-            else:
-                _connect_pick(saved, picked)
-            if (APP.connect_new and _provider_of(APP.connect_form)) or picked is not None:
-                _project_fields()
-            if APP.connect_error:
-                c.alert(APP.connect_error, kind="error")
-            elif busy:
-                with ui.element("div").classes("connect-state"):
-                    ui.spinner(size="sm")
-                    ui.label(CONNECTING_NOTE.format(name=_connect_target().get("name") or ""))
+            _connect_view()
+            _connect_status()
         with ui.element("div").classes("p-panel-actions"):
-            with ui.element("div").classes("row-gap-sm"):
-                c.button(
-                    CONNECTING_GO if busy else CONNECT_GO,
-                    _connect_now,
-                    kind="primary",
-                    icon=DATABASE_KIND_ICON,
-                    enabled=not busy
-                    and (
-                        (APP.connect_new and _provider_of(APP.connect_form) is not None)
-                        or picked is not None
-                    ),
-                )
-                if APP.connect_new and saved:
-                    c.button(SAVED_CONNECTIONS, _back_to_pick, kind="secondary", enabled=not busy)
-                c.button(CONNECT_CANCEL, _cancel_connect, kind="secondary", enabled=not busy)
+            _connect_actions()
 
 
-def _connect_pick(saved: list[dict[str, str]], picked: dict[str, str] | None) -> None:
+# **Each press redraws the part it changed** *(2026-09-23, the user: "every
+# floating card gets a full refresh when it's clicked")*. Every press here used
+# to redraw `_connect_panel`, title and buttons included. Now the panel is drawn
+# when the dialog opens; switching between the saved list, the providers and a
+# form redraws `_connect_view`, the line under the title and the buttons; a
+# saved row picked moves the wash, redraws the password box (`_pick_secret`)
+# and shows the project's half; a sign-in method picked turns the fields' *required* words
+# in place and redraws the password box (`_auth_secret`); and Connect redraws
+# the state line and the buttons.
+
+
+def _picked_saved() -> dict[str, str] | None:
+    return next((s for s in engine.connection_suggestions() if s["name"] == APP.connect_pick), None)
+
+
+def _can_connect() -> bool:
+    if APP.connect_new:
+        return _provider_of(APP.connect_form) is not None
+    return _picked_saved() is not None
+
+
+@ui.refreshable
+def _connect_sub() -> None:
+    # One line, and only on the form: where what is typed there goes is the one
+    # thing on this dialog no title or mark can say. The list of connections
+    # and the list of providers explain themselves.
+    if APP.connect_new and _provider_of(APP.connect_form) is not None:
+        ui.label(CONNECT_SUB).classes("p-panel-sub")
+
+
+@ui.refreshable
+def _connect_view() -> None:
+    """The saved list or the form, and the project's half under either."""
+    if APP.connect_new:
+        _connect_form()
+        if _provider_of(APP.connect_form) is not None:
+            _project_fields()
+    else:
+        _connect_pick(engine.connection_suggestions())
+
+
+@ui.refreshable
+def _connect_status() -> None:
+    """The failure, or the session being opened: what Connect changes in the body."""
+    if APP.connect_error:
+        c.alert(APP.connect_error, kind="error")
+    elif APP.connection_status == state.CONNECTING:
+        with ui.element("div").classes("connect-state"):
+            ui.spinner(size="sm")
+            ui.label(CONNECTING_NOTE.format(name=_connect_target().get("name") or ""))
+
+
+#: Connect, kept so a pick can light it without the row of buttons being redrawn.
+_CONNECT_GO: ui.button | None = None
+#: Whether the row as drawn carries *Saved connections*: the one thing a view
+#: switch can change about the row besides whether Connect is lit.
+_CONNECT_BACK = False
+
+
+def _wants_back() -> bool:
+    return APP.connect_new and bool(engine.connection_suggestions())
+
+
+@ui.refreshable
+def _connect_actions() -> None:
+    global _CONNECT_GO, _CONNECT_BACK
+    busy = APP.connection_status == state.CONNECTING
+    _CONNECT_BACK = _wants_back()
+    with ui.element("div").classes("row-gap-sm"):
+        _CONNECT_GO = c.button(
+            CONNECTING_GO if busy else CONNECT_GO,
+            _connect_now,
+            kind="primary",
+            icon=DATABASE_KIND_ICON,
+            enabled=not busy and _can_connect(),
+        )
+        if _CONNECT_BACK:
+            c.button(SAVED_CONNECTIONS, _back_to_pick, kind="secondary", enabled=not busy)
+        c.button(CONNECT_CANCEL, _cancel_connect, kind="secondary", enabled=not busy)
+
+
+def _connect_view_changed() -> None:
+    """Saved list, providers or form: the body and the line under the title.
+
+    The buttons are redrawn only when *Saved connections* comes or goes;
+    otherwise Connect is lit or darkened in place.
+    """
+    had_error = bool(APP.connect_error)
+    APP.connect_error = ""
+    _connect_sub.refresh()
+    _connect_view.refresh()
+    if had_error:
+        _connect_status.refresh()
+    _light_connect()
+
+
+def _light_connect() -> None:
+    """Connect lit when there is something to connect to, with the rest of the row kept."""
+    go = _CONNECT_GO
+    if go is None or go.is_deleted or _wants_back() != _CONNECT_BACK:
+        _connect_actions.refresh()
+        return
+    go.set_enabled(APP.connection_status != state.CONNECTING and _can_connect())
+
+
+#: The saved rows as last drawn, by name, so a pick moves the wash in place.
+_SAVED_ROWS: dict[str, ui.element] = {}
+_SAVED_PICKED = "connect-pick-row--selected"
+
+
+def _connect_pick(saved: list[dict[str, str]]) -> None:
     """The saved connections as rows, the last row starting a new one.
 
     A row carries the name, who into what account, and how it signs in. The
@@ -1604,13 +1704,15 @@ def _connect_pick(saved: list[dict[str, str]], picked: dict[str, str] | None) ->
     """
     from portia.connectors import registry
 
+    _SAVED_ROWS.clear()
     with ui.element("div").classes("connect-pick"):
         for s in saved:
             provider = registry.PROVIDERS.get(s.get("kind") or "")
-            selected = picked is not None and s["name"] == picked["name"]
+            selected = s["name"] == APP.connect_pick
             row = ui.element("div").classes(
-                "connect-pick-row" + (" connect-pick-row--selected" if selected else "")
+                "connect-pick-row" + (f" {_SAVED_PICKED}" if selected else "")
             )
+            _SAVED_ROWS[s["name"]] = row
             with row:
                 _provider_mark(provider)
                 ui.label(s["name"]).classes("connect-pick-name")
@@ -1621,6 +1723,23 @@ def _connect_pick(saved: list[dict[str, str]], picked: dict[str, str] | None) ->
             ui.icon("add").classes("connect-pick-icon")
             ui.label(NEW_CONNECTION).classes("connect-pick-name")
         row.on("click", lambda _e: _start_new())
+    _pick_secret()
+    # The project's half is the same whichever row is picked, so it is drawn
+    # once and shown with the first pick rather than redrawn on every one.
+    with ui.element("div").classes("contents") as project:
+        _project_fields()
+    project.set_visibility(_picked_saved() is not None)
+    _PICK_PROJECT["half"] = project
+
+
+#: The project's half under the saved list, shown in place by the first pick.
+_PICK_PROJECT: dict[str, ui.element] = {}
+
+
+@ui.refreshable
+def _pick_secret() -> None:
+    """The picked connection's password or token box, when its sign-in needs one."""
+    picked = _picked_saved()
     secret = _secret_label(picked) if picked is not None else None
     if secret:
         _secret_field(secret)
@@ -1670,6 +1789,22 @@ def _connect_form() -> None:
     with ui.element("div").classes("connect-auth"):
         ui.label("Sign in with").classes("field-label")
         c.segmented([a.label for a in provider.auth], provider.auth_of(auth).label, _set_auth)
+    _auth_fields()
+
+
+#: The provider's fields as drawn, by key, so a sign-in method picked can say
+#: which it needs without the boxes being typed into being redrawn.
+_AUTH_BOXES: dict[str, ui.input] = {}
+
+
+def _auth_fields() -> None:
+    """The fields and the password box: what a sign-in method decides."""
+    form = APP.connect_form
+    provider = _provider_of(form)
+    if provider is None:
+        return
+    auth = form.get("auth") or provider.default_auth
+    _AUTH_BOXES.clear()
     with ui.element("div").classes("field-grid"):
         key, label, required, placeholder = NAME_FIELD
         c.field(
@@ -1684,7 +1819,7 @@ def _connect_form() -> None:
         # under the other two (`registry.Auth.needs`).
         needed = set(provider.auth_of(auth).needs)
         for f in provider.fields:
-            c.field(
+            _AUTH_BOXES[f.key] = c.field(
                 f.label,
                 required=f.required or f.key in needed,
                 value=form.get(f.key, ""),
@@ -1692,7 +1827,15 @@ def _connect_form() -> None:
                 mono=f.mono,
                 on_change=lambda e, k=f.key: form.__setitem__(k, e.value or ""),
             )
-    secret = provider.auth_of(auth).secret
+    _auth_secret()
+
+
+@ui.refreshable
+def _auth_secret() -> None:
+    provider = _provider_of(APP.connect_form)
+    if provider is None:
+        return
+    secret = provider.auth_of(APP.connect_form.get("auth") or provider.default_auth).secret
     if secret:
         _secret_field(secret)
 
@@ -1713,8 +1856,7 @@ def _pick_provider(kind: str) -> None:
     from portia.connectors import registry
 
     APP.connect_form = {"kind": kind, "auth": registry.PROVIDERS[kind].default_auth}
-    APP.connect_error = ""
-    _connect_panel.refresh()
+    _connect_view_changed()
 
 
 def _project_fields() -> None:
@@ -1753,29 +1895,51 @@ def _connect_target() -> dict[str, str]:
 
 
 def _pick(name: str) -> None:
+    """A saved row: the wash moves, what hangs under the list follows, Connect lights."""
+    if name == APP.connect_pick:
+        return
     APP.connect_pick = name
-    APP.connect_error = ""
-    _connect_panel.refresh()
+    c.mark_selected(_SAVED_ROWS, name, _SAVED_PICKED)
+    _pick_secret.refresh()
+    project = _PICK_PROJECT.get("half")
+    if project is not None and not project.is_deleted:
+        project.set_visibility(True)
+    if APP.connect_error:
+        APP.connect_error = ""
+        _connect_status.refresh()
+    _light_connect()
 
 
 def _start_new() -> None:
     APP.connect_new = True
     APP.connect_form = _blank_form()
-    APP.connect_error = ""
-    _connect_panel.refresh()
+    _connect_view_changed()
 
 
 def _back_to_pick() -> None:
     APP.connect_new = False
-    APP.connect_error = ""
-    _connect_panel.refresh()
+    _connect_view_changed()
 
 
 def _set_auth(label: str) -> None:
+    """The segment has moved itself (`c.segmented`). Which fields are required
+    follows in place, and the password box comes or goes."""
     provider = _provider_of(APP.connect_form)
-    if provider is not None:
-        APP.connect_form["auth"] = next(a.key for a in provider.auth if a.label == label)
-    _connect_panel.refresh()
+    if provider is None:
+        return
+    auth = next(a for a in provider.auth if a.label == label)
+    APP.connect_form["auth"] = auth.key
+    for f in provider.fields:
+        box = _AUTH_BOXES.get(f.key)
+        if box is not None and not box.is_deleted:
+            c.set_required(box, f.required or f.key in set(auth.needs))
+    _auth_secret.refresh()
+
+
+def _connect_state_changed() -> None:
+    """Connect pressed, failed or under way: the state line and the buttons, nothing else."""
+    _connect_status.refresh()
+    _connect_actions.refresh()
 
 
 def _cancel_connect() -> None:
@@ -1805,20 +1969,20 @@ async def _connect_now() -> None:
         engine.save_connection(form, agent_writes=APP.connect_agent_writes, app=APP)
     except ValueError as exc:
         APP.connect_error = str(exc)
-        _connect_panel.refresh()
+        _connect_state_changed()
         return
     wanted = _secret_label(form)
     secret = APP.connect_secret.strip() or None
     if wanted and not secret:
         APP.connect_error = f"{wanted} is required for this sign-in."
-        _connect_panel.refresh()
+        _connect_state_changed()
         return
     APP.connect_error = ""
-    _connect_panel.refresh()
+    _connect_state_changed()
     ok = await engine.connect_project(APP, secret=secret)
     if not ok:
         APP.connect_error = APP.connection_status.removeprefix("failed: ")
-        _connect_panel.refresh()
+        _connect_state_changed()
         return
     APP.connect_form = {}
     APP.connect_note = ""
@@ -1826,7 +1990,10 @@ async def _connect_now() -> None:
     APP.warehouse_open = True
     app_module.shell.refresh()
     artifacts.pane.refresh()
-    _refresh()
+    # The add-data card under the closed dialog: its connection line, and the
+    # tree the listing below fills. Not the card.
+    _warehouse_body.refresh()
+    _actions.refresh()
     await _list_databases()
 
 
@@ -1879,7 +2046,7 @@ def open_server_dialog(kind: str = "") -> None:
 
     The one whole redraw the panel gets: it is shut, and it opens on the saved
     configuration. Everything after, a pick, a keystroke, Start, redraws the
-    part it changed and nothing else (`_server_model`, `_server_state`).
+    part it changed and nothing else (`_server_path`, `_server_state`).
     """
     from portia.agent.providers import llamacpp
 
@@ -1913,7 +2080,7 @@ def _server_panel() -> None:
     is the provider's own sentence with the log's last lines under the fields.
 
     **Three parts, each redrawn alone** *(2026-09-23, the Settings pass
-    applied here)*: the model section when the path field is opened or shut,
+    applied here)*: the path box when it is opened or shut (`_server_path`),
     the state (the alert and the buttons) on Start and Stop, and the command
     line in place on every change. The whole card was redrawn on each pick and
     on every state change, which rebuilt the box under the pointer.
@@ -1965,15 +2132,15 @@ def _server_default(key: str) -> int:
 
 #: Whether the path field is open under the model select: a model kept outside
 #: the registry, or a repository. Set when the panel opens, flipped by the
-#: toggle, and read by `_server_model` alone.
+#: toggle, and read by `_server_path` alone.
 _SERVER_ELSEWHERE = False
 #: The inputs a start in progress disables, set in place rather than redrawn.
 _SERVER_INPUTS: list[Any] = []
 _SERVER_SELECT: ui.select | None = None
 _SERVER_PATH: ui.input | None = None
+_SERVER_TOGGLE: ui.button | None = None
 
 
-@ui.refreshable
 def _server_model() -> None:
     """The model: a select over the registry, and the path field behind a toggle.
 
@@ -1987,7 +2154,7 @@ def _server_model() -> None:
     """
     from portia.agent.providers import llamacpp
 
-    global _SERVER_SELECT, _SERVER_PATH
+    global _SERVER_SELECT, _SERVER_TOGGLE
     registry = llamacpp.registry_models()
     options = {str(p): llamacpp.display_name(str(p)) for p in registry}
     current = APP.server_form.get("model", "")
@@ -2012,26 +2179,38 @@ def _server_model() -> None:
         _SERVER_SELECT = select
         _SERVER_INPUTS.append(select)
     with ui.element("div").classes("row-gap-xs server-elsewhere-head"):
-        toggle = c.button(
+        _SERVER_TOGGLE = c.button(
             SERVER_ELSEWHERE,
             _toggle_elsewhere,
             icon="remove" if _SERVER_ELSEWHERE else "add",
             micro=True,
         )
         c.help_tip(SERVER_MODEL_HINT)
-    _SERVER_INPUTS.append(toggle)
+    _SERVER_INPUTS.append(_SERVER_TOGGLE)
+    _server_path()
+
+
+@ui.refreshable
+def _server_path() -> None:
+    """The path box behind *Path or repository*: the one part its toggle redraws."""
+    from portia.agent.providers import llamacpp
+
+    global _SERVER_PATH
     _SERVER_PATH = None
-    if _SERVER_ELSEWHERE:
-        with ui.element("div").classes("settings-customize server-elsewhere"):
-            _SERVER_PATH = c.field(
-                "",
-                value="" if current in options else current,
-                placeholder=SERVER_PATH_PLACEHOLDER,
-                mono=True,
-                on_change=lambda e: _server_path_typed(e.value),
-            )
-            _SERVER_PATH.props("spellcheck=false autocomplete=off")
-            _SERVER_INPUTS.append(_SERVER_PATH)
+    if not _SERVER_ELSEWHERE:
+        return
+    current = APP.server_form.get("model", "")
+    names = {str(p) for p in llamacpp.registry_models()}
+    with ui.element("div").classes("settings-customize server-elsewhere"):
+        _SERVER_PATH = c.field(
+            "",
+            value="" if current in names else current,
+            placeholder=SERVER_PATH_PLACEHOLDER,
+            mono=True,
+            on_change=lambda e: _server_path_typed(e.value),
+        )
+        _SERVER_PATH.props("spellcheck=false autocomplete=off")
+        _SERVER_INPUTS.append(_SERVER_PATH)
 
 
 def _server_select_empty(select: ui.select, words: str | None) -> None:
@@ -2061,7 +2240,9 @@ def _toggle_elsewhere() -> None:
     current = APP.server_form.get("model", "")
     if not _SERVER_ELSEWHERE and current not in {str(p) for p in llamacpp.registry_models()}:
         _server_field("model", "")
-    _server_model.refresh()
+    if _SERVER_TOGGLE is not None and not _SERVER_TOGGLE.is_deleted:
+        _SERVER_TOGGLE.set_icon("remove" if _SERVER_ELSEWHERE else "add")
+    _server_path.refresh()
     _server_busy()
 
 
@@ -2217,9 +2398,9 @@ def _redraw_pickers() -> None:
     """Every place the picker is drawn: the composer, the add-data screen, Settings."""
     from portia.ui import settings, transcript
 
-    transcript.pane.refresh()
+    transcript.refresh_spend()
     settings.refresh_if_open()
-    panel.refresh()
+    _interpret_controls.refresh()
 
 
 # --- route two: data that is not in the repo yet ----------------------------
@@ -2399,15 +2580,24 @@ def _profile_toggle() -> None:
     and the caption under the Index button repeats it.
     """
     with ui.element("div").classes("add-section add-section--cost"):
-        (
-            ui.switch(PROFILE_SWITCH)
-            .classes("p-toggle")
-            .bind_value(APP, "profile_on_add")
-            .on_value_change(_refresh)
-        )
+        switch = ui.switch(PROFILE_SWITCH).classes("p-toggle").bind_value(APP, "profile_on_add")
         # Caption size, not the hint's 13px: one line under a switch, which the
         # switch's own label already introduces (the user's call, 2026-09-18).
-        c.caption(PROFILE_ON_COST if APP.profile_on_add else PROFILE_OFF_COST)
+        cost = c.caption(PROFILE_ON_COST if APP.profile_on_add else PROFILE_OFF_COST)
+        switch.on_value_change(lambda: _profile_switched(cost))
+
+
+def _profile_switched(cost: ui.label) -> None:
+    """The line under the switch says the new cost in place; the note under Index follows.
+
+    It redrew the whole card *(until 2026-09-23)*, the tree of tables being
+    ticked included.
+    """
+    if not cost.is_deleted:
+        cost.set_text(PROFILE_ON_COST if APP.profile_on_add else PROFILE_OFF_COST)
+    if APP.scope_ticks:
+        # The note under Index says what a press does with the ticked tables.
+        _actions.refresh()
 
 
 def _interpret_toggle() -> None:
@@ -2428,18 +2618,31 @@ def _interpret_toggle() -> None:
             # this off has to take them away rather than leave a dead setting.
             .on_value_change(_interpret_switched)
         )
-        if APP.interpret:
-            with ui.element("div").classes("cost-controls"):
-                c.model_effort(
-                    APP,
-                    _set_indexing_effort,
-                    on_provider=_set_indexing_provider,
-                    on_refresh=_list_models_clicked,
-                    on_start=open_server_dialog,
-                )
+        _interpret_controls()
         remote = APP.data_mode == state.WAREHOUSE_DATA
         # The profile switch's size, so the two cost cards read as a pair.
         c.caption(INTERPRET_COST_REMOTE if remote else INTERPRET_COST)
+
+
+@ui.refreshable
+def _interpret_controls() -> None:
+    """The model and effort the read spends: what the switch and a provider pick redraw."""
+    if APP.interpret:
+        with ui.element("div").classes("cost-controls"):
+            c.model_effort(
+                APP,
+                _set_indexing_effort,
+                on_provider=_set_indexing_provider,
+                on_refresh=_list_models_clicked,
+                on_start=open_server_dialog,
+                on_model=_model_picked,
+            )
+
+
+def _model_picked() -> None:
+    from portia.ui import transcript
+
+    transcript.refresh_spend()
 
 
 async def _interpret_switched() -> None:
@@ -2450,24 +2653,31 @@ async def _interpret_switched() -> None:
     off and turning it on afterwards is the same request as indexing with it on,
     and the alternative is a screen where the switch does nothing until you
     index something else.
+
+    Only the controls the switch shows or hides are redrawn, and not the card.
     """
-    _refresh()
+    _interpret_controls.refresh()
     await _interpret_pending()
 
 
 def _set_indexing_effort(effort: str) -> None:
+    """The segment has moved itself (`c.segmented`); the composer's copy follows."""
+    from portia.ui import transcript
+
     APP.effort = effort
-    _refresh()
+    transcript.refresh_spend()
 
 
 def _set_indexing_provider(kind: str, model: str | None = None) -> None:
     from nicegui import background_tasks
 
     from portia.agent import providers
+    from portia.ui import transcript
 
     APP.provider = kind
     APP.model = model or providers.get(kind).default_model
-    _refresh()
+    _interpret_controls.refresh()
+    transcript.refresh_spend()
     background_tasks.create(_list_models(kind))
 
 
@@ -2478,7 +2688,7 @@ def _list_models_clicked(kind: str) -> None:
 
 
 async def _list_models(kind: str) -> None:
-    await c.list_models_behind_picker(kind, _refresh)
+    await c.list_models_behind_picker(kind, _interpret_controls.refresh)
 
 
 def _stop_indexing() -> None:

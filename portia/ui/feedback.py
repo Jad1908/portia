@@ -134,8 +134,7 @@ def _panel() -> None:
                 ui.label(WRITTEN_LABEL).classes("field-label")
                 written = ui.textarea().classes("p-field p-editor p-field-mono w-full")
                 written.props("borderless autogrow").bind_value(_FORM, "written")
-            if _FORM.notice:
-                c.alert(_FORM.notice, kind="info")
+            _notice()
         with ui.element("div").classes("p-panel-actions"):
             with ui.element("div").classes("row-gap-sm"):
                 c.button(ON_GITHUB, _post, kind="secondary", icon="public").tooltip(ON_GITHUB_TIP)
@@ -148,11 +147,21 @@ def _panel() -> None:
                 c.caption(ADDRESS.format(address=feedback.EMAIL))
 
 
+@ui.refreshable
+def _notice() -> None:
+    if _FORM.notice:
+        c.alert(_FORM.notice, kind="info")
+
+
 def _set_include(on: bool) -> None:
-    """The switch moved: rewrite what portia wrote, and keep what the user typed."""
+    """The switch moved: rewrite what portia wrote, and keep what the user typed.
+
+    Nothing is redrawn *(2026-09-23)*: the box is bound to ``_FORM.written``,
+    so setting it is the update. Redrawing the panel rebuilt the card around
+    the switch that was pressed.
+    """
     _FORM.include = on
     _FORM.written = _written()
-    _panel.refresh()
 
 
 def _heading() -> str:
@@ -164,7 +173,7 @@ def _post() -> None:
     if trimmed:
         ui.clipboard.write(_FORM.written)
         _FORM.notice = TRIMMED
-        _panel.refresh()
+        _notice.refresh()
     ui.navigate.to(url, new_tab=True)
 
 

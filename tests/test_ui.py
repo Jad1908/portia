@@ -1352,9 +1352,10 @@ def test_every_settings_tab_has_something_to_draw():
 def test_picking_a_setting_does_not_throw_you_back_to_the_first_tab(monkeypatch):
     """Picking a theme or an effort redraws the section. If the showing tab
     were rebuilt with it, every pick would bounce you back to Project."""
-    from portia.ui import settings
+    from portia.ui import settings, transcript
 
     monkeypatch.setattr(settings._section, "refresh", lambda *a, **k: None)
+    monkeypatch.setattr(transcript, "refresh_spend", lambda: None)
     monkeypatch.setattr(settings.theme, "set_mode", lambda *a, **k: None)
     monkeypatch.setattr(settings, "_TAB", "Appearance")
 
@@ -1365,29 +1366,93 @@ def test_picking_a_setting_does_not_throw_you_back_to_the_first_tab(monkeypatch)
     assert settings._TAB == "Appearance"
 
 
-def test_a_click_in_settings_redraws_the_section_and_never_the_card(monkeypatch):
-    """Switching section, or changing a theme or an effort, used to rebuild the
-    whole panel, title and list and Close included (2026-09-23, the user: *the
-    whole card rerenders instead of just switching*). The section redraws; the
-    card around it is drawn when the dialog opens and at no other time."""
-    from portia.ui import settings
+def test_a_click_in_settings_redraws_what_it_changed_and_never_the_card(monkeypatch):
+    """Switching section used to rebuild the whole panel, title and list and
+    Close included (2026-09-23, the user: *the whole card rerenders instead of
+    just switching*); then a theme or an effort rebuilt the whole section (the
+    user again, the same day: *every floating card gets a full refresh when it's
+    clicked*). Only a section switch redraws the section. A theme and an effort
+    redraw nothing, and a provider redraws `_spend` alone."""
+    from portia.ui import settings, transcript
 
-    def card_redrawn(*a, **k):
-        raise AssertionError("the whole settings card was redrawn")
+    def redrawn(what):
+        def fail(*a, **k):
+            raise AssertionError(f"{what} was redrawn")
 
-    sections = []
-    monkeypatch.setattr(settings._panel, "refresh", card_redrawn)
+        return fail
+
+    sections, spends, behind = [], [], []
+    monkeypatch.setattr(settings._panel, "refresh", redrawn("the whole settings card"))
     monkeypatch.setattr(settings._section, "refresh", lambda *a, **k: sections.append(1))
+    monkeypatch.setattr(settings._spend, "refresh", lambda *a, **k: spends.append(1))
+    monkeypatch.setattr(transcript, "refresh_spend", lambda: behind.append(1))
     monkeypatch.setattr(settings.theme, "set_mode", lambda *a, **k: None)
+    from nicegui import background_tasks
+
+    monkeypatch.setattr(background_tasks, "create", lambda coroutine: coroutine.close())
     monkeypatch.setattr(settings, "_TAB", "Project")
 
     settings._show_tab("Copilot")
     settings._show_tab("Copilot")  # already showing: nothing to draw
+    assert sections == [1]
+
+    monkeypatch.setattr(settings._section, "refresh", redrawn("the settings section"))
     settings._set_theme("light")
     settings._set_effort("high")
-
+    assert spends == [] and behind == [1], "the effort moves itself; the composer follows"
+    settings._set_provider("anthropic")
+    assert spends == [1], "a provider changes the spend setting, and only that"
     assert settings._TAB == "Copilot"
-    assert len(sections) == 3
+
+
+def test_a_setting_that_only_moves_a_highlight_moves_it_in_place():
+    """The segments, the theme cards and the settings rail all move a class on
+    the elements already drawn (`c.mark_selected`); none of them is rebuilt."""
+    import inspect
+
+    from portia.ui import settings
+
+    with ui.element("div"):
+        rows = {k: ui.element("div").classes("row") for k in ("a", "b", "c")}
+    rows["a"].classes(add="picked")
+    c.mark_selected(rows, "c", "picked")
+    assert ["picked" in r.classes for r in rows.values()] == [False, False, True]
+
+    assert "mark_selected(" in inspect.getsource(c.segmented)
+    assert "c.mark_selected(" in inspect.getsource(settings._set_theme)
+    assert "c.mark_selected(" in inspect.getsource(settings._show_tab)
+    for fn in (settings._set_theme, settings._set_effort):
+        assert "_section.refresh()" not in inspect.getsource(fn), fn.__name__
+    # *Customize* shows and hides what it folds; the section redraw left in it
+    # is for a panel whose elements are already gone.
+    assert "folded.set_visibility(_CUSTOMIZING)" in inspect.getsource(settings._toggle_customize)
+
+
+def test_a_segment_pressed_moves_its_wash_before_the_caller_hears():
+    from nicegui.events import ClickEventArguments, handle_event
+
+    picked = []
+    with ui.element("div") as slot:
+        c.segmented(["low", "high"], "low", picked.append)
+    buttons = [e for e in slot.descendants() if isinstance(e, ui.button)]
+    click = next(x for x in buttons[1]._event_listeners.values() if x.type == "click")
+    handle_event(click.handler, ClickEventArguments(sender=buttons[1], client=buttons[1].client))
+    assert picked == ["high"]
+    assert ["seg-active" in b.classes for b in buttons] == [False, True]
+
+
+def test_a_field_turns_required_in_place():
+    """The connect dialog's sign-in method decides which fields are required,
+    and picking one turns the word beside each rather than redrawing the boxes
+    somebody is typing into."""
+    with ui.element("div") as slot:
+        box = c.field("Key file")
+    word = next(e for e in slot.descendants() if isinstance(e, ui.label) and e.text == "optional")
+    c.set_required(box, True)
+    assert word.text == "required" and "field-required" in word.classes
+    assert "field-optional" not in word.classes
+    c.set_required(box, False)
+    assert word.text == "optional" and "field-optional" in word.classes
 
 
 def test_picking_a_provider_redraws_its_detail_and_nothing_else(monkeypatch):
@@ -1402,8 +1467,10 @@ def test_picking_a_provider_redraws_its_detail_and_nothing_else(monkeypatch):
 
         return fail
 
+    import inspect
+
     details = []
-    monkeypatch.setattr(providers_ui._dashboard, "refresh", redrawn("the dashboard"))
+    monkeypatch.setattr(providers_ui._head, "refresh", redrawn("the header"))
     monkeypatch.setattr(providers_ui._detail_view, "refresh", lambda *a, **k: details.append(1))
     monkeypatch.setattr(APP, "provider_pick", "anthropic")
 
@@ -1412,6 +1479,14 @@ def test_picking_a_provider_redraws_its_detail_and_nothing_else(monkeypatch):
 
     assert APP.provider_pick == "codex"
     assert details == [1]
+    # **The list is never redrawn after the section is** (2026-09-23): the
+    # dashboard is not a refreshable, a check sets each row's light and line in
+    # place, and a variable added or removed redraws the variables alone.
+    assert not hasattr(providers_ui._dashboard, "refresh")
+    assert "c.set_light(" in inspect.getsource(providers_ui._checked)
+    for fn in (providers_ui._add_var, providers_ui._drop_var):
+        source = inspect.getsource(fn)
+        assert "_variables.refresh()" in source and "_detail_view" not in source, fn.__name__
 
 
 def test_the_settings_body_lays_its_sections_out_as_the_composer_does_not():
@@ -1451,7 +1526,9 @@ def test_the_providers_detail_says_what_a_field_is_for_on_hover():
 
     from portia.ui import providers as providers_ui
 
-    source = inspect.getsource(providers_ui._detail)
+    source = inspect.getsource(providers_ui._detail) + inspect.getsource(
+        providers_ui._variables.func
+    )
     assert "hint=" not in source
     assert "help=why" in source
     assert "c.help_tip(notes[key])" in source
@@ -3075,6 +3152,24 @@ def _canvas_project(tmp_path: Path, *, index: bool = True) -> App:
     return app
 
 
+def _quiet_canvas(monkeypatch) -> None:
+    """Stub the redraws a canvas press makes, which need a running page to reach.
+
+    The pane's own is already stubbed by each test; these are the parts a press
+    redraws in its place (`workflow._canvas_changed`, `_spec_changed`).
+    """
+    from portia.ui import app as app_module
+    from portia.ui import workflow
+
+    for part in (
+        workflow._canvas,
+        workflow._report,
+        workflow._report_rail,
+        app_module.run_controls,
+    ):
+        monkeypatch.setattr(part, "refresh", lambda *a, **k: None)
+
+
 def _drawn(app: App):
     """Render the canvas half and hand back its elements, with a class helper."""
     from portia.ui import workflow
@@ -3167,6 +3262,7 @@ def test_clicking_an_arrow_opens_its_target_at_that_input(tmp_path, monkeypatch)
     app.expanded = frozenset()
     with _as_app(workflow, app):
         workflow.pane.refresh = lambda *a, **k: None
+        _quiet_canvas(monkeypatch)
         workflow.open_edge("mart|stg")
     assert "mart" in app.expanded
     assert app.open_input == ("mart", "stg")
@@ -3182,6 +3278,7 @@ def test_hiding_a_table_takes_everything_built_from_it(tmp_path, monkeypatch):
     app = _canvas_project(tmp_path)
     with _as_app(workflow, app):
         workflow.pane.refresh = lambda *a, **k: None
+        _quiet_canvas(monkeypatch)
         workflow._toggle_visible("stg", False)
     assert app.visible == frozenset()
     assert graph.project_layout(engine_module.project_docs(app), visible=app.visible).empty
@@ -3196,6 +3293,7 @@ def test_hiding_a_leaf_leaves_what_it_was_built_from(tmp_path, monkeypatch):
     app = _canvas_project(tmp_path)
     with _as_app(workflow, app):
         workflow.pane.refresh = lambda *a, **k: None
+        _quiet_canvas(monkeypatch)
         workflow._toggle_visible("mart", False)
     assert app.visible == frozenset({"stg"})
     els, klass = _drawn(app)
@@ -3211,10 +3309,115 @@ def test_select_all_is_a_toggle_between_everything_and_nothing(tmp_path, monkeyp
     app = _canvas_project(tmp_path)
     with _as_app(workflow, app):
         workflow.pane.refresh = lambda *a, **k: None
+        _quiet_canvas(monkeypatch)
         workflow._select_all(False)
         assert app.visible == frozenset(), "off is a set, and it is empty"
         workflow._select_all(True)
     assert app.visible is None, "on is *nothing chosen*, so a new table is drawn too"
+
+
+def test_a_tick_in_the_table_filter_keeps_the_menu_and_redraws_the_canvas(tmp_path, monkeypatch):
+    """Every tick redrew the whole middle pane, which rebuilt the button the
+    menu hangs from, so the menu shut after each one (2026-09-23). The canvas
+    redraws, and the menu's rows and the button's count are set in place."""
+    from portia.ui import workflow
+
+    monkeypatch.setattr(engine_module, "VIEWS", tmp_path / "views.json")
+    monkeypatch.chdir(tmp_path)
+    app = _canvas_project(tmp_path)
+    els, klass = _drawn(app)
+    rows = {
+        e.text: e
+        for e in els
+        if "menu-row-name" in klass(e) and "menu-row--head" not in klass(e.parent_slot.parent)
+    }
+    assert set(rows) >= {"stg", "mart"}
+
+    def pane_redrawn(*a, **k):
+        raise AssertionError("the whole middle pane was redrawn")
+
+    canvases = []
+    monkeypatch.setattr(workflow.pane, "refresh", pane_redrawn)
+    monkeypatch.setattr(workflow._canvas, "refresh", lambda *a, **k: canvases.append(a))
+    with _as_app(workflow, app):
+        workflow._toggle_visible("mart", False)
+    assert canvases, "the canvas redraws"
+    mart = rows["mart"].parent_slot.parent
+    assert "menu-row--on" not in mart.classes, "the row says off, in place"
+    button = workflow._VIEW_MENU["button"]
+    assert button.text == workflow._SHOWING.format(n=1, of=2)
+
+
+def test_a_press_on_a_canvas_card_redraws_the_canvas_and_not_the_pane(tmp_path, monkeypatch):
+    """A card press redrew the whole middle pane and the whole left pane
+    (2026-09-23: 463 of 701 elements for one card opened, measured). The
+    canvas's contents redraw, because an open card moves the grid; the report
+    redraws when the press picked another spec; the tree only moves its wash."""
+    import inspect
+
+    from portia.ui import artifacts, workflow
+
+    def body(fn) -> str:
+        source = inspect.getsource(fn)
+        return source.split('"""')[-1] if source.count('"""') >= 2 else source
+
+    for fn in (
+        workflow._open_model,
+        workflow._select_step,
+        workflow._open_input,
+        workflow.open_edge,
+        workflow.move_card,
+        workflow.reset_layout,
+        workflow._reveal_preview,
+    ):
+        code = body(fn)
+        assert "artifacts.pane.refresh()" not in code, fn.__name__
+        # `_select_step`'s one pane redraw is for a report whose slots are gone.
+        if fn is not workflow._select_step:
+            assert "pane.refresh()" not in code, fn.__name__
+    assert "artifacts.show_selection()" in body(workflow._spec_changed)
+
+    # Opening a card on the spec already open: the canvas, and nothing else.
+    monkeypatch.chdir(tmp_path)
+    app = _canvas_project(tmp_path)
+    _drawn(app)
+
+    def redrawn(what):
+        def fail(*a, **k):
+            raise AssertionError(f"{what} was redrawn")
+
+        return fail
+
+    canvases = []
+    monkeypatch.setattr(workflow.pane, "refresh", redrawn("the middle pane"))
+    monkeypatch.setattr(artifacts.pane, "refresh", redrawn("the left pane"))
+    monkeypatch.setattr(workflow._report, "refresh", redrawn("the report"))
+    monkeypatch.setattr(workflow._canvas, "refresh", lambda *a, **k: canvases.append(1))
+    app.spec_path = tmp_path / "specs" / "mart.yaml"
+    with _as_app(workflow, app):
+        workflow._open_model("mart")
+    assert canvases == [1]
+
+
+def test_the_left_pane_moves_its_wash_without_being_redrawn(tmp_path, monkeypatch):
+    from portia.ui import artifacts
+
+    monkeypatch.chdir(tmp_path)
+    app = _canvas_project(tmp_path)
+    app.select(state.SOURCE, "orders")
+    with _as_app(artifacts, app), ui.element("div") as slot:
+        artifacts.pane.func()
+    rows = {
+        e.text: e.parent_slot.parent.parent_slot.parent
+        for e in slot.descendants()
+        if isinstance(e, ui.label) and "artifact-name" in e.classes
+    }
+    assert "artifact-row--selected" in rows["orders.csv"].classes
+    app.select(state.SOURCE, "regions")
+    with _as_app(artifacts, app):
+        artifacts.show_selection()
+    assert "artifact-row--selected" not in rows["orders.csv"].classes
+    assert "artifact-row--selected" in rows["regions.csv"].classes
 
 
 def test_where_you_were_looking_is_remembered_per_project(tmp_path, monkeypatch):
@@ -3227,6 +3430,7 @@ def test_where_you_were_looking_is_remembered_per_project(tmp_path, monkeypatch)
     app = _canvas_project(tmp_path)
     with _as_app(workflow, app):
         workflow.pane.refresh = lambda *a, **k: None
+        _quiet_canvas(monkeypatch)
         workflow._toggle_visible("mart", False)
     assert engine_module.remembered_view(tmp_path) == frozenset({"stg"})
     assert engine_module.remembered_view(tmp_path / "elsewhere") is None, "never chosen"
@@ -3396,6 +3600,7 @@ def test_clicking_one_ghost_puts_all_of_them_on_the_canvas(tmp_path, monkeypatch
     app.previewing = "mart"
     with _as_app(workflow, app):
         workflow.pane.refresh = lambda *a, **k: None
+        _quiet_canvas(monkeypatch)
         workflow._reveal_preview()
 
     assert app.previewing is None
@@ -5523,6 +5728,7 @@ def test_dropping_a_card_records_where_it_landed_per_project(tmp_path, monkeypat
     app = _canvas_project(tmp_path)
     with _as_app(workflow, app):
         workflow.pane.refresh = lambda *a, **k: None
+        _quiet_canvas(monkeypatch)
         workflow.move_card("mart", 40, -10)
         workflow.move_card("mart", 40, -10)
         assert app.card_offsets == {"mart": (80, -20)}
@@ -5717,6 +5923,7 @@ def test_a_drop_onto_another_card_is_refused(tmp_path, monkeypatch):
     app.expanded = frozenset()
     with _as_app(workflow, app):
         workflow.pane.refresh = lambda *a, **k: None
+        _quiet_canvas(monkeypatch)
         _, placed, _ = workflow._layout()
         stg = next(n for n in placed.nodes if n.id == "stg")
         mart = next(n for n in placed.nodes if n.id == "mart")
@@ -6246,8 +6453,73 @@ def test_the_start_panel_redraws_the_part_that_changed_and_never_the_card():
         screens._server_field,
     ):
         assert "_server_panel.refresh()" not in inspect.getsource(fn), fn.__name__
-    assert "_server_model.refresh()" in inspect.getsource(screens._toggle_elsewhere)
+    assert "_server_path.refresh()" in inspect.getsource(screens._toggle_elsewhere)
+    assert "_server_model.refresh()" not in inspect.getsource(screens._toggle_elsewhere)
     assert "_server_state.refresh()" in inspect.getsource(screens._server_changed)
+
+
+def test_no_press_inside_a_floating_card_redraws_the_card():
+    """The user, 2026-09-23: *every floating card gets a full refresh when it's
+    clicked instead of just updating what is happening*. Each handler below is a
+    press inside a dialog, a menu or the composer, and each used to redraw the
+    card it sat in (or the pane behind it). None of them may now; what each may
+    redraw instead is the part it changed."""
+    import inspect
+
+    from portia.ui import feedback, screens, settings, transcript, workflow
+
+    def body(fn) -> str:
+        fn = getattr(fn, "func", fn)
+        source = inspect.getsource(fn)
+        # The code, not the docstring that says what it used to do.
+        return source.split('"""')[-1] if source.count('"""') >= 2 else source
+
+    never = {
+        "_connect_panel.refresh()": (
+            screens._pick,
+            screens._start_new,
+            screens._back_to_pick,
+            screens._pick_provider,
+            screens._set_auth,
+            screens._connect_now,
+        ),
+        "_panel.refresh()": (feedback._set_include, feedback._post),
+        # `_refresh` is the whole add-data card.
+        "_refresh()": (
+            screens._browse_to,
+            screens._choose_folder,
+            screens._repick,
+            screens._keep_folder,
+            screens._interpret_switched,
+            screens._set_indexing_effort,
+            screens._set_indexing_provider,
+            screens._list_databases,
+            screens._redraw_pickers,
+        ),
+        "pane.refresh()": (
+            transcript._set_effort,
+            transcript._set_provider,
+            transcript._mode_changed,
+            transcript._resolve_write,
+            transcript._allow_all,
+            transcript._set_indexing_effort,
+            screens._redraw_pickers,
+            workflow._toggle_visible,
+            workflow._select_all,
+        ),
+    }
+    for call, handlers in never.items():
+        for fn in handlers:
+            assert call not in body(fn).replace(f"_{call}", ""), f"{fn.__name__}: {call}"
+    assert "_auth_secret.refresh()" in body(screens._set_auth)
+    assert "_pick_secret.refresh()" in body(screens._pick)
+    assert "_repo_body.refresh()" in body(screens._browse_to)
+    assert "_canvas.refresh(" in body(workflow._set_visible_in_place)
+    # The profile switch's line is set in place; the card is never redrawn.
+    assert ".on_value_change(_refresh)" not in inspect.getsource(screens._profile_toggle)
+    # Settings' copy of the composer's controls follows without a redraw of either.
+    assert "transcript.show_mode()" in body(settings._mode_changed)
+    assert "settings.show_mode()" in body(transcript._mode_changed)
 
 
 def test_starting_is_on_screen_before_the_load_and_the_panel_stays_open_after():

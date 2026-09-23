@@ -114,6 +114,7 @@ def field(
     *required* / *optional* word off, for a field whose placeholder is its
     default and so says it can be left alone (the start panel, 2026-09-23).
     """
+    marked = None
     with ui.element("div").classes("field"):
         if label:
             with ui.element("div").classes("field-label"):
@@ -121,7 +122,7 @@ def field(
                 if help:
                     help_tip(help)
                 if mark:
-                    ui.label("required" if required else "optional").classes(
+                    marked = ui.label("required" if required else "optional").classes(
                         "field-required" if required else "field-optional"
                     )
         box = ui.input(
@@ -133,7 +134,22 @@ def field(
             box.on_value_change(on_change)
         if hint:
             ui.label(hint).classes("field-hint")
+    # Kept on the box, so a form whose rule changes under it can turn the word
+    # in place (`set_required`) and the label goes when the box does.
+    box.required_mark = marked  # type: ignore[attr-defined]
     return box
+
+
+def set_required(box: ui.input, required: bool) -> None:
+    """Turn a drawn field's word to *required* or *optional*, redrawing nothing."""
+    marked = getattr(box, "required_mark", None)
+    if marked is None or marked.is_deleted:
+        return
+    marked.set_text("required" if required else "optional")
+    marked.classes(
+        remove="field-optional field-required",
+        add="field-required" if required else "field-optional",
+    )
 
 
 def help_tip(text: str) -> ui.icon:
@@ -335,6 +351,15 @@ def status_light(kind: str, tip: str = "") -> ui.element:
     return light
 
 
+def set_light(light: ui.element, kind: str) -> None:
+    """Turn a drawn `status_light` to another state, in place."""
+    if kind not in LIGHTS:
+        raise ValueError(f"unknown status light {kind!r}; one of {', '.join(LIGHTS)}")
+    light.classes(
+        remove=" ".join(f"status-light--{k}" for k in LIGHTS), add=f"status-light--{kind}"
+    )
+
+
 def pulse_phase() -> str:
     """``--pulse-phase``: where in the beat an element built *now* should start.
 
@@ -517,13 +542,41 @@ def segmented(options, current, on_pick: Callable[[str], Any]) -> None:
     Quasar's toggle paints its active segment with a solid brand fill, which
     would be a second accent fill in a view that is allowed exactly one. The
     selected segment here is the soft accent wash DESIGN.md specifies instead.
+
+    **A press moves the wash itself, before ``on_pick`` runs** *(2026-09-23)*,
+    so a caller whose only reason to redraw was the highlight has none. Every
+    effort pick used to redraw whatever held the control: the Settings section,
+    the add-data card, the composer's whole pane with the chat list in it.
     """
+    segments: dict[str, ui.element] = {}
+
+    def press(option) -> Any:
+        mark_selected(segments, str(option), "seg-active")
+        return on_pick(option)
+
     with ui.element("div").classes("row-gap-xs segmented-control"):
         for option in options:
-            picked = option == current
-            b = button(str(option), lambda o=option: on_pick(o), micro=True)
-            if picked:
+            b = button(str(option), lambda o=option: press(o), micro=True)
+            if option == current:
                 b.classes("seg-active")
+            segments[str(option)] = b
+
+
+def mark_selected(rows: Mapping[str, ui.element], picked: str, selected: str) -> None:
+    """Move a selected class onto ``picked`` across rows already drawn, redrawing none.
+
+    The one way a pick inside a floating card shows (`DESIGN.md` → a click
+    changes what it changed): the Settings rail, the providers list, a
+    segmented control, a theme card, a saved connection. A row deleted since it
+    was drawn is skipped, because the card around it may have been rebuilt.
+    """
+    for key, row in rows.items():
+        if row.is_deleted:
+            continue
+        if key == picked:
+            row.classes(add=selected)
+        else:
+            row.classes(remove=selected)
 
 
 def provider_glyph(kind: str, *, tip: bool = True) -> ui.element:
@@ -550,6 +603,7 @@ def model_effort(
     on_refresh: Callable[[str], Any] | None = None,
     on_start: Callable[[str], Any] | None = None,
     provider_fixed: bool = False,
+    on_model: Callable[[], Any] | None = None,
 ) -> None:
     """What an exchange will spend: where the model comes from, the model, the effort.
 
@@ -569,6 +623,10 @@ def model_effort(
     ``on_provider(kind, model)`` takes both; called with the kind alone it
     moves the model to that provider's default, because a Claude name sent
     to Ollama is a guaranteed refusal.
+
+    ``on_model`` runs after a model is picked on the same provider, which
+    redraws nothing here, for a caller with another copy of the picker to
+    bring along (Settings, whose composer sits behind it).
 
     ``effort_disabled`` and ``provider_fixed`` are for a chat already under way.
     The model can change between exchanges (`set_model`); effort is a
@@ -609,6 +667,7 @@ def model_effort(
             on_start,
             switchable=not provider_fixed and on_provider is not None,
             parked=provider_fixed,
+            on_model=on_model,
         )
         with ui.element("span").classes("spend-slot"):
             if kind in APP.models_listing:
@@ -707,6 +766,7 @@ def model_menu(
     *,
     switchable: bool,
     parked: bool,
+    on_model: Callable[[], Any] | None = None,
 ) -> None:
     """The provider and the model, as one control (`DESIGN.md` → `model-picker`).
 
@@ -738,6 +798,10 @@ def model_menu(
     """
     from portia.agent import providers
 
+    #: What a pick on this provider changes in place: the button's name, and
+    #: the menu it closes. Filled by `draw`.
+    drawn: dict[str, Any] = {}
+
     @ui.refreshable
     def draw() -> None:
         nothing = listed == [] and not parked
@@ -747,7 +811,7 @@ def model_menu(
         trigger.props("data-modelpick-trigger")
         with trigger:
             provider_glyph(kind, tip=False)
-            ui.label(label).classes("modelpick-trigger-name")
+            drawn["name"] = ui.label(label).classes("modelpick-trigger-name")
             ui.icon("expand_more").classes("modelpick-caret")
         if nothing and not switchable:
             trigger.set_enabled(False)
@@ -761,6 +825,7 @@ def model_menu(
             kinds.append(kind)
         with trigger, ui.menu().classes("modelpick-menu").props("no-focus") as menu:
             body(kinds, menu)
+        drawn["menu"] = menu
         _PICKERS.append((menu, body.refresh))
         menu.on_value_change(lambda e: None if e.value else _flush_behind_picker())
 
@@ -831,10 +896,22 @@ def model_menu(
             if on_provider is not None:
                 on_provider(picked_kind, name)
         else:
+            # **The button is renamed and the menu shut, and nothing is rebuilt**
+            # *(2026-09-23)*. The whole control used to be redrawn, which is how
+            # the menu closed. Its body is redrawn behind the shut menu, so the
+            # next open ticks the new model.
             app.model = name
-            draw.refresh()
-        # The menu this came from is gone without saying it closed, so what
-        # waited on it runs now.
+            menu, label = drawn.get("menu"), drawn.get("name")
+            if menu is None or label is None or label.is_deleted:
+                draw.refresh()
+            else:
+                menu.close()
+                label.set_text(shown_name(name, _drawn_list(kind), kind))
+                body.refresh()
+            if on_model is not None:
+                on_model()
+        # The menu this came from is shut, or gone without saying it closed,
+        # so what waited on it runs now.
         _flush_behind_picker()
 
     draw()
@@ -1102,15 +1179,29 @@ def approval_mode(app, on_change: Callable[[], Any] | None = None) -> ui.select:
         value=app.mode,
     ).props("borderless dense options-dense")
     select.classes("p-field approval-mode")
+    with select:
+        tip = ui.tooltip(MODE_TIPS[app.mode]).props(f"delay={TOOLTIP_DELAY}")
 
     def picked(e) -> None:
         app.set_mode(str(e.value))
+        # The tooltip says what the mode does, so it follows the pick in place:
+        # a redraw of the card around the select was the only thing moving it.
+        tip.set_text(MODE_TIPS[app.mode])
         if on_change is not None:
             on_change()
 
     select.on_value_change(picked)
-    hint(select, MODE_TIPS[app.mode])
     return select
+
+
+def show_mode(select: ui.select | None, app) -> None:
+    """Set a drawn `approval_mode` picker to the mode now in force, redrawing nothing.
+
+    For the copy of the picker that was not pressed: the composer's when
+    Settings or a write card moved the mode, and Settings' when the composer did.
+    """
+    if select is not None and not select.is_deleted and select.value != app.mode:
+        select.set_value(app.mode)
 
 
 def setting(title: str, description: str = "", *, help: str = "") -> ui.element:

@@ -21,10 +21,12 @@ computes nothing (`CLAUDE.md` → `ui/engine.py`).
 
 **Picking a provider redraws its detail and nothing else** *(2026-09-23)*.
 Every control here used to redraw the whole settings panel, so a click on a
-row rebuilt the card it sat in. Three refreshables now, each the smallest
-thing a change can reach: `_dashboard` for a check, which changes every row,
-`_detail_view` for a pick or a variable, and a row's own line for its switch.
-The highlight moves on the rows already drawn, the settings nav's rule.
+row rebuilt the card it sat in. Each change now reaches the smallest thing it
+changed: a pick redraws `_detail_view` and moves the highlight on the rows
+already drawn, the settings nav's rule; a switch rewrites its row's line; a
+variable added or removed redraws `_variables`; and a check, which changes
+every row's state, redraws `_head` and the detail and sets each row's light
+and line in place, so the list the press came from is never rebuilt.
 """
 
 from __future__ import annotations
@@ -71,6 +73,7 @@ _FIELDS = {"binary": (BINARY_WHAT, BINARY_WHY), "home": (HOME_WHAT, HOME_WHY)}
 #: highlight and a switch rewrites one line without drawing the list again.
 _ROWS: dict[str, ui.element] = {}
 _LINES: dict[str, ui.label] = {}
+_LIGHTS: dict[str, ui.element] = {}
 _SELECTED = "provider-row--selected"
 
 
@@ -107,30 +110,34 @@ def section() -> None:
     c.caption(f"{SETTINGS_FILE} {providers.SETTINGS}")
 
 
-@ui.refreshable
 def _dashboard() -> None:
-    """The header, the list and the detail: what a check changes."""
+    """The header, the list and the detail, drawn when the section is."""
     settings = APP.provider_settings or engine.load_provider_settings(APP)
     with ui.element("div").classes("row-gap-sm providers-head"):
-        checked = (
-            None
-            if APP.providers_checked_at is None
-            else time.monotonic() - APP.providers_checked_at
-        )
-        if APP.providers_checking:
-            ui.spinner(size="xs")
-            c.caption(CHECKING)
-        else:
-            c.caption(ago(checked))
-            c.button("", _check, icon="refresh", micro=True).tooltip(CHECK)
+        _head()
     _ROWS.clear()
     _LINES.clear()
+    _LIGHTS.clear()
     with ui.element("div").classes("providers-layout"):
         with ui.element("div").classes("providers-list"):
             for kind in providers.KINDS:
                 _row(kind, settings[kind])
         with ui.element("div").classes("provider-detail"):
             _detail_view()
+
+
+@ui.refreshable
+def _head() -> None:
+    """When the last check ran, or that one is running, and the way to run another."""
+    checked = (
+        None if APP.providers_checked_at is None else time.monotonic() - APP.providers_checked_at
+    )
+    if APP.providers_checking:
+        ui.spinner(size="xs")
+        c.caption(CHECKING)
+    else:
+        c.caption(ago(checked))
+        c.button("", _check, icon="refresh", micro=True).tooltip(CHECK)
 
 
 @ui.refreshable
@@ -159,7 +166,7 @@ def _row(kind: str, settings: providers.Settings) -> None:
         with ui.element("div").classes("provider-row-body"):
             ui.label(provider.label).classes("provider-row-name")
             with ui.element("div").classes("row-gap-xs provider-row-state"):
-                c.status_light(light)
+                _LIGHTS[kind] = c.status_light(light)
                 _LINES[kind] = c.caption(_line(kind, settings.enabled)).classes("provider-row-line")
         switch = ui.switch().classes("p-toggle provider-row-switch")
         switch.value = settings.enabled
@@ -213,6 +220,16 @@ def _detail(kind: str, settings: providers.Settings) -> None:
     with ui.element("div").classes("row-gap-xs"):
         ui.label(VARIABLES).classes("setting-title")
         c.help_tip(VARIABLES_WHY)
+    _variables(kind)
+    if provider.add_command("<name>"):
+        c.add_model_line(kind)
+
+
+@ui.refreshable
+def _variables(kind: str) -> None:
+    """The set variables, the new one, and the ones portia reads: what Add and Remove redraw."""
+    provider = providers.get(kind)
+    settings = APP.provider_settings[kind]
     notes = provider.env_notes()
     # One grid for the set variables and the new one, so every name, box and
     # button sits in the same three columns on the same centre line. As rows of
@@ -242,8 +259,6 @@ def _detail(kind: str, settings: providers.Settings) -> None:
                 with ui.element("div").classes("row-gap-xs"):
                     c.mono(key, small=True)
                     c.help_tip(notes[key])
-    if provider.add_command("<name>"):
-        c.add_model_line(kind)
 
 
 def _adder(kind: str) -> None:
@@ -274,11 +289,24 @@ def _check() -> None:
     from nicegui import background_tasks
 
     async def go() -> None:
-        _dashboard.refresh()
+        _head.refresh()
         await engine.check_providers(APP)
-        _dashboard.refresh()
+        _head.refresh()
+        _checked()
 
     background_tasks.create(go())
+
+
+def _checked() -> None:
+    """A check finished: every row's light and line set in place, and the detail redrawn."""
+    settings = APP.provider_settings or engine.load_provider_settings(APP)
+    for kind, line in _LINES.items():
+        if not line.is_deleted:
+            line.set_text(_line(kind, settings[kind].enabled))
+        light = _LIGHTS.get(kind)
+        if light is not None and not light.is_deleted:
+            c.set_light(light, state_words(kind)[0])
+    _detail_view.refresh()
 
 
 def _pick(kind: str) -> None:
@@ -286,9 +314,7 @@ def _pick(kind: str) -> None:
     if kind == APP.provider_pick:
         return
     APP.provider_pick = kind
-    for name, row in _ROWS.items():
-        if not row.is_deleted:
-            row.classes(add=_SELECTED) if name == kind else row.classes(remove=_SELECTED)
+    c.mark_selected(_ROWS, kind, _SELECTED)
     _detail_view.refresh()
 
 
@@ -313,7 +339,7 @@ def _drop_var(kind: str, key: str) -> None:
     env = dict(APP.provider_settings[kind].env)
     env.pop(key, None)
     engine.save_provider_settings(APP, kind, env=env)
-    _detail_view.refresh()
+    _variables.refresh()
 
 
 def _add_var(kind: str, draft: dict[str, str]) -> None:
@@ -323,4 +349,4 @@ def _add_var(kind: str, draft: dict[str, str]) -> None:
     env = dict(APP.provider_settings[kind].env)
     env[key] = draft.get("value", "")
     engine.save_provider_settings(APP, kind, env=env)
-    _detail_view.refresh()
+    _variables.refresh()
