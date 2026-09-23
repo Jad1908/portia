@@ -708,3 +708,13 @@ def test_deleting_a_log_takes_its_title_with_it(tmp_path):
     assert not log.path.exists()
     assert runlog.titles(tmp_path)[runlog.title_key(log.path)] is None
     runlog.delete(log.path, tmp_path)  # idempotent
+
+
+def test_an_indexing_log_records_the_tools_the_job_was_offered(tmp_path):
+    """A job reads (`tools.BUILD_TOOLS`), and line two has to say what *its*
+    model read, not what a chat's would have."""
+    log = _chat(tmp_path, cwd=tmp_path, kind=runlog.INDEXING)
+    run = runlog.read(log.path)
+    assert "set_interpretation" in run.prompts["tools"]
+    assert "record_step" not in run.prompts["tools"]
+    assert "run_spec" not in run.prompts["tools"]

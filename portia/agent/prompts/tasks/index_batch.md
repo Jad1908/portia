@@ -32,6 +32,10 @@ workflow, record that with `set_group` and the context they share.
 Then tell me, briefly: what these sources are, what one row of each is, what
 connects to what, what will need a mapping before it joins, and what you would look
 at first if the goal in the brief is the goal. Draw one chart if a shape says it
-better than a sentence. Do not build anything: indexing reads, and the pipeline is
-a later conversation. Ask me only about something the project description leaves
+better than a sentence.
+
+Indexing reads. This job has no `record_step` and no `run_spec`, and there is
+nothing to fix here: a problem you find in a source goes in its `note`, and what
+to do about it is a conversation the person starts later, with the pipeline in
+front of them. Ask me only about something the project description leaves
 genuinely ambiguous.

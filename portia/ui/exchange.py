@@ -159,6 +159,8 @@ async def start(
                 cwd=str(APP.root),
                 portia_dir=APP.portia_dir,
                 provider=provider,
+                # A job reads. It is offered no way to build (`tools.BUILD_TOOLS`).
+                builds=False,
             )
             async with chat.job as job:
                 await _drain(job.send(prompt), chat)

@@ -277,6 +277,7 @@ class CodexConversation:
         client_factory: Callable[..., Any] | None = None,
         resume: str | None = None,
         provider: str = codex_provider.PROVIDER.kind,
+        builds: bool = True,
     ) -> None:
         if effort is not None and effort not in session.EFFORTS:
             raise ValueError(
@@ -285,6 +286,9 @@ class CodexConversation:
         self._answer = answer
         self._confirm = confirm
         self._auto_allow = auto_allow
+        #: Whether the served tools include the build half (`tools.BUILD_TOOLS`);
+        #: off for a job that reads, as on the Claude harness.
+        self._builds = builds
         self._pending: list[events.Event] = []
         self.curator = curation.Curation()
         self._factory = client_factory or _client
@@ -330,7 +334,7 @@ class CodexConversation:
 
         self._loop = asyncio.get_running_loop()
         source = providers.get(self.provider)
-        server = tools.build_server(sees_images=source.sees_images, asks=True)
+        server = tools.build_server(sees_images=source.sees_images, asks=True, builds=self._builds)
         self._served = await loopback.serve(server["instance"])
         client = self._factory(
             binary=codex_provider.binary(),

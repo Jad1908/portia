@@ -4899,6 +4899,50 @@ def test_stop_reaches_a_job_that_has_no_chat_behind_it():
     assert stream.job.interrupted == 1
 
 
+def test_a_job_is_opened_on_a_conversation_that_cannot_build(monkeypatch):
+    """Indexing reads: the window opens its job with `builds=False`, so the
+    copilot is offered no `record_step` and no `run_spec` (2026-09-23)."""
+    import asyncio
+
+    from portia.agent import events
+    from portia.ui import exchange, transcript
+
+    app = App()
+    made: dict = {}
+
+    class FakeJob:
+        def __init__(self, **kw):
+            made.update(kw)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def send(self, prompt):
+            yield events.prompt_event(prompt, model="m", effort=None)
+            yield events.Event(events.RESULT, {"subtype": "success"})
+
+    class FakeSession:
+        conversation = staticmethod(lambda **kw: FakeJob(**kw))
+
+    import portia.agent
+
+    monkeypatch.setattr(portia.agent, "session", FakeSession, raising=False)
+    monkeypatch.setattr(transcript.pane, "refresh", lambda: None)
+    monkeypatch.setattr(exchange, "_sync_artifacts", lambda: False)
+    monkeypatch.setattr(exchange, "_preflight", _passes)
+    with _as_app(exchange, app):
+        asyncio.run(exchange.start("read these", model="m", effort=None, kind=state.INDEXING))
+
+    assert made["builds"] is False
+
+
+async def _passes(provider, model):
+    return True
+
+
 def test_the_indexing_banner_offers_stop_while_a_job_runs():
     from portia.ui import transcript
 

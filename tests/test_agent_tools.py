@@ -199,3 +199,24 @@ def test_the_slot_is_restored_after_the_exchange():
     with tools.stopping(cancel.Scope()):
         assert tools._stop is not None
     assert tools._stop is None
+
+
+# --- a job that reads is offered no way to build (2026-09-23) -------------------
+
+
+def test_an_indexing_job_is_offered_every_tool_but_the_build_half():
+    """The prompt said *build nothing* once, at its end; the tool list said
+    otherwise on every request. Read-only by construction now, the way the
+    agent has no filesystem by construction."""
+    reads = {t.name for t in tools.offered(builds=False)}
+    assert reads == {t.name for t in tools.offered()} - {"record_step", "run_spec"}
+    assert {t.name for t in tools.BUILD_TOOLS} == {"record_step", "run_spec"}
+    # The job's own output, its questions and its pictures all stay.
+    assert {
+        "set_interpretation",
+        "set_group",
+        "measure_overlaps",
+        "query_data",
+        "plot_data",
+    } <= reads
+    assert "record_step" not in tools.descriptions(builds=False)
