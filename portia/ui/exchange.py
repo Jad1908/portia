@@ -150,7 +150,7 @@ async def start(
             # handle: the button interrupted nothing and the copilot's tool
             # threads ran on, on the meter, after the pane said it had ended.
             answer, confirm = _callbacks(chat)
-            chat.job = session.Conversation(
+            chat.job = session.conversation(
                 answer=answer,
                 confirm=confirm,
                 auto_allow=auto_allow,
@@ -268,7 +268,7 @@ async def _open_chat(chat: Chat, session, *, model: str, effort: str | None, pro
         answer, confirm = _callbacks(chat)
         resume = chat.session_id if chat.logged is not None else None
         chat.resumed = resume is not None
-        chat.conversation = session.Conversation(
+        chat.conversation = session.conversation(
             answer=answer,
             confirm=confirm,
             auto_allow=auto_allow,

@@ -1064,7 +1064,10 @@ body.body--dark .p-panel {
  * provider *inside* Copilot. A section taller than the box scrolls in
  * `settings-body`; the frame never moves (DESIGN.md → Layout stability). */
 .settings-panel {
-  width: 720px;
+  /* 840 rather than 720 since the Providers section (2026-09-23): a list and
+   * a detail side by side inside the body left the detail 240px, and its
+   * variable rows were a name, a box too narrow to read, and a button. */
+  width: 840px;
   max-width: 92vw;
 }
 .settings-layout {
@@ -1072,16 +1075,28 @@ body.body--dark .p-panel {
   gap: var(--sp-lg);
   height: min(480px, 70vh);
 }
+/* A rail of glyphs, each named by its tooltip (2026-09-23, the user's call):
+ * the names cost 168px the Providers section needed. */
 .settings-nav {
-  flex: 0 0 168px;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding-right: var(--sp-md);
+  padding-right: var(--sp-sm);
   border-right: 1px solid var(--hairline-soft);
 }
 .settings-nav .artifact-row {
   margin: 0;
+  justify-content: center;
+  padding: var(--sp-sm);
+}
+/* Qualified by the row: `.artifact-row .artifact-body` is declared later at
+ * the same weight and would draw the name back. */
+.settings-nav .artifact-row .artifact-body {
+  display: none;
+}
+.settings-nav .artifact-row .artifact-icon {
+  font-size: 18px;
 }
 .settings-body {
   flex: 1 1 auto;
@@ -1092,9 +1107,155 @@ body.body--dark .p-panel {
   padding-top: var(--sp-xs);
   overflow-y: auto;
 }
+/* A section scrolls; it is never squeezed. Flex items shrink by default, and a
+ * section taller than the box had its settings shrunk to share 480px, drawing
+ * each one's control over the title of the next (2026-09-23). */
+.settings-body > * {
+  flex-shrink: 0;
+}
+/* The effort segments' `spend-detail` is a full *line* in the composer's
+ * wrapping row (`flex: 1 0 100%`). Inside a `setting`, which is a column, the
+ * same 100% is a *height*: the row was sized to its setting and the segments
+ * sat on the next setting's title (2026-09-23, measured in Copilot). */
+.setting > .spend-detail {
+  flex: 0 0 auto;
+}
 .settings-foot {
   display: flex;
   justify-content: flex-end;
+}
+
+/* ── Settings → Providers (ui/providers.py, docs/PROVIDERS.md §9.5) ─────────
+ * A list of every provider down the left and the picked one's detail on the
+ * right, inside the settings body. A row is the glyph, the name over one line
+ * of state, and the enabled switch; the light says measured state and the
+ * switch says preference, apart. Kind, never rank: same glyph size, no colour
+ * but the light's. */
+.providers-head {
+  align-items: center;
+  min-height: 24px;
+}
+/* Stretched to the body's width. A `setting` sizes its children to their
+ * content, and the content of a row whose status line never wraps is that
+ * whole line: the list grew to the longest sentence a provider said, and the
+ * detail was pushed past the right edge behind a scrollbar (2026-09-23). */
+.providers-layout {
+  display: flex;
+  gap: var(--sp-lg);
+  align-items: flex-start;
+  align-self: stretch;
+  min-width: 0;
+}
+.providers-list {
+  flex: 0 0 280px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-right: 1px solid var(--hairline-soft);
+  padding-right: var(--sp-md);
+}
+.provider-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  padding: var(--sp-xs) var(--sp-sm);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  min-width: 0;
+}
+.provider-row:hover {
+  background: var(--surface-hover);
+}
+.provider-row--selected,
+.provider-row--selected:hover {
+  background: var(--accent-wash);
+}
+.provider-row .provider-glyph {
+  color: var(--body);
+}
+.provider-row-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.provider-row-name {
+  font: var(--t-body-md);
+  color: var(--ink);
+}
+/* Qualified by the row: `.row-gap-xs` is declared later at the same weight
+ * and its `wrap` won, so a long line put the light alone above it. The line
+ * itself wraps (2026-09-23, the user): ellipsized at any width this list can
+ * have, it cut *signed in · claude.ai max* to *sig…*, and what a provider said
+ * is the one thing on the row worth reading. The light sits on the first line. */
+.provider-row .provider-row-state {
+  align-items: flex-start;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+.provider-row .provider-row-state .status-light {
+  margin-top: 5px;
+}
+.provider-row .provider-row-line {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.provider-row-switch {
+  flex: 0 0 auto;
+}
+.provider-detail {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-sm);
+}
+.provider-detail-head {
+  align-items: center;
+}
+/* A button in the detail is its own width: the column stretches its children
+ * so the fields fill it, and *Start the server…* came out as a bar. */
+.provider-detail > .q-btn {
+  align-self: flex-start;
+}
+.provider-detail-head .provider-glyph {
+  width: 18px;
+  height: 18px;
+  color: var(--body);
+}
+/* The variables and the new one as one grid: a name, its box, its button, on
+ * one centre line. Rows of labelled fields put the name level with the
+ * *Value* label rather than the box (2026-09-23). */
+.provider-vars {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) auto;
+  align-items: center;
+  gap: var(--sp-sm);
+}
+/* The button column is as wide as *Add*; the remove cross keeps its own size. */
+.provider-vars > .q-btn {
+  justify-self: start;
+}
+.provider-var-key {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+/* A small *?* beside a name; the sentence is its tooltip (`c.help_tip`). */
+.help-tip {
+  font-size: 13px;
+  color: var(--ash);
+  cursor: help;
+  flex: 0 0 auto;
+}
+.help-tip:hover {
+  color: var(--mute);
+}
+.field-label .help-tip {
+  align-self: center;
 }
 
 /* One setting: a title, what it does, and the control under them
@@ -1110,6 +1271,247 @@ body.body--dark .p-panel {
   font-size: 13px;
   font-weight: 500;
   color: var(--ink);
+}
+.setting-head {
+  flex-wrap: nowrap;
+}
+/* A heading over a whole section, where a section needs one to say what kind
+ * it is (Data, 2026-09-23). The rail names sections on hover only. */
+.settings-heading {
+  flex-wrap: nowrap;
+  margin-bottom: calc(-1 * var(--sp-xs));
+}
+.settings-heading-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+}
+/* What *Customize* opens under a setting: a small title and its switches,
+ * indented on a hairline so they read as belonging to the control above. */
+.settings-customize {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+  padding-left: var(--sp-md);
+  border-left: 1px solid var(--hairline);
+}
+.setting-subtitle {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--body);
+}
+
+/* A value that is an absence, drawn as a state (`c.state_pill`): mono beside
+ * real values, *not set, the whole repo* read as a folder of that name. */
+.state-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  padding: 2px 10px;
+  border: 1px dashed var(--hairline-strong);
+  border-radius: var(--r-full);
+  font-size: 12px;
+  color: var(--mute);
+}
+
+/* ── Settings → Appearance: the theme previews (2026-09-23) ──────────────────
+ * Each card is the window in miniature in one mode's palette, and the card is
+ * the control. The palettes are **restated**, not read from the tokens: a
+ * light card has to stay light in dark mode, and a custom property has one
+ * value per element. `tests/test_ui.py` holds each value to the `:root` and
+ * `body.body--dark` blocks, so the restatement cannot drift.
+ *
+ * The spider is the website's (`portia-www/src/lib/mark.ts`), the one ornament
+ * in the app, and it is here because the user asked for it: it hangs on its
+ * dragline, sways, and drops lower and swings faster under the pointer. Under
+ * reduced motion it hangs still. */
+.theme-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-md);
+  /* A `setting` sizes its children to their content, `providers-layout`'s
+   * lesson: unstretched, three 1fr columns are three slivers. */
+  align-self: stretch;
+}
+.theme-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+  cursor: pointer;
+}
+.theme-preview {
+  position: relative;
+  height: 150px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--hairline);
+  overflow: hidden;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.theme-card:hover .theme-preview {
+  border-color: var(--hairline-strong);
+}
+.theme-card--picked .theme-preview,
+.theme-card--picked:hover .theme-preview {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.theme-card-name {
+  flex-wrap: nowrap;
+  font-size: 12px;
+  color: var(--body);
+}
+.theme-card--picked .theme-card-name {
+  color: var(--accent-text);
+  font-weight: 500;
+}
+.theme-beta {
+  font-size: 10px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  padding: 0 6px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--hairline-strong);
+  color: var(--mute);
+}
+.tp-light {
+  --tp-canvas: #f4f6f9;
+  --tp-surface: #fcfdfe;
+  --tp-hairline: #e3e6ec;
+  --tp-ink: #0e1116;
+  --tp-stone: #c2c7ce;
+  --tp-accent: #0c6b61;
+}
+.tp-dark {
+  --tp-canvas: #08090c;
+  --tp-surface: #0d0f14;
+  --tp-hairline: #25282f;
+  --tp-ink: #f3f4f7;
+  --tp-stone: #43464e;
+  --tp-accent: #2dd4bf;
+}
+.tp-window {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--tp-canvas);
+  color: var(--tp-ink);
+}
+/* Auto: the day window above the diagonal, the night one below it. */
+.theme-preview--auto .tp-dark {
+  clip-path: polygon(100% 0, 100% 100%, 0 100%);
+}
+.tp-bar {
+  flex: 0 0 12px;
+  background: var(--tp-surface);
+  border-bottom: 1px solid var(--tp-hairline);
+}
+.tp-body {
+  flex: 1 1 auto;
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+}
+.tp-side {
+  flex: 0 0 28%;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 5px;
+  border-radius: 3px;
+  background: var(--tp-surface);
+  border: 1px solid var(--tp-hairline);
+}
+.tp-main {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.tp-card {
+  height: 38px;
+  width: 52%;
+  border-radius: 3px;
+  background: var(--tp-surface);
+  border: 1px solid var(--tp-accent);
+}
+.tp-line {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--tp-stone);
+}
+.tp-line--short {
+  width: 45%;
+}
+.tp-hang {
+  position: absolute;
+  top: 0;
+  right: 14%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transform-origin: 50% 0;
+  animation: tp-sway 4.2s ease-in-out infinite;
+}
+.tp-silk {
+  width: 1px;
+  height: 22px;
+  background: var(--tp-ink);
+  opacity: 0.45;
+  transition: height 700ms cubic-bezier(0.34, 1.4, 0.5, 1);
+}
+.tp-spider {
+  width: 28px;
+  height: 28px;
+  margin-top: -4px;
+  line-height: 0;
+}
+.tp-spider svg {
+  width: 100%;
+  height: 100%;
+}
+.tp-spider .spider-abdomen {
+  fill: var(--tp-accent);
+}
+.tp-spider .spider-catchlight {
+  fill: var(--tp-canvas);
+}
+.tp-spider .spider-legs {
+  transform-origin: 50% 60%;
+  animation: tp-legs 2.6s ease-in-out infinite;
+}
+.theme-card:hover .tp-silk {
+  height: 64px;
+}
+.theme-card:hover .tp-hang {
+  animation-duration: 1.5s;
+}
+@keyframes tp-sway {
+  0%,
+  100% {
+    transform: rotate(-5deg);
+  }
+  50% {
+    transform: rotate(5deg);
+  }
+}
+@keyframes tp-legs {
+  0%,
+  100% {
+    transform: scaleY(1);
+  }
+  50% {
+    transform: scaleY(0.94);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tp-hang,
+  .tp-spider .spider-legs {
+    animation: none;
+  }
+  .tp-silk {
+    transition: none;
+  }
 }
 .setting-why {
   font-size: 12px;
@@ -5072,6 +5474,10 @@ body.tab-dragging .tab-drop {
   -webkit-mask-image: url(/portia-assets/providers/anthropic.svg);
   mask-image: url(/portia-assets/providers/anthropic.svg);
 }
+.provider-glyph-codex {
+  -webkit-mask-image: url(/portia-assets/providers/codex.svg);
+  mask-image: url(/portia-assets/providers/codex.svg);
+}
 .provider-glyph-ollama {
   -webkit-mask-image: url(/portia-assets/providers/ollama.svg);
   mask-image: url(/portia-assets/providers/ollama.svg);
@@ -5079,6 +5485,26 @@ body.tab-dragging .tab-drop {
 .provider-glyph-llamacpp {
   -webkit-mask-image: url(/portia-assets/providers/llamacpp.svg);
   mask-image: url(/portia-assets/providers/llamacpp.svg);
+}
+/* A mark of portia's own in an `artifact-row`, under assets/glyphs/: masked
+ * like a provider glyph, sized like the Material icon it stands beside, so it
+ * takes the row's ink and the selected accent the same way. */
+.artifact-glyph {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  background-color: currentColor;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+}
+.glyph-bot {
+  -webkit-mask-image: url(/portia-assets/glyphs/bot.svg);
+  mask-image: url(/portia-assets/glyphs/bot.svg);
 }
 /* One mark per database portia connects to, under assets/connectors/: the
  * vendor's own, from Simple Icons (CC0), masked so it takes the ink of where it

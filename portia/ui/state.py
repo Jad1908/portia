@@ -1119,6 +1119,14 @@ class App:
     provider_status: dict[str, Any] = field(default_factory=dict)
     #: Providers being listed right now, so the picker can say so.
     models_listing: frozenset[str] = frozenset()
+    #: The providers dashboard (`ui/providers.py`, `PROVIDERS.md` §9.5): the
+    #: machine's settings as last read from `providers.SETTINGS`, when every
+    #: provider was last asked how it is (`time.monotonic`, ``None`` never),
+    #: whether that check is running, and which provider's detail is open.
+    provider_settings: dict[str, Any] = field(default_factory=dict)
+    providers_checked_at: float | None = None
+    providers_checking: bool = False
+    provider_pick: str = providers.DEFAULT_KIND
     #: A refused preflight, as ``(reason, remedy)``, drawn in the composer until
     #: the next Send (`PROVIDERS.md` §5). A refusal is not an exchange, so it
     #: opens no log and draws no prompt row.

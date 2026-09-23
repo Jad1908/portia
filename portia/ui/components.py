@@ -90,6 +90,7 @@ def field(
     *,
     required: bool = False,
     hint: str = "",
+    help: str = "",
     value: str = "",
     placeholder: str = "",
     mono: bool = False,
@@ -104,13 +105,21 @@ def field(
     wash on focus — rather than Quasar's 56px default, which read as a form
     built from someone else's kit. ``secret`` draws a password box with the
     reveal toggle; what is typed there is never written anywhere by portia.
+
+    ``help`` is ``hint`` folded into a `help_tip` beside the label, for a form
+    dense enough that a sentence under every box is most of what it shows (the
+    providers dashboard, 2026-09-23). An empty ``label`` draws the box alone,
+    for a row whose first cell already names it.
     """
     with ui.element("div").classes("field"):
-        with ui.element("div").classes("field-label"):
-            ui.label(label)
-            ui.label("required" if required else "optional").classes(
-                "field-required" if required else "field-optional"
-            )
+        if label:
+            with ui.element("div").classes("field-label"):
+                ui.label(label)
+                if help:
+                    help_tip(help)
+                ui.label("required" if required else "optional").classes(
+                    "field-required" if required else "field-optional"
+                )
         box = ui.input(
             value=value, placeholder=placeholder, password=secret, password_toggle_button=secret
         )
@@ -121,6 +130,20 @@ def field(
         if hint:
             ui.label(hint).classes("field-hint")
     return box
+
+
+def help_tip(text: str) -> ui.icon:
+    """A small *?* beside a name, saying on hover what the name is for.
+
+    For what would otherwise be a caption under every field of a dense form.
+    The sentence is not on screen anywhere else, which is the one condition
+    under which a tooltip earns its place (`hint`'s rule). Instant rather than
+    delayed: a mark this small is aimed at, never crossed on the way past.
+    """
+    icon = ui.icon("help_outline").classes("help-tip")
+    with icon:
+        ui.tooltip(text).props("max-width=300px").classes("help-tip-text")
+    return icon
 
 
 #: The glyph each alert kind carries. Kind, never rank: an error is not louder
@@ -673,8 +696,14 @@ def _provider_pick(kind: str, on_provider, *, fixed: bool) -> None:
     # Closed, the control is the glyph and the arrow: the display value is
     # blank and the mark sits in the field's prepend slot. Open, the options
     # are the names (the user's call, 2026-09-14).
+    # The kinds the machine's settings enable (`providers.offered_kinds`, the
+    # dashboard in Settings), plus the one picked, so a chat on a kind since
+    # switched off still says what it runs on.
+    kinds = list(providers.offered_kinds())
+    if kind not in kinds:
+        kinds.append(kind)
     select = ui.select(
-        {each: providers.get(each).label for each in providers.KINDS},
+        {each: providers.get(each).label for each in kinds},
         value=kind,
         on_change=lambda e: on_provider(e.value),
     ).props('borderless dense options-dense display-value=""')
@@ -773,22 +802,42 @@ def approval_mode(app, on_change: Callable[[], Any] | None = None) -> ui.select:
     return select
 
 
-def setting(title: str, description: str = "") -> ui.element:
-    """One setting: what it is, what it does, and the control that changes it.
+def setting(title: str, description: str = "", *, help: str = "") -> ui.element:
+    """One setting: what it is, and the control that changes it.
 
     **One row shape for every preference** *(2026-09-04)*. The settings panel
     was captions and controls in whatever order each tab happened to stack them,
-    so the same kind of thing read three ways. A setting is a title, a line
-    saying what it does, and the control under them — the shape every editor's
-    settings page uses — and the caller opens this and puts the control inside.
-    The description is a fact about the setting, never advice about its value.
+    so the same kind of thing read three ways. A setting is a title and the
+    control under it, and the caller opens this and puts the control inside.
+
+    **Most settings carry no sentence at all** *(2026-09-23, the user, line by
+    line)*. A description under every title was most of what the panel showed;
+    they were deleted where the control says it, and moved into ``help``, a
+    `help_tip` beside the title, where the definition is worth having on hover.
+    ``description`` stays for a line that has to be read without asking.
     """
     row = ui.element("div").classes("setting")
     with row:
-        ui.label(title).classes("setting-title")
+        with ui.element("div").classes("row-gap-xs setting-head"):
+            ui.label(title).classes("setting-title")
+            if help:
+                help_tip(help)
         if description:
             ui.label(description).classes("setting-why pre-wrap")
     return row
+
+
+def state_pill(value: str) -> ui.element:
+    """A setting's value when it is an *absence*: *not set*, *not connected*.
+
+    Set in the mono face beside real values, an absence read as one more value
+    (`not set, the whole repo` looked like a folder called that, the user,
+    2026-09-23). A pill with an off `status_light` says it is a state.
+    """
+    with ui.element("div").classes("state-pill") as pill:
+        status_light(OFF)
+        ui.label(value)
+    return pill
 
 
 def menu_row(icon: str, label: str, on_click: Callable[..., Any]) -> ui.element:
@@ -995,6 +1044,11 @@ def prop_value(value: str) -> str:
     return f"{quote}{value}{quote}"
 
 
+#: An `artifact_row` icon that is one of portia's own SVGs rather than a
+#: Material name: ``glyph:<file>`` for ``assets/glyphs/<file>.svg``.
+GLYPH = "glyph:"
+
+
 def artifact_row(
     *,
     name: str,
@@ -1041,7 +1095,12 @@ def artifact_row(
     with row:
         if caret:
             ui.icon(caret).classes("artifact-caret")
-        ui.icon(icon).classes("artifact-icon")
+        if icon.startswith(GLYPH):
+            # A mark of portia's own under `assets/glyphs/`, masked so it takes
+            # the row's ink like a Material icon does (`DESIGN.md` → `glyph`).
+            ui.element("span").classes(f"artifact-icon artifact-glyph glyph-{icon[len(GLYPH) :]}")
+        else:
+            ui.icon(icon).classes("artifact-icon")
         # Own class rather than utility classes: this wrapper's job is to be the
         # thing that shrinks, and a long path is exactly what it holds.
         with ui.element("div").classes("artifact-body"):

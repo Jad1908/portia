@@ -79,6 +79,11 @@ def build_system_prompt(portia_dir: str = catalog.DEFAULT_DIR) -> str:
     return f"{PROMPT_PATH.read_text(encoding='utf-8')}\n\n---\n\n{context.build_brief(portia_dir)}"
 
 
+def asks(provider: str = DEFAULT_PROVIDER) -> bool:
+    """Whether ``provider``'s harness is offered `tools.ask_user` (the Codex one is)."""
+    return providers.get(provider).harness == providers.CODEX
+
+
 def prompt_chars(portia_dir: str = catalog.DEFAULT_DIR, provider: str = DEFAULT_PROVIDER) -> int:
     """How long everything portia composes for the model is, in characters.
 
@@ -93,7 +98,9 @@ def prompt_chars(portia_dir: str = catalog.DEFAULT_DIR, provider: str = DEFAULT_
     its models can take in, because a tool that is not offered is a description
     that is not sent (`tools.offered`).
     """
-    described = tools.descriptions(sees_images=providers.get(provider).sees_images)
+    described = tools.descriptions(
+        sees_images=providers.get(provider).sees_images, asks=asks(provider)
+    )
     return len(build_system_prompt(portia_dir)) + sum(len(d) for d in described.values())
 
 
@@ -432,6 +439,22 @@ class Conversation:
         return cast("dict[str, Any]", await self._client.get_context_usage())
 
 
+def conversation(*, provider: str = DEFAULT_PROVIDER, **kw: Any) -> Any:
+    """One chat on whichever harness ``provider`` runs on (`docs/PROVIDERS.md` §9).
+
+    `Conversation` for every environment of the Claude SDK's binary, and
+    `codex.CodexConversation` for the one provider that is a second harness.
+    The two share a surface member for member, so the caller holds the result
+    as *a chat* and never asks which. Every surface that opens a chat comes
+    through here; `Conversation(...)` directly is the Claude harness by name.
+    """
+    if providers.get(provider).harness == providers.CODEX:
+        from portia.agent import codex
+
+        return codex.CodexConversation(provider=provider, **kw)
+    return Conversation(provider=provider, **kw)
+
+
 async def run(
     prompt: str,
     *,
@@ -451,7 +474,7 @@ async def run(
     conversations (`CONVERSATION.md` §6). Kept as a wrapper rather than a second
     implementation, so there is one drain loop and one set of ordering rules.
     """
-    async with Conversation(
+    async with conversation(
         answer=answer,
         confirm=confirm,
         auto_allow=auto_allow,

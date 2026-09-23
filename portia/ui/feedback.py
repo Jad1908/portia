@@ -37,7 +37,6 @@ SAID_LABEL = "What happened"
 SAID_HINT = "What you were doing, and what you expected instead."
 WRITTEN_LABEL = "Sent with it"
 INCLUDE = "Include the {kind} from {at:%H:%M}, during {where}"
-NOTHING_SENT = "portia sends nothing. Each button opens a page or a message for you to submit."
 ON_GITHUB = "Post on GitHub"
 ON_GITHUB_TIP = "Public. Anyone can read it, and it needs a GitHub account."
 BY_EMAIL = "Email"
@@ -135,7 +134,6 @@ def _panel() -> None:
                 ui.label(WRITTEN_LABEL).classes("field-label")
                 written = ui.textarea().classes("p-field p-editor p-field-mono w-full")
                 written.props("borderless autogrow").bind_value(_FORM, "written")
-            c.caption(NOTHING_SENT)
             if _FORM.notice:
                 c.alert(_FORM.notice, kind="info")
         with ui.element("div").classes("p-panel-actions"):

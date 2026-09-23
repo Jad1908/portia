@@ -1980,6 +1980,35 @@ wheels = [
 ]
 
 [[package]]
+name = "openai-codex"
+version = "0.156.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "openai-codex-cli-bin" },
+    { name = "packaging" },
+    { name = "pydantic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/fe/a2/c1d378fef1f1a04b57af6af968bde66dc68849ce1ab91c6beb03782430b7/openai_codex-0.156.0.tar.gz", hash = "sha256:2d766358edce206325a8ee6ccd5f54250b6743f72ac58ba53c3e0706e2f7caee", size = 87934, upload-time = "2026-09-22T20:03:30.398Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2c/65/7e1bde4685f3cf3811f3a6b7f56148908104d4030a96c68506a68f423cc0/openai_codex-0.156.0-py3-none-any.whl", hash = "sha256:2fbd38e12e79091d2aa1f2ae92d97457289daa6ab9f7c2231deba337e703fe3f", size = 96057, upload-time = "2026-09-22T20:03:28.814Z" },
+]
+
+[[package]]
+name = "openai-codex-cli-bin"
+version = "0.156.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c6/5a/6ab804125153352a6d7d39518d893c6252cf1682013b0b3e78abc08ac1bc/openai_codex_cli_bin-0.156.0-py3-none-macosx_10_9_x86_64.whl", hash = "sha256:af36bbb750a808351020c29519d16e421625ed29c800a087d182cba4b87ee616", size = 130007766, upload-time = "2026-09-22T20:01:25.593Z" },
+    { url = "https://files.pythonhosted.org/packages/ea/42/734e6fd84cb149a33b8982da52b3e6a820c4e3e7694ba6b176ce3993759f/openai_codex_cli_bin-0.156.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:b0fe3f27224ea22454f78d92d3022560f3126c25e8b063c53a85cba9ca5fd2f8", size = 119159163, upload-time = "2026-09-22T20:01:34.139Z" },
+    { url = "https://files.pythonhosted.org/packages/30/49/e93dbdf994988b0defd5f4124d9aba3895ecc31fc4597adbdc4819b22a48/openai_codex_cli_bin-0.156.0-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:7b7b0c436e8af55aad9a619849ab5d78e92e8b6d2649109a1255350e0869c429", size = 127264576, upload-time = "2026-09-22T20:01:42.59Z" },
+    { url = "https://files.pythonhosted.org/packages/73/a9/da942602042b9942727ce22691e2bc6237888adf938fddc246a35ed30f8d/openai_codex_cli_bin-0.156.0-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:f299e5b5ef595108333f86ea9f1b9fa03beeaf25266d50e29ef21c7b6f50ded0", size = 136206270, upload-time = "2026-09-22T20:01:53.22Z" },
+    { url = "https://files.pythonhosted.org/packages/04/59/afb7a7114b70a827985c5fa13f917ec8dcce5eb56550b207a5970226002a/openai_codex_cli_bin-0.156.0-py3-none-musllinux_1_1_aarch64.whl", hash = "sha256:1363e1972a80e1b51a89ef37d1a36edce21492dcd569d4427b34b73a96ae2489", size = 136890375, upload-time = "2026-09-22T20:02:07.27Z" },
+    { url = "https://files.pythonhosted.org/packages/6e/42/4a63ef1c381614f99540c2ac6f25c373f2fdbacd7e77ff4d4cb7bdee77e9/openai_codex_cli_bin-0.156.0-py3-none-musllinux_1_1_x86_64.whl", hash = "sha256:331910a4d991d1e8819705cf9deb4504bd8aa8bd38e1dcd777289742c090af80", size = 145971890, upload-time = "2026-09-22T20:02:17.877Z" },
+    { url = "https://files.pythonhosted.org/packages/38/d9/6fae394b013049f475bbb34a87579ec6c950b7646adac007691c6695aa9b/openai_codex_cli_bin-0.156.0-py3-none-win_amd64.whl", hash = "sha256:f2e0dad06bbb212b8a8a02c09a402d1e4074d6e082a43c43ba45941e55056a84", size = 145787414, upload-time = "2026-09-22T20:02:28.31Z" },
+    { url = "https://files.pythonhosted.org/packages/37/92/7c04977dd1a45a446c70f88d26a1c64cca6c433056a6989c04f25a9aa015/openai_codex_cli_bin-0.156.0-py3-none-win_arm64.whl", hash = "sha256:81a70445465572e7bd5fd0b7743f50fe2b2e0768b090c265c23fd869978eae7e", size = 134742526, upload-time = "2026-09-22T20:02:39.276Z" },
+]
+
+[[package]]
 name = "opentelemetry-api"
 version = "1.44.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2169,6 +2198,10 @@ bigquery = [
     { name = "google-cloud-bigquery" },
     { name = "sqlglot" },
 ]
+codex = [
+    { name = "claude-agent-sdk" },
+    { name = "openai-codex" },
+]
 dev = [
     { name = "mypy" },
     { name = "pre-commit" },
@@ -2194,11 +2227,13 @@ ui = [
 [package.metadata]
 requires-dist = [
     { name = "claude-agent-sdk", marker = "extra == 'agent'", specifier = ">=0.2.128" },
+    { name = "claude-agent-sdk", marker = "extra == 'codex'", specifier = ">=0.2.128" },
     { name = "duckdb", specifier = ">=1.5.5" },
     { name = "google-cloud-bigquery", marker = "extra == 'bigquery'", specifier = ">=3.20" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
     { name = "neo4j", marker = "extra == 'graph'", specifier = ">=5.0" },
     { name = "nicegui", marker = "extra == 'ui'", specifier = ">=2.0" },
+    { name = "openai-codex", marker = "extra == 'codex'", specifier = ">=0.156" },
     { name = "pandas", specifier = ">=2.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.7" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.2" },
@@ -2212,7 +2247,7 @@ requires-dist = [
     { name = "sqlglot", marker = "extra == 'postgres'", specifier = ">=25.0" },
     { name = "sqlglot", marker = "extra == 'snowflake'", specifier = ">=25.0" },
 ]
-provides-extras = ["dev", "agent", "ui", "graph", "snowflake", "bigquery", "postgres"]
+provides-extras = ["dev", "agent", "ui", "codex", "graph", "snowflake", "bigquery", "postgres"]
 
 [[package]]
 name = "pre-commit"

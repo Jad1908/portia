@@ -38,11 +38,31 @@ import os
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
+import yaml
+
 #: Every provider, in the order a picker offers them. The first is the default.
-KINDS = ("anthropic", "ollama", "llamacpp")
+KINDS = ("anthropic", "codex", "ollama", "llamacpp")
 DEFAULT_KIND = KINDS[0]
+
+#: What drives the loop for a provider (`docs/PROVIDERS.md` §9). Route A is the
+#: Claude Agent SDK's binary, and every provider but one is an environment for
+#: it. Route B is a second harness, Codex's app-server, which speaks neither
+#: Anthropic's API nor sits behind a bridge to it; `agent/codex.py` drives it
+#: and `session.conversation` picks by this field. A harness is a kind, not a
+#: rank: the same tools, the same log, the same window either way.
+CLAUDE = "claude"
+CODEX = "codex"
+HARNESSES = (CLAUDE, CODEX)
+
+#: One file for the machine, beside the connections and the llama.cpp
+#: configuration: which providers the picker offers, where a binary is, and
+#: the variables a provider's process is started with (`docs/PROVIDERS.md`
+#: §9.5). Never per project, for the reason `llamacpp.CONFIG` is not: an
+#: account or a binary is the machine's, and every project reads the same one.
+SETTINGS = Path.home() / ".config" / "portia" / "providers.yaml"
 
 #: What the SDK's binary needs to talk to a server that is not Anthropic's:
 #: where it is, and a token the binary requires and a local server ignores.
@@ -72,13 +92,98 @@ class Model:
 class Status:
     """Whether the provider can be reached right now, and what it said.
 
-    ``reachable`` is ``None`` when nothing was measured. The Anthropic provider
-    measures nothing: the account resolves inside the SDK's binary when a chat
-    starts, and portia writes no auth code (`docs/PLAN.md` → Auth posture).
+    ``reachable`` is ``None`` when nothing was measured. ``detail`` is one line
+    for a human, in the provider's own words where it has them. ``version`` and
+    ``account`` are the two facts a dashboard draws on their own lines when a
+    provider reports them: the binary or server that answered, and who it is
+    signed in as (`docs/PROVIDERS.md` §9.5). Both empty where not measured,
+    never guessed. ``remedy`` is the one thing to do when it is not reachable.
     """
 
     reachable: bool | None
     detail: str = ""
+    version: str = ""
+    account: str = ""
+    remedy: str = ""
+
+
+@dataclass(frozen=True)
+class Settings:
+    """What the machine says about one provider (:data:`SETTINGS`).
+
+    ``enabled`` is whether the picker offers it; the default is yes for every
+    kind, and the dashboard is where a kind nobody has is switched off. Off
+    means *not offered*: a chat that already ran on it still opens and says so.
+    ``binary`` is a path for a provider that runs one, empty for the bundled or
+    the one on ``PATH``; ``home`` is that binary's own configuration directory,
+    empty for its default. ``env`` is the variables the provider's process is
+    started with, on top of the machine's own: an API key, a base URL. A secret
+    written here is written in the clear, in the user's home, which is where
+    the vendors' own files keep it too; the dashboard says so beside the field.
+    """
+
+    enabled: bool = True
+    binary: str = ""
+    home: str = ""
+    env: dict[str, str] = field(default_factory=dict)
+
+    def as_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"enabled": self.enabled}
+        if self.binary:
+            out["binary"] = self.binary
+        if self.home:
+            out["home"] = self.home
+        if self.env:
+            out["env"] = dict(self.env)
+        return out
+
+
+def load_settings(path: Path | None = None) -> dict[str, Settings]:
+    """Every kind's settings, the defaults for a kind the file does not name."""
+    target = path or SETTINGS
+    raw: Any = {}
+    if target.exists():
+        raw = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
+    if not isinstance(raw, dict):
+        raw = {}
+    out: dict[str, Settings] = {}
+    for kind in KINDS:
+        found = raw.get(kind)
+        entry: dict[str, Any] = dict(found) if isinstance(found, dict) else {}
+        raw_env = entry.get("env")
+        env: dict[str, Any] = dict(raw_env) if isinstance(raw_env, dict) else {}
+        out[kind] = Settings(
+            enabled=bool(entry.get("enabled", True)),
+            binary=str(entry.get("binary") or ""),
+            home=str(entry.get("home") or ""),
+            env={str(k): str(v) for k, v in env.items()},
+        )
+    return out
+
+
+def save_settings(settings: dict[str, Settings], path: Path | None = None) -> Path:
+    """Write every kind's settings. A kind on its defaults is written as such, so the file reads whole."""
+    target = path or SETTINGS
+    target.parent.mkdir(parents=True, exist_ok=True)
+    data = {kind: settings[kind].as_dict() for kind in KINDS if kind in settings}
+    target.write_text(yaml.safe_dump(data, sort_keys=True), encoding="utf-8")
+    return target
+
+
+def settings_for(kind: str, path: Path | None = None) -> Settings:
+    return load_settings(path).get(kind, Settings())
+
+
+def offered_kinds(path: Path | None = None) -> tuple[str, ...]:
+    """The kinds a picker draws: every enabled one, in `KINDS` order, never empty.
+
+    With everything switched off the default is offered anyway: a picker with
+    no options is a composer that cannot send, and the dashboard is where to
+    see why.
+    """
+    settings = load_settings(path)
+    kinds = tuple(kind for kind in KINDS if settings[kind].enabled)
+    return kinds or (DEFAULT_KIND,)
 
 
 @dataclass(frozen=True)
@@ -104,6 +209,14 @@ class Provider(ABC):
     kind: str
     #: What a human calls it.
     label: str
+    #: What drives the loop for this provider (:data:`HARNESSES`). `CLAUDE` for
+    #: every environment of the SDK's binary; `CODEX` for the one provider
+    #: that is a second harness (`agent/codex.py`).
+    harness: str = CLAUDE
+    #: The settings the dashboard draws a field for, beyond `enabled` and the
+    #: variables every provider has: ``binary`` and ``home`` for a provider
+    #: that runs a program of its own, nothing for a server reached over HTTP.
+    runtime_fields: tuple[str, ...] = ()
     #: The model a fresh chat starts on when nothing was picked.
     default_model: str
     #: Whether the reasoning-effort knob reaches the model. It is an Anthropic
@@ -179,6 +292,18 @@ class Provider(ABC):
         where it drew *Start*. Never a network call: it is read in a render.
         """
         return False
+
+    def settings(self) -> Settings:
+        """This provider's machine settings (:data:`SETTINGS`). One small file read."""
+        return settings_for(self.kind)
+
+    def env_notes(self) -> dict[str, str]:
+        """The variables this provider reads out of `Settings.env`, each with one line saying what it does.
+
+        Drawn beside the variables editor so a person knows which names mean
+        something to portia. Empty where a provider reads none of its own.
+        """
+        return {}
 
 
 def get(kind: str) -> Provider:

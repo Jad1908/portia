@@ -305,10 +305,12 @@ def prompts_read(
         from portia.agent import providers, tools
         from portia.agent.session import build_system_prompt
 
-        sees = providers.get(provider or providers.DEFAULT_KIND).sees_images
+        source = providers.get(provider or providers.DEFAULT_KIND)
         return {
             "system": build_system_prompt(str(portia_dir)),
-            "tools": tools.descriptions(sees_images=sees),
+            "tools": tools.descriptions(
+                sees_images=source.sees_images, asks=source.harness == providers.CODEX
+            ),
         }
     except Exception:
         # Deliberately every exception, not ImportError: a missing extra, an

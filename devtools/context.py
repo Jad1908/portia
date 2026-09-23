@@ -98,6 +98,10 @@ LADDER = {
     "record_step": ("write", "Runs a decided step, measures it, records it if it holds."),
     "review_queries": ("curate", "This chat's query_data calls, numbered — read at the end."),
     "record_finding": ("write", "Keeps one thing learned, indexed by the tables it concerns."),
+    "ask_user": (
+        "ask",
+        "One to four questions to the human, on the harness with no question of its own.",
+    ),
     "read_spec": (
         "read",
         "One spec as recorded: steps verbatim, what it reads and is read by; "
@@ -308,7 +312,7 @@ def delivered_tools() -> list[Delivered]:
                 qualified=tools.qualified(name),
                 description=str(described.get("description") or registered.description or ""),
                 schema=dict(described.get("inputSchema") or {}),
-                read_only=bool(getattr(registered.annotations, "readOnlyHint", False)),
+                read_only=read_only(registered.annotations),
                 auto_approved=name in auto,
                 rung=rung,
                 rung_note=note,
@@ -318,6 +322,17 @@ def delivered_tools() -> list[Delivered]:
             )
         )
     return out
+
+
+def read_only(annotations: Any) -> bool:
+    """Whether a tool's annotations carry the read-only hint, on mcp 1.x or 2.x (the field was renamed)."""
+    if annotations is None:
+        return False
+    for name in ("read_only_hint", "readOnlyHint"):
+        value = getattr(annotations, name, None)
+        if value is not None:
+            return bool(value)
+    return False
 
 
 def _list_tools(tools: Any) -> list[dict[str, Any]]:
@@ -333,7 +348,9 @@ def _list_tools(tools: Any) -> list[dict[str, Any]]:
         from mcp.types import ListToolsRequest
 
         server = tools.build_server()["instance"]
-        handler = server.request_handlers[ListToolsRequest]
+        # Public on mcp 1.x, underscored on 2.x; the same table either way.
+        handlers = getattr(server, "request_handlers", None) or server._request_handlers
+        handler = handlers[ListToolsRequest]
         response = asyncio.run(handler(ListToolsRequest(method="tools/list")))
         return [t for t in response.root.model_dump().get("tools", [])]
     except Exception:  # noqa: BLE001 - a dev page must render without the SDK's internals
