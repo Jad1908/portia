@@ -3152,6 +3152,24 @@ def _canvas_project(tmp_path: Path, *, index: bool = True) -> App:
     return app
 
 
+def _quiet_canvas(monkeypatch) -> None:
+    """Stub the redraws a canvas press makes, which need a running page to reach.
+
+    The pane's own is already stubbed by each test; these are the parts a press
+    redraws in its place (`workflow._canvas_changed`, `_spec_changed`).
+    """
+    from portia.ui import app as app_module
+    from portia.ui import workflow
+
+    for part in (
+        workflow._canvas,
+        workflow._report,
+        workflow._report_rail,
+        app_module.run_controls,
+    ):
+        monkeypatch.setattr(part, "refresh", lambda *a, **k: None)
+
+
 def _drawn(app: App):
     """Render the canvas half and hand back its elements, with a class helper."""
     from portia.ui import workflow
@@ -3244,6 +3262,7 @@ def test_clicking_an_arrow_opens_its_target_at_that_input(tmp_path, monkeypatch)
     app.expanded = frozenset()
     with _as_app(workflow, app):
         workflow.pane.refresh = lambda *a, **k: None
+        _quiet_canvas(monkeypatch)
         workflow.open_edge("mart|stg")
     assert "mart" in app.expanded
     assert app.open_input == ("mart", "stg")
@@ -3259,7 +3278,7 @@ def test_hiding_a_table_takes_everything_built_from_it(tmp_path, monkeypatch):
     app = _canvas_project(tmp_path)
     with _as_app(workflow, app):
         workflow.pane.refresh = lambda *a, **k: None
-        monkeypatch.setattr(workflow._canvas, "refresh", lambda *a, **k: None)
+        _quiet_canvas(monkeypatch)
         workflow._toggle_visible("stg", False)
     assert app.visible == frozenset()
     assert graph.project_layout(engine_module.project_docs(app), visible=app.visible).empty
@@ -3274,7 +3293,7 @@ def test_hiding_a_leaf_leaves_what_it_was_built_from(tmp_path, monkeypatch):
     app = _canvas_project(tmp_path)
     with _as_app(workflow, app):
         workflow.pane.refresh = lambda *a, **k: None
-        monkeypatch.setattr(workflow._canvas, "refresh", lambda *a, **k: None)
+        _quiet_canvas(monkeypatch)
         workflow._toggle_visible("mart", False)
     assert app.visible == frozenset({"stg"})
     els, klass = _drawn(app)
@@ -3290,7 +3309,7 @@ def test_select_all_is_a_toggle_between_everything_and_nothing(tmp_path, monkeyp
     app = _canvas_project(tmp_path)
     with _as_app(workflow, app):
         workflow.pane.refresh = lambda *a, **k: None
-        monkeypatch.setattr(workflow._canvas, "refresh", lambda *a, **k: None)
+        _quiet_canvas(monkeypatch)
         workflow._select_all(False)
         assert app.visible == frozenset(), "off is a set, and it is empty"
         workflow._select_all(True)
@@ -3329,6 +3348,78 @@ def test_a_tick_in_the_table_filter_keeps_the_menu_and_redraws_the_canvas(tmp_pa
     assert button.text == workflow._SHOWING.format(n=1, of=2)
 
 
+def test_a_press_on_a_canvas_card_redraws_the_canvas_and_not_the_pane(tmp_path, monkeypatch):
+    """A card press redrew the whole middle pane and the whole left pane
+    (2026-09-23: 463 of 701 elements for one card opened, measured). The
+    canvas's contents redraw, because an open card moves the grid; the report
+    redraws when the press picked another spec; the tree only moves its wash."""
+    import inspect
+
+    from portia.ui import artifacts, workflow
+
+    def body(fn) -> str:
+        source = inspect.getsource(fn)
+        return source.split('"""')[-1] if source.count('"""') >= 2 else source
+
+    for fn in (
+        workflow._open_model,
+        workflow._select_step,
+        workflow._open_input,
+        workflow.open_edge,
+        workflow.move_card,
+        workflow.reset_layout,
+        workflow._reveal_preview,
+    ):
+        code = body(fn)
+        assert "artifacts.pane.refresh()" not in code, fn.__name__
+        # `_select_step`'s one pane redraw is for a report whose slots are gone.
+        if fn is not workflow._select_step:
+            assert "pane.refresh()" not in code, fn.__name__
+    assert "artifacts.show_selection()" in body(workflow._spec_changed)
+
+    # Opening a card on the spec already open: the canvas, and nothing else.
+    monkeypatch.chdir(tmp_path)
+    app = _canvas_project(tmp_path)
+    _drawn(app)
+
+    def redrawn(what):
+        def fail(*a, **k):
+            raise AssertionError(f"{what} was redrawn")
+
+        return fail
+
+    canvases = []
+    monkeypatch.setattr(workflow.pane, "refresh", redrawn("the middle pane"))
+    monkeypatch.setattr(artifacts.pane, "refresh", redrawn("the left pane"))
+    monkeypatch.setattr(workflow._report, "refresh", redrawn("the report"))
+    monkeypatch.setattr(workflow._canvas, "refresh", lambda *a, **k: canvases.append(1))
+    app.spec_path = tmp_path / "specs" / "mart.yaml"
+    with _as_app(workflow, app):
+        workflow._open_model("mart")
+    assert canvases == [1]
+
+
+def test_the_left_pane_moves_its_wash_without_being_redrawn(tmp_path, monkeypatch):
+    from portia.ui import artifacts
+
+    monkeypatch.chdir(tmp_path)
+    app = _canvas_project(tmp_path)
+    app.select(state.SOURCE, "orders")
+    with _as_app(artifacts, app), ui.element("div") as slot:
+        artifacts.pane.func()
+    rows = {
+        e.text: e.parent_slot.parent.parent_slot.parent
+        for e in slot.descendants()
+        if isinstance(e, ui.label) and "artifact-name" in e.classes
+    }
+    assert "artifact-row--selected" in rows["orders.csv"].classes
+    app.select(state.SOURCE, "regions")
+    with _as_app(artifacts, app):
+        artifacts.show_selection()
+    assert "artifact-row--selected" not in rows["orders.csv"].classes
+    assert "artifact-row--selected" in rows["regions.csv"].classes
+
+
 def test_where_you_were_looking_is_remembered_per_project(tmp_path, monkeypatch):
     """`engine.VIEWS`, beside recents — where you last looked is about you, and is
     not a fact anyone else on the project should inherit through a commit."""
@@ -3339,7 +3430,7 @@ def test_where_you_were_looking_is_remembered_per_project(tmp_path, monkeypatch)
     app = _canvas_project(tmp_path)
     with _as_app(workflow, app):
         workflow.pane.refresh = lambda *a, **k: None
-        monkeypatch.setattr(workflow._canvas, "refresh", lambda *a, **k: None)
+        _quiet_canvas(monkeypatch)
         workflow._toggle_visible("mart", False)
     assert engine_module.remembered_view(tmp_path) == frozenset({"stg"})
     assert engine_module.remembered_view(tmp_path / "elsewhere") is None, "never chosen"
@@ -3509,6 +3600,7 @@ def test_clicking_one_ghost_puts_all_of_them_on_the_canvas(tmp_path, monkeypatch
     app.previewing = "mart"
     with _as_app(workflow, app):
         workflow.pane.refresh = lambda *a, **k: None
+        _quiet_canvas(monkeypatch)
         workflow._reveal_preview()
 
     assert app.previewing is None
@@ -5636,6 +5728,7 @@ def test_dropping_a_card_records_where_it_landed_per_project(tmp_path, monkeypat
     app = _canvas_project(tmp_path)
     with _as_app(workflow, app):
         workflow.pane.refresh = lambda *a, **k: None
+        _quiet_canvas(monkeypatch)
         workflow.move_card("mart", 40, -10)
         workflow.move_card("mart", 40, -10)
         assert app.card_offsets == {"mart": (80, -20)}
@@ -5830,6 +5923,7 @@ def test_a_drop_onto_another_card_is_refused(tmp_path, monkeypatch):
     app.expanded = frozenset()
     with _as_app(workflow, app):
         workflow.pane.refresh = lambda *a, **k: None
+        _quiet_canvas(monkeypatch)
         _, placed, _ = workflow._layout()
         stg = next(n for n in placed.nodes if n.id == "stg")
         mart = next(n for n in placed.nodes if n.id == "mart")
