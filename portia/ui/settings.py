@@ -503,11 +503,11 @@ def _set_effort(effort: str) -> None:
     _redraw()
 
 
-def _set_provider(kind: str) -> None:
+def _set_provider(kind: str, model: str | None = None) -> None:
     from nicegui import background_tasks
 
     APP.provider = kind
-    APP.model = providers.get(kind).default_model
+    APP.model = model or providers.get(kind).default_model
     _redraw()
     background_tasks.create(_list_models(kind))
 
@@ -521,9 +521,7 @@ def _list_models_clicked(kind: str) -> None:
 async def _list_models(kind: str) -> None:
     from portia.ui import transcript
 
-    await engine.list_models(APP, kind)
-    _redraw()
-    transcript.pane.refresh()
+    await c.list_models_behind_picker(kind, _redraw, transcript.pane.refresh)
 
 
 async def _switch_project() -> None:

@@ -1837,8 +1837,9 @@ _SERVER_DIALOG: ui.dialog | None = None
 
 SERVER_TITLE = "Start llama-server"
 SERVER_MODEL = "Model"
-SERVER_ELSEWHERE = "Elsewhere…"
-SERVER_ELSEWHERE_FIELD = "Path or repository"
+SERVER_NO_FILES = "No model files yet"
+SERVER_PICK_FILE = "Pick a model file"
+SERVER_ELSEWHERE = "Path or repository"
 SERVER_MODEL_HINT = (
     "A .gguf file anywhere on this machine, or a Hugging Face repository such as "
     "Qwen/Qwen3-8B-GGUF:Q4_K_M, which llama-server fetches once into its own cache."
@@ -1846,15 +1847,14 @@ SERVER_MODEL_HINT = (
 SERVER_REGISTRY_HINT = (
     "Model files portia knows, from {folder}. Put a .gguf there and it appears here."
 )
-SERVER_REGISTRY_EMPTY = (
-    "{folder} is empty. Put a .gguf there and it appears here, or pick Elsewhere."
-)
-SERVER_CONTEXT = "Context, tokens per slot"
+SERVER_PATH_PLACEHOLDER = "/path/to/model.gguf or owner/repo:QUANT"
+SERVER_CONTEXT = "Context"
 SERVER_CONTEXT_HINT = (
-    "portia's instructions alone are about 14,700 tokens; 32768 leaves room for a chat."
+    "Tokens per slot. portia's instructions alone are about 14,700 tokens; "
+    "32768 leaves room for a chat."
 )
 SERVER_PORT = "Port"
-SERVER_COMMAND = "What will run:"
+SERVER_COMMAND = "What will run"
 SERVER_GO = "Start"
 SERVER_STARTING_GO = "Starting…"
 SERVER_STARTING = (
@@ -1875,15 +1875,26 @@ def build_server_dialog() -> None:
 
 
 def open_server_dialog(kind: str = "") -> None:
-    """Show it, on the saved configuration, from wherever the picker offered it."""
+    """Show it, on the saved configuration, from wherever the picker offered it.
+
+    The one whole redraw the panel gets: it is shut, and it opens on the saved
+    configuration. Everything after, a pick, a keystroke, Start, redraws the
+    part it changed and nothing else (`_server_model`, `_server_state`).
+    """
     from portia.agent.providers import llamacpp
 
+    global _SERVER_ELSEWHERE
     if _SERVER_DIALOG is None or _SERVER_DIALOG.is_deleted:
         ui.notify(NO_SERVER_DIALOG)
         return
     if not APP.server_form:
         APP.server_form = llamacpp.load_config().as_form()
     APP.server_error = ""
+    model = APP.server_form.get("model", "")
+    names = {str(p) for p in llamacpp.registry_models()}
+    # Open on the path field when that is where the saved model is, or when
+    # the folder has nothing in it to pick.
+    _SERVER_ELSEWHERE = (bool(model) and model not in names) or not names
     _server_panel.refresh()
     _SERVER_DIALOG.open()
 
@@ -1895,117 +1906,241 @@ def _close_server_dialog() -> None:
 
 @ui.refreshable
 def _server_panel() -> None:
-    """The three fields, the command they make, and Start or Stop.
+    """The model, the context and the port, the command they make, and Start or Stop.
 
     The command is drawn as it will run (`ServerConfig.command`), so what the
     window does is what a terminal would do with the same line, and a refusal
-    is the provider's own sentence with the log's last lines under the button
-    that failed. While the model loads the panel says so and Start is dark;
-    once the server answers, the panel closes and the picker lists it.
+    is the provider's own sentence with the log's last lines under the fields.
+
+    **Three parts, each redrawn alone** *(2026-09-23, the Settings pass
+    applied here)*: the model section when the path field is opened or shut,
+    the state (the alert and the buttons) on Start and Stop, and the command
+    line in place on every change. The whole card was redrawn on each pick and
+    on every state change, which rebuilt the box under the pointer.
+    """
+    form = APP.server_form
+    _SERVER_INPUTS.clear()
+    with ui.element("div").classes("p-panel server-panel"):
+        with ui.element("div").classes("p-panel-head"):
+            ui.label(SERVER_TITLE).classes("t-heading-md")
+        with ui.element("div").classes("p-panel-body server-form"):
+            _server_model()
+            with ui.element("div").classes("server-grid"):
+                _SERVER_INPUTS.append(
+                    c.field(
+                        SERVER_CONTEXT,
+                        help=SERVER_CONTEXT_HINT,
+                        value=form.get("context", ""),
+                        placeholder=str(_server_default("context")),
+                        mono=True,
+                        mark=False,
+                        on_change=lambda e: _server_field("context", e.value),
+                    )
+                )
+                _SERVER_INPUTS.append(
+                    c.field(
+                        SERVER_PORT,
+                        value=form.get("port", ""),
+                        placeholder=str(_server_default("port")),
+                        mono=True,
+                        mark=False,
+                        on_change=lambda e: _server_field("port", e.value),
+                    )
+                )
+            global _COMMAND_LINE
+            with ui.element("div").classes("server-command"):
+                ui.label(SERVER_COMMAND).classes("server-command-label")
+                _COMMAND_LINE = ui.label(_server_command(form)).classes("server-command-line")
+            _server_state(body=True)
+        with ui.element("div").classes("p-panel-actions"):
+            _server_state(body=False)
+    _server_busy()
+
+
+def _server_default(key: str) -> int:
+    from portia.agent.providers import llamacpp
+
+    return llamacpp.DEFAULT_CONTEXT if key == "context" else llamacpp.DEFAULT_PORT
+
+
+#: Whether the path field is open under the model select: a model kept outside
+#: the registry, or a repository. Set when the panel opens, flipped by the
+#: toggle, and read by `_server_model` alone.
+_SERVER_ELSEWHERE = False
+#: The inputs a start in progress disables, set in place rather than redrawn.
+_SERVER_INPUTS: list[Any] = []
+_SERVER_SELECT: ui.select | None = None
+_SERVER_PATH: ui.input | None = None
+
+
+@ui.refreshable
+def _server_model() -> None:
+    """The model: a select over the registry, and the path field behind a toggle.
+
+    The registry (`llamacpp.REGISTRY_DIR`) is the one folder portia looks in, so
+    the common case is a name off a list and never a path typed by hand. A
+    model kept elsewhere, or a Hugging Face repository, is behind *Path or
+    repository*, the way Settings keeps the per-tool switches behind
+    *Customize* *(2026-09-23, the user: it was an *Elsewhere…* option at the
+    foot of the list)*. The two write one field: a pick empties the path box,
+    and a path typed takes the select back to nothing picked.
+    """
+    from portia.agent.providers import llamacpp
+
+    global _SERVER_SELECT, _SERVER_PATH
+    registry = llamacpp.registry_models()
+    options = {str(p): llamacpp.display_name(str(p)) for p in registry}
+    current = APP.server_form.get("model", "")
+    with ui.element("div").classes("field"):
+        with ui.element("div").classes("field-label"):
+            ui.label(SERVER_MODEL)
+            c.help_tip(SERVER_REGISTRY_HINT.format(folder=llamacpp.REGISTRY_DIR))
+        select = ui.select(
+            options,
+            value=current if current in options else None,
+            on_change=lambda e: _server_model_picked(e.value),
+        )
+        select.props(
+            "dense borderless options-dense hide-bottom-space popup-content-class=server-select-menu"
+        )
+        select.classes("p-field p-input p-field-mono w-full server-select")
+        if not options:
+            _server_select_empty(select, SERVER_NO_FILES)
+            select.set_enabled(False)
+        elif current not in options:
+            _server_select_empty(select, SERVER_PICK_FILE)
+        _SERVER_SELECT = select
+        _SERVER_INPUTS.append(select)
+    with ui.element("div").classes("row-gap-xs server-elsewhere-head"):
+        toggle = c.button(
+            SERVER_ELSEWHERE,
+            _toggle_elsewhere,
+            icon="remove" if _SERVER_ELSEWHERE else "add",
+            micro=True,
+        )
+        c.help_tip(SERVER_MODEL_HINT)
+    _SERVER_INPUTS.append(toggle)
+    _SERVER_PATH = None
+    if _SERVER_ELSEWHERE:
+        with ui.element("div").classes("settings-customize server-elsewhere"):
+            _SERVER_PATH = c.field(
+                "",
+                value="" if current in options else current,
+                placeholder=SERVER_PATH_PLACEHOLDER,
+                mono=True,
+                on_change=lambda e: _server_path_typed(e.value),
+            )
+            _SERVER_PATH.props("spellcheck=false autocomplete=off")
+            _SERVER_INPUTS.append(_SERVER_PATH)
+
+
+def _server_select_empty(select: ui.select, words: str | None) -> None:
+    """Say what the select holds when it holds nothing, in the placeholder's ink.
+
+    ``None`` takes the words away, for a pick. In place, on the one element.
+    """
+    if words is None:
+        select.props(remove="display-value")
+        select.classes(remove="server-select--empty")
+    else:
+        select.props(f"display-value={c.prop_value(words)}")
+        select.classes(add="server-select--empty")
+
+
+def _toggle_elsewhere() -> None:
+    """Open or shut the path field. Shutting it drops a model that lived there.
+
+    A model named only in a field nobody can see is a start that runs
+    something not on screen, so shutting the field over a path empties it and
+    the command line says what is missing.
+    """
+    from portia.agent.providers import llamacpp
+
+    global _SERVER_ELSEWHERE
+    _SERVER_ELSEWHERE = not _SERVER_ELSEWHERE
+    current = APP.server_form.get("model", "")
+    if not _SERVER_ELSEWHERE and current not in {str(p) for p in llamacpp.registry_models()}:
+        _server_field("model", "")
+    _server_model.refresh()
+    _server_busy()
+
+
+def _server_model_picked(value: object) -> None:
+    """A registry pick: the model is that file, and the path box empties in place."""
+    if not value:
+        return
+    _server_field("model", value)
+    if _SERVER_SELECT is not None and not _SERVER_SELECT.is_deleted:
+        _server_select_empty(_SERVER_SELECT, None)
+    if _SERVER_PATH is not None and not _SERVER_PATH.is_deleted and _SERVER_PATH.value:
+        _SERVER_PATH.value = ""
+
+
+def _server_path_typed(value: object) -> None:
+    """A path or repository typed: the model is that, and the select lets go of its pick."""
+    text = str(value or "")
+    if not text and APP.server_form.get("model", "") != "":
+        # Emptied because a registry pick cleared it: the pick stands.
+        select = _SERVER_SELECT
+        if select is not None and not select.is_deleted and select.value:
+            return
+    _server_field("model", text)
+    select = _SERVER_SELECT
+    if text and select is not None and not select.is_deleted and select.value is not None:
+        select.set_value(None)
+        _server_select_empty(select, SERVER_PICK_FILE)
+
+
+@ui.refreshable
+def _server_state(body: bool) -> None:
+    """What the server is doing (``body``) or the buttons that change it.
+
+    Two slots of one refreshable, one in the body and one in the actions row,
+    redrawn together on Start and Stop and on nothing else.
     """
     from portia.agent.providers import llamacpp
 
     busy = APP.server_status == state.STARTING
     pid = llamacpp.running()
-    form = APP.server_form
-    with ui.element("div").classes("p-panel p-panel--prose"):
-        with ui.element("div").classes("p-panel-head"):
-            ui.label(SERVER_TITLE).classes("t-heading-md")
-        with ui.element("div").classes("p-panel-body"):
-            _server_model_pick(form)
-            c.field(
-                SERVER_CONTEXT,
-                hint=SERVER_CONTEXT_HINT,
-                value=form.get("context", ""),
-                mono=True,
-                on_change=lambda e: _server_field("context", e.value),
+    if body:
+        if APP.server_error:
+            c.alert(APP.server_error, kind="error")
+        elif busy:
+            with ui.element("div").classes("connect-state"):
+                ui.spinner(size="sm")
+                ui.label(SERVER_STARTING)
+        elif pid is not None:
+            c.alert(SERVER_RUNNING.format(pid=pid), kind="info")
+        return
+    with ui.element("div").classes("row-gap-sm"):
+        if pid is None:
+            c.button(
+                SERVER_STARTING_GO if busy else SERVER_GO,
+                _start_server_clicked,
+                kind="primary",
+                icon="play_arrow",
+                enabled=not busy,
             )
-            c.field(
-                SERVER_PORT,
-                value=form.get("port", ""),
-                mono=True,
-                on_change=lambda e: _server_field("port", e.value),
-            )
-            global _COMMAND_LINE
-            c.caption(SERVER_COMMAND)
-            _COMMAND_LINE = c.mono(_server_command(form), small=True)
-            if APP.server_error:
-                c.alert(APP.server_error, kind="error")
-            elif busy:
-                with ui.element("div").classes("connect-state"):
-                    ui.spinner(size="sm")
-                    ui.label(SERVER_STARTING)
-            elif pid is not None:
-                c.alert(SERVER_RUNNING.format(pid=pid), kind="info")
-        with ui.element("div").classes("p-panel-actions"):
-            with ui.element("div").classes("row-gap-sm"):
-                if pid is None:
-                    c.button(
-                        SERVER_STARTING_GO if busy else SERVER_GO,
-                        _start_server_clicked,
-                        kind="primary",
-                        icon="play_arrow",
-                        enabled=not busy,
-                    )
-                else:
-                    c.button(SERVER_STOP, _stop_server_clicked, kind="secondary", icon="stop")
-                c.button(SERVER_CLOSE, _close_server_dialog, kind="secondary", enabled=not busy)
+        else:
+            c.button(SERVER_STOP, _stop_server_clicked, kind="secondary", icon="stop")
+        c.button(SERVER_CLOSE, _close_server_dialog, kind="secondary", enabled=not busy)
 
 
-#: The select's value for a model that is not in the registry: the path field
-#: is drawn under it and holds the real value.
-ELSEWHERE = "__elsewhere__"
+def _server_busy() -> None:
+    """Dark while a start is loading the model: the fields are what it was started with."""
+    busy = APP.server_status == state.STARTING
+    for element in _SERVER_INPUTS:
+        if not element.is_deleted:
+            element.set_enabled(not busy)
+    if not busy and _SERVER_SELECT is not None and not _SERVER_SELECT.is_deleted:
+        # A select with nothing to offer stays dark whatever the server does.
+        _SERVER_SELECT.set_enabled(bool(_SERVER_SELECT.options))
 
 
-def _server_model_pick(form: dict[str, str]) -> None:
-    """The model as a select over the registry, with *elsewhere* revealing a path field.
-
-    The registry (`llamacpp.REGISTRY_DIR`) is the one folder portia looks in, so
-    the common case is a name off a list and never a path typed by hand. A
-    model kept elsewhere is still allowed: the last option reveals the field
-    the panel used to be, for a path or a Hugging Face repository.
-    """
-    from portia.agent.providers import llamacpp
-
-    registry = llamacpp.registry_models()
-    options = {str(p): llamacpp.display_name(str(p)) for p in registry}
-    options[ELSEWHERE] = SERVER_ELSEWHERE
-    current = form.get("model", "")
-    picked = current if current in options else ELSEWHERE
-    with ui.element("div").classes("field"):
-        with ui.element("div").classes("field-label"):
-            ui.label(SERVER_MODEL)
-            ui.label("required").classes("field-required")
-        select = ui.select(options, value=picked, on_change=lambda e: _server_model_picked(e.value))
-        select.props("dense borderless options-dense hide-bottom-space").classes(
-            "p-field p-field-mono w-full"
-        )
-        ui.label(
-            SERVER_REGISTRY_HINT.format(folder=llamacpp.REGISTRY_DIR)
-            if registry
-            else SERVER_REGISTRY_EMPTY.format(folder=llamacpp.REGISTRY_DIR)
-        ).classes("field-hint")
-    if picked == ELSEWHERE:
-        c.field(
-            SERVER_ELSEWHERE_FIELD,
-            required=True,
-            hint=SERVER_MODEL_HINT,
-            value=current,
-            mono=True,
-            on_change=lambda e: _server_field("model", e.value),
-        )
-
-
-def _server_model_picked(value: str) -> None:
-    """A registry pick sets the path; *elsewhere* clears it and reveals the field.
-
-    The panel is redrawn here, unlike a keystroke in the path field: what is
-    drawn under the select changes with the choice, and the select is not the
-    element being typed in.
-    """
-    APP.server_form = {**APP.server_form, "model": "" if value == ELSEWHERE else value}
-    APP.server_error = ""
-    _server_panel.refresh()
+def _server_changed() -> None:
+    """Start or Stop moved the state: redraw the state's two slots and nothing else."""
+    _server_state.refresh()
+    _server_busy()
 
 
 #: The command line under the fields, updated in place as they are typed. A
@@ -2017,6 +2152,7 @@ _COMMAND_LINE: ui.label | None = None
 
 def _server_field(key: str, value: object) -> None:
     APP.server_form = {**APP.server_form, key: str(value or "")}
+    APP.server_error = ""
     if _COMMAND_LINE is not None and not _COMMAND_LINE.is_deleted:
         _COMMAND_LINE.text = _server_command(APP.server_form)
 
@@ -2051,12 +2187,17 @@ async def _start_server() -> None:
 
     APP.server_status = state.STARTING
     APP.server_error = ""
-    _server_panel.refresh()
+    _server_changed()
     _redraw_pickers()
     ok = await engine.start_server(APP)
     if ok:
+        # The model moves with the provider, to the one the server loaded: a
+        # start pressed inside the picker happens while another provider is
+        # picked, and the provider alone left a Claude name on llama.cpp
+        # (2026-09-23). The listing that just ran is what names it.
         APP.provider = llamacpp.PROVIDER.kind
-    _server_panel.refresh()
+        APP.model = llamacpp.PROVIDER.default_model
+    _server_changed()
     _redraw_pickers()
 
 
@@ -2068,7 +2209,7 @@ def _stop_server_clicked() -> None:
 
 async def _stop_server() -> None:
     await engine.stop_server(APP)
-    _server_panel.refresh()
+    _server_changed()
     _redraw_pickers()
 
 
@@ -2319,13 +2460,13 @@ def _set_indexing_effort(effort: str) -> None:
     _refresh()
 
 
-def _set_indexing_provider(kind: str) -> None:
+def _set_indexing_provider(kind: str, model: str | None = None) -> None:
     from nicegui import background_tasks
 
     from portia.agent import providers
 
     APP.provider = kind
-    APP.model = providers.get(kind).default_model
+    APP.model = model or providers.get(kind).default_model
     _refresh()
     background_tasks.create(_list_models(kind))
 
@@ -2337,8 +2478,7 @@ def _list_models_clicked(kind: str) -> None:
 
 
 async def _list_models(kind: str) -> None:
-    await engine.list_models(APP, kind)
-    _refresh()
+    await c.list_models_behind_picker(kind, _refresh)
 
 
 def _stop_indexing() -> None:

@@ -86,6 +86,19 @@ class Model:
     #: The vendor's one line about it: parameter count and quantization for a
     #: local model, nothing for a remote one.
     detail: str = ""
+    #: What the vendor's own picker calls it (``Claude Opus 5.5``), empty where
+    #: the name is all there is, which is every local model.
+    label: str = ""
+    #: Whether the vendor's own picker files it under *legacy*: still served,
+    #: no longer what it offers first. The vendor's word, never portia's
+    #: judgment of the model, and a picker folds these away rather than ranks
+    #: them (`docs/PROVIDERS.md` §5.1).
+    legacy: bool = False
+
+    @property
+    def shown(self) -> str:
+        """The name a picker draws: the vendor's label, else the model's name."""
+        return self.label or self.name
 
 
 @dataclass(frozen=True)
@@ -255,7 +268,9 @@ class Provider(ABC):
     #: The models this provider can name without asking anyone: a list written
     #: in its own module. Empty where the list is the server's, which is every
     #: local provider. A picker may draw these in a render, where `models` is
-    #: a network call and may not be (`docs/PROVIDERS.md` §4.3).
+    #: a network call and may not be (`docs/PROVIDERS.md` §4.3). Written in the
+    #: order the vendor's own picker offers them, current first, and read off
+    #: the binary portia runs (§5.1).
     static_models: tuple[Model, ...] = ()
 
     @abstractmethod

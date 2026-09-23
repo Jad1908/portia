@@ -109,6 +109,10 @@ PICK_JS = ASSETS / "pick.js"
 #: to the server every render is everything arriving at once. It remembers keys,
 #: not elements, for `pick.js`'s reason.
 MOTION_JS = ASSETS / "motion.js"
+#: Where the open model picker is looking: the provider on its rail, the
+#: search, the legacy fold, the row under the arrow keys. The canvas's rule:
+#: a round trip per keystroke would rebuild the box being typed into.
+MODELPICK_JS = ASSETS / "modelpick.js"
 BEHAVIOUR = (
     CANVAS_JS,
     VIEWPORT_JS,
@@ -119,6 +123,7 @@ BEHAVIOUR = (
     TABS_JS,
     PICK_JS,
     MOTION_JS,
+    MODELPICK_JS,
 )
 
 #: The graph explorer's renderer — the one third-party script the window loads.

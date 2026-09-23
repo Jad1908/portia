@@ -80,6 +80,25 @@ SERVER_NAME = "portia"
 #: Codex picks its own default when the thread is started with no model.
 ACCOUNT_DEFAULT = "account default"
 
+#: Every model Codex's own picker lists, in its order, split the way T3 Code's
+#: splits them: the current family first, the rest folded under *legacy*
+#: (`docs/PROVIDERS.md` §5.1). Read off the model list compiled into
+#: ``codex-cli`` 0.156.1, the binary ``openai-codex`` 0.156.1 pins; the entries
+#: that binary hides (the Daybreak pair, GPT-5.4, its own review model) are not
+#: here, as they are not in its picker. On an account the list is the
+#: account's (``model/list``) and this only says which of those are legacy.
+CATALOG = (
+    Model("gpt-6-astra", label="GPT-6 Astra"),
+    Model("gpt-6-sol", label="GPT-6 Sol"),
+    Model("gpt-6-luna", label="GPT-6 Luna"),
+    Model("gpt-5.6-sol", label="GPT-5.6 Sol", legacy=True),
+    Model("gpt-5.6-terra", label="GPT-5.6 Terra", legacy=True),
+    Model("gpt-5.6-luna", label="GPT-5.6 Luna", legacy=True),
+    Model("gpt-5.5", label="GPT-5.5", legacy=True),
+)
+LEGACY = frozenset(m.name for m in CATALOG if m.legacy)
+_LABELS = {m.name: m.label for m in CATALOG}
+
 #: How long Codex waits on one tool call. A tool that asks the human a
 #: question waits as long as they take; 70 s passed at the server's default on
 #: 2026-09-22, and this makes the ceiling a day rather than a guess.
@@ -277,7 +296,14 @@ def _account_models() -> list[Model]:
     except Exception as exc:  # noqa: BLE001 - the SDK's own words are the reason
         raise ProviderUnavailable(str(exc).splitlines()[0] if str(exc) else repr(exc)) from exc
     models = [
-        Model(m.model, detail=m.description or m.display_name) for m in listed if not m.hidden
+        Model(
+            m.model,
+            detail=m.description or "",
+            label=_LABELS.get(m.model) or m.display_name or "",
+            legacy=m.model in LEGACY,
+        )
+        for m in listed
+        if not m.hidden
     ]
     defaults = [m.model for m in listed if m.is_default]
     models.sort(key=lambda m: (m.name not in defaults, m.name))
@@ -298,6 +324,11 @@ class Codex(Provider):
     metered = False
     runtime_fields = ("binary", "home")
     start_remedy = SIGN_IN_REMEDY
+
+    @property
+    def static_models(self) -> tuple[Model, ...]:  # type: ignore[override]
+        """The catalog on an account, nothing on a local server, whose list is its own."""
+        return () if base_url() else CATALOG
 
     @property
     def default_model(self) -> str:  # type: ignore[override]

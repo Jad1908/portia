@@ -5536,96 +5536,253 @@ body.tab-dragging .tab-drop {
   width: 18px;
   height: 18px;
 }
-.provider-segments .btn .provider-glyph {
-  color: inherit;
-}
-.provider-segments .btn.seg-active .provider-glyph {
-  color: var(--accent-text);
-}
 /* The picker keeps one shape whatever it says (DESIGN.md → Layout stability).
- * A q-field is 100% wide by default, so the select claimed its line and pushed
- * the refresh button onto a row of its own — on Ollama only, because only that
- * provider draws one, which is how switching provider moved the composer. The
- * width is the row's now, never the model name's: a longer name ellipsizes
- * inside it, and the full name is in the dropdown.
+ * The width is the row's, never the model name's: a longer name ellipsizes
+ * inside the button, and the full name is in the menu.
  *
  * **`nowrap`, because a wrapping flex line wraps before it shrinks**: items go
- * to the next line on their base size, so a shrinkable select still wrapped
- * its slot at the default pane width. On one line the select gives way
+ * to the next line on their base size, so a shrinkable control still wrapped
+ * its slot at the default pane width. On one line the picker gives way
  * instead, down to its floor, which turns the pane-edge drag from a reshuffle
  * into a resize. */
 .spend-row {
   flex-wrap: nowrap;
   align-items: center;
 }
-/* One group per thing picked: the provider, the model with its refresh. A
- * group never wraps inside itself, and everything in it shares one centre
- * line, so the glyph, the name and the button read as one row whatever the
- * pane's width does to the row as a whole (2026-09-14). The provider group
- * never gives way; the model group shrinks first. */
-.spend-group {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-xs);
-  min-width: 0;
-  flex-wrap: nowrap;
-}
-.spend-provider {
-  flex: 0 0 auto;
-}
-/* The model group takes the room the row has; squeezed, this row's order of
- * surrender is the select down to its floor, then the slot — measured before
- * this, the last 40px of a pane drag folded the provider marks into a column,
- * bouncing the row's height per pixel. */
-.spend-model {
-  flex: 1 1 auto;
-}
-.spend-group .p-field .q-field__control,
-.spend-group .p-field .q-field__native {
-  min-height: 24px;
-  height: 24px;
-  padding-top: 0;
-  padding-bottom: 0;
-  line-height: 24px;
-}
-.spend-group .p-field.q-field--auto-height .q-field__control,
-.spend-group .p-field.q-field--auto-height .q-field__native {
-  min-height: 24px;
-}
-.spend-group .p-field .q-field__prepend,
-.spend-group .p-field .q-field__append {
-  height: 24px;
-}
-/* Closed, the provider select is its glyph and the arrow; the blank display
- * value keeps the native slot from reserving a word's width. */
-.provider-select .q-field__native {
-  min-width: 0;
-  width: 0;
-  padding: 0;
-}
-.provider-select .q-field__prepend {
-  padding-right: 0;
-}
-.provider-select .q-field__prepend .provider-glyph {
-  color: var(--body);
-}
-.spend-row .model-select {
-  /* Grow to the room the row has, never to the name: the width tracks the
-   * pane, so a longer selection changes nothing and a narrower pane shrinks
-   * the select smoothly. The cap keeps the caret near the text on a wide
-   * settings body. */
-  flex: 1 1 auto;
+/* The model picker, closed (`DESIGN.md` → `model-picker`): the provider's
+ * mark, the model's name and a caret, as one tertiary button. It grows to the
+ * row's room and never to the name, capped, so a longer name ellipsizes rather
+ * than moving the slot beside it (→ Layout stability). */
+.spend-row .modelpick-trigger {
+  flex: 0 1 auto;
   min-width: 64px;
   max-width: 340px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0 var(--sp-xs) 0 var(--sp-sm);
 }
-.spend-row .model-select .q-field__native {
+.modelpick-trigger .q-btn__content {
   flex-wrap: nowrap;
+  gap: var(--sp-xs);
   min-width: 0;
+  width: 100%;
 }
-.spend-row .model-select .q-field__native > span {
+.modelpick-trigger .provider-glyph {
+  color: var(--body);
+}
+.modelpick-trigger-name {
+  font-size: 13px;
+  color: var(--ink);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.modelpick-caret {
+  font-size: 16px;
+  color: var(--mute);
+  flex: 0 0 auto;
+}
+
+/* The picker, open: a rail of provider marks down the left, the rail's pick's
+ * models beside it under a search box. One width whatever the list holds, so
+ * switching provider on the rail never resizes the menu under the pointer. */
+.q-menu.modelpick-menu {
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+}
+.modelpick {
+  display: flex;
+  width: 360px;
+  max-width: 92vw;
+  height: 380px;
+  max-height: 70vh;
+}
+.modelpick-rail {
+  flex: 0 0 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-xs);
+  padding: var(--sp-sm) 0;
+  border-right: 1px solid var(--hairline);
+}
+/* A mark per provider, in the ink of the rail; the one showing takes the
+ * accent and a bar on the rail's edge. Kind, never rank: every mark is the
+ * same size, and none carries its vendor's colour. */
+.modelpick-rail-item {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--mute);
+  cursor: pointer;
+}
+.modelpick-rail-item .provider-glyph {
+  width: 18px;
+  height: 18px;
+  color: inherit;
+}
+.modelpick-rail-item:hover {
+  background: var(--hairline-soft);
+  color: var(--body);
+}
+.modelpick-rail-item[data-active] {
+  color: var(--accent-text);
+}
+.modelpick-rail-item[data-active]::after {
+  content: "";
+  position: absolute;
+  right: -7px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: var(--r-full);
+  background: var(--accent-primary);
+}
+.modelpick-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.modelpick-search {
+  flex: 0 0 auto;
+  margin: var(--sp-sm) var(--sp-sm) 0;
+  padding: var(--sp-xs) var(--sp-xs) var(--sp-sm);
+  border: 0;
+  border-bottom: 1px solid var(--hairline-strong);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+.modelpick-search::placeholder {
+  color: var(--ash);
+}
+.modelpick-search:focus {
+  border-bottom-color: var(--accent-primary);
+}
+.modelpick-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-sm);
+}
+.modelpick-panel {
+  display: none;
+  flex-direction: column;
+  gap: var(--sp-xxs);
+}
+.modelpick-panel[data-active] {
+  display: flex;
+}
+.modelpick-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  padding: 6px var(--sp-sm);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  min-width: 0;
+}
+.modelpick-row:hover,
+.modelpick-row[data-cursor] {
+  background: var(--hairline-soft);
+}
+/* The pick is the accent wash, the selected state everywhere else in the
+ * window (`segmented-control`, the left tree). */
+.modelpick-row[data-selected] {
+  background: var(--accent-soft);
+}
+.modelpick-row-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.modelpick-row-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.modelpick-row-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  font-size: 11px;
+  color: var(--mute);
+  min-width: 0;
+}
+.modelpick-row-meta .provider-glyph {
+  width: 12px;
+  height: 12px;
+}
+.modelpick-size {
+  font-family: var(--font-mono);
+  font-feature-settings: "tnum";
+}
+.modelpick-check {
+  flex: 0 0 auto;
+  font-size: 16px;
+  color: var(--accent-text);
+}
+/* The legacy models, folded under one row until it is pressed, and shown
+ * whole while a search is typed: a search is for finding one, and a fold it
+ * cannot see into would hide the answer. */
+.modelpick-legacy {
+  display: none;
+}
+.modelpick-panel[data-legacy-open] .modelpick-legacy,
+[data-searching] .modelpick-legacy {
+  display: flex;
+}
+[data-searching] .modelpick-fold {
+  display: none;
+}
+.modelpick-fold-caret {
+  flex: 0 0 auto;
+  font-size: 18px;
+  color: var(--mute);
+  transition: transform 120ms ease;
+}
+.modelpick-panel[data-legacy-open] .modelpick-fold-caret {
+  transform: rotate(90deg);
+}
+.modelpick-row[data-hide],
+.modelpick-panel[data-legacy-open] .modelpick-row[data-hide],
+[data-searching] .modelpick-row[data-hide] {
+  display: none;
+}
+/* A provider with a server ends its list on the listing and the server: the
+ * reason when there is nothing, *List models* or *List again*, and for the
+ * one portia can start, Start or Stop. Ruled off from the rows above it when
+ * there are any, because it acts on the list rather than being a member. */
+.modelpick-foot {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-sm);
+  padding: var(--sp-sm);
+}
+.modelpick-row + .modelpick-foot {
+  margin-top: var(--sp-xs);
+  border-top: 1px solid var(--hairline);
+  padding-top: var(--sp-md);
+}
+[data-searching] .modelpick-foot {
+  display: none;
 }
 /* One slot for the listing spinner and the refresh button, drawn whether or
  * not either is: the indicator changes, the controls around it stay put. It
@@ -5686,4 +5843,120 @@ body.tab-dragging .tab-drop {
  * message that did not go, and no exchange happened to give it a row. */
 .composer-alert {
   padding: 0 var(--sp-sm) var(--sp-xs);
+}
+
+/* The start panel (`screens._server_panel`, DESIGN.md → `server-panel`), the
+ * Settings pass applied *(2026-09-23)*: a card the width of what it asks for,
+ * each sentence behind a *?*, and fields drawn lean. A lean field is a soft
+ * fill with no border at rest and the accent ring on focus, 32px, with its
+ * label above it in the body ink: the hairline box beside a hairline card was
+ * a box inside a box. Scoped to the panel; the other forms keep `p-input`. */
+.q-dialog__inner > div.p-panel.server-panel {
+  max-width: min(520px, 92vw);
+}
+.server-form {
+  gap: var(--sp-lg);
+}
+.server-form .field {
+  gap: var(--sp-xs);
+}
+.server-form .field-label {
+  font-weight: 500;
+  color: var(--body);
+}
+.server-form .p-input .q-field__control {
+  min-height: 32px;
+  height: 32px;
+  padding: 0 var(--sp-md);
+  background: var(--hairline-soft);
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+.server-form .p-input .q-field__control:hover {
+  border-color: var(--hairline);
+}
+.server-form .p-input.q-field--focused .q-field__control {
+  background: var(--surface-elevated);
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.server-form .p-input .q-field__control::before,
+.server-form .p-input .q-field__control::after {
+  display: none;
+}
+.server-form .p-input .q-field__native,
+.server-form .p-input .q-field__input {
+  min-height: 30px;
+  line-height: 30px;
+  font-size: 12px;
+}
+.server-form .p-input .q-field__native::placeholder,
+.server-form .p-input .q-field__input::placeholder {
+  color: var(--ash);
+  opacity: 1;
+}
+.server-form .server-select .q-field__append {
+  height: 30px;
+}
+.server-form .q-field--disabled .q-field__control {
+  opacity: 0.6;
+}
+/* Context and port on one line, the context taking the room: a port is five
+ * digits and a whole row for it read as a form padded out. */
+.server-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: var(--sp-md);
+}
+.server-elsewhere-head {
+  flex-wrap: nowrap;
+  margin-top: calc(-1 * var(--sp-sm));
+}
+.server-elsewhere {
+  margin-top: calc(-1 * var(--sp-sm));
+}
+/* The command as a terminal would read it: a code block, wrapped at any
+ * character, because a path has no spaces to break on. */
+.server-command {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+}
+.server-command-label {
+  font-size: 11px;
+  color: var(--mute);
+}
+.server-command-line {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--body);
+  background: var(--surface-card);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  padding: var(--sp-sm) var(--sp-md);
+  word-break: break-all;
+}
+/* Nothing picked: the words say so in the placeholder's ink and the sans
+ * face, so *Pick a model file* never reads as a file of that name. */
+.server-form .server-select--empty .q-field__native {
+  font-family: var(--font-sans);
+  color: var(--ash);
+}
+/* The select's list, lean like its field: rows with room, rounded, the
+ * hover a wash rather than Quasar's grey. */
+.server-select-menu {
+  padding: var(--sp-xs);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+}
+.server-select-menu .q-item {
+  min-height: 30px;
+  padding: 0 var(--sp-sm);
+  border-radius: var(--r-sm);
+}
+.server-select-menu .q-item--active {
+  background: var(--accent-soft);
+  color: var(--accent-text);
 }
