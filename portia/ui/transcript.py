@@ -813,11 +813,11 @@ def _set_indexing_effort(effort: str) -> None:
     _index_actions.refresh()
 
 
-def _set_indexing_provider(kind: str) -> None:
+def _set_indexing_provider(kind: str, model: str | None = None) -> None:
     from nicegui import background_tasks
 
     APP.provider = kind
-    APP.model = providers.get(kind).default_model
+    APP.model = model or providers.get(kind).default_model
     _index_actions.refresh()
     background_tasks.create(_list_models(kind))
 
@@ -1099,18 +1099,19 @@ def _set_effort(effort: str) -> None:
     pane.refresh()
 
 
-def _set_provider(kind: str) -> None:
+def _set_provider(kind: str, model: str | None = None) -> None:
     """The open chat's provider, or the default a new one starts with.
 
-    The model moves with it, to the provider's default: a Claude name sent to
-    Ollama is a guaranteed refusal (`PROVIDERS.md` §4.3). And the list is
-    asked for again, so a server started since the window opened is seen.
+    The model moves with it: to the one picked with it in the picker, else to
+    the provider's default, since a Claude name sent to Ollama is a guaranteed
+    refusal (`PROVIDERS.md` §4.3). And the list is asked for again, so a
+    server started since the window opened is seen.
     """
     from nicegui import background_tasks
 
     target = APP.open if APP.open is not None and APP.open.continuable else APP
     target.provider = kind
-    target.model = providers.get(kind).default_model
+    target.model = model or providers.get(kind).default_model
     APP.spend_alert = None
     pane.refresh()
     background_tasks.create(_list_models(kind))

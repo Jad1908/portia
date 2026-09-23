@@ -503,11 +503,11 @@ def _set_effort(effort: str) -> None:
     _redraw()
 
 
-def _set_provider(kind: str) -> None:
+def _set_provider(kind: str, model: str | None = None) -> None:
     from nicegui import background_tasks
 
     APP.provider = kind
-    APP.model = providers.get(kind).default_model
+    APP.model = model or providers.get(kind).default_model
     _redraw()
     background_tasks.create(_list_models(kind))
 

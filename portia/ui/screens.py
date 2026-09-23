@@ -2319,13 +2319,13 @@ def _set_indexing_effort(effort: str) -> None:
     _refresh()
 
 
-def _set_indexing_provider(kind: str) -> None:
+def _set_indexing_provider(kind: str, model: str | None = None) -> None:
     from nicegui import background_tasks
 
     from portia.agent import providers
 
     APP.provider = kind
-    APP.model = providers.get(kind).default_model
+    APP.model = model or providers.get(kind).default_model
     _refresh()
     background_tasks.create(_list_models(kind))
 

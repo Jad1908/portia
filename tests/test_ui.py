@@ -5791,14 +5791,17 @@ def test_the_picker_draws_the_providers_list_and_never_lists_on_the_loop():
     `engine.list_models` stored and nothing else (§4.3)."""
     import inspect
 
-    source = inspect.getsource(c.model_effort)
+    source = inspect.getsource(c.model_effort) + inspect.getsource(c._drawn_list)
+    assert "_drawn_list(kind)" in inspect.getsource(c.model_effort)
     assert "provider_models" in source
-    assert ".models()" not in source
+    assert ".models()" not in source + inspect.getsource(c.model_menu)
 
 
 def test_a_provider_with_a_written_list_offers_it_before_anything_is_listed():
     """Anthropic has no server to ask, so nothing listed it when the page
-    opened and the select held one model until a provider switch asked."""
+    opened and the picker held one model until a provider switch asked. Codex
+    on an account names its catalog the same way; on a local server its list
+    is the server's, like every local provider's."""
     import inspect
 
     from portia.agent import providers
@@ -5806,14 +5809,23 @@ def test_a_provider_with_a_written_list_offers_it_before_anything_is_listed():
     anthropic = providers.get("anthropic")
     assert [m.name for m in anthropic.static_models] == list(providers.anthropic.MODELS)
     assert anthropic.models() == list(anthropic.static_models)
-    assert all(
-        not providers.get(kind).static_models for kind in providers.KINDS if kind != "anthropic"
-    )
-    assert "static_models" in inspect.getsource(c.model_effort)
+    assert providers.get("codex").static_models == providers.codex.CATALOG
+    assert all(not providers.get(kind).static_models for kind in ("ollama", "llamacpp"))
+    assert "static_models" in inspect.getsource(c._drawn_list)
+
+
+def _picker_rows(slot) -> list[str]:
+    """The model names a drawn picker offers, in the order it draws them."""
+    return [
+        str(e.props["data-name"]).strip("\"'")
+        for e in slot.descendants()
+        if "modelpick-row" in e.classes and "data-name" in e.props
+    ]
 
 
 def test_a_window_that_never_switched_provider_offers_every_anthropic_model():
-    """The picker as drawn on a fresh app, nothing listed, read off the select."""
+    """The picker as drawn on a fresh app, nothing listed, read off its rows:
+    every model Claude Code offers, current and legacy, in its order."""
     from portia.agent import providers
     from portia.ui import state
 
@@ -5825,12 +5837,71 @@ def test_a_window_that_never_switched_provider_offers_every_anthropic_model():
             c.model_effort(fresh, lambda effort: None)
     finally:
         state.APP = original
-    select = next(e for e in slot.descendants() if "model-select" in e.classes)
-    assert list(select.options) == list(providers.anthropic.MODELS)
+    assert _picker_rows(slot) == list(providers.anthropic.MODELS)
+    legacy = [e for e in slot.descendants() if "modelpick-legacy" in e.classes]
+    assert len(legacy) == sum(m.legacy for m in providers.anthropic.CATALOG) == 7
+
+
+def test_the_picker_is_one_control_for_the_provider_and_the_model():
+    """Closed, the mark and the model's label; open, a rail over every offered
+    provider with each one's list drawn beside it (the user's call,
+    2026-09-23, after T3 Code's picker)."""
+    from portia.agent import providers
+    from portia.ui import state
+
+    fresh = state.App(provider="anthropic", model="claude-opus-5-5")
+    original, state.APP = state.APP, fresh
+    try:
+        with ui.element("div") as slot:
+            c.model_effort(fresh, lambda effort: None, on_provider=lambda *a: None)
+    finally:
+        state.APP = original
+    drawn = list(slot.descendants())
+    trigger = next(e for e in drawn if "modelpick-trigger" in e.classes)
+    names = [e.text for e in trigger.descendants() if "modelpick-trigger-name" in e.classes]
+    assert names == ["Claude Opus 5.5"]
+    rails = [e.props["data-modelpick-rail"] for e in drawn if "modelpick-rail-item" in e.classes]
+    assert rails == list(providers.offered_kinds())
+    panels = [e for e in drawn if "modelpick-panel" in e.classes]
+    assert [("data-active" in p.props) for p in panels] == [k == "anthropic" for k in rails]
+    selected = [e for e in drawn if "modelpick-row" in e.classes and "data-selected" in e.props]
+    assert len(selected) == 1
+
+
+def test_a_parked_chat_changes_model_and_never_provider():
+    """The rail holds the one mark a parked client runs on (§4.2)."""
+    from portia.ui import state
+
+    fresh = state.App(provider="anthropic", model="claude-sonnet-5")
+    original, state.APP = state.APP, fresh
+    try:
+        with ui.element("div") as slot:
+            c.model_effort(
+                fresh, lambda effort: None, on_provider=lambda *a: None, provider_fixed=True
+            )
+    finally:
+        state.APP = original
+    rails = [e for e in slot.descendants() if "modelpick-rail-item" in e.classes]
+    assert [r.props["data-modelpick-rail"] for r in rails] == ["anthropic"]
+    assert "claude-opus-5-5" in _picker_rows(slot)
+
+
+def test_a_legacy_pick_opens_its_fold():
+    from portia.ui import state
+
+    fresh = state.App(provider="anthropic", model="claude-haiku-4-5")
+    original, state.APP = state.APP, fresh
+    try:
+        with ui.element("div") as slot:
+            c.model_effort(fresh, lambda effort: None)
+    finally:
+        state.APP = original
+    panel = next(e for e in slot.descendants() if "modelpick-panel" in e.classes)
+    assert "data-legacy-open" in panel.props
 
 
 def test_a_server_with_no_models_offers_none_and_says_nothing_about_effort():
-    """The select showed the provider's default name over a line saying nothing
+    """The picker showed the provider's default name over a line saying nothing
     is installed, and under it a sentence about a control that is not there."""
     from portia.ui import state
 
@@ -5843,21 +5914,46 @@ def test_a_server_with_no_models_offers_none_and_says_nothing_about_effort():
     finally:
         state.APP = original
     drawn = list(slot.descendants())
-    select = next(e for e in drawn if "model-select" in e.classes)
-    assert select.value == "" and list(select.options.values()) == ["no models"]
-    assert not select.enabled
+    trigger = next(e for e in drawn if "modelpick-trigger" in e.classes)
+    assert [e.text for e in trigger.descendants() if "modelpick-trigger-name" in e.classes] == [
+        "no models"
+    ]
+    assert not trigger.enabled
+    assert not any("modelpick-menu" in e.classes for e in drawn)
     detail = next(e for e in drawn if "spend-detail" in e.classes)
     assert not list(detail.descendants()), "the row is reserved, and empty"
 
 
-def test_a_local_model_is_listed_with_the_vendors_own_size():
+def test_the_picker_splits_current_from_legacy_and_keeps_a_name_nobody_listed():
     from portia.agent import providers
 
-    options = c._model_options("qwen3:8b", [providers.Model("qwen3:8b", 5_225_388_164, "8.2B")])
-    assert options == {"qwen3:8b": "qwen3:8b · 5.2 GB"}
-    assert c._model_options("claude-haiku-4-5", None) == ["claude-haiku-4-5"]
-    typed = c._model_options("gpt-oss:20b", [providers.Model("qwen3:8b", 1, "")])
-    assert typed["gpt-oss:20b"] == "gpt-oss:20b"
+    listed = [
+        providers.Model("gpt-6-astra", label="GPT-6 Astra"),
+        providers.Model("gpt-5.5", label="GPT-5.5", legacy=True),
+    ]
+    current, legacy = c.model_rows("gpt-6-astra", listed)
+    assert [m.name for m in current] == ["gpt-6-astra"]
+    assert [m.name for m in legacy] == ["gpt-5.5"]
+    typed, _ = c.model_rows("gpt-oss:20b", [providers.Model("qwen3:8b", 1, "")])
+    assert [m.name for m in typed] == ["gpt-oss:20b", "qwen3:8b"]
+    assert c.shown_name("gpt-5.5", listed) == "GPT-5.5"
+    assert c.shown_name("qwen3:8b", None) == "qwen3:8b"
+
+
+def test_a_local_model_is_listed_with_the_vendors_own_size():
+    from portia.agent import providers
+    from portia.ui import state
+
+    fresh = state.App(provider="ollama", model="qwen3:8b")
+    fresh.provider_models["ollama"] = [providers.Model("qwen3:8b", 5_225_388_164, "8.2B")]
+    original, state.APP = state.APP, fresh
+    try:
+        with ui.element("div") as slot:
+            c.model_effort(fresh, lambda effort: None)
+    finally:
+        state.APP = original
+    sizes = [e.text for e in slot.descendants() if "modelpick-size" in e.classes]
+    assert sizes == ["5.2 GB"]
 
 
 def test_a_provider_that_is_down_shows_how_to_start_it_and_an_empty_one_how_to_add():
@@ -5966,22 +6062,34 @@ def test_a_local_models_cost_is_not_drawn_because_it_is_about_nothing(monkeypatc
 # --- the provider is a select, and a server portia can start has a panel (§4.9) ---
 
 
-def test_the_provider_is_picked_from_a_select_and_the_glyph_stays():
-    """The user's call, 2026-09-14: one control to read before the model, not
-    one segment per provider; the mark still says what a chat runs on."""
+def test_the_provider_is_picked_on_the_pickers_rail_and_the_glyph_stays():
+    """The user's call, 2026-09-14, kept through the 2026-09-23 overhaul: one
+    control to read before the model, not one segment per provider, and the
+    mark still says what a chat runs on."""
     import inspect
 
     from portia.ui import components
 
-    source = inspect.getsource(components._provider_pick)
+    source = inspect.getsource(components.model_menu)
     # The kinds are the machine's enabled ones (`providers.offered_kinds`,
     # Settings → Providers), never the whole list by name (2026-09-22).
-    assert "ui.select(" in source and "providers.offered_kinds()" in source
-    assert "provider_glyph(kind)" in source
-    assert not hasattr(components, "_provider_segments")
-    # Closed it is the glyph and the arrow: the mark is in the prepend slot
-    # and the display value is blank (the user's call, 2026-09-14).
-    assert 'add_slot("prepend")' in source and 'display-value=""' in source
+    assert "providers.offered_kinds()" in source
+    assert "provider_glyph(kind, tip=False)" in source
+    assert not hasattr(components, "_provider_pick")
+    # A pick on another provider carries the model picked with it.
+    assert "on_provider(picked_kind, name)" in source
+
+
+def test_where_the_open_picker_is_looking_never_reaches_the_server():
+    """The rail, the search and the fold are the client's (`modelpick.js`);
+    only a pick is an event."""
+    from portia.ui import theme
+
+    assert theme.MODELPICK_JS in theme.BEHAVIOUR
+    script = theme.MODELPICK_JS.read_text(encoding="utf-8")
+    assert "emitEvent" not in script
+    for hook in ("data-modelpick-rail", "data-modelpick-search", "data-modelpick-fold"):
+        assert hook in script
 
 
 def test_every_picker_offers_the_start_panel_and_the_page_builds_it():
@@ -6365,3 +6473,34 @@ def test_the_windows_own_announcement_does_not_make_it_redraw(tmp_path, monkeypa
     assert engine_module.artifact_stamp(app) == before
     _stash(tmp_path)
     assert engine_module.artifact_stamp(app) != before, "a drawn chart is a change"
+
+
+def test_a_provider_with_nothing_to_offer_still_opens_so_the_rail_can_leave_it():
+    """2026-09-23, in the browser: a pick on Codex with nobody signed in listed
+    nothing, and a disabled button left the composer with no way back."""
+    from portia.ui import state
+
+    fresh = state.App(provider="codex", model="gpt-6-sol")
+    fresh.provider_models["codex"] = []
+    original, state.APP = state.APP, fresh
+    try:
+        with ui.element("div") as slot:
+            c.model_effort(fresh, lambda effort: None, on_provider=lambda *a: None)
+    finally:
+        state.APP = original
+    drawn = list(slot.descendants())
+    trigger = next(e for e in drawn if "modelpick-trigger" in e.classes)
+    assert trigger.enabled
+    assert any("modelpick-menu" in e.classes for e in drawn)
+    codex = next(
+        e
+        for e in drawn
+        if "modelpick-panel" in e.classes and e.props["data-modelpick-panel"] == "codex"
+    )
+    assert not [e for e in codex.descendants() if "modelpick-row" in e.classes]
+
+
+def test_a_name_picked_before_its_list_arrived_reads_as_its_label():
+    assert c.shown_name("gpt-6-sol", [], "codex") == "GPT-6 Sol"
+    assert c.shown_name("claude-opus-5-5", None, "anthropic") == "Claude Opus 5.5"
+    assert c.shown_name("qwen3:8b", None, "ollama") == "qwen3:8b"

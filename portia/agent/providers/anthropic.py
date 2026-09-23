@@ -35,9 +35,26 @@ from portia.agent.providers import Model, Preflight, Provider, ProviderUnavailab
 #: good.
 DEFAULT_MODEL = "claude-haiku-4-5"
 
-#: Models worth offering in a picker, cheapest first, which is also the order
-#: `PLAN.md` says to develop in. ``--model`` takes anything the SDK accepts.
-MODELS = ("claude-haiku-4-5", "claude-sonnet-5", "claude-opus-5")
+#: Every model Claude Code's own ``/model`` picker offers, in its order and
+#: split as it splits them: four current, then the legacy ones it folds away
+#: (`docs/PROVIDERS.md` §5.1). Read off Claude Code 2.1.280, the binary
+#: ``claude-agent-sdk`` 0.2.158 bundles; a model newer than the lock is one a
+#: picker can still be typed into, because ``--model`` takes anything the SDK
+#: accepts and this list is a convenience, never a validation set.
+CATALOG = (
+    Model("claude-opus-5-5", label="Claude Opus 5.5"),
+    Model("claude-fable-5-1", label="Claude Fable 5.1"),
+    Model("claude-opus-5", label="Claude Opus 5"),
+    Model("claude-sonnet-5", label="Claude Sonnet 5"),
+    Model("claude-fable-5", label="Claude Fable 5", legacy=True),
+    Model("claude-opus-4-8", label="Claude Opus 4.8", legacy=True),
+    Model("claude-opus-4-7", label="Claude Opus 4.7", legacy=True),
+    Model("claude-opus-4-6", label="Claude Opus 4.6", legacy=True),
+    Model("claude-opus-4-5", label="Claude Opus 4.5", legacy=True),
+    Model("claude-sonnet-4-6", label="Claude Sonnet 4.6", legacy=True),
+    Model("claude-haiku-4-5", label="Claude Haiku 4.5", legacy=True),
+)
+MODELS = tuple(m.name for m in CATALOG)
 
 
 QUICK_TIMEOUT = 10.0
@@ -120,7 +137,7 @@ class Anthropic(Provider):
     honours_effort = True
     #: Every model in `MODELS` takes images.
     sees_images = True
-    static_models = tuple(Model(name) for name in MODELS)
+    static_models = CATALOG
     runtime_fields = ("binary",)
     start_remedy = SIGN_IN_REMEDY
 
