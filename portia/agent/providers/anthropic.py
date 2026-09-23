@@ -30,10 +30,12 @@ from pathlib import Path
 
 from portia.agent.providers import Model, Preflight, Provider, ProviderUnavailable, Status
 
-#: The model is a config knob, never a hard dependency (`docs/PLAN.md`). We
-#: develop on a small one on purpose: if the loop works here, the *engine* is
-#: good.
-DEFAULT_MODEL = "claude-haiku-4-5"
+#: The model is a config knob, never a hard dependency (`docs/PLAN.md`).
+#: Sonnet 5, a current model, since 2026-09-23 (the user's call): Haiku 4.5 is
+#: on Claude Code's legacy list now, and a default inside the fold opened the
+#: picker on its legacy models every time. Developing on a small model is
+#: still a choice in the picker, one press away.
+DEFAULT_MODEL = "claude-sonnet-5"
 
 #: Every model Claude Code's own ``/model`` picker offers, in its order and
 #: split as it splits them: four current, then the legacy ones it folds away

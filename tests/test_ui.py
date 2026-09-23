@@ -5886,6 +5886,26 @@ def test_a_parked_chat_changes_model_and_never_provider():
     assert "claude-opus-5-5" in _picker_rows(slot)
 
 
+def test_a_fresh_window_opens_the_picker_on_current_models_with_legacy_folded():
+    """The user, 2026-09-23: the default was Haiku 4.5, a legacy model, so
+    every fresh picker opened on its fold."""
+    from portia.agent import providers
+    from portia.ui import state
+
+    default = providers.anthropic.DEFAULT_MODEL
+    assert not next(m for m in providers.anthropic.CATALOG if m.name == default).legacy
+    fresh = state.App()
+    original, state.APP = state.APP, fresh
+    try:
+        with ui.element("div") as slot:
+            c.model_effort(fresh, lambda effort: None)
+    finally:
+        state.APP = original
+    assert fresh.model == default
+    panel = next(e for e in slot.descendants() if "modelpick-panel" in e.classes)
+    assert "data-legacy-open" not in panel.props
+
+
 def test_a_legacy_pick_opens_its_fold():
     from portia.ui import state
 
