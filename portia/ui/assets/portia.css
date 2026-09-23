@@ -5179,6 +5179,26 @@ body.tab-dragging .tab-drop {
   -webkit-mask-image: url(/portia-assets/providers/llamacpp.svg);
   mask-image: url(/portia-assets/providers/llamacpp.svg);
 }
+/* A mark of portia's own in an `artifact-row`, under assets/glyphs/: masked
+ * like a provider glyph, sized like the Material icon it stands beside, so it
+ * takes the row's ink and the selected accent the same way. */
+.artifact-glyph {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  background-color: currentColor;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+}
+.glyph-bot {
+  -webkit-mask-image: url(/portia-assets/glyphs/bot.svg);
+  mask-image: url(/portia-assets/glyphs/bot.svg);
+}
 /* One mark per database portia connects to, under assets/connectors/: the
  * vendor's own, from Simple Icons (CC0), masked so it takes the ink of where it
  * sits. Same rule as the model providers' marks above: kind, never rank. */

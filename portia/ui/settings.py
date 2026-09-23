@@ -143,7 +143,7 @@ TABS = ("Project", "Copilot", "Providers", "Data", "Appearance", "Help")
 _ICONS = {
     "Project": "folder",
     "Copilot": "forum",
-    "Providers": "hub",
+    "Providers": c.GLYPH + "bot",
     "Data": "table_chart",
     "Appearance": "palette",
     "Help": "help_outline",

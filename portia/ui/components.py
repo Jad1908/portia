@@ -1001,6 +1001,11 @@ def prop_value(value: str) -> str:
     return f"{quote}{value}{quote}"
 
 
+#: An `artifact_row` icon that is one of portia's own SVGs rather than a
+#: Material name: ``glyph:<file>`` for ``assets/glyphs/<file>.svg``.
+GLYPH = "glyph:"
+
+
 def artifact_row(
     *,
     name: str,
@@ -1047,7 +1052,12 @@ def artifact_row(
     with row:
         if caret:
             ui.icon(caret).classes("artifact-caret")
-        ui.icon(icon).classes("artifact-icon")
+        if icon.startswith(GLYPH):
+            # A mark of portia's own under `assets/glyphs/`, masked so it takes
+            # the row's ink like a Material icon does (`DESIGN.md` → `glyph`).
+            ui.element("span").classes(f"artifact-icon artifact-glyph glyph-{icon[len(GLYPH) :]}")
+        else:
+            ui.icon(icon).classes("artifact-icon")
         # Own class rather than utility classes: this wrapper's job is to be the
         # thing that shrinks, and a long path is exactly what it holds.
         with ui.element("div").classes("artifact-body"):
