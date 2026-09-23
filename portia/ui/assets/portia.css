@@ -1272,6 +1272,247 @@ body.body--dark .p-panel {
   font-weight: 500;
   color: var(--ink);
 }
+.setting-head {
+  flex-wrap: nowrap;
+}
+/* A heading over a whole section, where a section needs one to say what kind
+ * it is (Data, 2026-09-23). The rail names sections on hover only. */
+.settings-heading {
+  flex-wrap: nowrap;
+  margin-bottom: calc(-1 * var(--sp-xs));
+}
+.settings-heading-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+}
+/* What *Customize* opens under a setting: a small title and its switches,
+ * indented on a hairline so they read as belonging to the control above. */
+.settings-customize {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+  padding-left: var(--sp-md);
+  border-left: 1px solid var(--hairline);
+}
+.setting-subtitle {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--body);
+}
+
+/* A value that is an absence, drawn as a state (`c.state_pill`): mono beside
+ * real values, *not set, the whole repo* read as a folder of that name. */
+.state-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  padding: 2px 10px;
+  border: 1px dashed var(--hairline-strong);
+  border-radius: var(--r-full);
+  font-size: 12px;
+  color: var(--mute);
+}
+
+/* ── Settings → Appearance: the theme previews (2026-09-23) ──────────────────
+ * Each card is the window in miniature in one mode's palette, and the card is
+ * the control. The palettes are **restated**, not read from the tokens: a
+ * light card has to stay light in dark mode, and a custom property has one
+ * value per element. `tests/test_ui.py` holds each value to the `:root` and
+ * `body.body--dark` blocks, so the restatement cannot drift.
+ *
+ * The spider is the website's (`portia-www/src/lib/mark.ts`), the one ornament
+ * in the app, and it is here because the user asked for it: it hangs on its
+ * dragline, sways, and drops lower and swings faster under the pointer. Under
+ * reduced motion it hangs still. */
+.theme-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-md);
+  /* A `setting` sizes its children to their content, `providers-layout`'s
+   * lesson: unstretched, three 1fr columns are three slivers. */
+  align-self: stretch;
+}
+.theme-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+  cursor: pointer;
+}
+.theme-preview {
+  position: relative;
+  height: 150px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--hairline);
+  overflow: hidden;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.theme-card:hover .theme-preview {
+  border-color: var(--hairline-strong);
+}
+.theme-card--picked .theme-preview,
+.theme-card--picked:hover .theme-preview {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.theme-card-name {
+  flex-wrap: nowrap;
+  font-size: 12px;
+  color: var(--body);
+}
+.theme-card--picked .theme-card-name {
+  color: var(--accent-text);
+  font-weight: 500;
+}
+.theme-beta {
+  font-size: 10px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  padding: 0 6px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--hairline-strong);
+  color: var(--mute);
+}
+.tp-light {
+  --tp-canvas: #f4f6f9;
+  --tp-surface: #fcfdfe;
+  --tp-hairline: #e3e6ec;
+  --tp-ink: #0e1116;
+  --tp-stone: #c2c7ce;
+  --tp-accent: #0c6b61;
+}
+.tp-dark {
+  --tp-canvas: #08090c;
+  --tp-surface: #0d0f14;
+  --tp-hairline: #25282f;
+  --tp-ink: #f3f4f7;
+  --tp-stone: #43464e;
+  --tp-accent: #2dd4bf;
+}
+.tp-window {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--tp-canvas);
+  color: var(--tp-ink);
+}
+/* Auto: the day window above the diagonal, the night one below it. */
+.theme-preview--auto .tp-dark {
+  clip-path: polygon(100% 0, 100% 100%, 0 100%);
+}
+.tp-bar {
+  flex: 0 0 12px;
+  background: var(--tp-surface);
+  border-bottom: 1px solid var(--tp-hairline);
+}
+.tp-body {
+  flex: 1 1 auto;
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+}
+.tp-side {
+  flex: 0 0 28%;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 5px;
+  border-radius: 3px;
+  background: var(--tp-surface);
+  border: 1px solid var(--tp-hairline);
+}
+.tp-main {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.tp-card {
+  height: 38px;
+  width: 52%;
+  border-radius: 3px;
+  background: var(--tp-surface);
+  border: 1px solid var(--tp-accent);
+}
+.tp-line {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--tp-stone);
+}
+.tp-line--short {
+  width: 45%;
+}
+.tp-hang {
+  position: absolute;
+  top: 0;
+  right: 14%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transform-origin: 50% 0;
+  animation: tp-sway 4.2s ease-in-out infinite;
+}
+.tp-silk {
+  width: 1px;
+  height: 22px;
+  background: var(--tp-ink);
+  opacity: 0.45;
+  transition: height 700ms cubic-bezier(0.34, 1.4, 0.5, 1);
+}
+.tp-spider {
+  width: 28px;
+  height: 28px;
+  margin-top: -4px;
+  line-height: 0;
+}
+.tp-spider svg {
+  width: 100%;
+  height: 100%;
+}
+.tp-spider .spider-abdomen {
+  fill: var(--tp-accent);
+}
+.tp-spider .spider-catchlight {
+  fill: var(--tp-canvas);
+}
+.tp-spider .spider-legs {
+  transform-origin: 50% 60%;
+  animation: tp-legs 2.6s ease-in-out infinite;
+}
+.theme-card:hover .tp-silk {
+  height: 64px;
+}
+.theme-card:hover .tp-hang {
+  animation-duration: 1.5s;
+}
+@keyframes tp-sway {
+  0%,
+  100% {
+    transform: rotate(-5deg);
+  }
+  50% {
+    transform: rotate(5deg);
+  }
+}
+@keyframes tp-legs {
+  0%,
+  100% {
+    transform: scaleY(1);
+  }
+  50% {
+    transform: scaleY(0.94);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tp-hang,
+  .tp-spider .spider-legs {
+    animation: none;
+  }
+  .tp-silk {
+    transition: none;
+  }
+}
 .setting-why {
   font-size: 12px;
   line-height: 1.45;
