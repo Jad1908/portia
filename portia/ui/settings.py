@@ -39,9 +39,15 @@ the one section that changed: the whole card went out and came back for a
 press that meant *show me the next one*. The section is its own refreshable
 (`_section`), picking one moves the list's highlight on the rows that are
 already there, and `_panel.refresh()` runs only when the dialog opens.
+
+**And a click inside a section redraws what it changed, not the section**
+*(2026-09-23, the second pass)*: see `_section` for which part each control
+reaches.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 from nicegui import ui
 
@@ -106,6 +112,11 @@ STALE_PANEL = "Settings may show stale values ({why}). Reload the page."
 #: Whether the per-tool switches under *Writes* are showing. Page state, like
 #: `_TAB`, so a redraw of the section does not fold them away under you.
 _CUSTOMIZING = False
+#: What *Customize* opens and shuts in place: its button and the switches.
+_CUSTOMIZE: dict[str, Any] = {}
+#: The theme cards as last drawn, by mode label, so a pick moves the ring.
+_THEME_CARDS: dict[str, ui.element] = {}
+_PICKED_THEME = "theme-card--picked"
 
 #: The spider the theme previews hang, read once. A file rather than a string
 #: for the stylesheet's reason, and drawn inline so it takes each preview's ink.
@@ -212,13 +223,18 @@ def _nav() -> None:
 
 @ui.refreshable
 def _section() -> None:
-    """The showing section's settings: the one part of the panel a click redraws."""
+    """The showing section's settings, drawn again only when another section is picked.
+
+    **A control inside a section redraws what it changed, never the section**
+    *(2026-09-23, the user: "every floating card gets a full refresh when it's
+    clicked")*. An effort press rebuilt 50 of the card's 86 elements, the
+    provider picker and the Writes setting with it, to move one wash. The
+    segments move themselves (`c.segmented`), a theme card and a nav row move
+    a class (`c.mark_selected`), *Customize* shows and hides what it folds, and
+    the two parts whose shape depends on a pick are refreshables of their own:
+    `_spend` for the provider, `_data_place` for where the data lives.
+    """
     _BODY[_TAB]()
-
-
-def _redraw() -> None:
-    """After a control here changed something: this section, never the card around it."""
-    _section.refresh()
 
 
 def _show_tab(tab: str) -> None:
@@ -227,9 +243,7 @@ def _show_tab(tab: str) -> None:
     if tab == _TAB:
         return
     _TAB = tab
-    for name, row in _NAV_ROWS.items():
-        if not row.is_deleted:
-            row.classes(add=_SELECTED) if name == tab else row.classes(remove=_SELECTED)
+    c.mark_selected(_NAV_ROWS, tab, _SELECTED)
     _section.refresh()
 
 
@@ -259,6 +273,33 @@ def _copilot() -> None:
     second place to *change* the setting and never a second setting. They sit
     folded behind *Customize* (the user, 2026-09-23).
     """
+    _spend()
+    # The same picker the composer carries (`c.approval_mode`), bound to the
+    # same field.
+    with c.setting(MODE_WHAT):
+        _mode_picker()
+        _CUSTOMIZE["button"] = c.button(
+            CUSTOMIZE, _toggle_customize, icon="remove" if _CUSTOMIZING else "add", micro=True
+        )
+        # Drawn shut rather than not drawn, so the press shows it in place.
+        with ui.element("div").classes("settings-customize") as folded:
+            ui.label(CONFIRM_WHAT).classes("setting-subtitle")
+            for tool in state.AUTO_ALLOWABLE:
+                switch = ui.switch(state.WRITE_LABELS[tool]).classes("p-toggle")
+                switch.value = tool not in APP.auto_allow
+                switch.on_value_change(lambda e, name=tool: _set_confirm(name, bool(e.value)))
+        folded.set_visibility(_CUSTOMIZING)
+        _CUSTOMIZE["folded"] = folded
+
+
+@ui.refreshable
+def _spend() -> None:
+    """The provider, the model and the effort: what a provider pick redraws.
+
+    A pick on another provider changes the whole of it (the button's mark,
+    the notes, whether effort is drawn, the add-a-model line), and nothing
+    outside it.
+    """
     with c.setting(SPEND_WHAT):
         # `model_effort` draws no effort control on a provider that ignores it.
         c.model_effort(
@@ -267,23 +308,20 @@ def _copilot() -> None:
             on_provider=_set_provider,
             on_refresh=_list_models_clicked,
             on_start=screens.open_server_dialog,
+            on_model=_model_picked,
         )
         # How a model is added: the command, shown and never run
         # (`docs/PROVIDERS.md` §4.4). Here and not in the composer, because
         # it is a thing you do once in a terminal, not per message.
         c.add_model_line(APP.provider)
-    # The same picker the composer carries (`c.approval_mode`), bound to the
-    # same field.
-    with c.setting(MODE_WHAT):
-        c.approval_mode(APP, _mode_changed)
-        c.button(CUSTOMIZE, _toggle_customize, icon="remove" if _CUSTOMIZING else "add", micro=True)
-        if _CUSTOMIZING:
-            with ui.element("div").classes("settings-customize"):
-                ui.label(CONFIRM_WHAT).classes("setting-subtitle")
-                for tool in state.AUTO_ALLOWABLE:
-                    switch = ui.switch(state.WRITE_LABELS[tool]).classes("p-toggle")
-                    switch.value = tool not in APP.auto_allow
-                    switch.on_value_change(lambda e, name=tool: _set_confirm(name, bool(e.value)))
+
+
+#: This panel's mode picker as drawn, set in place when the mode moves elsewhere.
+_MODE_SELECT: dict[str, ui.select] = {}
+
+
+def _mode_picker() -> None:
+    _MODE_SELECT["select"] = c.approval_mode(APP, _mode_changed)
 
 
 def _providers() -> None:
@@ -317,10 +355,18 @@ def _data() -> None:
     building a second one here would be two pickers that have to agree about
     what counts as a data folder.
     """
-    changeable = engine.can_change_data(APP)
     with ui.element("div").classes("row-gap-xs settings-heading"):
         ui.label(DATA_TITLE).classes("settings-heading-title")
         c.help_tip(DATA_HELP)
+    _data_place()
+    with c.setting(INTERPRET_WHAT, help=INTERPRET_HELP):
+        ui.switch(INTERPRET_LABEL).classes("p-toggle").bind_value(APP, "interpret")
+
+
+@ui.refreshable
+def _data_place() -> None:
+    """Where the data lives and what that place needs: what choosing files redraws."""
+    changeable = engine.can_change_data(APP)
     with c.setting(DATA_KIND_WHAT):
         with ui.element("div").classes("row-gap-sm"):
             with ui.element("div").classes("row-gap-xs segmented-control data-kind"):
@@ -364,8 +410,6 @@ def _data() -> None:
             else:
                 c.state_pill(NO_WAREHOUSE)
                 c.button(WAREHOUSE_OPEN, _connect_warehouse, icon=c.DATABASE_GLYPH)
-    with c.setting(INTERPRET_WHAT, help=INTERPRET_HELP):
-        ui.switch(INTERPRET_LABEL).classes("p-toggle").bind_value(APP, "interpret")
 
 
 def _appearance() -> None:
@@ -380,6 +424,7 @@ def _appearance() -> None:
     """
     spider = SPIDER.read_text(encoding="utf-8")
     current = theme.mode()
+    _THEME_CARDS.clear()
     with c.setting(THEME_WHAT):
         with ui.element("div").classes("theme-cards"):
             for mode in theme.MODES:
@@ -389,7 +434,8 @@ def _appearance() -> None:
 def _theme_card(mode: bool | None, *, picked: bool, spider: str) -> None:
     """One mode, as a small window drawn in its palette, and its name under it."""
     label = theme.MODE_LABEL[mode]
-    card = ui.element("div").classes("theme-card" + (" theme-card--picked" if picked else ""))
+    card = ui.element("div").classes("theme-card" + (f" {_PICKED_THEME}" if picked else ""))
+    _THEME_CARDS[label] = card
     with card:
         with ui.element("div").classes(f"theme-preview theme-preview--{label}"):
             # Auto is both palettes, one per half: the window it will be by day
@@ -442,9 +488,15 @@ _BODY = {
 
 
 def _toggle_customize() -> None:
+    """Show or shut the switches, and turn the button's sign, in place."""
     global _CUSTOMIZING
     _CUSTOMIZING = not _CUSTOMIZING
-    _redraw()
+    button, folded = _CUSTOMIZE.get("button"), _CUSTOMIZE.get("folded")
+    if button is None or folded is None or button.is_deleted or folded.is_deleted:
+        _section.refresh()
+        return
+    button.set_icon("remove" if _CUSTOMIZING else "add")
+    folded.set_visibility(_CUSTOMIZING)
 
 
 def _choose_data(mode: str) -> None:
@@ -455,7 +507,7 @@ def _choose_data(mode: str) -> None:
         _connect_warehouse()
         return
     engine.choose_data(mode, APP)
-    _redraw()
+    _data_place.refresh()
 
 
 def _set_confirm(tool: str, ask_first: bool) -> None:
@@ -468,47 +520,67 @@ def _set_confirm(tool: str, ask_first: bool) -> None:
 
 
 def _mode_changed() -> None:
-    """The picker here moved. Redraw this panel, and the composer's copy of it.
+    """The picker here moved. The composer's copy of it follows.
 
     **Both, always** (`docs/CONVERSATION.md` §14.4): refreshing only this panel
     once left the composer showing the old mode until an unrelated event redrew
     it — a mode running invisibly, found in a browser because nothing in Python
     renders two panes. `exchange.auto_allow` reads the flag at the moment of
-    each call, so switching applies to the very next write.
+    each call, so switching applies to the very next write. The picker here
+    already shows what was picked, so nothing in the panel is redrawn.
     """
     from portia.ui import transcript
 
-    _redraw()
-    transcript.pane.refresh()
+    transcript.show_mode()
+
+
+def show_mode() -> None:
+    """The mode moved somewhere else: this panel's picker says so, in place."""
+    c.show_mode(_MODE_SELECT.get("select"), APP)
 
 
 def refresh_if_open() -> None:
-    """Redraw the panel when a setting it shows was changed somewhere else.
+    """Redraw what this panel shows of a setting that was changed somewhere else.
 
-    The composer's picker and the write card's *autopilot* row both set the
-    mode this panel displays. Cheap when the dialog is shut, and the reason it
-    exists is the same as `_mode_changed`'s.
+    The composer's picker and the write card's *autopilot* row set the mode
+    this panel displays, and a listing or a server started changes the
+    provider picker. Those two parts and nothing else; a no-op on a section
+    that draws neither, and cheap when the dialog is shut.
     """
     if _DIALOG is not None and not _DIALOG.is_deleted and _DIALOG.value:
-        _redraw()
+        _spend.refresh()
+        c.show_mode(_MODE_SELECT.get("select"), APP)
 
 
 def _set_theme(label: str) -> None:
     theme.set_mode(theme.MODE_VALUE[label])
-    _redraw()
+    c.mark_selected(_THEME_CARDS, label, _PICKED_THEME)
 
 
 def _set_effort(effort: str) -> None:
+    """The segment has moved itself (`c.segmented`); the composer behind follows."""
+    from portia.ui import transcript
+
     APP.effort = effort
-    _redraw()
+    transcript.refresh_spend()
+
+
+def _model_picked() -> None:
+    """The picker here renamed itself; the composer's copy behind the dialog follows."""
+    from portia.ui import transcript
+
+    transcript.refresh_spend()
 
 
 def _set_provider(kind: str, model: str | None = None) -> None:
     from nicegui import background_tasks
 
+    from portia.ui import transcript
+
     APP.provider = kind
     APP.model = model or providers.get(kind).default_model
-    _redraw()
+    _spend.refresh()
+    transcript.refresh_spend()
     background_tasks.create(_list_models(kind))
 
 
@@ -521,7 +593,7 @@ def _list_models_clicked(kind: str) -> None:
 async def _list_models(kind: str) -> None:
     from portia.ui import transcript
 
-    await c.list_models_behind_picker(kind, _redraw, transcript.pane.refresh)
+    await c.list_models_behind_picker(kind, _spend.refresh, transcript.refresh_spend)
 
 
 async def _switch_project() -> None:

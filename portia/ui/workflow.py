@@ -246,10 +246,20 @@ def _graph_half() -> None:
     with ui.element("div").classes("p-pane"):
         _graph_header(docs, placed)
         with ui.element("div").classes("graph-canvas"):
-            if placed.empty:
-                c.empty_note(_NO_SPECS)
-            else:
-                _graph(placed, docs, reads, hops)
+            _canvas(placed, docs, reads, hops)
+
+
+@ui.refreshable
+def _canvas(placed: graph.Layout, docs: dict, reads: dict, hops: dict[str, int]) -> None:
+    """What the canvas draws, inside the `.graph-canvas` that keeps the pan and zoom.
+
+    Its own refreshable for the table filter, whose ticks change what is drawn
+    and nothing else on the pane (`_set_visible_in_place`).
+    """
+    if placed.empty:
+        c.empty_note(_NO_SPECS)
+    else:
+        _graph(placed, docs, reads, hops)
 
 
 def _layout(offsets: dict[str, tuple[int, int]] | None = None) -> tuple[dict, graph.Layout, dict]:
@@ -365,13 +375,11 @@ def _view_menu(docs: dict, placed: graph.Layout) -> None:
     keeps *Select all* and the count reachable instead of pushing them off the
     end of a menu.
     """
-    total = len(docs)
-    shown = total - len(placed.hidden)
-    label = (
-        _SHOWING_ALL.format(n=total) if not placed.hidden else _SHOWING.format(n=shown, of=total)
-    )
+    label = _view_label(len(docs), len(placed.hidden))
     button = c.button(label, None, icon="filter_list", micro=True)
     button.tooltip(_VIEW_TIP)
+    _VIEW_MENU.clear()
+    _VIEW_MENU["button"] = button
     with button:
         # **A trailing caret, because this one is easy to read as a caption.**
         # Every other control on this header is a verb or a glyph; this one is a
@@ -388,6 +396,29 @@ def _view_menu(docs: dict, placed: graph.Layout) -> None:
                     _view_row(name, docs[name], drawn)
 
 
+#: The filter menu as drawn, so a tick turns its rows and relabels its button
+#: in place and the menu stays open (`_set_visible_in_place`): the button, the
+#: head row's label, and per table ``row:<name>`` and ``tip:<name>``.
+_VIEW_MENU: dict[str, Any] = {}
+
+
+def _view_label(total: int, hidden: int) -> str:
+    return (
+        _SHOWING_ALL.format(n=total) if not hidden else _SHOWING.format(n=total - hidden, of=total)
+    )
+
+
+def _all_on(docs: dict) -> bool:
+    return APP.visible is None or set(APP.visible) >= set(docs)
+
+
+def _row_state(name: str, docs: dict) -> tuple[bool, bool]:
+    """``(on, chosen)``: drawn on the canvas, and ticked for itself rather than pulled in."""
+    if APP.visible is None:
+        return True, True
+    return name in graph.ancestry(docs, APP.visible), name in APP.visible
+
+
 def _select_all_row(docs: dict) -> None:
     """One toggle at the top: everything on, or everything off.
 
@@ -396,12 +427,13 @@ def _select_all_row(docs: dict) -> None:
     moment is the opposite one. Pinned above the scroll region because on a forty
     table project it is the row you most want to be able to reach.
     """
-    every = set(docs)
-    all_on = APP.visible is None or set(APP.visible) >= every
     with ui.element("div").classes("menu-row menu-row--head") as row:
         ui.icon("done_all").classes("menu-row-mark")
-        ui.label(_SELECT_NONE if all_on else _SELECT_ALL).classes("menu-row-name")
-    row.on("click", lambda: _select_all(not all_on))
+        _VIEW_MENU["head"] = ui.label(_SELECT_NONE if _all_on(docs) else _SELECT_ALL).classes(
+            "menu-row-name"
+        )
+    # Read at the press, not at the draw: the rows change under an open menu.
+    row.on("click", lambda: _select_all(not _all_on(engine.project_docs(APP))))
 
 
 def _view_row(name: str, doc: dict, drawn: set[str] | None) -> None:
@@ -421,9 +453,23 @@ def _view_row(name: str, doc: dict, drawn: set[str] | None) -> None:
         ui.element("div").classes("flex-1")
         if doc.get("layer"):
             c.chip(doc["layer"])
-    if on and not chosen:
-        row.tooltip(_VIEW_REQUIRED)
-    row.on("click", lambda n=name, v=on: _toggle_visible(n, not v))
+        # Always there, and silenced unless it applies, so a tick can turn it
+        # on or off in place.
+        tip = ui.tooltip(_VIEW_REQUIRED)
+    _silence(tip, not (on and not chosen))
+    _VIEW_MENU[f"row:{name}"] = row
+    _VIEW_MENU[f"tip:{name}"] = tip
+    row.on(
+        "click", lambda n=name: _toggle_visible(n, not _row_state(n, engine.project_docs(APP))[0])
+    )
+
+
+def _silence(tip: ui.tooltip, quiet: bool) -> None:
+    """A tooltip that no hover opens, or one that it does."""
+    if quiet:
+        tip.props("no-parent-event")
+    else:
+        tip.props(remove="no-parent-event")
 
 
 def _view_controls() -> None:
@@ -2205,7 +2251,7 @@ def _toggle_visible(name: str, on: bool) -> None:
         chosen |= {name}
     else:
         chosen -= graph.descendants(docs, [name])
-    _set_visible(frozenset(chosen))
+    _set_visible_in_place(frozenset(chosen))
 
 
 def _reveal_preview() -> None:
@@ -2234,13 +2280,44 @@ def _select_all(on: bool) -> None:
     been chosen* and a table added to the project later is drawn without anyone
     having to re-tick anything (`graph._visible`).
     """
-    _set_visible(None if on else frozenset())
+    _set_visible_in_place(None if on else frozenset())
 
 
 def _set_visible(visible: frozenset[str] | None) -> None:
     APP.visible = visible
     engine.remember_view(APP.root, visible)
     pane.refresh()
+
+
+def _set_visible_in_place(visible: frozenset[str] | None) -> None:
+    """A tick in the table filter: the canvas redraws, and the open menu stays open.
+
+    **It redrew the whole middle pane** *(until 2026-09-23)*, which rebuilt the
+    button the menu hangs from, so every tick shut the menu it was made in and
+    narrowing a forty-table canvas was forty trips to the button. Now the
+    canvas's contents redraw (`_canvas`), and the menu's rows, its head row and
+    the button's count are set in place.
+    """
+    APP.visible = visible
+    engine.remember_view(APP.root, visible)
+    button = _VIEW_MENU.get("button")
+    if button is None or button.is_deleted:
+        pane.refresh()
+        return
+    docs, placed, reads = _layout()
+    _canvas.refresh(placed, docs, reads, _highlit(docs))
+    button.set_text(_view_label(len(docs), len(placed.hidden)))
+    head = _VIEW_MENU.get("head")
+    if head is not None and not head.is_deleted:
+        head.set_text(_SELECT_NONE if _all_on(docs) else _SELECT_ALL)
+    for name in docs:
+        row, tip = _VIEW_MENU.get(f"row:{name}"), _VIEW_MENU.get(f"tip:{name}")
+        if row is None or row.is_deleted:
+            continue
+        on, chosen = _row_state(name, docs)
+        row.classes(add="menu-row--on") if on else row.classes(remove="menu-row--on")
+        if tip is not None and not tip.is_deleted:
+            _silence(tip, not (on and not chosen))
 
 
 def _result(step_id: str) -> Any | None:
