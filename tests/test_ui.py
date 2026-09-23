@@ -6160,14 +6160,74 @@ def test_a_listing_that_raises_never_leaves_the_picker_spinning():
     assert "boom" in app.provider_status["llamacpp"].detail
 
 
-def test_the_start_panel_picks_a_model_off_the_registry_with_elsewhere_as_the_way_out():
+def _draw_server_panel(monkeypatch, registry, form, elsewhere=False):
+    from pathlib import Path
+
+    from portia.agent.providers import llamacpp
+    from portia.ui import screens
+
+    monkeypatch.setattr(llamacpp, "registry_models", lambda: [Path(p) for p in registry])
+    monkeypatch.setattr(llamacpp, "running", lambda: None)
+    monkeypatch.setattr(screens, "_SERVER_ELSEWHERE", elsewhere)
+    monkeypatch.setattr(state.APP, "server_form", dict(form))
+    monkeypatch.setattr(state.APP, "server_status", "")
+    monkeypatch.setattr(state.APP, "server_error", "")
+    with ui.element("div") as slot:
+        screens._server_panel()
+    return slot
+
+
+def test_the_start_panel_picks_off_the_registry_and_keeps_a_path_behind_a_toggle(monkeypatch):
+    """The user, 2026-09-23: no *Elsewhere…* option in the list; a path or a
+    repository is behind a toggle, the way Settings keeps its switches behind
+    *Customize*, and every sentence the panel had is behind a *?*."""
+    from portia.ui import screens
+
+    slot = _draw_server_panel(
+        monkeypatch, ["/m/Qwen3-8B.gguf"], {"model": "/m/Qwen3-8B.gguf", "context": "32768"}
+    )
+    drawn = list(slot.descendants())
+    select = next(e for e in drawn if isinstance(e, ui.select))
+    assert list(select.options) == ["/m/Qwen3-8B.gguf"] and select.value == "/m/Qwen3-8B.gguf"
+    texts = [e.text for e in drawn if isinstance(e, ui.label)]
+    for sentence in (screens.SERVER_CONTEXT_HINT, screens.SERVER_MODEL_HINT):
+        assert sentence not in texts, "a sentence under a field is behind its ?"
+    assert not [e for e in drawn if "field-hint" in e.classes]
+    tips = [e for e in drawn if "help-tip" in e.classes]
+    assert len(tips) == 3, "model, path or repository, context"
+    assert not [e for e in drawn if "server-elsewhere" in e.classes], "shut until asked"
+    labels = [e.text for e in drawn if isinstance(e, ui.button)]
+    assert screens.SERVER_ELSEWHERE in labels
+
+
+def test_a_model_kept_elsewhere_opens_the_path_field_and_an_empty_registry_is_dark(monkeypatch):
+    slot = _draw_server_panel(monkeypatch, [], {"model": "Qwen/Qwen3-8B-GGUF:Q4_K_M"}, True)
+    drawn = list(slot.descendants())
+    select = next(e for e in drawn if isinstance(e, ui.select))
+    assert not select.enabled and select.value is None
+    boxes = [e for e in drawn if isinstance(e, ui.input) and e.value == "Qwen/Qwen3-8B-GGUF:Q4_K_M"]
+    assert boxes, "the repository is in the path field"
+
+
+def test_the_start_panel_redraws_the_part_that_changed_and_never_the_card():
+    """The Settings pass (2026-09-23): a pick, the toggle, Start and Stop each
+    redraw their own part."""
     import inspect
 
     from portia.ui import screens
 
-    source = inspect.getsource(screens._server_model_pick)
-    assert "registry_models()" in source and "ELSEWHERE" in source
-    assert "c.field(" in source, "a model elsewhere is still typed as a path"
+    for fn in (
+        screens._server_model_picked,
+        screens._server_path_typed,
+        screens._toggle_elsewhere,
+        screens._server_changed,
+        screens._start_server,
+        screens._stop_server,
+        screens._server_field,
+    ):
+        assert "_server_panel.refresh()" not in inspect.getsource(fn), fn.__name__
+    assert "_server_model.refresh()" in inspect.getsource(screens._toggle_elsewhere)
+    assert "_server_state.refresh()" in inspect.getsource(screens._server_changed)
 
 
 def test_starting_is_on_screen_before_the_load_and_the_panel_stays_open_after():

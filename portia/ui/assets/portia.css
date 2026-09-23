@@ -5844,3 +5844,119 @@ body.tab-dragging .tab-drop {
 .composer-alert {
   padding: 0 var(--sp-sm) var(--sp-xs);
 }
+
+/* The start panel (`screens._server_panel`, DESIGN.md → `server-panel`), the
+ * Settings pass applied *(2026-09-23)*: a card the width of what it asks for,
+ * each sentence behind a *?*, and fields drawn lean. A lean field is a soft
+ * fill with no border at rest and the accent ring on focus, 32px, with its
+ * label above it in the body ink: the hairline box beside a hairline card was
+ * a box inside a box. Scoped to the panel; the other forms keep `p-input`. */
+.q-dialog__inner > div.p-panel.server-panel {
+  max-width: min(520px, 92vw);
+}
+.server-form {
+  gap: var(--sp-lg);
+}
+.server-form .field {
+  gap: var(--sp-xs);
+}
+.server-form .field-label {
+  font-weight: 500;
+  color: var(--body);
+}
+.server-form .p-input .q-field__control {
+  min-height: 32px;
+  height: 32px;
+  padding: 0 var(--sp-md);
+  background: var(--hairline-soft);
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+.server-form .p-input .q-field__control:hover {
+  border-color: var(--hairline);
+}
+.server-form .p-input.q-field--focused .q-field__control {
+  background: var(--surface-elevated);
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.server-form .p-input .q-field__control::before,
+.server-form .p-input .q-field__control::after {
+  display: none;
+}
+.server-form .p-input .q-field__native,
+.server-form .p-input .q-field__input {
+  min-height: 30px;
+  line-height: 30px;
+  font-size: 12px;
+}
+.server-form .p-input .q-field__native::placeholder,
+.server-form .p-input .q-field__input::placeholder {
+  color: var(--ash);
+  opacity: 1;
+}
+.server-form .server-select .q-field__append {
+  height: 30px;
+}
+.server-form .q-field--disabled .q-field__control {
+  opacity: 0.6;
+}
+/* Context and port on one line, the context taking the room: a port is five
+ * digits and a whole row for it read as a form padded out. */
+.server-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: var(--sp-md);
+}
+.server-elsewhere-head {
+  flex-wrap: nowrap;
+  margin-top: calc(-1 * var(--sp-sm));
+}
+.server-elsewhere {
+  margin-top: calc(-1 * var(--sp-sm));
+}
+/* The command as a terminal would read it: a code block, wrapped at any
+ * character, because a path has no spaces to break on. */
+.server-command {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+}
+.server-command-label {
+  font-size: 11px;
+  color: var(--mute);
+}
+.server-command-line {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--body);
+  background: var(--surface-card);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  padding: var(--sp-sm) var(--sp-md);
+  word-break: break-all;
+}
+/* Nothing picked: the words say so in the placeholder's ink and the sans
+ * face, so *Pick a model file* never reads as a file of that name. */
+.server-form .server-select--empty .q-field__native {
+  font-family: var(--font-sans);
+  color: var(--ash);
+}
+/* The select's list, lean like its field: rows with room, rounded, the
+ * hover a wash rather than Quasar's grey. */
+.server-select-menu {
+  padding: var(--sp-xs);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+}
+.server-select-menu .q-item {
+  min-height: 30px;
+  padding: 0 var(--sp-sm);
+  border-radius: var(--r-sm);
+}
+.server-select-menu .q-item--active {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}

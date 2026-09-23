@@ -95,6 +95,7 @@ def field(
     placeholder: str = "",
     mono: bool = False,
     secret: bool = False,
+    mark: bool = True,
     on_change: Callable[..., Any] | None = None,
 ) -> ui.input:
     """One labelled input: the label, **whether it is required**, the box, a hint.
@@ -109,7 +110,9 @@ def field(
     ``help`` is ``hint`` folded into a `help_tip` beside the label, for a form
     dense enough that a sentence under every box is most of what it shows (the
     providers dashboard, 2026-09-23). An empty ``label`` draws the box alone,
-    for a row whose first cell already names it.
+    for a row whose first cell already names it. ``mark`` false leaves the
+    *required* / *optional* word off, for a field whose placeholder is its
+    default and so says it can be left alone (the start panel, 2026-09-23).
     """
     with ui.element("div").classes("field"):
         if label:
@@ -117,9 +120,10 @@ def field(
                 ui.label(label)
                 if help:
                     help_tip(help)
-                ui.label("required" if required else "optional").classes(
-                    "field-required" if required else "field-optional"
-                )
+                if mark:
+                    ui.label("required" if required else "optional").classes(
+                        "field-required" if required else "field-optional"
+                    )
         box = ui.input(
             value=value, placeholder=placeholder, password=secret, password_toggle_button=secret
         )
