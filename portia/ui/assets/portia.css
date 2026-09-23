@@ -1075,16 +1075,28 @@ body.body--dark .p-panel {
   gap: var(--sp-lg);
   height: min(480px, 70vh);
 }
+/* A rail of glyphs, each named by its tooltip (2026-09-23, the user's call):
+ * the names cost 168px the Providers section needed. */
 .settings-nav {
-  flex: 0 0 168px;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding-right: var(--sp-md);
+  padding-right: var(--sp-sm);
   border-right: 1px solid var(--hairline-soft);
 }
 .settings-nav .artifact-row {
   margin: 0;
+  justify-content: center;
+  padding: var(--sp-sm);
+}
+/* Qualified by the row: `.artifact-row .artifact-body` is declared later at
+ * the same weight and would draw the name back. */
+.settings-nav .artifact-row .artifact-body {
+  display: none;
+}
+.settings-nav .artifact-row .artifact-icon {
+  font-size: 18px;
 }
 .settings-body {
   flex: 1 1 auto;
@@ -1135,7 +1147,7 @@ body.body--dark .p-panel {
   min-width: 0;
 }
 .providers-list {
-  flex: 0 0 216px;
+  flex: 0 0 280px;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -1174,18 +1186,22 @@ body.body--dark .p-panel {
   color: var(--ink);
 }
 /* Qualified by the row: `.row-gap-xs` is declared later at the same weight
- * and its `wrap` won, so a long line put the light alone above it. */
+ * and its `wrap` won, so a long line put the light alone above it. The line
+ * itself wraps (2026-09-23, the user): ellipsized at any width this list can
+ * have, it cut *signed in · claude.ai max* to *sig…*, and what a provider said
+ * is the one thing on the row worth reading. The light sits on the first line. */
 .provider-row .provider-row-state {
-  align-items: center;
+  align-items: flex-start;
   min-width: 0;
   flex-wrap: nowrap;
 }
+.provider-row .provider-row-state .status-light {
+  margin-top: 5px;
+}
 .provider-row .provider-row-line {
   flex: 1 1 auto;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 .provider-row-switch {
   flex: 0 0 auto;
@@ -1210,16 +1226,36 @@ body.body--dark .p-panel {
   height: 18px;
   color: var(--body);
 }
-.provider-var {
-  align-items: flex-end;
+/* The variables and the new one as one grid: a name, its box, its button, on
+ * one centre line. Rows of labelled fields put the name level with the
+ * *Value* label rather than the box (2026-09-23). */
+.provider-vars {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) auto;
+  align-items: center;
+  gap: var(--sp-sm);
 }
-.provider-var .field {
-  flex: 1 1 auto;
+/* The button column is as wide as *Add*; the remove cross keeps its own size. */
+.provider-vars > .q-btn {
+  justify-self: start;
+}
+.provider-var-key {
+  flex-wrap: nowrap;
   min-width: 0;
 }
-.provider-var > .p-mono {
+
+/* A small *?* beside a name; the sentence is its tooltip (`c.help_tip`). */
+.help-tip {
+  font-size: 13px;
+  color: var(--ash);
+  cursor: help;
   flex: 0 0 auto;
-  padding-bottom: 6px;
+}
+.help-tip:hover {
+  color: var(--mute);
+}
+.field-label .help-tip {
+  align-self: center;
 }
 
 /* One setting: a title, what it does, and the control under them

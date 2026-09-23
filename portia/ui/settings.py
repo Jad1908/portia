@@ -191,15 +191,25 @@ def _panel() -> None:
 
 
 def _nav() -> None:
+    """The sections as a rail of glyphs, each named on hover.
+
+    **Glyphs only since 2026-09-23** (the user's call): the names took 168px
+    from a body the Providers section needed for a list and a detail side by
+    side, and a provider's own sentence was the thing being ellipsized. The
+    row is still `artifact_row`, its name hidden by CSS and said by the
+    tooltip, so the rail is the left pane's vocabulary at one more setting.
+    """
     _NAV_ROWS.clear()
     with ui.element("div").classes("settings-nav"):
         for tab in TABS:
-            _NAV_ROWS[tab] = c.artifact_row(
+            row = c.artifact_row(
                 name=tab,
                 icon=_ICONS[tab],
                 selected=tab == _TAB,
                 on_click=lambda t=tab: _show_tab(t),
             )
+            row.tooltip(tab)
+            _NAV_ROWS[tab] = row
 
 
 @ui.refreshable

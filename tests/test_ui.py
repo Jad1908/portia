@@ -1436,6 +1436,26 @@ def test_the_settings_body_lays_its_sections_out_as_the_composer_does_not():
     assert "flex-shrink: 0" in block(".settings-body > *")
     assert "align-self: stretch" in block(".providers-layout")
     assert "flex-wrap: nowrap" in block(".provider-row .provider-row-state")
+    # The section list is a rail of glyphs, its names in tooltips (the user's
+    # call, 2026-09-23), qualified so `.artifact-row .artifact-body` below it
+    # does not draw them back.
+    assert "display: none" in block(".settings-nav .artifact-row .artifact-body")
+    # The variables are one grid, so a name sits level with its box.
+    assert "display: grid" in block(".provider-vars")
+
+
+def test_the_providers_detail_says_what_a_field_is_for_on_hover():
+    """A caption under every field was most of what the detail showed (the
+    user, 2026-09-23): the sentences are `help_tip`s beside the names now."""
+    import inspect
+
+    from portia.ui import providers as providers_ui
+
+    source = inspect.getsource(providers_ui._detail)
+    assert "hint=" not in source
+    assert "help=why" in source
+    assert "c.help_tip(notes[key])" in source
+    assert "c.caption(VARIABLES_WHY)" not in source
 
 
 def test_the_settings_sections_reuse_the_left_panes_row_vocabulary():

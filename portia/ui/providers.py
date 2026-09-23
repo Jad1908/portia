@@ -206,49 +206,66 @@ def _detail(kind: str, settings: providers.Settings) -> None:
             what, why = _FIELDS[name]
             c.field(
                 what,
-                hint=why,
+                help=why,
                 value=getattr(settings, name),
                 mono=True,
                 on_change=lambda e, k=kind, n=name: _set_field(k, n, str(e.value or "")),
             )
-    ui.label(VARIABLES).classes("setting-title")
-    c.caption(VARIABLES_WHY)
+    with ui.element("div").classes("row-gap-xs"):
+        ui.label(VARIABLES).classes("setting-title")
+        c.help_tip(VARIABLES_WHY)
     notes = provider.env_notes()
-    for key, value in sorted(settings.env.items()):
-        with ui.element("div").classes("row-gap-sm provider-var"):
-            c.mono(key, small=True)
-            box = c.field(
-                VALUE,
+    # One grid for the set variables and the new one, so every name, box and
+    # button sits in the same three columns on the same centre line. As rows of
+    # labelled fields, the name sat level with the *Value* label, not the box.
+    with ui.element("div").classes("provider-vars"):
+        for key, value in sorted(settings.env.items()):
+            with ui.element("div").classes("row-gap-xs provider-var-key"):
+                c.mono(key, small=True)
+                if key in notes:
+                    c.help_tip(notes[key])
+            c.field(
+                "",
                 value=value,
                 mono=True,
                 secret=key.upper().endswith("KEY"),
                 on_change=lambda e, k=kind, n=key: _set_var(k, n, str(e.value or "")),
             )
-            box.classes("provider-var-value")
             c.button("", lambda k=kind, n=key: _drop_var(k, n), icon="close", micro=True).tooltip(
                 REMOVE
             )
-        if key in notes:
-            c.caption(notes[key])
-    _adder(kind)
+        _adder(kind)
     unknown = [k for k in notes if k not in settings.env]
     if unknown:
-        c.caption(KNOWN)
-        for key in unknown:
-            c.caption(f"{key} — {notes[key]}")
+        with ui.element("div").classes("row-gap-sm"):
+            c.caption(KNOWN)
+            for key in unknown:
+                with ui.element("div").classes("row-gap-xs"):
+                    c.mono(key, small=True)
+                    c.help_tip(notes[key])
     if provider.add_command("<name>"):
         c.add_model_line(kind)
 
 
 def _adder(kind: str) -> None:
-    """Two boxes and a button: a new variable, written on Add and never on a keystroke."""
+    """Two boxes and a button: a new variable, written on Add and never on a keystroke.
+
+    Three cells of `provider-vars`' grid, under the set variables' three.
+    """
     draft: dict[str, str] = {"name": "", "value": ""}
-    with ui.element("div").classes("row-gap-sm provider-var provider-var-new"):
-        c.field(NAME, mono=True, on_change=lambda e: draft.__setitem__("name", str(e.value or "")))
-        c.field(
-            VALUE, mono=True, on_change=lambda e: draft.__setitem__("value", str(e.value or ""))
-        )
-        c.button(ADD, lambda: _add_var(kind, draft), icon="add", micro=True)
+    c.field(
+        "",
+        placeholder=NAME,
+        mono=True,
+        on_change=lambda e: draft.__setitem__("name", str(e.value or "")),
+    )
+    c.field(
+        "",
+        placeholder=VALUE,
+        mono=True,
+        on_change=lambda e: draft.__setitem__("value", str(e.value or "")),
+    )
+    c.button(ADD, lambda: _add_var(kind, draft), icon="add", micro=True)
 
 
 # --- what the controls do --------------------------------------------------------

@@ -90,6 +90,7 @@ def field(
     *,
     required: bool = False,
     hint: str = "",
+    help: str = "",
     value: str = "",
     placeholder: str = "",
     mono: bool = False,
@@ -104,13 +105,21 @@ def field(
     wash on focus — rather than Quasar's 56px default, which read as a form
     built from someone else's kit. ``secret`` draws a password box with the
     reveal toggle; what is typed there is never written anywhere by portia.
+
+    ``help`` is ``hint`` folded into a `help_tip` beside the label, for a form
+    dense enough that a sentence under every box is most of what it shows (the
+    providers dashboard, 2026-09-23). An empty ``label`` draws the box alone,
+    for a row whose first cell already names it.
     """
     with ui.element("div").classes("field"):
-        with ui.element("div").classes("field-label"):
-            ui.label(label)
-            ui.label("required" if required else "optional").classes(
-                "field-required" if required else "field-optional"
-            )
+        if label:
+            with ui.element("div").classes("field-label"):
+                ui.label(label)
+                if help:
+                    help_tip(help)
+                ui.label("required" if required else "optional").classes(
+                    "field-required" if required else "field-optional"
+                )
         box = ui.input(
             value=value, placeholder=placeholder, password=secret, password_toggle_button=secret
         )
@@ -121,6 +130,20 @@ def field(
         if hint:
             ui.label(hint).classes("field-hint")
     return box
+
+
+def help_tip(text: str) -> ui.icon:
+    """A small *?* beside a name, saying on hover what the name is for.
+
+    For what would otherwise be a caption under every field of a dense form.
+    The sentence is not on screen anywhere else, which is the one condition
+    under which a tooltip earns its place (`hint`'s rule). Instant rather than
+    delayed: a mark this small is aimed at, never crossed on the way past.
+    """
+    icon = ui.icon("help_outline").classes("help-tip")
+    with icon:
+        ui.tooltip(text).props("max-width=300px").classes("help-tip-text")
+    return icon
 
 
 #: The glyph each alert kind carries. Kind, never rank: an error is not louder
