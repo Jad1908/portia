@@ -3543,9 +3543,11 @@ def test_the_destination_of_the_flow_does_not_pulse():
 def test_the_flow_stops_for_anyone_who_asked_it_to():
     """The path still lights — the statement survives; only the motion goes."""
     css = (Path(c.__file__).parent / "assets" / "portia.css").read_text(encoding="utf-8")
-    reduced = css[css.index("prefers-reduced-motion") :]
+    # Every reduced-motion block, not the first: the theme previews in Settings
+    # carry one of their own (2026-09-23) and sit earlier in the file.
+    blocks = [chunk[:600] for chunk in css.split("prefers-reduced-motion")[1:]]
     for selector in (".graph-node--lit .model-card", ".graph-edges path.is-lit"):
-        assert selector in reduced[:600]
+        assert any(selector in block for block in blocks)
 
 
 def test_a_spec_row_carries_its_name_for_the_client_to_read(tmp_path, monkeypatch):
@@ -4274,10 +4276,85 @@ def test_every_switchable_write_is_labelled_by_what_it_writes():
         assert "_" not in label
 
 
-def test_the_settings_panel_says_what_the_mode_you_are_in_does():
+def test_the_settings_panel_carries_no_sentence_under_a_setting():
+    """The user went through the panel line by line (2026-09-23) and deleted
+    each description or moved it into a `help_tip`. A `_WHY` constant is the
+    shape one took; a new one belongs in ``help=`` or nowhere."""
+    import inspect
+
+    from portia.ui import feedback, settings
+
+    assert not [name for name in vars(settings) if name.endswith("_WHY")]
+    assert "NOTHING_SENT" not in vars(feedback)
+    source = inspect.getsource(settings)
+    assert "c.setting(BRIEF_WHAT, help=BRIEF_HELP)" in source
+
+
+def test_the_catalog_switches_wait_behind_customize(monkeypatch):
+    """Folded by default, and a redraw of the section does not fold them back."""
     from portia.ui import settings
 
-    assert set(settings.MODE_WHY) == set(state.MODES)
+    monkeypatch.setattr(settings._section, "refresh", lambda *a, **k: None)
+    monkeypatch.setattr(settings, "_CUSTOMIZING", False)
+    settings._toggle_customize()
+    assert settings._CUSTOMIZING is True
+    settings._toggle_customize()
+    assert settings._CUSTOMIZING is False
+
+
+def test_where_the_data_lives_cannot_be_changed_from_settings_once_pinned(monkeypatch):
+    """A project reads from one place (`engine.can_change_data`): the other side
+    of the Data section's choice is disabled once a source is in, and a press
+    that reaches `_choose_data` anyway changes nothing."""
+    from portia.ui import settings
+    from portia.ui.state import APP
+
+    chosen = []
+    monkeypatch.setattr(settings.engine, "can_change_data", lambda app: False)
+    monkeypatch.setattr(settings.engine, "choose_data", lambda mode, app: chosen.append(mode))
+    monkeypatch.setattr(APP, "data_mode", state.LOCAL_DATA)
+
+    settings._choose_data(state.WAREHOUSE_DATA)
+
+    assert chosen == []
+    assert APP.data_mode == state.LOCAL_DATA
+
+
+def test_the_theme_previews_restate_the_tokens_they_draw():
+    """A light card stays light in dark mode, so its palette cannot read the
+    tokens and restates them. Each restated value is held to its token here."""
+    import re
+
+    from portia.ui import theme
+
+    css = theme.CSS.read_text(encoding="utf-8")
+
+    def block(selector):
+        found = re.search(re.escape(selector) + r" \{([^}]*)\}", css)
+        assert found, f"{selector} is not styled"
+        return dict(re.findall(r"(--[\w-]+):\s*([^;]+);", found.group(1)))
+
+    pairs = {
+        "--tp-canvas": "--canvas",
+        "--tp-surface": "--surface",
+        "--tp-hairline": "--hairline",
+        "--tp-ink": "--ink",
+        "--tp-stone": "--stone",
+        "--tp-accent": "--accent-text",
+    }
+    for preview, tokens in ((".tp-light", ":root"), (".tp-dark", "body.body--dark")):
+        restated, real = block(preview), block(tokens)
+        for mine, theirs in pairs.items():
+            assert restated[mine] == real[theirs], (preview, mine)
+    assert settings_spider_exists()
+
+
+def settings_spider_exists():
+    from portia.ui import settings
+
+    return settings.SPIDER.is_file() and "currentColor" in settings.SPIDER.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_notes_are_drawn_dated_in_the_order_they_were_learned():

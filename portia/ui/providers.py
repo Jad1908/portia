@@ -39,7 +39,6 @@ from portia.ui import engine
 from portia.ui.state import APP
 
 TITLE = "Providers"
-WHY = "Where the copilot's model can come from, and whether each one can be reached now."
 NOT_CHECKED = "Not checked yet"
 CHECKING = "checking…"
 CHECK = "Check again"

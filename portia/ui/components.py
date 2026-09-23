@@ -802,22 +802,42 @@ def approval_mode(app, on_change: Callable[[], Any] | None = None) -> ui.select:
     return select
 
 
-def setting(title: str, description: str = "") -> ui.element:
-    """One setting: what it is, what it does, and the control that changes it.
+def setting(title: str, description: str = "", *, help: str = "") -> ui.element:
+    """One setting: what it is, and the control that changes it.
 
     **One row shape for every preference** *(2026-09-04)*. The settings panel
     was captions and controls in whatever order each tab happened to stack them,
-    so the same kind of thing read three ways. A setting is a title, a line
-    saying what it does, and the control under them — the shape every editor's
-    settings page uses — and the caller opens this and puts the control inside.
-    The description is a fact about the setting, never advice about its value.
+    so the same kind of thing read three ways. A setting is a title and the
+    control under it, and the caller opens this and puts the control inside.
+
+    **Most settings carry no sentence at all** *(2026-09-23, the user, line by
+    line)*. A description under every title was most of what the panel showed;
+    they were deleted where the control says it, and moved into ``help``, a
+    `help_tip` beside the title, where the definition is worth having on hover.
+    ``description`` stays for a line that has to be read without asking.
     """
     row = ui.element("div").classes("setting")
     with row:
-        ui.label(title).classes("setting-title")
+        with ui.element("div").classes("row-gap-xs setting-head"):
+            ui.label(title).classes("setting-title")
+            if help:
+                help_tip(help)
         if description:
             ui.label(description).classes("setting-why pre-wrap")
     return row
+
+
+def state_pill(value: str) -> ui.element:
+    """A setting's value when it is an *absence*: *not set*, *not connected*.
+
+    Set in the mono face beside real values, an absence read as one more value
+    (`not set, the whole repo` looked like a folder called that, the user,
+    2026-09-23). A pill with an off `status_light` says it is a state.
+    """
+    with ui.element("div").classes("state-pill") as pill:
+        status_light(OFF)
+        ui.label(value)
+    return pill
 
 
 def menu_row(icon: str, label: str, on_click: Callable[..., Any]) -> ui.element:
