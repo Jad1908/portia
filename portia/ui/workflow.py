@@ -2145,7 +2145,7 @@ def _knowledge_counts(data: dict) -> str:
         kinds[node["kind"]] = kinds.get(node["kind"], 0) + 1
     shown = " · ".join(f"{n} {kind}" for kind, n in kinds.items())
     edges = f"{len(data['edges'])} edge(s)"
-    cut = "  (truncated)" if data.get("truncated") else ""
+    cut = f"  · {data['omitted']} more not drawn" if data.get("truncated") else ""
     return f"{shown} · {edges}{cut}"
 
 

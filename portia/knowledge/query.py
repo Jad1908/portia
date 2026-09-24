@@ -673,14 +673,27 @@ def subgraph(session: Any, *, project: str, columns: bool = False) -> dict:
     """
     labels = (SOURCE, MODEL, GROUP, COLUMN) if columns else (SOURCE, MODEL, GROUP)
     scoped = f"n.{PROJECT} = $project"
+    # **Tables before columns, whatever the cap cuts** *(2026-09-23)*. The
+    # nodes were ordered by kind, and `Column` sorts before `Group`, `Model`
+    # and `Source`, so on a project with more columns than `MAX_GRAPH_NODES`
+    # the cap kept every column and dropped every table. The `HAS_COLUMN`
+    # edges were then filtered out below as pointing at unknown nodes, and the
+    # explorer drew six hundred columns attached to nothing, joined only by the
+    # overlaps measured between them (the user's report, on a warehouse of 39
+    # tables). The kinds a picture is *about* come first, and the columns are
+    # ordered by their key, which starts with the table's, so what the cap
+    # takes is whole tables at the end of the list rather than a scatter of
+    # columns from every table.
+    where = f"WHERE {_any_label('n', labels)} AND {scoped} "
     nodes = _run(
         session,
-        f"MATCH (n) WHERE {_any_label('n', labels)} AND {scoped} "
+        f"MATCH (n) {where}"
         "RETURN labels(n)[0] AS kind, coalesce(n.name, n.key, n.path) AS label, "
         "elementId(n) AS id, properties(n) AS properties "
-        f"ORDER BY kind, label LIMIT {MAX_GRAPH_NODES}",
+        f"ORDER BY n:{COLUMN}, kind, coalesce(n.key, n.name, n.path) LIMIT {MAX_GRAPH_NODES}",
         project=project,
     )
+    total = _run(session, f"MATCH (n) {where}RETURN count(n) AS n", project=project)[0]["n"]
     known = {n["id"] for n in nodes}
     edges = [
         e
@@ -716,7 +729,10 @@ def subgraph(session: Any, *, project: str, columns: bool = False) -> dict:
     return {
         "nodes": nodes,
         "edges": edges,
-        "truncated": len(nodes) >= MAX_GRAPH_NODES,
+        "truncated": total > len(nodes),
+        # How many the cap left out, so the caption can count them rather than
+        # say *truncated* and leave the reader to guess at what.
+        "omitted": total - len(nodes),
     }
 
 

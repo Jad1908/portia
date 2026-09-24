@@ -424,6 +424,30 @@ def test_the_subgraph_is_tables_until_you_ask_for_columns(filled, pid):
     assert len(columns["nodes"]) > len(tables["nodes"])
 
 
+def test_the_cap_takes_columns_and_never_the_tables_they_hang_from(filled, pid, monkeypatch):
+    """A warehouse of 39 tables drew six hundred columns attached to nothing.
+
+    The nodes were ordered by kind, `Column` sorts first, and the cap kept the
+    columns and cut the tables; every `HAS_COLUMN` edge then pointed at a node
+    the picture did not have and was dropped. Tables and groups come first now,
+    and what the cap takes is columns, whole tables at a time.
+    """
+    from portia.knowledge.schema import HAS_COLUMN
+
+    tables = query.subgraph(filled, project=pid)["nodes"]
+    monkeypatch.setattr(query, "MAX_GRAPH_NODES", len(tables) + 2)
+
+    picture = query.subgraph(filled, columns=True, project=pid)
+    assert {n["id"] for n in tables} <= {n["id"] for n in picture["nodes"]}
+    columns = [n for n in picture["nodes"] if n["kind"] == "Column"]
+    assert len(columns) == 2, "the two slots left over the tables go to columns"
+    assert picture["truncated"] and picture["omitted"] > 0
+
+    attached = {e["to"] for e in picture["edges"] if e["kind"] == HAS_COLUMN}
+    assert {n["id"] for n in columns} <= attached, "every drawn column hangs from its table"
+    assert len({n["properties"]["table"] for n in columns}) == 1, "cut by table, not scattered"
+
+
 def test_the_picture_speaks_portias_vocabulary_and_no_librarys(filled, pid):
     """Swapping what draws it must be one JavaScript file and nothing else."""
     node = query.subgraph(filled, project=pid)["nodes"][0]
