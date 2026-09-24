@@ -152,6 +152,8 @@ async def run_and_render(
         cwd=cwd,
         portia_dir=portia_dir,
         provider=provider,
+        # `index` is a job that reads: no build tool is offered to it.
+        builds=kind == runlog.CHAT,
     ):
         log.event(event)
         render(event)

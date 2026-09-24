@@ -494,3 +494,27 @@ def test_the_prompt_length_the_preflight_uses_is_the_prompt_the_model_is_sent():
         len(d) for d in tools.descriptions().values()
     )
     assert chars > 40_000  # copilot.md and fifteen descriptions; the number the doc quotes
+
+
+# --- a job that reads (2026-09-23) --------------------------------------------
+
+
+def test_a_job_that_reads_gets_options_with_no_build_tool(monkeypatch):
+    """Neither the server nor the permission list names `record_step` or
+    `run_spec`, so an indexing job cannot write a step however the prompt reads."""
+    served: list[dict] = []
+    real = session.tools.build_server
+
+    def spy(**kw):
+        served.append(kw)
+        return real(**kw)
+
+    monkeypatch.setattr(session.tools, "build_server", spy)
+    options = session.build_options(portia_dir="nowhere/.portia", builds=False)
+
+    assert served[-1]["builds"] is False
+    assert session.tools.qualified("run_spec") not in options.allowed_tools
+    assert session.tools.qualified("describe_source") in options.allowed_tools
+
+    session.build_options(portia_dir="nowhere/.portia")
+    assert served[-1]["builds"] is True, "a chat builds"

@@ -114,8 +114,14 @@ def build_options(
     curator: curation.Curation | None = None,
     resume: str | None = None,
     provider: str = DEFAULT_PROVIDER,
+    builds: bool = True,
 ) -> Any:
     """Assemble ``ClaudeAgentOptions`` for a portia session.
+
+    ``builds`` is off for a job that reads (`tools.BUILD_TOOLS`): the server
+    does not list `record_step` or `run_spec`, and the permission list does not
+    name them either, so an indexing job cannot write a step however the
+    prompt reads.
 
     ``provider`` decides the environment the SDK's binary is started in and
     nothing else (`agent/providers/`): the Anthropic provider adds no variable,
@@ -167,11 +173,17 @@ def build_options(
         tools=[ask.ASK_TOOL],
         # A model that cannot take a picture is not offered the tool that
         # returns one (`tools.VISION_TOOLS`).
-        mcp_servers={tools.SERVER_NAME: tools.build_server(sees_images=source.sees_images)},
+        mcp_servers={
+            tools.SERVER_NAME: tools.build_server(sees_images=source.sees_images, builds=builds)
+        },
         # Read-only checks run freely; writes fall through to `can_use_tool`
         # so a durable artifact is never changed silently. Naming a tool the
         # server does not list is harmless: this is a permission, not an offer.
-        allowed_tools=[tools.qualified(t.name) for t in tools.READ_TOOLS],
+        allowed_tools=[
+            tools.qualified(t.name)
+            for t in tools.READ_TOOLS
+            if builds or t not in tools.BUILD_TOOLS
+        ],
         can_use_tool=can_use_tool,
         # Do not inherit this repo's CLAUDE.md or .claude/ — portia's copilot is
         # not Claude Code and must not pick up our development instructions.
@@ -276,6 +288,7 @@ class Conversation:
         client_factory: Callable[[Any], Any] | None = None,
         resume: str | None = None,
         provider: str = DEFAULT_PROVIDER,
+        builds: bool = True,
     ) -> None:
         #: Questions and approvals are emitted from inside `can_use_tool` while
         #: the message stream is paused waiting on it, so they land here and
@@ -294,6 +307,7 @@ class Conversation:
             curator=self.curator,
             resume=resume,
             provider=provider,
+            builds=builds,
             can_use_tool=ask.build_can_use_tool(
                 answer=answer,
                 confirm=confirm,
@@ -466,6 +480,7 @@ async def run(
     cwd: str | Path | None = None,
     portia_dir: str = catalog.DEFAULT_DIR,
     provider: str = DEFAULT_PROVIDER,
+    builds: bool = True,
 ) -> AsyncIterator[events.Event]:
     """One exchange, in a chat that lasts exactly as long as it does.
 
@@ -483,6 +498,7 @@ async def run(
         cwd=cwd,
         portia_dir=portia_dir,
         provider=provider,
+        builds=builds,
     ) as chat:
         async for event in chat.send(prompt):
             yield event

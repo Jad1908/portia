@@ -14,5 +14,6 @@ picked each one. Pick pairs you can justify and do not sweep. Treat a zero as a
 result: two columns that share no values are often the same thing needing a
 mapping first.
 
-Build nothing. Ask me only if the project context leaves something genuinely
-ambiguous that would change what you write.
+Indexing reads. This job has no `record_step` and no `run_spec`; a problem you
+find in the source goes in its `note`, not in a step. Ask me only if the project
+context leaves something genuinely ambiguous that would change what you write.

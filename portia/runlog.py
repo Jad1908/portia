@@ -252,7 +252,9 @@ def start(
     if host:
         header[HOSTED] = host
     log.write(HEADER, header)
-    log.write(PROMPTS, prompts_read(portia_dir, provider) if prompts is None else prompts)
+    # A job reads: its model is offered no build tool, and the record says so.
+    read = prompts_read(portia_dir, provider, builds=kind == CHAT)
+    log.write(PROMPTS, read if prompts is None else prompts)
     return log
 
 
@@ -282,9 +284,13 @@ def stamp(when: datetime | None = None) -> str:
 
 
 def prompts_read(
-    portia_dir: str | Path = DEFAULT_DIR, provider: str | None = None
+    portia_dir: str | Path = DEFAULT_DIR, provider: str | None = None, *, builds: bool = True
 ) -> dict[str, Any]:
     """What the copilot is about to be given: system prompt and tool descriptions.
+
+    ``builds`` is off for an indexing log: that job is not offered the build
+    tools (`tools.BUILD_TOOLS`), and this record has to list what its model
+    read and not what a chat's would have.
 
     **Best-effort, like the graph writes** (`CLAUDE.md` → `knowledge/`): this is
     a record *about* the run, so failing to take it must never stop the run. The
@@ -309,7 +315,9 @@ def prompts_read(
         return {
             "system": build_system_prompt(str(portia_dir)),
             "tools": tools.descriptions(
-                sees_images=source.sees_images, asks=source.harness == providers.CODEX
+                sees_images=source.sees_images,
+                asks=source.harness == providers.CODEX,
+                builds=builds,
             ),
         }
     except Exception:

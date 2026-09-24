@@ -528,3 +528,18 @@ def test_the_question_tool_is_read_only_so_codex_runs_it_without_an_approval():
 
     assert read_only(tools.ask_user.annotations) is True
     assert tools.ask_user not in tools.READ_TOOLS and tools.ask_user not in tools.WRITE_TOOLS
+
+
+def test_a_job_that_reads_is_served_no_build_tool(monkeypatch):
+    """The same rule as the Claude harness: an indexing job's loopback server
+    lists no `record_step` and no `run_spec` (`tools.BUILD_TOOLS`)."""
+    served: list[dict] = []
+    real = codex.tools.build_server
+
+    def spy(**kw):
+        served.append(kw)
+        return real(**kw)
+
+    monkeypatch.setattr(codex.tools, "build_server", spy)
+    _drain(_chat(FakeCodex([[turn_completed()]]), builds=False), "read these")
+    assert served[-1]["builds"] is False

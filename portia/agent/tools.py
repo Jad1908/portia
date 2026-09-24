@@ -962,6 +962,16 @@ QUESTION_TOOLS = [ask_user]
 
 ALL_TOOLS = [*READ_TOOLS, *WRITE_TOOLS, *QUESTION_TOOLS]
 
+#: The build half: the tool that writes a spec and the tool that runs one.
+#: **Withheld from a job that reads** (`offered(builds=False)`, 2026-09-23).
+#: An indexing job's whole output is the catalog, and it was offered every
+#: tool a build gets; the system prompt says *record as you go* and the task
+#: prompt said *build nothing* once, at its end, and on a real warehouse the
+#: copilot set about fixing what it read instead of describing it. Indexing is
+#: read-only by construction now, the way the agent has no filesystem by
+#: construction: a tool it is not offered is a tool it cannot reach for.
+BUILD_TOOLS = [record_step, run_spec]
+
 #: Tools whose answer is a picture. **Offered only to a model that can see one**
 #: (`providers.Provider.sees_images`): a text-only model handed an image block
 #: either errors or, worse, describes a chart it was never shown. Same rule as
@@ -969,19 +979,28 @@ ALL_TOOLS = [*READ_TOOLS, *WRITE_TOOLS, *QUESTION_TOOLS]
 VISION_TOOLS = [view_chart]
 
 
-def offered(*, sees_images: bool = True, asks: bool = False) -> list:
+def offered(*, sees_images: bool = True, asks: bool = False, builds: bool = True) -> list:
     """The tools a session gets, given what its model can take in and which harness drives it.
 
     ``asks`` is the Codex harness: it gets `ask_user`, because it has no
     question tool of its own. The Claude harness never does.
+
+    ``builds`` is off for a job that reads — indexing, a re-read — which is
+    then not offered `BUILD_TOOLS`. Everything else stays: the catalog writes
+    are the job's output, a question is a `query_data`, and a chart is how it
+    shows a shape.
     """
     tools = [*READ_TOOLS, *WRITE_TOOLS] + (list(QUESTION_TOOLS) if asks else [])
+    if not builds:
+        tools = [t for t in tools if t not in BUILD_TOOLS]
     if sees_images:
         return tools
     return [t for t in tools if t not in VISION_TOOLS]
 
 
-def descriptions(*, sees_images: bool = True, asks: bool = False) -> dict[str, str]:
+def descriptions(
+    *, sees_images: bool = True, asks: bool = False, builds: bool = True
+) -> dict[str, str]:
     """Every tool description as the model receives it, keyed by tool name.
 
     Read off the registered tools rather than out of ``prompts/tools/``, because
@@ -995,7 +1014,10 @@ def descriptions(*, sees_images: bool = True, asks: bool = False) -> dict[str, s
     *find* the prompts but not to read them without leaving what you are doing.
     Nothing in the loop calls this.
     """
-    return {t.name: str(t.description or "") for t in offered(sees_images=sees_images, asks=asks)}
+    return {
+        t.name: str(t.description or "")
+        for t in offered(sees_images=sees_images, asks=asks, builds=builds)
+    }
 
 
 def qualified(name: str) -> str:
@@ -1003,7 +1025,7 @@ def qualified(name: str) -> str:
     return f"mcp__{SERVER_NAME}__{name}"
 
 
-def build_server(*, sees_images: bool = True, asks: bool = False):
+def build_server(*, sees_images: bool = True, asks: bool = False, builds: bool = True):
     """The in-process MCP server the agent talks to. Runs inside this process.
 
     The Claude SDK bridges it to its binary itself; the Codex harness serves the
@@ -1011,5 +1033,7 @@ def build_server(*, sees_images: bool = True, asks: bool = False):
     `ask_user` in the list.
     """
     return create_sdk_mcp_server(
-        name=SERVER_NAME, version="0.1.0", tools=offered(sees_images=sees_images, asks=asks)
+        name=SERVER_NAME,
+        version="0.1.0",
+        tools=offered(sees_images=sees_images, asks=asks, builds=builds),
     )
