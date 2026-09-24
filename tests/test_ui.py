@@ -331,7 +331,7 @@ def _reading(app, monkeypatch, on_start=None):
 
     started: list[str] = []
 
-    async def fake_start(prompt, *, model, effort, kind, label):
+    async def fake_start(prompt, *, model, effort, kind, label, chat=None):
         started.append(label)
         if on_start is not None:
             on_start(len(started))
@@ -382,7 +382,7 @@ def test_indexing_hands_straight_over_to_the_read(tmp_path, monkeypatch):
 
     started: list[str] = []
 
-    async def fake_start(prompt, *, model, effort, kind, label):
+    async def fake_start(prompt, *, model, effort, kind, label, chat=None):
         started.append(label)
         assert not app.left_add_data, "the read runs with the add-data screen still showing"
 
@@ -425,7 +425,7 @@ def test_a_pressed_index_is_busy_until_profiling_ends_and_takes_one_press(tmp_pa
         await screens._index_now()  # the second press, mid-run
         return await real_index(paths, app_, **kwargs)
 
-    async def fake_start(prompt, *, model, effort, kind, label):
+    async def fake_start(prompt, *, model, effort, kind, label, chat=None):
         seen["at the read"] = app.indexing_pressed
 
     monkeypatch.setattr(engine, "index", watched_index)
@@ -3002,8 +3002,10 @@ def test_stopping_indexing_does_not_spend_money_on_interpretation():
     from portia.ui import screens
 
     source = inspect.getsource(screens._index_and_interpret)
-    assert "if not stop.cancelled:" in source
-    assert source.index("if not stop.cancelled:") < source.index("_interpret_pending()")
+    assert "if stop.cancelled" in source
+    assert source.index("if stop.cancelled") < source.index("_interpret_pending()")
+    # The stop ends the waiting job rather than reading into it (2026-09-23).
+    assert source.index("_abandon(job, STOPPED_NO_READ") < source.index("_interpret_pending()")
 
 
 def test_indexing_offers_a_stop_while_it_is_indexing():
@@ -4897,6 +4899,351 @@ def test_stop_reaches_a_job_that_has_no_chat_behind_it():
     with _as_app(exchange, app):
         asyncio.run(exchange.interrupt())
     assert stream.job.interrupted == 1
+
+
+# --- the job exists from the first hop of profiling (2026-09-23) ---------------
+
+
+def test_profiling_makes_the_job_it_is_ahead_of_and_the_read_lands_in_it(tmp_path, monkeypatch):
+    """Ten minutes of profiling on a warehouse had nowhere to stand: the job
+    began with its model turn. It begins with profiling now, waits with the
+    lines profiling writes, and the exchange lands in the same chat."""
+    import asyncio
+
+    from nicegui import core, ui
+
+    from portia.ui import engine, exchange, screens
+    from portia.ui.state import App
+
+    pd.DataFrame({"a": [1, 2]}).to_csv(tmp_path / "orders.csv", index=False)
+    monkeypatch.chdir(tmp_path)
+    app = App(root=tmp_path)
+    catalog.init_project("test", portia_dir=app.portia_dir)
+
+    seen: dict = {}
+    real_index = engine.index
+
+    async def watched_index(paths, app_, **kwargs):
+        job = app.profiling
+        seen["during"] = job
+        seen["title"] = job.title
+        seen["listed"] = job.started
+        return await real_index(paths, app_, **kwargs)
+
+    async def fake_start(prompt, *, model, effort, kind, label, chat=None):
+        seen["read in"] = chat
+        seen["waiting at read"] = chat.waiting
+        seen["lines"] = list(chat.prelude)
+
+    monkeypatch.setattr(engine, "index", watched_index)
+    monkeypatch.setattr(exchange, "start", fake_start)
+    monkeypatch.setattr(ui, "notify", lambda *a, **k: None)
+
+    async def index() -> None:
+        monkeypatch.setattr(core, "loop", asyncio.get_running_loop())
+        await screens._index_and_interpret([tmp_path / "orders.csv"])
+        await asyncio.sleep(0)
+
+    with _as_app(screens, app):
+        asyncio.run(index())
+
+    job = seen["during"]
+    assert job is not None and job.kind == state.INDEXING
+    assert seen["title"] == "Indexing 1 file" and seen["listed"]
+    assert seen["read in"] is job and seen["waiting at read"] is False
+    assert seen["lines"] == ["Reading 1 file…", "Profiling orders, 1 of 1", "Profiled 1 source."]
+    assert app.profiling is None, "nothing waits once the read has started"
+
+
+def test_no_job_waits_when_the_read_switch_is_off_and_one_job_takes_a_second_batch():
+    from portia.ui import screens
+    from portia.ui.state import App
+
+    app = App(interpret=False)
+    with _as_app(screens, app):
+        assert screens._waiting_job(3, "file") is None
+        app.interpret = True
+        first = screens._waiting_job(3, "file")
+        assert first is app.profiling and first.waiting and first.title == "Indexing 3 files"
+        assert screens._waiting_job(2, "table") is first, "a second batch joins the waiting job"
+
+
+def test_a_stop_ends_the_waiting_job_and_drops_it_unless_it_is_on_screen(monkeypatch):
+    from portia.ui import screens
+    from portia.ui.state import App
+
+    app = App()
+    monkeypatch.setattr(screens, "_redraw_indexing", lambda: None)  # tested on its own
+    with _as_app(screens, app):
+        job = screens._waiting_job(2, "file")
+        screens._abandon(job, screens.STOPPED_NO_READ)
+        assert job not in app.chats, "nobody was looking, nothing happened in it"
+
+        job = screens._waiting_job(2, "file")
+        app.show_chat(job)
+        screens._abandon(job, screens.STOPPED_NO_READ)
+        assert job in app.chats and not job.waiting and job.prelude[-1] == screens.STOPPED_NO_READ
+        app.show_chat(None)
+        assert job not in app.chats, "and it goes when they leave it"
+
+
+def test_opening_the_workspace_lands_in_the_job_waiting_on_profiling(monkeypatch):
+    """The way out during profiling threw you into a workspace with nothing on
+    it that said anything was happening (the user's report)."""
+    from portia.ui import app as app_module
+    from portia.ui import screens
+    from portia.ui.state import App
+
+    monkeypatch.setattr(app_module.shell, "refresh", lambda *a, **k: None)
+    app = App(catalog={"sources": {"orders": {}}})
+    with _as_app(screens, app):
+        job = screens._waiting_job(2, "file")
+        screens._leave(in_dialog=False)
+        assert app.open is job
+
+        app.chats.clear()
+        app.open = None
+        app.left_add_data = False
+        app.indexing_status = "Profiling orders, 1 of 2"  # the switch off: no job
+        screens._leave(in_dialog=False)
+        assert app.open is None and app.right == state.SOURCES
+
+
+def test_a_hop_redraws_every_line_that_draws_profiling(monkeypatch):
+    """The add-data screen redrew its own line only, so the sources view stuck
+    on the count it was drawn with until a page reload."""
+    from portia.ui import screens, transcript
+    from portia.ui.state import App
+
+    drawn: list[str] = []
+    monkeypatch.setattr(screens._progress, "refresh", lambda: drawn.append("add-data"))
+    monkeypatch.setattr(transcript._index_progress, "refresh", lambda: drawn.append("sources"))
+    monkeypatch.setattr(transcript._prelude_view, "refresh", lambda: drawn.append("job"))
+    app = App()
+    with _as_app(screens, app):
+        job = screens._waiting_job(1, "file")
+        screens._profiling_moved(job, "Profiling orders, 1 of 1")
+    assert drawn == ["add-data", "sources", "job"]
+    assert app.indexing_status == "Profiling orders, 1 of 1" and job.prelude == []
+    with _as_app(screens, app):
+        screens._profiling_moved(job, "")
+    assert job.prelude == ["Profiling orders, 1 of 1"] and app.indexing_status == ""
+
+
+def test_a_waiting_job_is_the_first_row_of_the_list_and_carries_the_light(tmp_path, monkeypatch):
+    from portia.ui import screens, transcript
+    from portia.ui.state import App
+
+    app = App(root=tmp_path)
+    monkeypatch.setattr(transcript.engine, "logs_in", lambda app_: [])
+    with _as_app(screens, app), _as_app(transcript, app):
+        job = screens._waiting_job(2, "file")
+        with ui.element("div") as slot:
+            transcript._chat_list()
+    texts = [str(getattr(e, "text", "")) for e in slot.descendants()]
+    assert job.title in texts and transcript._PROFILING in texts
+    lights = [e for e in slot.descendants() if "status-light--live" in e.classes]
+    assert lights, "running, the way a chat's row says a chat is"
+    assert transcript._NO_CHATS not in texts
+
+
+def test_the_pinned_sources_row_lights_up_while_profiling_with_no_job():
+    from portia.ui import transcript
+    from portia.ui.state import App
+
+    app = App(indexing_status="Profiling orders, 1 of 2")
+    with _as_app(transcript, app), ui.element("div") as slot:
+        transcript._pinned_sources_row()
+    assert [e for e in slot.descendants() if "status-light--live" in e.classes]
+
+
+def test_the_back_control_in_another_chat_knows_profiling_is_running():
+    from portia.ui import screens, transcript
+    from portia.ui.state import App
+
+    app = App()
+    with _as_app(screens, app), _as_app(transcript, app):
+        job = screens._waiting_job(2, "file")
+        other = app.new_chat()
+        assert transcript._elsewhere(other) is job
+        assert transcript._elsewhere(job) is None
+
+
+def test_the_waiting_jobs_header_draws_the_lines_the_status_and_stop():
+    from portia.core import cancel
+    from portia.ui import screens, transcript
+    from portia.ui.state import App
+
+    app = App(indexing_status="Profiling invoices, 2 of 2")
+    app.indexing_stop = cancel.Scope()
+    try:
+        with _as_app(screens, app), _as_app(transcript, app):
+            job = screens._waiting_job(2, "file")
+            job.prelude.append("Profiling orders, 1 of 2")
+            with ui.element("div") as slot:
+                transcript._job_header(job)
+        texts = [str(getattr(e, "text", "")) for e in slot.descendants()]
+    finally:
+        app.indexing_stop.close()
+    assert transcript._WAITING_WHY in texts
+    assert "Profiling orders, 1 of 2" in texts and "Profiling invoices, 2 of 2" in texts
+    assert "Stop" in texts
+
+    # The read has started: the lines fold shut under the exchange's banner.
+    app.indexing_status = ""
+    job.waiting = False
+    app.start_exchange("read them", model="m", effort=None, kind=state.INDEXING, chat=job)
+    with _as_app(transcript, app), ui.element("div") as slot:
+        transcript._job_header(job)
+    texts = [str(getattr(e, "text", "")) for e in slot.descendants()]
+    labels = [str(e._props.get("label", "")) for e in slot.descendants()]
+    assert transcript._PRELUDE_DONE.format(n="1 line") in labels
+    assert transcript._WAITING_WHY not in texts
+
+
+def test_a_waiting_job_draws_no_empty_note_under_its_header():
+    from portia.ui import screens, transcript
+    from portia.ui.state import App
+
+    app = App()
+    with _as_app(screens, app), _as_app(transcript, app):
+        job = screens._waiting_job(2, "file")
+        app.show_chat(job)
+        with ui.element("div") as slot:
+            transcript.stream_view()
+    texts = [str(getattr(e, "text", "")) for e in slot.descendants()]
+    assert transcript._IDLE_JOB not in texts
+
+
+def test_a_jobs_instruction_is_not_drawn_in_its_transcript():
+    """The app's own template stood where a human's message stands, shut, and
+    the user called it useless. The log keeps it; the pane does not draw it."""
+    from portia.agent import events
+    from portia.ui import transcript
+
+    with ui.element("div") as slot:
+        transcript._event(
+            events.prompt_event("These sources were just indexed: 'a'.", model="m", effort=None),
+            job=True,
+        )
+    assert not list(slot.descendants())
+
+
+def test_a_job_is_titled_by_what_it_indexes(tmp_path, monkeypatch):
+    """Its title was the first line of the template it was sent, so every job
+    in the list and the header of every one opened read *These sources were
+    just indexed: 'A', 'B', …*."""
+    import asyncio
+
+    from portia import runlog
+    from portia.agent import events
+    from portia.ui import exchange, transcript
+
+    app = App(root=tmp_path)
+    made: dict = {}
+
+    class FakeJob:
+        def __init__(self, **kw):
+            made.update(kw)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def send(self, prompt):
+            yield events.prompt_event(prompt, model="m", effort=None)
+            yield events.Event(events.RESULT, {"subtype": "success"})
+
+    class FakeSession:
+        conversation = staticmethod(lambda **kw: FakeJob(**kw))
+
+    import portia.agent
+
+    monkeypatch.setattr(portia.agent, "session", FakeSession, raising=False)
+    monkeypatch.setattr(transcript.pane, "refresh", lambda: None)
+    monkeypatch.setattr(exchange, "_sync_artifacts", lambda: False)
+
+    async def passes(provider, model):
+        return True
+
+    monkeypatch.setattr(exchange, "_preflight", passes)
+    with _as_app(exchange, app):
+        asyncio.run(
+            exchange.start(
+                "These sources were just indexed: 'orders', 'invoices'.",
+                model="m",
+                effort=None,
+                kind=state.INDEXING,
+                label="orders, invoices",
+            )
+        )
+    job = app.chats[-1]
+    assert job.title == "Indexing orders, invoices"
+    listing = runlog.read_listing(job.path, app.portia_dir)
+    assert listing["title"] == "Indexing orders, invoices", (
+        "the list reads the same name off the file"
+    )
+
+
+def test_the_status_line_keeps_one_size_and_cuts_the_name():
+    """The sentence names the table, so the row grew and shrank with every hop
+    (the user's call): the sentence gives way with an ellipsis, never the row."""
+    import re
+    from pathlib import Path
+
+    css = (Path(c.__file__).parent / "assets" / "portia.css").read_text(encoding="utf-8")
+    rule = re.search(r"\n\.indexing-status > \.pre-wrap \{(.*?)\}", css, re.S).group(1)
+    assert "white-space: nowrap" in rule and "text-overflow: ellipsis" in rule
+    assert "min-width: 0" in rule
+    row = re.search(r"\n\.indexing-status \{(.*?)\}", css, re.S).group(1)
+    assert "width: 100%" in row and "flex-wrap: nowrap" in row
+
+
+def test_a_batch_queued_behind_a_chat_is_read_when_the_chat_ends(monkeypatch):
+    from portia.ui import exchange
+    from portia.ui.state import App
+
+    kicked: list = []
+    from nicegui import background_tasks
+
+    monkeypatch.setattr(
+        background_tasks, "create", lambda coro, **k: (kicked.append(coro), coro.close())
+    )
+    app = App(pending_interpret=["orders"])
+    with _as_app(exchange, app):
+        exchange._resume_reads()
+    assert len(kicked) == 1
+    app.pending_interpret = []
+    with _as_app(exchange, app):
+        exchange._resume_reads()
+    assert len(kicked) == 1, "nothing queued, nothing kicked"
+
+
+def test_the_sources_view_draws_a_running_job_as_a_row_and_keeps_its_list(tmp_path, monkeypatch):
+    """It drew the job's banner and none of its rows, and nothing refreshed it:
+    whoever followed profiling from here saw the read start and then nothing
+    move (the user's report, 2026-09-23). A row that opens the job now."""
+    from portia.ui import screens, transcript
+    from portia.ui.state import App
+
+    app = App(root=tmp_path, catalog={"sources": {"orders": {"path": "data/orders.csv"}}})
+    monkeypatch.setattr(transcript.engine, "source_states", lambda app_: [])
+    app.indexing_status = screens.INTERPRETING.format(n="1 source")
+    job = app.start_exchange("read them", model="m", effort=None, kind=state.INDEXING)
+    with _as_app(transcript, app), ui.element("div") as slot:
+        transcript._sources_view()
+    texts = [str(getattr(e, "text", "")) for e in slot.descendants()]
+    assert transcript._RUNNING in texts and transcript._INDEX_WHAT in texts
+    assert "working" not in texts, "the job's own pane says that; this row opens it"
+    assert [e for e in slot.descendants() if "status-light--live" in e.classes]
+    assert app.indexing_status not in texts, "a sentence written for the add-data screen"
+
+    monkeypatch.setattr(transcript.pane, "refresh", lambda: None)
+    with _as_app(transcript, app):
+        transcript._open_held(job)
+    assert app.open is job
 
 
 def test_a_job_is_opened_on_a_conversation_that_cannot_build(monkeypatch):

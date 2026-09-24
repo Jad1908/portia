@@ -1019,9 +1019,44 @@ body.body--dark .p-panel {
 }
 
 /* Indexing says what it is doing. A spinner on its own is the thing this
- * replaces: it told you something was happening and nothing about what. */
+ * replaces: it told you something was happening and nothing about what.
+ *
+ * **One size from the first table to the last** (2026-09-23, the user's
+ * call). The sentence names the table, so the row used to grow and shrink
+ * with every hop and the Stop beside it moved with it. The row is the full
+ * width now, the spinner and the button keep their size, and the sentence is
+ * the part that gives: cut with an ellipsis, never wrapped. */
 .indexing-status {
   align-items: center;
+  width: 100%;
+  flex-wrap: nowrap;
+}
+.indexing-status > * {
+  flex: 0 0 auto;
+}
+.indexing-status > .pre-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Profiling's lines in the job that waits on it (`transcript._prelude_lines`):
+ * a box of a few rows that scrolls and follows its own foot, each line cut
+ * rather than wrapped, for the same reason as the status row above. */
+.indexing-log {
+  max-height: calc(6 * 16.5px + 2 * var(--sp-xs));
+  overflow-y: auto;
+  padding: var(--sp-xs) var(--sp-sm);
+  background: var(--surface-elevated);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+}
+.indexing-log > .pre-wrap {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* The mark is a cut-out, so it sits on the canvas rather than in a tile. */

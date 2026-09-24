@@ -133,6 +133,10 @@ async def start(
     )
     exchange = chat.exchange
     assert exchange is not None
+    if chat.is_job:
+        # Named by what it reads, not by the template it was sent
+        # (`runlog.job_title`); the same name the list reads off the file.
+        chat.title = runlog.job_title(label)
     if show:
         APP.show_chat(chat)
     transcript.pane.refresh()
@@ -140,7 +144,7 @@ async def start(
     # The window's copy dies with the window; this is the durable one
     # (`portia/runlog.py`). Teed here, at the edge, for the same reason the CLI
     # tees in `run_turn` — the engine must not learn it is being observed.
-    _open_log(chat, kind, prompt)
+    _open_log(chat, kind, prompt, label=label)
 
     try:
         if chat.is_job:
@@ -183,9 +187,31 @@ async def start(
         if not chat.is_job:
             await _read_context(chat)
         transcript.pane.refresh()
+        if not chat.is_job:
+            _resume_reads()
 
 
-def _open_log(chat: Chat, kind: str, prompt: str) -> None:
+def _resume_reads() -> None:
+    """A batch profiled while a chat was running is read now that it has ended.
+
+    `screens._interpret_pending` is a loop at the end of profiling and at the
+    end of an indexing exchange, and nowhere else — so a batch that finished
+    profiling while a goal chat held the line stayed queued, and the job made
+    for it (`Chat.waiting`) said *waiting for the running chat to end* until
+    the next index. Only after a chat, never a job: the loop that started a
+    job is still running when the job ends and takes the queue itself, and a
+    second loop beside it would pop the same names.
+    """
+    if not (APP.interpret and APP.pending_interpret) or APP.busy:
+        return
+    from nicegui import background_tasks
+
+    from portia.ui import screens
+
+    background_tasks.create(screens._interpret_pending())
+
+
+def _open_log(chat: Chat, kind: str, prompt: str, *, label: str = "") -> None:
     """The chat's file: opened on the first message, reopened on a resume.
 
     **Appending, never a second file** (`CHAT_SESSIONS.md` §3.9). A chat opened
@@ -205,6 +231,7 @@ def _open_log(chat: Chat, kind: str, prompt: str) -> None:
         cwd=str(APP.root),
         kind=_LOG_KIND_FOR.get(kind, runlog.CHAT),
         provider=chat.provider or None,
+        label=label if chat.is_job else None,
     )
     chat.path = chat.log.path
     # Off the prompt, not the listing: the `PROMPT` event is written by the
