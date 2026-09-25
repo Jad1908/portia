@@ -204,6 +204,7 @@ def test_nothing_is_written_before_the_last_launch_was_read():
 def test_a_window_sitting_still_writes_nothing(monkeypatch):
     app = _app()
     prefs.restore_machine(app)
+    prefs.sync(app)  # the first: what the file did not hold yet
     writes: list[dict] = []
     monkeypatch.setattr(prefs, "update_machine", writes.append)
     prefs.sync(app)
@@ -477,9 +478,13 @@ def test_two_windows_overwrite_each_other_only_on_what_both_changed():
     """Two processes, each holding what it read at its own start: the one that
     writes last must not put back what the other changed since."""
     first, second = _app(), _app()
+    # Each window's first sync runs a second after it starts (the page timer),
+    # before anybody has changed anything in the other.
     prefs.restore_machine(first)
+    prefs.sync(first)
     written_by_first = prefs._written_machine
     prefs.restore_machine(second)
+    prefs.sync(second)
     written_by_second = prefs._written_machine
 
     prefs._written_machine = written_by_first
@@ -493,3 +498,25 @@ def test_two_windows_overwrite_each_other_only_on_what_both_changed():
     saved = prefs.machine()
     assert saved["theme"] == "dark", "the other window's pick survives"
     assert saved["files_width"] == 320
+
+
+def test_a_project_opened_on_the_command_line_is_written_on_the_first_sync(tmp_path, launch):
+    """The baseline is what the file holds, not what the app holds after restoring:
+    a value that came from `--project` or a default is not on disk yet."""
+    app_module, window = launch
+    project = tmp_path / "named"
+    project.mkdir()
+    app_module.open_at_start(project)
+    app_module.restore()
+    prefs.sync(window)
+    assert prefs.machine()["project"] == prefs.key(project)
+
+
+def test_a_value_the_file_already_holds_is_not_written_again(monkeypatch):
+    prefs.update_machine({"theme": "dark"})
+    app = _app()
+    prefs.restore_machine(app)
+    writes: list[dict] = []
+    monkeypatch.setattr(prefs, "update_machine", writes.append)
+    prefs.sync(app)
+    assert writes and "theme" not in writes[0], "only what the file does not hold yet"

@@ -350,7 +350,10 @@ def restore_machine(app: Any) -> Path | None:
         value = saved.get(name)
         if isinstance(value, int) and not isinstance(value, bool) and value in _WIDTHS:
             setattr(app, name, value)
-    _written_machine = machine_of(app)
+    # What the file holds, not what the app holds now: a value that came from
+    # a default or from `--project` is not on disk, and must be written on the
+    # first `sync` rather than counted as written (`_on_disk`).
+    _written_machine = _on_disk(saved, machine_of(app))
     project = saved.get("project")
     return Path(project) if isinstance(project, str) and project else None
 
@@ -431,6 +434,18 @@ def sync(app: Any) -> None:
         if moved:
             update_machine(moved)
             _written_machine = now
+
+
+def _on_disk(saved: dict[str, Any], shape: dict[str, Any]) -> dict[str, Any]:
+    """What the file said for each key `sync` writes, as the baseline it compares against.
+
+    The baseline used to be the app's state right after restoring, which
+    counted as written everything the file never held: a project opened with
+    `--project`, a default nobody changed. Once `sync` wrote only what moved
+    (§2.3.1), those were never written at all, and a window launched on a
+    project reopened on the picker (2026-09-25, found by restarting a window).
+    """
+    return {name: saved.get(name) for name in shape}
 
 
 def _moved(now: dict[str, Any], written: dict[str, Any]) -> dict[str, Any]:
