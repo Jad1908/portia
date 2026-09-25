@@ -77,6 +77,7 @@ from portia.agent.providers import (
     machine_memory,
     rough_tokens,
 )
+from portia.core import ports
 
 #: The server's own variables for where it listens, read the way it reads
 #: them, so a server started with them is found without portia learning a
@@ -88,7 +89,18 @@ DEFAULT_HOST = "127.0.0.1"
 #: (`ui/__main__`), and on 2026-09-14 the picker sat spinning because the
 #: window itself answered the health check with a 404. A server started by
 #: hand on 8080 is still found through `LLAMA_ARG_PORT` or the panel's field.
+#:
+#: **A default, and the user's to change** *(2026-09-25, `PROVIDERS.md`
+#: §4.9.1)*. A second window used to take 8081 when 8080 was busy, and
+#: anything else on the machine may be on it too, so no fixed number is safe.
+#: The port is a field of the start panel, saved in `CONFIG`; the window's
+#: own port search steps around whatever it says (`configured_port`), and
+#: Start refuses a port that is not free with the reason and a free one.
 DEFAULT_PORT = 8081
+#: The highest port there is.
+MAX_PORT = 65535
+#: How far above a taken port Start looks for a free one to name.
+FREE_PORT_SEARCH = 20
 
 #: The server's own variable for the key it was started with (``--api-key``).
 #: Read and passed through as the binary's token when set; otherwise the
@@ -183,9 +195,10 @@ class ServerConfig:
         model = (form.get("model") or "").strip()
         if not model:
             raise ValueError("Name the model: a .gguf file, or a Hugging Face repository.")
-        return cls(
-            model, _number(form, "context", DEFAULT_CONTEXT), _number(form, "port", DEFAULT_PORT)
-        )
+        port = _number(form, "port", DEFAULT_PORT)
+        if port > MAX_PORT:
+            raise ValueError(f"port must be at most {MAX_PORT}.")
+        return cls(model, _number(form, "context", DEFAULT_CONTEXT), port)
 
     def as_form(self) -> dict[str, str]:
         return {"model": self.model, "context": str(self.context), "port": str(self.port)}
@@ -252,6 +265,16 @@ def host() -> str:
         return raw_host.rstrip("/")
     port = os.environ.get(PORT_VAR, "").strip() or str(load_config().port)
     return f"http://{raw_host}:{port}"
+
+
+def configured_port() -> int:
+    """The port the server is looked for on: `LLAMA_ARG_PORT`, else the saved one.
+
+    Read by the window before it picks its own port (`ui/__main__.pick_port`),
+    so it does not sit where the server is set to go.
+    """
+    raw = os.environ.get(PORT_VAR, "").strip()
+    return int(raw) if raw else load_config().port
 
 
 def _request(path: str, *, timeout: float = QUICK_TIMEOUT) -> Any:
@@ -326,10 +349,9 @@ def start(config: ServerConfig) -> int:
         raise ProviderUnavailable("llama-server is already running from this window.")
     if shutil.which(BINARY) is None:
         raise ProviderUnavailable(f"{BINARY} is not installed. {INSTALL_REMEDY}")
-    if _answering(config.port):
-        raise ProviderUnavailable(
-            f"Something is already answering on port {config.port}. Stop it, or pick another port."
-        )
+    problem = port_problem(config.port)
+    if problem:
+        raise ProviderUnavailable(problem)
     LOG.parent.mkdir(parents=True, exist_ok=True)
     log = LOG.open("ab")
     global _process
@@ -337,6 +359,48 @@ def start(config: ServerConfig) -> int:
         config.command(), stdout=log, stderr=subprocess.STDOUT, start_new_session=True
     )
     return _process.pid
+
+
+def port_problem(port: int, *, window: int | None = None) -> str:
+    """Why the server cannot be started on ``port``, or ``""`` when it can.
+
+    Three reasons, each with what to do, because the user picks the port and
+    a bare *in use* leaves them guessing which of their programs it is:
+
+    - it is **this window's** own port (``window``, passed by the window);
+    - a **llama-server is already there**, started outside portia, which
+      portia can use as it is: the picker lists what it serves;
+    - **something else** holds it. Then the next free port above it is named,
+      as a fact to type in, not a choice made for them.
+    """
+    if window is not None and port == window:
+        return PORT_IS_WINDOW.format(port=port)
+    if _is_llama_server(port):
+        return PORT_HAS_SERVER.format(port=port)
+    if _answering(port) or not ports.is_free(DEFAULT_HOST, port):
+        free = ports.next_free(
+            DEFAULT_HOST, port + 1, tries=FREE_PORT_SEARCH, skip=() if window is None else (window,)
+        )
+        return PORT_TAKEN.format(port=port) + (PORT_FREE.format(port=free) if free else "")
+    return ""
+
+
+def _is_llama_server(port: int) -> bool:
+    """Whether a llama-server answers ``/health`` on ``port``, loading or ready."""
+    try:
+        with urllib.request.urlopen(f"http://{DEFAULT_HOST}:{port}/health", timeout=1.0) as r:
+            body = json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as exc:
+        # Loading answers 503 and says so; a web server that is not
+        # llama-server answers 404, which is the window's case.
+        try:
+            said = exc.read().decode("utf-8", "replace")
+        except OSError:
+            said = ""
+        return exc.code == 503 and "Loading model" in said
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        return False
+    return isinstance(body, dict) and body.get("status") == "ok"
 
 
 def _answering(port: int) -> bool:
@@ -551,6 +615,13 @@ def _model(entry: dict) -> Model:
 #: The one thing to do about each refusal, read by a person at the composer.
 WAIT_REMEDY = "Wait for the model to finish loading, then send again."
 INSTALL_REMEDY = "Install it with `brew install llama.cpp`."
+PORT_IS_WINDOW = "Port {port} is this portia window's own. Pick another port for llama-server."
+PORT_HAS_SERVER = (
+    "A llama-server started outside portia is already on port {port}. portia uses it as it is: "
+    "pick its model in the model picker. To start another, pick another port."
+)
+PORT_TAKEN = "Port {port} is in use by another program. Pick another port."
+PORT_FREE = " {port} is free."
 OTHER_PORT_REMEDY = "Start it on another port, or point LLAMA_ARG_PORT at where it runs."
 CONTEXT_REMEDY = (
     f"Restart llama-server with `{SERVE_FLAGS}`: -c is the context per slot only with -np 1, "

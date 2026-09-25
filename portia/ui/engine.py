@@ -387,6 +387,13 @@ async def start_server(app: App) -> bool:
     except ValueError as exc:
         app.server_error = str(exc)
         return False
+    # This window's own port is refused before anything is saved: saved, the
+    # picker would go on asking the window for models (`PROVIDERS.md` §4.9.1).
+    # Every other refusal comes from `llamacpp.start`, after the save, since a
+    # server already on the port is one the picker should now be pointed at.
+    if config.port == window_port(app):
+        app.server_error = llamacpp.port_problem(config.port, window=config.port)
+        return False
     llamacpp.save_config(config)
     app.server_status = State.STARTING
     ok = False
@@ -401,6 +408,16 @@ async def start_server(app: App) -> bool:
         app.server_status = ""
     await list_models(app, llamacpp.PROVIDER.kind)
     return ok
+
+
+def window_port(app: App) -> int | None:
+    """The port this window serves on, off `App.url`; ``None`` when unknown."""
+    from urllib.parse import urlsplit
+
+    try:
+        return urlsplit(app.url).port if app.url else None
+    except ValueError:
+        return None
 
 
 async def stop_server(app: App) -> None:
