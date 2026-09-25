@@ -878,3 +878,15 @@ def test_a_project_opened_but_never_touched_is_still_remembered(brief_project):
     app.knowledge_columns = False
     prefs.sync(app)
     assert "expanded" in prefs.project(brief_project)
+
+
+def test_reopening_at_launch_never_records_no_project(tmp_path, launch):
+    """`open_project` writes the project being left; at launch there is none,
+    and writing then put *no project* in the file until a page synced."""
+    app_module, window = launch
+    project = tmp_path / "proj"
+    project.mkdir()
+    _left_open(project)
+    app_module.restore()
+    assert window.opened
+    assert prefs.machine()["project"] == prefs.key(project)

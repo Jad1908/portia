@@ -114,7 +114,11 @@ def open_project(path: str | Path, app: App) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     # Where you were in the project being left, up to this moment: the page
     # writes it once a second, and the last second is the one you just spent.
-    prefs.sync(app)
+    # Only when one is being left: reopening at launch runs through here with
+    # nothing open yet, and a write then recorded *no project* as the last
+    # one, which the next launch obeyed if no page had loaded in between.
+    if app.opened:
+        prefs.sync(app)
     # Whoever is drawing charts into the project being left must stop being told
     # a window is watching it (`agent/drawn.py`).
     drawn.withdraw(app.catalog_dir)
