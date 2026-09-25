@@ -292,7 +292,9 @@ def _back_to_picker() -> None:
     nobody asked for.
     """
     from portia.ui import app as app_module
+    from portia.ui import prefs
 
+    prefs.sync(APP)
     APP.opened = False
     APP.goal = ""
     APP.editing_brief = False

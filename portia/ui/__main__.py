@@ -121,6 +121,9 @@ def main() -> None:
     APP.url = f"http://{args.host}:{port}"
     if args.project:
         app.open_at_start(args.project)
+    # What the last launch left: the model, the theme, the panes, and the
+    # project that was open, unless one was just named (`app.restore`).
+    app.restore()
 
     # A chat holds a live SDK subprocess (`docs/CONVERSATION.md` §4). Closing
     # the window is the last way out of a project, so it is the last place one
@@ -132,9 +135,10 @@ def main() -> None:
         port=port,
         title=app.TITLE,
         favicon=theme.LOGO_FILE,
-        # Auto: Quasar resolves it from prefers-color-scheme, and the toolbar's
-        # override rides the same mechanism (portia/ui/theme.py).
-        dark=None,
+        # The remembered theme, so the first paint is already in it. Auto
+        # (`None`) is Quasar resolving prefers-color-scheme; Settings' pick
+        # rides the same mechanism (portia/ui/theme.py).
+        dark=APP.theme,
         show=not args.no_show,
         reload=False,
         show_welcome_message=False,

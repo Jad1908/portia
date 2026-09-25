@@ -140,3 +140,753 @@ def test_a_folder_that_is_gone_is_not_forgotten(tmp_path):
     prefs.update_project(gone, {"draft": "x"})
     assert prefs.recents()[0][0] == gone
     assert prefs.project(gone)["draft"] == "x"
+
+
+# --- the machine's half, on the app -----------------------------------------
+
+
+def _app(**fields):
+    from portia.ui.state import App
+
+    app = App()
+    for name, value in fields.items():
+        setattr(app, name, value)
+    return app
+
+
+def _only_these_providers(monkeypatch, *kinds):
+    from portia.agent import providers
+
+    monkeypatch.setattr(providers, "offered_kinds", lambda path=None: kinds)
+
+
+def test_what_the_window_held_comes_back_on_the_next_launch(tmp_path, monkeypatch):
+    _only_these_providers(monkeypatch, "anthropic", "ollama")
+    prefs.restore_machine(_app())  # the first launch: nothing to restore
+    project = tmp_path / "proj"
+    project.mkdir()
+    before = _app(
+        provider="ollama",
+        model="qwen3:8b",
+        effort="high",
+        theme=True,
+        interpret=False,
+        pane_choices={"wide": (True, False)},
+        files_width=300,
+        transcript_width=500,
+        reopen_last=False,
+        opened=True,
+        root=project,
+    )
+    prefs.sync(before)
+
+    after = _app()
+    last = prefs.restore_machine(after)
+    assert (after.provider, after.model, after.effort) == ("ollama", "qwen3:8b", "high")
+    assert after.model_unconfirmed == "qwen3:8b", "a server's model is checked on its first list"
+    assert after.theme is True
+    assert after.interpret is False
+    assert after.pane_choices == {"wide": (True, False)}
+    assert (after.show_files, after.show_transcript) == (True, False), "the wide band's choice"
+    assert (after.files_width, after.transcript_width) == (300, 500)
+    assert after.reopen_last is False
+    assert last == project.resolve()
+    assert after.spend_alert is None
+
+
+def test_nothing_is_written_before_the_last_launch_was_read():
+    """Until `restore_machine` runs the app holds defaults, and writing them would
+    overwrite what was remembered with what was not."""
+    prefs.sync(_app(theme=True))
+    assert not prefs.FILE.exists()
+
+
+def test_a_window_sitting_still_writes_nothing(monkeypatch):
+    app = _app()
+    prefs.restore_machine(app)
+    prefs.sync(app)  # the first: what the file did not hold yet
+    writes: list[dict] = []
+    monkeypatch.setattr(prefs, "update_machine", writes.append)
+    prefs.sync(app)
+    prefs.sync(app)
+    assert writes == []
+    app.theme = False
+    prefs.sync(app)
+    prefs.sync(app)
+    assert len(writes) == 1 and writes[0]["theme"] == "light"
+
+
+def test_a_window_closed_on_the_picker_opens_on_the_picker(tmp_path):
+    app = _app()
+    prefs.restore_machine(app)
+    app.opened, app.root = True, tmp_path
+    prefs.sync(app)
+    app.opened = False
+    prefs.sync(app)
+    assert prefs.restore_machine(_app()) is None
+
+
+def test_a_provider_switched_off_since_is_not_restored_and_the_composer_says_so(monkeypatch):
+    _only_these_providers(monkeypatch, "anthropic")
+    prefs.update_machine({"provider": "ollama", "model": "qwen3:8b", "effort": "medium"})
+    app = _app()
+    prefs.restore_machine(app)
+    assert app.provider == "anthropic"
+    assert app.model != "qwen3:8b"
+    assert app.effort == "medium", "effort is not the provider's"
+    reason, remedy = app.spend_alert
+    assert "Ollama" in reason and "switched off" in reason
+    assert remedy.startswith("Using ")
+
+
+def test_a_kind_this_build_does_not_have_is_not_restored(monkeypatch):
+    prefs.update_machine({"provider": "mistral", "model": "large"})
+    app = _app()
+    prefs.restore_machine(app)
+    assert app.provider == "anthropic"
+    assert "mistral" in app.spend_alert[0]
+
+
+def test_a_retired_model_falls_back_to_the_default_and_says_so(monkeypatch):
+    from portia.agent.providers import anthropic
+
+    _only_these_providers(monkeypatch, "anthropic")
+    prefs.update_machine({"provider": "anthropic", "model": "claude-2.1"})
+    app = _app()
+    prefs.restore_machine(app)
+    assert app.model == anthropic.DEFAULT_MODEL
+    assert app.model_unconfirmed == ""
+    assert "claude-2.1" in app.spend_alert[0]
+    shown = next(m.shown for m in anthropic.CATALOG if m.name == anthropic.DEFAULT_MODEL)
+    assert shown in app.spend_alert[1], "named the way the picker names it"
+
+
+def test_a_model_in_the_catalog_is_restored_without_a_word(monkeypatch):
+    from portia.agent.providers import anthropic
+
+    _only_these_providers(monkeypatch, "anthropic")
+    model = anthropic.CATALOG[-1].name
+    prefs.update_machine({"provider": "anthropic", "model": model})
+    app = _app()
+    prefs.restore_machine(app)
+    assert app.model == model
+    assert app.spend_alert is None
+
+
+def test_values_of_the_wrong_shape_are_ignored_one_by_one(monkeypatch):
+    prefs.update_machine(
+        {
+            "theme": "purple",
+            "effort": "extreme",
+            "interpret": "yes",
+            "reopen": 1,
+            "files_width": True,
+            "transcript_width": -40,
+            "panes": {"enormous": [True, True], "narrow": [True], "medium": [False, True]},
+            "project": 42,
+        }
+    )
+    app = _app()
+    assert prefs.restore_machine(app) is None
+    fresh = _app()
+    assert app.theme is fresh.theme
+    assert app.effort == fresh.effort
+    assert app.interpret is fresh.interpret
+    assert app.reopen_last is fresh.reopen_last
+    assert (app.files_width, app.transcript_width) == (None, None)
+    assert app.pane_choices == {"medium": (False, True)}
+
+
+# --- a server's model, checked when its list arrives ------------------------
+
+
+def _listed(*names):
+    from portia.agent.providers import Model
+
+    return [Model(name=n) for n in names]
+
+
+def test_a_remembered_server_model_that_is_gone_falls_back_on_the_first_list():
+    from portia.agent.providers import ollama
+    from portia.ui import engine
+
+    app = _app(provider="ollama", model="qwen3:8b", model_unconfirmed="qwen3:8b")
+    engine._confirm_restored_model(app, "ollama", _listed("llama3:8b"))
+    assert app.model == ollama.PROVIDER.default_model
+    assert app.model_unconfirmed == ""
+    assert "qwen3:8b" in app.spend_alert[0] and "Ollama" in app.spend_alert[0]
+
+
+def test_a_remembered_server_model_that_is_listed_stays():
+    from portia.ui import engine
+
+    app = _app(provider="ollama", model="qwen3:8b", model_unconfirmed="qwen3:8b")
+    engine._confirm_restored_model(app, "ollama", _listed("llama3:8b", "qwen3:8b"))
+    assert app.model == "qwen3:8b"
+    assert app.model_unconfirmed == ""
+    assert app.spend_alert is None
+
+
+def test_an_empty_list_proves_nothing_and_the_check_waits():
+    """A server that is down lists nothing; its models are not gone."""
+    from portia.ui import engine
+
+    app = _app(provider="ollama", model="qwen3:8b", model_unconfirmed="qwen3:8b")
+    engine._confirm_restored_model(app, "ollama", [])
+    assert app.model == "qwen3:8b"
+    assert app.model_unconfirmed == "qwen3:8b"
+
+
+def test_a_model_picked_before_the_list_arrived_is_left_alone():
+    from portia.ui import engine
+
+    app = _app(provider="ollama", model="llama3:8b", model_unconfirmed="qwen3:8b")
+    engine._confirm_restored_model(app, "ollama", _listed("mistral:7b"))
+    assert app.model == "llama3:8b"
+    assert app.spend_alert is None
+
+
+def test_another_providers_list_does_not_check_it():
+    from portia.ui import engine
+
+    app = _app(provider="ollama", model="qwen3:8b", model_unconfirmed="qwen3:8b")
+    engine._confirm_restored_model(app, "llamacpp", _listed("Qwen3-8B"))
+    assert app.model_unconfirmed == "qwen3:8b"
+
+
+# --- the side panes ---------------------------------------------------------
+
+
+def test_a_pane_closed_in_one_band_stays_closed_in_that_band_only():
+    from portia.ui.state import MEDIUM, NARROW_BAND, WIDE
+
+    app = _app()
+    app.resize(WIDE)
+    assert app.set_panes(True, False)
+    app.resize(MEDIUM - 1)
+    assert app.band == NARROW_BAND
+    assert (app.show_files, app.show_transcript) == (False, False), "narrow's defaults"
+    app.resize(WIDE)
+    assert (app.show_files, app.show_transcript) == (True, False), "the choice made here"
+
+
+def test_a_remembered_width_is_drawn_inside_this_windows_limits():
+    from portia.ui import app as app_module
+
+    assert app_module._width(None, 260, (150, 520)) == 260
+    assert app_module._width(900, 260, (150, 520)) == 520, "dragged in a wider window"
+    assert app_module._width(40, 260, (150, 520)) == 150, "under the floor it would close"
+    assert app_module._width(333, 260, (150, 520)) == 333
+
+
+def test_picking_a_theme_is_what_is_remembered():
+    from portia.ui import theme
+    from portia.ui.state import APP
+
+    was = APP.theme
+    try:
+        theme.set_mode(True)
+        assert APP.theme is True and theme.mode() is True
+    finally:
+        APP.theme = was
+
+
+# --- reopening the last project ---------------------------------------------
+
+
+@pytest.fixture
+def launch(monkeypatch, tmp_path):
+    """`app.restore` as a fresh process would run it, on a fresh window."""
+    from portia.ui import app as app_module
+    from portia.ui.state import App
+
+    window = App()
+    monkeypatch.setattr(app_module, "APP", window)
+    monkeypatch.setattr(app_module, "_restored", False)
+    # `open_project` moves the process into the project; this puts it back.
+    monkeypatch.chdir(tmp_path)
+    return app_module, window
+
+
+def _left_open(root, *, reopen: bool = True) -> None:
+    prefs.update_machine({"project": prefs.key(root), "reopen": reopen})
+
+
+def test_the_project_open_at_the_last_close_is_opened_again(tmp_path, launch):
+    app_module, window = launch
+    project = tmp_path / "proj"
+    project.mkdir()
+    _left_open(project)
+    app_module.restore()
+    assert window.opened and window.root == project.resolve()
+
+
+def test_reopening_happens_once_per_process_and_never_on_a_reload(tmp_path, launch):
+    app_module, window = launch
+    project = tmp_path / "proj"
+    project.mkdir()
+    _left_open(project)
+    app_module.restore()
+    window.opened = False  # back to the picker, on purpose
+    app_module.restore()  # the page is reloaded
+    assert window.opened is False
+
+
+def test_a_project_folder_that_is_gone_leaves_the_picker_showing(tmp_path, launch):
+    app_module, window = launch
+    _left_open(tmp_path / "deleted")
+    app_module.restore()
+    assert window.opened is False
+    assert not (tmp_path / "deleted").exists(), "opening would have created it"
+
+
+def test_the_switch_off_leaves_the_picker_showing(tmp_path, launch):
+    app_module, window = launch
+    project = tmp_path / "proj"
+    project.mkdir()
+    _left_open(project, reopen=False)
+    app_module.restore()
+    assert window.opened is False
+
+
+def test_a_project_named_on_the_command_line_wins(tmp_path, launch):
+    app_module, window = launch
+    named, remembered = tmp_path / "named", tmp_path / "remembered"
+    named.mkdir()
+    remembered.mkdir()
+    _left_open(remembered)
+    app_module.open_at_start(named)
+    app_module.restore()
+    assert window.root == named.resolve()
+
+
+def test_a_project_that_will_not_open_leaves_the_picker_showing(tmp_path, launch, monkeypatch):
+    app_module, window = launch
+    project = tmp_path / "proj"
+    project.mkdir()
+    _left_open(project)
+
+    def refuse(*_a, **_k):
+        raise PermissionError("not yours")
+
+    monkeypatch.setattr(app_module, "open_at_start", refuse)
+    app_module.restore()
+    assert window.opened is False
+
+
+def test_two_windows_overwrite_each_other_only_on_what_both_changed():
+    """Two processes, each holding what it read at its own start: the one that
+    writes last must not put back what the other changed since."""
+    first, second = _app(), _app()
+    # Each window's first sync runs a second after it starts (the page timer),
+    # before anybody has changed anything in the other.
+    prefs.restore_machine(first)
+    prefs.sync(first)
+    written_by_first = prefs._written_machine
+    prefs.restore_machine(second)
+    prefs.sync(second)
+    written_by_second = prefs._written_machine
+
+    prefs._written_machine = written_by_first
+    first.theme = True
+    prefs.sync(first)
+
+    prefs._written_machine = written_by_second
+    second.files_width = 320
+    prefs.sync(second)
+
+    saved = prefs.machine()
+    assert saved["theme"] == "dark", "the other window's pick survives"
+    assert saved["files_width"] == 320
+
+
+def test_a_project_opened_on_the_command_line_is_written_on_the_first_sync(tmp_path, launch):
+    """The baseline is what the file holds, not what the app holds after restoring:
+    a value that came from `--project` or a default is not on disk yet."""
+    app_module, window = launch
+    project = tmp_path / "named"
+    project.mkdir()
+    app_module.open_at_start(project)
+    app_module.restore()
+    prefs.sync(window)
+    assert prefs.machine()["project"] == prefs.key(project)
+
+
+def test_a_value_the_file_already_holds_is_not_written_again(monkeypatch):
+    prefs.update_machine({"theme": "dark"})
+    app = _app()
+    prefs.restore_machine(app)
+    writes: list[dict] = []
+    monkeypatch.setattr(prefs, "update_machine", writes.append)
+    prefs.sync(app)
+    assert writes and "theme" not in writes[0], "only what the file does not hold yet"
+
+
+# --- one project's view -----------------------------------------------------
+
+
+def _opened(root):
+    from portia.ui import engine
+    from portia.ui.state import App
+
+    app = App()
+    engine.open_project(root, app)
+    app.opened = True
+    return app
+
+
+def _figure(root, name):
+    from portia import figures
+
+    chart = {
+        "tab": name,
+        "question": f"what is {name}",
+        "vega": {"mark": "bar"},
+        "rows": [{"a": 1}],
+        "columns": ["a"],
+        "sql": "select 1 as a",
+        "inputs": [],
+    }
+    return figures.save(chart, root=root).relative_to(root).as_posix()
+
+
+@pytest.fixture
+def brief_project(tmp_path, monkeypatch):
+    """A project whose brief is saved, the way `catalog.init_project` writes it."""
+    from portia import catalog
+
+    root = tmp_path / "proj"
+    root.mkdir()
+    monkeypatch.chdir(root)
+    catalog.init_project("A project with a brief.", portia_dir=".portia")
+    monkeypatch.chdir(tmp_path)
+    return root
+
+
+def test_saved_figure_tabs_come_back_where_they_were(brief_project):
+    from portia.ui.state import RIGHT, Chart
+
+    root = brief_project
+    first, second = _figure(root, "sales"), _figure(root, "costs")
+    app = _opened(root)
+    for path, group in ((first, None), (second, RIGHT)):
+        app.show_chart(Chart.from_figure(path, {"name": path}))
+        if group:
+            app.move_tab(path, group)
+    app.chart(first).height = 320
+    app.show_chart(Chart(name="unsaved", rows=[{"a": 1}]))  # only in memory
+    app.focus_tab(second)
+    prefs.sync(app)
+
+    back = _opened(root)
+    assert [c.key for c in back.charts] == [first, second]
+    assert back.chart(second).group == RIGHT
+    assert back.chart(first).height == 320
+    assert back.chart(first).rows == [{"a": 1}], "read from the file"
+    # The unsaved chart was showing on the left; it is gone, so the left half
+    # shows its first tab, the canvas.
+    assert back.active == {"left": "", "right": second}
+    assert back.focus_group == RIGHT
+
+
+def test_a_figure_deleted_since_is_not_reopened_and_the_right_half_slides_over(brief_project):
+    from portia.ui.state import CANVAS, LEFT, RIGHT, Chart
+
+    root = brief_project
+    gone, kept = _figure(root, "gone"), _figure(root, "kept")
+    app = _opened(root)
+    app.show_chart(Chart.from_figure(gone, {}))
+    app.show_chart(Chart.from_figure(kept, {}))
+    app.move_tab(kept, RIGHT)
+    app.move_tab(CANVAS, RIGHT)
+    assert app.keys(LEFT) == [gone]
+    prefs.sync(app)
+    (root / gone).unlink()
+
+    back = _opened(root)
+    assert back.keys(LEFT) == [CANVAS, kept], "a left half with nothing in it is not a layout"
+    assert back.keys(RIGHT) == []
+    assert back.active[RIGHT] == ""
+
+
+def test_one_preview_per_group_even_from_a_hand_edited_file(brief_project):
+    root = brief_project
+    a, b = _figure(root, "a"), _figure(root, "b")
+    _opened(root)
+    prefs.update_project(
+        root,
+        {"tabs": [{"path": a, "preview": True}, {"path": b, "preview": True}, {"path": 7}]},
+    )
+    back = _opened(root)
+    assert [c.preview for c in back.charts] == [True, False]
+
+
+def test_what_was_folded_comes_back(brief_project):
+    root = brief_project
+    app = _opened(root)
+    app.open_folders = frozenset({"data/raw"})
+    app.closed_folders = frozenset({"specs"})
+    app.figures_open, app.warehouse_open, app.report_open = False, False, False
+    app.figures_closed = frozenset({"figures/old"})
+    app.knowledge_columns = True
+    prefs.sync(app)
+
+    back = _opened(root)
+    assert back.open_folders == frozenset({"data/raw"})
+    assert back.closed_folders == frozenset({"specs"})
+    assert (back.figures_open, back.warehouse_open, back.report_open) == (False, False, False)
+    assert back.figures_closed == frozenset({"figures/old"})
+    assert back.knowledge_columns is True
+
+
+def test_one_projects_folds_do_not_follow_you_into_another(brief_project, tmp_path):
+    other = tmp_path / "other"
+    other.mkdir()
+    app = _opened(brief_project)
+    app.open_folders = frozenset({"data/raw"})
+    prefs.sync(app)
+    from portia.ui import engine
+
+    engine.open_project(other, app)
+    assert app.open_folders == frozenset()
+
+
+def test_a_half_written_message_is_kept(brief_project):
+    app = _opened(brief_project)
+    app.goal = "join orders to regions and"
+    prefs.sync(app)
+    assert _opened(brief_project).goal == "join orders to regions and"
+
+    app.goal = ""  # sent
+    prefs.sync(app)
+    assert _opened(brief_project).goal == ""
+
+
+def test_a_brief_being_typed_is_not_a_draft(tmp_path, monkeypatch):
+    """`App.goal` is also the brief screen's scratch; a brief is not a message."""
+    monkeypatch.chdir(tmp_path)
+    root = tmp_path / "fresh"
+    root.mkdir()
+    app = _opened(root)
+    assert not app.project_context
+    app.goal = "This project harmonizes"
+    prefs.sync(app)
+    assert "draft" not in prefs.project(root)
+
+
+def test_a_draft_is_not_restored_into_a_project_whose_brief_is_gone(brief_project):
+    app = _opened(brief_project)
+    app.goal = "half a message"
+    prefs.sync(app)
+    (brief_project / ".portia" / "project.yaml").unlink()
+    assert _opened(brief_project).goal == "", "it would land in the brief box"
+
+
+def test_a_selection_is_restored_only_if_it_still_exists(brief_project):
+    from portia.ui.state import BRIEF
+
+    app = _opened(brief_project)
+    app.select(BRIEF, "")
+    prefs.sync(app)
+    assert _opened(brief_project).selection == (BRIEF, "")
+
+    prefs.update_project(brief_project, {"selection": ["source", "orders"]})
+    assert _opened(brief_project).selection is None, "no such source in the catalog"
+    prefs.update_project(brief_project, {"selection": ["run", "report.md"]})
+    assert _opened(brief_project).selection is None, "a kind that is not restored"
+
+
+def test_leaving_a_project_writes_its_last_second(brief_project, tmp_path, monkeypatch):
+    """The page writes once a second; opening another project must not lose the
+    second in between."""
+    from portia.ui import engine
+
+    app = _opened(brief_project)
+    app.knowledge_columns = True  # no sync after this
+    other = tmp_path / "other"
+    other.mkdir()
+    engine.open_project(other, app)
+    assert prefs.project(brief_project)["knowledge_columns"] is True
+
+
+def test_a_project_whose_entry_was_not_read_is_never_written(brief_project, tmp_path):
+    """Otherwise a window pointed at a project some other way would overwrite
+    where you were with that window's defaults."""
+    app = _opened(brief_project)
+    app.root = tmp_path  # moved without `open_project`
+    app.goal = "x"
+    prefs.sync(app)
+    assert prefs.project(tmp_path) == {}
+
+
+# --- the spec and the chat, which open_at_start picks up ---------------------
+
+
+@pytest.fixture
+def window(monkeypatch, tmp_path):
+    from portia.ui import app as app_module
+    from portia.ui.state import App
+
+    fresh = App()
+    monkeypatch.setattr(app_module, "APP", fresh)
+    monkeypatch.chdir(tmp_path)
+    return app_module, fresh
+
+
+def _specs(root, *names):
+    import yaml
+
+    (root / "specs").mkdir(exist_ok=True)
+    for name in names:
+        (root / "specs" / f"{name}.yaml").write_text(
+            yaml.safe_dump({"sources": {}, "steps": []}), encoding="utf-8"
+        )
+
+
+def test_the_spec_left_open_is_opened_with_the_cards_left_open(brief_project, window):
+    app_module, app = window
+    _specs(brief_project, "a_first", "b_second", "c_third")
+    prefs.update_project(brief_project, {"spec": "b_second", "expanded": ["c_third", "gone"]})
+    app_module.open_at_start(brief_project)
+    assert app.spec_path.stem == "b_second"
+    assert app.expanded == frozenset({"c_third"}), "a card whose spec is gone is not opened"
+
+
+def test_the_spec_row_left_lit_is_lit_without_hiding_a_restored_tab(brief_project, window):
+    from portia.ui.state import SPEC
+
+    app_module, app = window
+    _specs(brief_project, "a_first", "b_second")
+    figure = _figure(brief_project, "sales")
+    prefs.update_project(
+        brief_project,
+        {
+            "spec": "b_second",
+            "selection": [SPEC, "b_second.yaml"],
+            "tabs": [{"path": figure}],
+            "active": {"left": figure},
+        },
+    )
+    app_module.open_at_start(brief_project)
+    assert app.selection == (SPEC, "b_second.yaml")
+    assert app.active["left"] == figure
+
+
+def test_a_spec_row_is_not_lit_for_a_spec_that_is_not_the_one_opened(brief_project, window):
+    from portia.ui.state import SPEC
+
+    app_module, app = window
+    _specs(brief_project, "a_first")
+    prefs.update_project(brief_project, {"spec": "gone", "selection": [SPEC, "gone.yaml"]})
+    app_module.open_at_start(brief_project)
+    assert app.selection is None
+
+
+def test_every_card_shut_is_remembered_as_every_card_shut(brief_project, window):
+    app_module, app = window
+    _specs(brief_project, "a_first", "b_second")
+    prefs.update_project(brief_project, {"spec": "b_second", "expanded": []})
+    app_module.open_at_start(brief_project)
+    assert app.expanded == frozenset()
+
+
+def test_a_spec_removed_since_falls_back_to_the_first(brief_project, window):
+    app_module, app = window
+    _specs(brief_project, "a_first", "b_second")
+    prefs.update_project(brief_project, {"spec": "renamed", "expanded": []})
+    app_module.open_at_start(brief_project)
+    assert app.spec_path.stem == "a_first"
+    assert app.expanded == frozenset({"a_first"}), "the remembered cards belonged to it"
+
+
+def test_the_chat_left_open_is_opened_again(brief_project, window, monkeypatch):
+    from portia.ui import exchange
+
+    app_module, app = window
+    log = brief_project / ".portia" / "chats" / "2026-09-25-chat.jsonl"
+    log.parent.mkdir(parents=True)
+    log.write_text("", encoding="utf-8")
+    opened: list = []
+    monkeypatch.setattr(exchange, "open_from_disk", opened.append)
+    prefs.update_project(brief_project, {"chat": "chats/2026-09-25-chat.jsonl"})
+    app_module.open_at_start(brief_project)
+    assert opened == [log.resolve()]
+
+
+@pytest.mark.parametrize(
+    "rel",
+    ["chats/missing.jsonl", "../../elsewhere/chats/x.jsonl", "sources/orders.yaml", 12],
+)
+def test_a_chat_that_is_gone_or_not_a_chat_is_not_opened(brief_project, window, monkeypatch, rel):
+    from portia.ui import exchange
+
+    app_module, _ = window
+    (brief_project / ".portia" / "sources").mkdir(exist_ok=True)
+    (brief_project / ".portia" / "sources" / "orders.yaml").write_text("", encoding="utf-8")
+    opened: list = []
+    monkeypatch.setattr(exchange, "open_from_disk", opened.append)
+    prefs.update_project(brief_project, {"chat": rel})
+    app_module.open_at_start(brief_project)
+    assert opened == []
+
+
+def test_a_chat_log_that_will_not_read_does_not_stop_the_project_opening(
+    brief_project, window, monkeypatch
+):
+    from portia.ui import exchange
+
+    app_module, app = window
+    log = brief_project / ".portia" / "chats" / "broken.jsonl"
+    log.parent.mkdir(parents=True)
+    log.write_text("{ not json", encoding="utf-8")
+
+    def broken(path):
+        raise ValueError("not a log")
+
+    monkeypatch.setattr(exchange, "open_from_disk", broken)
+    prefs.update_project(brief_project, {"chat": "chats/broken.jsonl"})
+    app_module.open_at_start(brief_project)
+    assert app.opened and app.open is None
+
+
+def test_two_windows_on_one_project_keep_each_others_changes(brief_project):
+    # Each window's first sync runs a second after it opens the project.
+    first = _opened(brief_project)
+    prefs.sync(first)
+    written_by_first = prefs._written_project
+    second = _opened(brief_project)
+    prefs.sync(second)
+    written_by_second = prefs._written_project
+
+    prefs._written_project = written_by_first
+    first.goal = "a draft typed in the first window"
+    prefs.sync(first)
+
+    prefs._written_project = written_by_second
+    second.knowledge_columns = True
+    prefs.sync(second)
+
+    saved = prefs.project(brief_project)
+    assert saved["draft"] == "a draft typed in the first window"
+    assert saved["knowledge_columns"] is True
+
+
+def test_a_project_opened_but_never_touched_is_still_remembered(brief_project):
+    """The project half's baseline is the file too, so what a project opened with
+    and never changed (its spec, its cards) reaches the file on the first sync."""
+    app = _opened(brief_project)
+    app.knowledge_columns = False
+    prefs.sync(app)
+    assert "expanded" in prefs.project(brief_project)
+
+
+def test_reopening_at_launch_never_records_no_project(tmp_path, launch):
+    """`open_project` writes the project being left; at launch there is none,
+    and writing then put *no project* in the file until a page synced."""
+    app_module, window = launch
+    project = tmp_path / "proj"
+    project.mkdir()
+    _left_open(project)
+    app_module.restore()
+    assert window.opened
+    assert prefs.machine()["project"] == prefs.key(project)

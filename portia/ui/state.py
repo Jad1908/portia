@@ -228,6 +228,21 @@ MEDIUM = 1024
 WIDE_BAND = "wide"
 MEDIUM_BAND = "medium"
 NARROW_BAND = "narrow"
+BANDS = (WIDE_BAND, MEDIUM_BAND, NARROW_BAND)
+
+
+#: What the composer says when the model a new chat would start on is not the
+#: one remembered from the last launch (`ui/prefs`), because it is gone.
+#: Drawn as `App.spend_alert` — the place a refused preflight is drawn —
+#: because it is the same fact: the next message goes somewhere you did not
+#: last pick.
+PROVIDER_GONE = "{provider}, which you used last, is switched off."
+MODEL_GONE = "{model}, which you used last, is not on {provider} any more."
+USING_INSTEAD = "Using {model}."
+
+#: The three themes by name, as `prefs` writes them and Settings labels them.
+#: Quasar's value is the key: ``None`` auto, ``False`` light, ``True`` dark.
+THEMES: dict[bool | None, str] = {None: "auto", False: "light", True: "dark"}
 
 
 def band_for(width: int) -> str:
@@ -666,6 +681,28 @@ class Chart:
     #: keeping the chart or throwing it away has to take the file with it.
     stashed: bool = False
 
+    @classmethod
+    def from_figure(cls, path: str, saved: dict, *, preview: bool = False) -> Chart:
+        """A saved figure as a tab: what `figures.load` read, keyed by its path.
+
+        One constructor for the two ways a figure becomes a tab, the gallery
+        (`charts.open_figure`) and a project reopened with it open (`prefs`),
+        so the two cannot build different tabs out of one file.
+        """
+        return cls(
+            name=saved.get("name") or Path(path).stem,
+            question=saved.get("question", ""),
+            vega=saved.get("vega") or {},
+            rows=saved.get("rows") or [],
+            columns=saved.get("columns") or [],
+            sql=saved.get("sql", ""),
+            inputs=saved.get("inputs") or [],
+            path=path,
+            notes=saved.get("notes", ""),
+            at=saved.get("at", ""),
+            preview=preview,
+        )
+
     @property
     def key(self) -> str:
         """What its tab is called on the strip, and what `App.chart` looks up.
@@ -1081,6 +1118,26 @@ class App:
     #: cross a threshold and **not** on every resize event. Dragging a window
     #: narrower should not keep reopening a pane you just closed.
     band: str = WIDE_BAND
+    #: Which side panes the reader left open, **per band**, as ``band ->
+    #: (files, transcript)`` (`ui/prefs`). Per band because one answer would
+    #: fight the band's defaults: closing the transcript in a wide window says
+    #: nothing about whether it fits in a narrow one, and a single remembered
+    #: pair would be overruled by the band's defaults on every launch where the
+    #: window opened at another width. A band with no entry takes its defaults.
+    pane_choices: dict[str, tuple[bool, bool]] = field(default_factory=dict)
+    #: How wide each side pane was last dragged, in pixels, or ``None`` for the
+    #: default width. Clamped to the pane's limits when drawn, since the window
+    #: it was dragged in may have been wider than this one.
+    files_width: int | None = None
+    transcript_width: int | None = None
+    #: Light, dark or auto: ``None`` auto, ``False`` light, ``True`` dark, the
+    #: way Quasar spells it (`ui/theme.py`). Held here rather than read off the
+    #: page's control, because it has to be known before a page exists.
+    theme: bool | None = None
+    #: Whether portia opens the project that was open when it was last closed,
+    #: rather than the picker. On by default: the picker is one click away in
+    #: Settings, and finding your work where you left it is the point.
+    reopen_last: bool = True
 
     #: Every chat and job this process holds, in the order they were started
     #: (`docs/CHAT_SESSIONS.md` §3.1). Open ones keep their client here; a
@@ -1123,10 +1180,16 @@ class App:
     #: no obvious way out of it — so where it lives is a field of its own.
     canvas_group: str = LEFT
 
-    #: Exchange settings, remembered between exchanges.
+    #: Exchange settings, remembered between exchanges, and the three below
+    #: between launches too (`ui/prefs`).
     goal: str = ""
     model: str = ""
     effort: str | None = "low"
+    #: A model restored from the last launch that its provider has not listed
+    #: yet. A server's list is a network call that happens after the window
+    #: opens (`engine.list_models`), so a model deleted since cannot be caught
+    #: when it is restored; the first listing checks it and clears this.
+    model_unconfirmed: str = ""
     #: Where a new chat's model comes from (`docs/PROVIDERS.md`). The default a
     #: chat starts with, not the value of any open one, like `model`.
     provider: str = providers.DEFAULT_KIND
@@ -1147,7 +1210,8 @@ class App:
     provider_pick: str = providers.DEFAULT_KIND
     #: A refused preflight, as ``(reason, remedy)``, drawn in the composer until
     #: the next Send (`PROVIDERS.md` §5). A refusal is not an exchange, so it
-    #: opens no log and draws no prompt row.
+    #: opens no log and draws no prompt row. Also a model remembered from the
+    #: last launch that is gone (`MODEL_GONE`), for the same reason.
     spend_alert: tuple[str, str] | None = None
     #: What a preflight is doing, while it does it: *loading qwen3:8b*. Send
     #: is refused for the duration, the way it is while a message is in flight.
@@ -1765,9 +1829,19 @@ class App:
         if band == self.band:
             return False
         self.band = band
-        self.show_files = band != NARROW_BAND
-        self.show_transcript = band == WIDE_BAND
+        self.show_files, self.show_transcript = self.panes_for(band)
         return True
+
+    def panes_for(self, band: str) -> tuple[bool, bool]:
+        """Which side panes a band opens with: the reader's choice, else its defaults."""
+        return self.pane_choices.get(band, (band != NARROW_BAND, band == WIDE_BAND))
+
+    def set_panes(self, files: bool, transcript: bool) -> bool:
+        """Open or close the side panes, remembering it for this band. Whether anything moved."""
+        before = (self.show_files, self.show_transcript)
+        self.show_files, self.show_transcript = files, transcript
+        self.pane_choices = {**self.pane_choices, self.band: (files, transcript)}
+        return (files, transcript) != before
 
     def select(self, kind: str | None, name: str = "") -> None:
         """Pick what tab zero is about, and go there.

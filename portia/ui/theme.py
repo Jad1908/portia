@@ -19,6 +19,8 @@ from pathlib import Path
 from nicegui import app as ng_app
 from nicegui import ui
 
+from portia.ui.state import APP, THEMES
+
 ASSETS = Path(__file__).parent / "assets"
 CSS = ASSETS / "portia.css"
 
@@ -62,7 +64,7 @@ _INTER = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&displa
 #: "auto, and it's night".
 _CYCLE: dict[bool | None, bool | None] = {None: False, False: True, True: None}
 MODE_ICON = {None: "brightness_auto", False: "light_mode", True: "dark_mode"}
-MODE_LABEL = {None: "auto", False: "light", True: "dark"}
+MODE_LABEL = THEMES
 #: The three, in the order the settings panel offers them, and the way back from
 #: the label a segmented control hands you.
 MODES: tuple[bool | None, ...] = (None, False, True)
@@ -159,16 +161,19 @@ def apply() -> ui.dark_mode:
     ui.add_css(CSS.read_text(encoding="utf-8").replace(f"{ASSET_TOKEN}/", f"{ASSET_ROUTE}/"))
     for script in BEHAVIOUR:
         ui.add_body_html(f"<script>{script.read_text(encoding='utf-8')}</script>")
-    _DARK = ui.dark_mode(None)
+    # The theme the reader picked last time (`App.theme`, restored by `prefs`),
+    # not auto every time the page loads.
+    _DARK = ui.dark_mode(APP.theme)
     return _DARK
 
 
 def mode() -> bool | None:
     """Which of the three is in play: ``None`` auto, ``False`` light, ``True`` dark."""
-    return _DARK.value if _DARK is not None else None
+    return APP.theme
 
 
 def set_mode(value: bool | None) -> None:
+    APP.theme = value
     if _DARK is not None:
         _DARK.value = value
 
