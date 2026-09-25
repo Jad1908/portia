@@ -30,6 +30,7 @@ from portia.ui import (
     artifacts,
     engine,
     feedback,
+    prefs,
     screens,
     settings,
     state,
@@ -83,9 +84,55 @@ def _remember_uncaught(exc: Exception) -> None:
 
 nicegui_app.on_exception(_remember_uncaught)
 
+#: How often the window writes what it remembers (`prefs.sync`). A drag of a
+#: pane edge reports every frame; the file hears about where it stopped.
+REMEMBER_SECONDS = 1.0
+
+#: Whether this process has put back what the last one remembered. Once, on
+#: the first page: a reload is not a launch, and a reader who went back to the
+#: picker on purpose must not be put back in their project by pressing F5.
+_restored = False
+
+
+def restore() -> None:
+    """Put back what the last launch remembered, and reopen its project.
+
+    Called by the launcher before the server starts, so the first paint is in
+    the remembered theme, and by the first page, which is where a script that
+    runs the window itself arrives (`_stop_local_server`'s reason). Whichever
+    comes first does it.
+
+    A project named on the command line wins over the remembered one: it is
+    already open by the time this runs. A remembered folder that is gone, or
+    will not open, leaves the picker showing, which is what it would show
+    anyway.
+    """
+    global _restored
+    if _restored:
+        return
+    _restored = True
+    last = prefs.restore_machine(APP)
+    if APP.opened or not APP.reopen_last or last is None or not last.is_dir():
+        return
+    try:
+        open_at_start(last)
+    except OSError as exc:
+        # Not readable any more, or not writable enough to open. The picker it
+        # falls back to lists it, and opening it from there says why.
+        core_feedback.remember(exc, "reopening the last project")
+
+
+def _remember_now() -> None:
+    prefs.sync(APP)
+
+
+# On the way out too, for whatever moved in the last second.
+nicegui_app.on_shutdown(_remember_now)
+
 
 @ui.page("/")
 def page() -> None:
+    restore()
     theme.apply()
     ui.page_title(TITLE)
     # At page level, deliberately: a dialog built inside a refreshable is deleted
@@ -137,6 +184,9 @@ def page() -> None:
     # refreshable it would be rebuilt — and left running — on every refresh.
     # It costs one predicate a second when nothing is running (`tick_progress`).
     ui.timer(TICK_SECONDS, tick_progress)
+    # What the window remembers, written when it moved (`prefs.sync`): one
+    # comparison of a small dict a second when nothing did.
+    ui.timer(REMEMBER_SECONDS, _remember_now)
     # The same second, for the clock beside a running tool call
     # (`transcript.tool_clock`). One predicate a second when nothing runs.
     ui.timer(TICK_SECONDS, transcript.tick_clocks)
@@ -309,7 +359,13 @@ def _window() -> None:
         toolbar()
         with ui.element("div").classes("p-body"):
             if APP.show_files:
-                with _splitter(FILES_WIDTH, _files_limits(), on_collapse=_close_files) as files:
+                limits = _files_limits()
+                with _splitter(
+                    _width(APP.files_width, FILES_WIDTH, limits),
+                    limits,
+                    on_collapse=_close_files,
+                    on_width=_files_dragged,
+                ) as files:
                     with files.before:
                         _left()
                     with files.after:
@@ -332,9 +388,13 @@ def _workflow_and_transcript() -> None:
         return
     # `reverse` so the pixel size applies to the transcript rather than to the
     # workflow: the pane with a real minimum is the one the number should govern.
-    lower, upper = _transcript_limits()
+    limits = _transcript_limits()
     with _splitter(
-        min(TRANSCRIPT_WIDTH, upper), (lower, upper), reverse=True, on_collapse=_close_transcript
+        _width(APP.transcript_width, TRANSCRIPT_WIDTH, limits),
+        limits,
+        reverse=True,
+        on_collapse=_close_transcript,
+        on_width=_transcript_dragged,
     ) as split:
         with split.before:
             _middle()
@@ -391,8 +451,32 @@ def _transcript_limits() -> tuple[int, int]:
     return lower, max(lower, min(upper, _room_beside_files() - WORKFLOW_MIN))
 
 
+def _width(remembered: int | None, default: int, limits: tuple[int, int]) -> int:
+    """Where a pane edge is drawn: where it was left, inside what this window allows.
+
+    A width remembered from a wider window is cut to this one's ceiling, and
+    one under the floor (which a drag cannot leave behind, but a hand-edited
+    file can) is raised to it rather than drawing a pane that closes itself.
+    """
+    lower, upper = limits
+    return max(lower, min(upper, default if remembered is None else remembered))
+
+
+def _files_dragged(width: int) -> None:
+    APP.files_width = width
+
+
+def _transcript_dragged(width: int) -> None:
+    APP.transcript_width = width
+
+
 def _splitter(
-    value: int, limits: tuple[int, int], *, reverse: bool = False, on_collapse=None
+    value: int,
+    limits: tuple[int, int],
+    *,
+    reverse: bool = False,
+    on_collapse=None,
+    on_width=None,
 ) -> ui.splitter:
     """A draggable pane edge that closes the pane when you drag past its floor.
 
@@ -413,15 +497,25 @@ def _splitter(
         .props("unit=px")
         .classes("w-full h-full p-splitter")
     )
-    if on_collapse is not None:
-        split.on_value_change(lambda event: _past_the_floor(event.value, lower, on_collapse))
+    if on_collapse is not None or on_width is not None:
+        split.on_value_change(lambda event: _dragged(event.value, lower, on_collapse, on_width))
     return split
 
 
-def _past_the_floor(width, floor: int, close) -> None:
-    """Close the pane once a drag takes it under the width it is readable at."""
-    if width is not None and width < floor:
-        close()
+def _dragged(width, floor: int, close, keep) -> None:
+    """Close the pane once a drag takes it under the width it is readable at.
+
+    Above the floor the width is kept (`App.files_width`), so the pane opens
+    where it was left. Every frame of a drag lands here; it is an assignment,
+    and `prefs.sync` writes it once the drag has stopped moving it.
+    """
+    if width is None:
+        return
+    if width < floor:
+        if close is not None:
+            close()
+    elif keep is not None:
+        keep(int(width))
 
 
 def _left() -> None:
@@ -830,10 +924,9 @@ def _set_panes(*, files: bool | None = None, transcript: bool | None = None) -> 
     handler on every frame after it — and each one would refresh the shell,
     rebuilding all three panes under a mouse that is still held down.
     """
-    before = (APP.show_files, APP.show_transcript)
-    APP.show_files = before[0] if files is None else files
-    APP.show_transcript = before[1] if transcript is None else transcript
-    if (APP.show_files, APP.show_transcript) != before:
+    files = APP.show_files if files is None else files
+    transcript = APP.show_transcript if transcript is None else transcript
+    if APP.set_panes(files, transcript):
         shell.refresh()
 
 

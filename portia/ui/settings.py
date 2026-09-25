@@ -65,6 +65,8 @@ _DIALOG: ui.dialog | None = None
 SWITCH_BUSY = "Cannot switch projects while something is running."
 SWITCH_TIP = "Back to the project picker"
 PROJECT_WHAT = "Project"
+REOPEN_LABEL = "Open this project again when portia starts"
+REOPEN_HELP = "Off, portia starts on the project picker."
 BRIEF_WHAT = "Project brief"
 BRIEF_HELP = "The goal, the modelling and the data, in a few sentences. Read on every exchange."
 BRIEF_OPEN = "Edit the brief"
@@ -259,6 +261,11 @@ def _project() -> None:
         c.button("Open another project…", _switch_project, icon="folder_open").tooltip(
             SWITCH_BUSY if APP.busy else SWITCH_TIP
         )
+        with ui.element("div").classes("row-gap-xs"):
+            # Bound, like `interpret`: `prefs.sync` reads the field, so the
+            # switch needs no handler and redraws nothing.
+            ui.switch(REOPEN_LABEL).classes("p-toggle").bind_value(APP, "reopen_last")
+            c.help_tip(REOPEN_HELP)
     with c.setting(BRIEF_WHAT, help=BRIEF_HELP):
         c.button(BRIEF_OPEN, _open_brief, icon="notes")
 
