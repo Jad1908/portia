@@ -3324,7 +3324,6 @@ def test_a_tick_in_the_table_filter_keeps_the_menu_and_redraws_the_canvas(tmp_pa
     redraws, and the menu's rows and the button's count are set in place."""
     from portia.ui import workflow
 
-    monkeypatch.setattr(engine_module, "VIEWS", tmp_path / "views.json")
     monkeypatch.chdir(tmp_path)
     app = _canvas_project(tmp_path)
     els, klass = _drawn(app)
@@ -3423,11 +3422,10 @@ def test_the_left_pane_moves_its_wash_without_being_redrawn(tmp_path, monkeypatc
 
 
 def test_where_you_were_looking_is_remembered_per_project(tmp_path, monkeypatch):
-    """`engine.VIEWS`, beside recents — where you last looked is about you, and is
+    """In `prefs`, beside recents: where you last looked is about you, and is
     not a fact anyone else on the project should inherit through a commit."""
     from portia.ui import workflow
 
-    monkeypatch.setattr(engine_module, "VIEWS", tmp_path / "views.json")
     monkeypatch.chdir(tmp_path)
     app = _canvas_project(tmp_path)
     with _as_app(workflow, app):
@@ -6111,10 +6109,9 @@ def test_the_sync_reloads_nothing_while_the_stamp_holds_still(tmp_path, monkeypa
 
 def test_dropping_a_card_records_where_it_landed_per_project(tmp_path, monkeypatch):
     """A drop arrives once, as a delta; it accumulates, it is written beside
-    `VIEWS`, and Reset puts everything back and removes the entry."""
+    the canvas filter, and Reset puts everything back and removes the entry."""
     from portia.ui import workflow
 
-    monkeypatch.setattr(engine_module, "LAYOUTS", tmp_path / "layouts.json")
     monkeypatch.chdir(tmp_path)
     app = _canvas_project(tmp_path)
     with _as_app(workflow, app):
@@ -6173,11 +6170,8 @@ def test_reset_layout_is_disabled_while_nothing_is_moved(tmp_path, monkeypatch):
 
 
 def test_opening_a_project_restores_the_canvas_as_you_left_it(tmp_path, monkeypatch):
-    """Both files beside recents: the filter (`VIEWS`, written since 2026-08-16
-    and read back by nothing until now) and the arrangement (`LAYOUTS`)."""
-    monkeypatch.setattr(engine_module, "VIEWS", tmp_path / "views.json")
-    monkeypatch.setattr(engine_module, "LAYOUTS", tmp_path / "layouts.json")
-    monkeypatch.setattr(engine_module, "RECENTS", tmp_path / "recents.json", raising=False)
+    """Both, beside recents in `prefs`: the filter (written since 2026-08-16 and
+    read back by nothing until 2026-09-07) and the arrangement."""
     project = tmp_path / "proj"
     project.mkdir()
     engine_module.remember_view(project.resolve(), frozenset({"stg"}))
@@ -6308,7 +6302,6 @@ def test_a_drop_onto_another_card_is_refused(tmp_path, monkeypatch):
     from portia.ui import graph as graph_module
     from portia.ui import workflow
 
-    monkeypatch.setattr(engine_module, "LAYOUTS", tmp_path / "layouts.json")
     monkeypatch.chdir(tmp_path)
     app = _canvas_project(tmp_path)
     app.expanded = frozenset()

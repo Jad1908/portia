@@ -53,24 +53,30 @@ def _never_the_working_graph():
 
 @pytest.fixture(autouse=True)
 def _never_the_users_window_files(tmp_path_factory, monkeypatch):
-    """Point the window's three per-user files at a temp folder, for every test.
+    """Point the window's per-user preferences at a temp folder, for every test.
 
-    `engine.open_project` writes `~/.config/portia/recents.json`, and a test
-    that opens a project without redirecting it writes a pytest temp folder
-    into the list a real person opens the app on. The list keeps eight, so
-    one run of the suite pushed every real project off the opening screen
-    (found 2026-09-18: eight of eight entries were `pytest-of-…` paths).
-    Same shape as the fixture above and the same reason: nothing failed, so
-    nothing said so.
+    `engine.open_project` writes the recent projects, and a test that opens a
+    project without redirecting it writes a pytest temp folder into the list a
+    real person opens the app on. The list keeps eight, so one run of the suite
+    pushed every real project off the opening screen (found 2026-09-18: eight
+    of eight entries were `pytest-of-…` paths). Same shape as the fixture above
+    and the same reason: nothing failed, so nothing said so.
+
+    **The three files `prefs` replaced are redirected too**, because it reads
+    them when its own file does not exist, which in a test is always: a test
+    would otherwise start from the real person's recent projects.
     """
     try:
-        from portia.ui import engine
+        from portia.ui import prefs
     except ImportError:  # the `ui` extra is not installed
         yield
         return
     home = tmp_path_factory.mktemp("portia-config")
+    monkeypatch.setattr(prefs, "HOME", home)
+    monkeypatch.setattr(prefs, "FILE", home / "prefs.json")
+    monkeypatch.setattr(prefs, "UNREADABLE", home / "prefs.unreadable.json")
     for name in ("RECENTS", "VIEWS", "LAYOUTS"):
-        monkeypatch.setattr(engine, name, home / f"{name.lower()}.json")
+        monkeypatch.setattr(prefs, f"LEGACY_{name}", home / f"{name.lower()}.json")
     yield
 
 

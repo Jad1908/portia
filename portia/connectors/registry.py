@@ -3,9 +3,8 @@ the providers they are connections *to*.
 
 `docs/CONNECTORS.md` §2.3 and §2.4. A project's ``project.yaml`` names a
 connection; this file is where the name resolves, for the person whose machine
-this is. It sits beside the app's ``recents.json`` because it is about the
-user, not about any one project's data — the same argument `ui/engine.VIEWS`
-makes.
+this is. It sits beside the app's ``prefs.json`` because it is about the
+user, not about any one project's data — the same argument `ui/prefs` makes.
 
 **Nothing in here is a credential.** A password or token is typed per session
 and held on the pool in memory; a key file stays where the vendor put it and
