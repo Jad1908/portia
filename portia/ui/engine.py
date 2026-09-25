@@ -112,6 +112,13 @@ def open_project(path: str | Path, app: App) -> Path:
     """
     root = Path(path).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
+    # Where you were in the project being left, up to this moment: the page
+    # writes it once a second, and the last second is the one you just spent.
+    # Only when one is being left: reopening at launch runs through here with
+    # nothing open yet, and a write then recorded *no project* as the last
+    # one, which the next launch obeyed if no page had loaded in between.
+    if app.opened:
+        prefs.sync(app)
     # Whoever is drawing charts into the project being left must stop being told
     # a window is watching it (`agent/drawn.py`).
     drawn.withdraw(app.catalog_dir)
@@ -180,6 +187,10 @@ def open_project(path: str | Path, app: App) -> Path:
         app.data_mode = State.LOCAL_DATA
     else:
         app.data_mode = ""
+    # Where you were when you last left it: tabs, folds, the chat on the right
+    # and the half-written message (`prefs.restore_project`). Last, because it
+    # checks what it restores against the catalog read above.
+    prefs.restore_project(app, partial(load_figure, app))
     remember(root)
     return root
 
@@ -965,7 +976,7 @@ def refresh_catalog(app: App) -> None:
 #: every event, and stamping its size would make the stamp move exactly as often
 #: as the refreshes it exists to prevent. A *new* log is still a new row in the
 #: left pane, and the name alone says that.
-_HISTORY_DIRS = frozenset({"chats", "indexing", "runs"})
+HISTORY_DIRS = frozenset({"chats", "indexing", "runs"})
 
 
 def artifact_stamp(app: App) -> tuple:
@@ -1011,7 +1022,7 @@ def artifact_stamp(app: App) -> tuple:
                 # This window's own announcement. Stamping it would have the
                 # window redraw because it said it was open.
                 continue
-            if rel.parts and rel.parts[0] in _HISTORY_DIRS:
+            if rel.parts and rel.parts[0] in HISTORY_DIRS:
                 stamps.append((path.as_posix(), 0, 0))
             else:
                 add(path)

@@ -36,8 +36,6 @@ measured is a signal to add it to `checks`, not to work it out in a widget.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from nicegui import ui
 
 from portia.core.io import relative
@@ -412,21 +410,7 @@ def open_figure(path: str, *, preview: bool = False) -> None:
         ui.notify(_FIGURE_GONE)
         artifacts.pane.refresh()
         return
-    APP.show_chart(
-        Chart(
-            name=saved.get("name") or Path(path).stem,
-            question=saved.get("question", ""),
-            vega=saved.get("vega") or {},
-            rows=saved.get("rows") or [],
-            columns=saved.get("columns") or [],
-            sql=saved.get("sql", ""),
-            inputs=saved.get("inputs") or [],
-            path=path,
-            notes=saved.get("notes", ""),
-            at=saved.get("at", ""),
-            preview=preview,
-        )
-    )
+    APP.show_chart(Chart.from_figure(path, saved, preview=preview))
     _refresh()
 
 

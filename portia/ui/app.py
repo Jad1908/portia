@@ -963,12 +963,53 @@ def open_at_start(path: str | Path) -> None:
 
 
 def _pick_up_spec() -> None:
-    """Open the project's first spec, and open its card on the canvas.
+    """Open the spec you left open, else the first one, and the chat you left open.
 
     Collapsed, the graph would say a project has three tables and show nothing of
-    how any of them is built — so whichever spec is selected arrives expanded.
+    how any of them is built — so the spec picked arrives expanded, unless the
+    cards open when you left were remembered (`prefs.project_of`), which may be
+    none of them.
+
+    Here rather than in `prefs.restore_project` because both need the project
+    as it is now: a spec renamed or removed since is not picked, a card whose
+    spec is gone is not opened, and a chat is opened by reading its log.
     """
-    specs = engine.specs_in(APP)
+    saved = prefs.project(APP.root)
+    specs = {path.stem: path for path in engine.specs_in(APP)}
     if specs:
-        engine.select_spec(specs[0], APP)
-        APP.expanded = frozenset({specs[0].stem})
+        name = saved.get("spec")
+        picked = specs[name] if name in specs else next(iter(specs.values()))
+        engine.select_spec(picked, APP)
+        expanded = saved.get("expanded")
+        if isinstance(expanded, list) and name in specs:
+            APP.expanded = frozenset(str(n) for n in expanded if n in specs)
+        else:
+            APP.expanded = frozenset({picked.stem})
+        # Its row lit, if it was. Set rather than `App.select`, which would
+        # also bring the canvas to the front over a tab that was restored there.
+        if saved.get("selection") == [state.SPEC, picked.name] and name in specs:
+            APP.selection = (state.SPEC, picked.name)
+    _pick_up_chat(saved.get("chat"))
+
+
+def _pick_up_chat(rel: object) -> None:
+    """Put the chat you left open back on the right, reading its log once.
+
+    Nothing is connected: `exchange.open_from_disk` reads, and the client is
+    resumed on the first send (`docs/CHAT_SESSIONS.md` §3.3). A log that is
+    gone, is outside the project's history folders, or will not read leaves
+    the list showing, which is where the right pane opens anyway.
+    """
+    from portia.ui import exchange
+
+    if not isinstance(rel, str) or not rel:
+        return
+    path = (APP.catalog_dir / rel).resolve()
+    if path.parent.name not in engine.HISTORY_DIRS or not path.is_file():
+        return
+    if not path.is_relative_to(APP.catalog_dir.resolve()):
+        return
+    try:
+        exchange.open_from_disk(path)
+    except Exception as exc:  # noqa: BLE001 - a broken log must not stop the project opening
+        core_feedback.remember(exc, "reopening the last chat")
