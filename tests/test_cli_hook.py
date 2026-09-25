@@ -194,3 +194,84 @@ def test_a_hook_that_is_handed_nonsense_stays_silent(project):
         check=False,
     )
     assert (done.returncode, done.stdout) == (0, "")
+
+
+# --- a reading job (`docs/HEADLESS.md` §4.8) -----------------------------------------
+
+RECORD = "mcp__plugin_portia_portia__record_step"
+RUN = "mcp__portia__run_spec"
+
+
+def _shell(command):
+    block = {"type": "tool_use", "name": "Bash", "input": {"command": command}}
+    return {"type": "assistant", "message": {"content": [block]}}
+
+
+def _building(transcript, *records, tool=RECORD):
+    return {**transcript(*records), "hook_event_name": "PreToolUse", "tool_name": tool}
+
+
+def test_the_build_tools_are_the_tools_own():
+    pytest.importorskip("claude_agent_sdk")
+    from portia.agent import tools
+
+    assert set(hook._BUILDS) == {t.name for t in tools.BUILD_TOOLS}
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "portia index data/ --no-interpret",
+        "uv run portia index --no-interpret 'data/bookings.csv'",
+        "cd repo && portia index --init 'hotels' data/",
+        "uv run python -m portia.cli.index data/*.parquet --no-interpret",
+        "portia connect scope DB.RAW.BOOKINGS DB.RAW.HOTELS",
+        "python -m portia.cli.connect scope DB.RAW.BOOKINGS",
+        "/home/me/.local/bin/portia index data",
+    ],
+)
+def test_a_build_in_the_reply_that_indexed_is_refused(transcript, command):
+    for tool in (RECORD, RUN):
+        event = _building(transcript, _prompt(), _shell(command), _results(), tool=tool)
+        reason = _denied(hook.guard(event))
+        assert command.strip() in reason and "set_interpretation" in reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "portia index --init 'hotel bookings'",
+        "portia index --init 'hotel bookings' && portia build",
+        "portia build",
+        "portia connect browse DB.RAW",
+        "portia journal list",
+        "cat notes/portia index.md",
+    ],
+)
+def test_a_command_that_indexed_nothing_is_not_a_job(transcript, command):
+    assert hook.guard(_building(transcript, _prompt(), _shell(command), _results())) is None
+
+
+def test_the_humans_next_message_ends_the_job(transcript):
+    records = (_prompt(), _shell("portia index data/"), _results(), _prompt("now build it"))
+    assert hook.guard(_building(transcript, *records)) is None
+
+
+def test_a_reply_that_indexed_nothing_builds_as_before(transcript):
+    assert hook.guard(_building(transcript, _prompt(), _assistant(QUERY), _results())) is None
+
+
+def test_the_rest_of_portias_tools_are_not_the_jobs_business(transcript):
+    records = (_prompt(), _shell("portia index data/"), _results())
+    for tool in (QUERY, "mcp__portia__set_interpretation", "mcp__portia__record_finding"):
+        assert hook.guard(_building(transcript, *records, tool=tool)) is None
+
+
+def test_a_command_that_will_not_split_is_read_by_its_text(transcript):
+    records = (_prompt(), _shell("portia index 'data/unclosed"), _results())
+    assert hook.guard(_building(transcript, *records)) is not None
+
+
+def test_with_no_transcript_a_build_is_not_refused():
+    event = {"hook_event_name": "PreToolUse", "tool_name": RECORD, "tool_input": {}}
+    assert hook.guard(event) is None

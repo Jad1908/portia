@@ -1,7 +1,8 @@
-"""The two rules a host has to enforce, as Claude Code hooks.
+"""The rules a host has to enforce, as Claude Code hooks.
 
-`portia-mcp` puts the tools in a host (`cli/serve.py`). Two things the app held
-in its own loop cannot be held by a tool server, because neither is a tool call:
+`portia-mcp` puts the tools in a host (`cli/serve.py`). Three things the app held
+in its own loop cannot be held by a tool server, because none of them is about
+one tool call on its own:
 
 - **Review before you reply.** `agent/curation.py` holds a reply once, through
   the SDK's ``Stop`` hook, until `review_queries` has run. It exists because the
@@ -17,6 +18,14 @@ in its own loop cannot be held by a tool server, because neither is a tool call:
   past it, and that was accepted with the open design. It closes the door a
   model walks through by default, the file tool, so that going round the tools
   takes a decision and leaves a command in the host's transcript.
+- **A reading job does not build.** In the app an indexing job is a model turn
+  of its own that is never offered `record_step` or `run_spec`
+  (`agent/tools.BUILD_TOOLS`, `docs/COPILOT.md` §8). A host has no job: its
+  model runs `portia index` or `portia connect scope` in the shell and reads
+  what it indexed in the same reply. So the rest of that reply is the job, and
+  the two tools are refused in it until the human speaks again
+  (`docs/HEADLESS.md` §4.8). Like the review hold, it is read off the host's
+  transcript, which the tool server never sees.
 
 Each is one short process per event, so everything heavy is imported after the
 cheap checks have had the chance to say *not ours*. **A hook that fails must
@@ -34,6 +43,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
+import shlex
 import sys
 from pathlib import Path
 from typing import Any
@@ -46,6 +57,13 @@ _READS = {"Read": "file_path"}
 #: `agent/tools.SERVER_NAME`, restated because importing that module imports the
 #: Agent SDK, and this process runs before every reply. A test holds the two equal.
 _SERVER = "portia"
+
+#: `agent/tools.BUILD_TOOLS` by name, restated for the same reason and held
+#: equal by the same kind of test.
+_BUILDS = ("record_step", "run_spec")
+
+#: The host's shell tool, and the input field that carries the command.
+_SHELL = {"Bash": "command"}
 
 
 # --- review before you reply ------------------------------------------------
@@ -78,12 +96,20 @@ def stop(event: dict[str, Any]) -> dict[str, Any] | None:
 
 def _tools_since_the_last_prompt(transcript: Any) -> list[str]:
     """portia's tools called since the human last spoke, by their bare names."""
+    called = [
+        _label(str(block.get("name") or "")) for block in _calls_since_the_last_prompt(transcript)
+    ]
+    return [name for name in called if name]
+
+
+def _calls_since_the_last_prompt(transcript: Any) -> list[dict[str, Any]]:
+    """Every tool call the host made since the human last spoke, as its ``tool_use`` block."""
     if not transcript:
         return []
-    called: list[str] = []
+    called: list[dict[str, Any]] = []
     try:
         lines = Path(str(transcript)).read_text(encoding="utf-8").splitlines()
-    except OSError:
+    except (OSError, ValueError):
         return []
     for line in lines:
         try:
@@ -97,11 +123,11 @@ def _tools_since_the_last_prompt(transcript: Any) -> list[str]:
             called = []
         elif record.get("type") == "assistant" and isinstance(content, list):
             called += [
-                _label(block.get("name") or "")
+                block
                 for block in content
                 if isinstance(block, dict) and block.get("type") == "tool_use"
             ]
-    return [name for name in called if name]
+    return called
 
 
 def _is_a_prompt(content: Any) -> bool:
@@ -124,11 +150,97 @@ def _label(name: str) -> str:
     return tail if head.startswith("mcp__") and _SERVER in head else ""
 
 
+# --- a reading job ----------------------------------------------------------
+
+
+def reading(event: dict[str, Any]) -> dict[str, Any] | None:
+    """Refuse a build in the reply that indexed: that reply is the reading job.
+
+    The app's job is one model turn that is never offered a build tool. The
+    nearest thing a host has is the rest of the reply in which the shell ran
+    `portia index` or `portia connect scope`: the skill tells the model to read
+    what it indexed straight after, and the human has not spoken since. The
+    human's next message ends the job, which is where the app's ends too: a
+    build is a conversation the person starts, with the pipeline in front of
+    them. A reply that indexed nothing is not a job and is left alone.
+    """
+    if _label(str(event.get("tool_name") or "")) not in _BUILDS:
+        return None
+    commands = [
+        str((block.get("input") or {}).get(_SHELL[name]) or "")
+        for block in _calls_since_the_last_prompt(event.get("transcript_path"))
+        if (name := str(block.get("name") or "")) in _SHELL
+    ]
+    ran = next((c for c in commands if _indexes(c)), None)
+    if ran is None:
+        return None
+    from portia.agent import prompts
+
+    return _deny(prompts.error("reading_job_builds", command=ran.strip()))
+
+
+#: A word that runs one of portia's commands: ``portia`` itself, a path to it, or
+#: ``portia.cli.index`` / ``portia.cli.connect`` handed to ``python -m``.
+_COMMAND = re.compile(r"^(?:.*/)?portia(?:\.cli\.(index|connect))?$")
+#: `cli/index`'s options that take a value, so the value is not read as data.
+_INDEX_VALUES = ("--init", "--dir", "--provider", "--model", "--effort")
+#: Where one shell command ends and the next begins, as `shlex` leaves them.
+_SEPARATORS = ("&&", "||", ";", "|", "&")
+#: The same question asked of text, for a command `shlex` cannot split.
+_INDEXES_TEXT = re.compile(r"\bportia(?:\s+|\.cli\.)(?:index|connect\s+scope)\b")
+
+
+def _indexes(command: str) -> bool:
+    """Whether a shell command indexed data or brought warehouse tables into scope.
+
+    `portia index --init "..."` with nothing to index only describes the
+    project, and is not a job. A command that cannot be split into words is
+    read by its text and errs towards *a job*: what a wrong guess costs is a
+    build refused until the human's next message.
+    """
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return bool(_INDEXES_TEXT.search(command))
+    for at, word in enumerate(words):
+        match = _COMMAND.match(word)
+        if match is None:
+            continue
+        verb, rest = (
+            (match.group(1), words[at + 1 :])
+            if match.group(1)
+            else (words[at + 1] if at + 1 < len(words) else "", words[at + 2 :])
+        )
+        if verb == "index" and _names_data(rest):
+            return True
+        if verb == "connect" and rest[:1] == ["scope"]:
+            return True
+    return False
+
+
+def _names_data(words: list[str]) -> bool:
+    """Whether `portia index`'s arguments name something to index."""
+    takes_value = False
+    for word in words:
+        if word in _SEPARATORS:
+            return False
+        if takes_value:
+            takes_value = False
+        elif word in _INDEX_VALUES:
+            takes_value = True
+        elif not word.startswith("-"):
+            return True
+    return False
+
+
 # --- the file tools ---------------------------------------------------------
 
 
 def guard(event: dict[str, Any]) -> dict[str, Any] | None:
-    """Refuse a hand edit of what portia writes, or a read of data it has indexed."""
+    """Refuse a hand edit of what portia writes, a read of data it has indexed, or a
+    build in the reply that indexed (:func:`reading`)."""
+    if _label(str(event.get("tool_name") or "")):
+        return reading(event)
     tool = str(event.get("tool_name") or "")
     field = _WRITES.get(tool) or _READS.get(tool)
     target = (event.get("tool_input") or {}).get(field or "")
