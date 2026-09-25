@@ -448,6 +448,103 @@ def test_with_no_chat_listening_the_question_tool_refuses_rather_than_hanging():
     assert result.get("is_error") is True
 
 
+# --- review before you reply (`agent/curation.py`, `docs/FINDINGS.md` §5.3) ----------
+
+
+def _asked(tool: str = "query_data", call: str = "q1") -> list[tuple[str, dict]]:
+    return [
+        started("mcpToolCall", id=call, tool=tool, arguments={}, server="portia"),
+        completed("mcpToolCall", id=call, tool=tool, result={"content": []}, status="completed"),
+    ]
+
+
+def test_a_reply_that_asked_and_reviewed_nothing_gets_one_more_turn_asking_for_the_review():
+    fake = FakeCodex(
+        [
+            [
+                *_asked(),
+                completed("agentMessage", id="m1", text="14% point at a closed hotel"),
+                usage(),
+                turn_completed(),
+            ],
+            [
+                *_asked("review_queries", "r1"),
+                completed("agentMessage", id="m2", text="kept"),
+                usage(),
+                turn_completed(),
+            ],
+        ]
+    )
+    got = _drain(_chat(fake), "how many bookings are orphaned?")
+    from portia.agent import prompts
+
+    assert [t["prompt"] for t in fake.turns] == [
+        "how many bookings are orphaned?",
+        prompts.error("review_before_reply"),
+    ]
+    kinds = [e.kind for e in got]
+    # The follow-up is portia's, not the human's: no second message in the chat,
+    # and the exchange ends once, as a held stop does on Claude.
+    assert kinds.count(events.PROMPT) == 1
+    assert kinds.count(events.RESULT) == 1 and kinds[-1] == events.RESULT
+    assert got[-1].data["usage"] == {
+        "input_tokens": 200,
+        "cache_read_input_tokens": 1800,
+        "output_tokens": 100,
+        "reasoning_output_tokens": 0,
+    }
+
+
+def test_a_reply_that_reviewed_what_it_asked_is_not_held():
+    fake = FakeCodex([[*_asked(), *_asked("review_queries", "r1"), turn_completed()]])
+    _drain(_chat(fake), "q")
+    assert len(fake.turns) == 1
+
+
+def test_a_reply_that_asked_nothing_is_not_held():
+    fake = FakeCodex([[*_asked("profile_source"), turn_completed()]])
+    _drain(_chat(fake), "q")
+    assert len(fake.turns) == 1
+
+
+def test_the_reply_is_held_once_and_never_twice():
+    fake = FakeCodex(
+        [[*_asked(), turn_completed()], [*_asked("plot_data", "q2"), turn_completed()]]
+    )
+    got = _drain(_chat(fake), "q")
+    assert len(fake.turns) == 2
+    assert [e.kind for e in got].count(events.RESULT) == 1
+
+
+def test_a_reply_the_human_stopped_or_that_failed_is_not_held():
+    for status in ("interrupted", "failed"):
+        fake = FakeCodex([[*_asked(), turn_completed(status)]])
+        got = _drain(_chat(fake), "q")
+        assert len(fake.turns) == 1
+        assert got[-1].kind == events.RESULT
+
+
+def test_the_next_message_is_held_again():
+    fake = FakeCodex(
+        [
+            [*_asked(), turn_completed()],
+            [turn_completed()],
+            [*_asked(), turn_completed()],
+            [turn_completed()],
+        ]
+    )
+    chat = _chat(fake)
+
+    async def go():
+        async with chat:
+            for prompt in ("one", "two"):
+                async for _ in chat.send(prompt):
+                    pass
+
+    asyncio.run(go())
+    assert len(fake.turns) == 4
+
+
 def test_a_resumed_chat_hands_the_thread_id_back():
     fake = FakeCodex([[turn_completed()]])
     chat = _chat(fake, resume="old-thread")
