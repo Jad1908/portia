@@ -8,11 +8,12 @@ bar asks for (docs/VISION.md).
 from __future__ import annotations
 
 import argparse
-import socket
+from collections.abc import Collection
 
 from nicegui import app as nicegui_app
 from nicegui import ui
 
+from portia.core.ports import is_free
 from portia.ui import app, theme
 from portia.ui.state import APP
 
@@ -23,17 +24,15 @@ DEFAULT_PORT = 8080
 PORT_TRIES = 20
 
 
-def is_free(host: str, port: int) -> bool:
-    """Whether the window could listen here, found by binding and letting go."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        try:
-            probe.bind((host, port))
-        except OSError:
-            return False
-    return True
+#: Said when the window was asked to serve where llama.cpp is set to listen.
+#: Served anyway (a named port is the asker's), and said, because the server
+#: will then be refused its own port by the start panel.
+SHARES_LLAMA_PORT = (
+    "note: llama-server is set to use port {port} too; pick another port for it in its start panel"
+)
 
 
-def pick_port(host: str, asked: int | None) -> int:
+def pick_port(host: str, asked: int | None, *, reserved: Collection[int] = ()) -> int:
     """The port to serve on.
 
     **A port somebody asked for is theirs or it is refused**: they have a
@@ -41,16 +40,33 @@ def pick_port(host: str, asked: int | None) -> int:
     somewhere else would be the app disagreeing with them quietly. With nothing
     asked, the default is a preference and the next free port above it does as
     well, which is the first thing a tester on Windows with WSL ran into.
+
+    **``reserved`` is passed over when nothing was asked**: the port the
+    llama.cpp server is set to listen on (`llamacpp.configured_port`). A second
+    window used to take 8081 when 8080 was busy, which is llama.cpp's default,
+    and then either the server could not start or the model picker asked this
+    window for its models (`docs/PROVIDERS.md` §4.9.1). Which port the server
+    uses is the user's, in its start panel; the window steps around it.
     """
     if asked is not None:
         if not is_free(host, asked):
             raise ValueError(f"port {asked} on {host} is already in use; pass another --port")
         return asked
     for port in range(DEFAULT_PORT, DEFAULT_PORT + PORT_TRIES):
-        if is_free(host, port):
+        if port not in reserved and is_free(host, port):
             return port
     last = DEFAULT_PORT + PORT_TRIES - 1
     raise ValueError(f"no free port from {DEFAULT_PORT} to {last} on {host}; pass one with --port")
+
+
+def _llama_port() -> int | None:
+    """Where llama.cpp is set to listen, or ``None`` when that cannot be read."""
+    from portia.agent.providers import llamacpp
+
+    try:
+        return llamacpp.configured_port()
+    except (OSError, ValueError):
+        return None
 
 
 async def _close_chats() -> None:
@@ -86,17 +102,23 @@ def main() -> None:
     parser.add_argument("--no-show", action="store_true", help="don't open a browser")
     args = parser.parse_args()
 
+    llama = _llama_port()
     try:
-        port = pick_port(args.host, args.port)
+        port = pick_port(args.host, args.port, reserved=() if llama is None else (llama,))
     except ValueError as refusal:
         raise SystemExit(str(refusal)) from None
+    if port == llama:
+        print(SHARES_LLAMA_PORT.format(port=port), flush=True)
     # NiceGUI's own welcome is switched off below, so this is the only line
     # that says where the window is, and a browser does not always open by
     # itself (`--no-show`, WSL, a remote shell).
     print(f"portia is at http://{args.host}:{port}", flush=True)
 
     APP.portia_dir = args.dir
-    APP.url = f"http://{args.host}:{args.port}"
+    # The port served, not the one asked for: with no `--port` that was
+    # `None`, and `.portia/window.json` told a host the window was at
+    # `http://127.0.0.1:None` (`drawn.announce`).
+    APP.url = f"http://{args.host}:{port}"
     if args.project:
         app.open_at_start(args.project)
 

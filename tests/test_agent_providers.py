@@ -533,8 +533,8 @@ def test_starting_is_refused_before_anything_runs_for_the_three_reasons_it_can(m
     with pytest.raises(providers.ProviderUnavailable, match="not installed"):
         llamacpp.start(config)
     monkeypatch.setattr(shutil, "which", lambda name: "/opt/homebrew/bin/llama-server")
-    monkeypatch.setattr(llamacpp, "_answering", lambda port: True)
-    with pytest.raises(providers.ProviderUnavailable, match="already answering on port 8081"):
+    monkeypatch.setattr(llamacpp, "port_problem", lambda port, **_: f"Port {port} is taken.")
+    with pytest.raises(providers.ProviderUnavailable, match="Port 8081 is taken"):
         llamacpp.start(config)
     monkeypatch.setattr(llamacpp, "running", lambda: 4242)
     with pytest.raises(providers.ProviderUnavailable, match="already running from this window"):
@@ -768,3 +768,98 @@ def test_the_local_model_list_is_the_servers_v1_models(monkeypatch):
 def test_codex_names_the_variables_it_reads():
     notes = codex_provider.PROVIDER.env_notes()
     assert set(notes) == {"OPENAI_BASE_URL", "OPENAI_API_KEY"}
+
+
+# --- the port is the user's (`docs/PROVIDERS.md` §4.9.1) --------------------
+
+
+@pytest.fixture
+def taken_port():
+    """A port something is listening on, and a free one just above it is not promised."""
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as held:
+        held.bind(("127.0.0.1", 0))
+        held.listen()
+        yield held.getsockname()[1]
+
+
+def test_a_free_port_has_no_problem(monkeypatch):
+    from portia.core import ports
+
+    monkeypatch.setattr(llamacpp, "_is_llama_server", lambda port: False)
+    monkeypatch.setattr(llamacpp, "_answering", lambda port: False)
+    monkeypatch.setattr(ports, "is_free", lambda host, port: True)
+    assert llamacpp.port_problem(9123) == ""
+
+
+def test_this_windows_own_port_is_named_as_the_windows(monkeypatch):
+    monkeypatch.setattr(llamacpp, "_is_llama_server", lambda port: True)
+    assert "this portia window" in llamacpp.port_problem(8080, window=8080)
+
+
+def test_a_server_started_outside_portia_is_said_to_be_usable_as_it_is(monkeypatch):
+    monkeypatch.setattr(llamacpp, "_is_llama_server", lambda port: True)
+    said = llamacpp.port_problem(9000)
+    assert "started outside portia" in said and "model picker" in said
+
+
+def test_a_port_held_by_anything_else_is_refused_with_a_free_one_named(taken_port):
+    """Not only a web server: a plain listening socket that answers no HTTP at
+    all passed the old `/health` check, and the server failed after loading."""
+    said = llamacpp.port_problem(taken_port)
+    assert said.startswith(f"Port {taken_port} is in use by another program.")
+    assert "is free." in said
+
+
+def test_the_free_port_named_is_never_the_windows(monkeypatch):
+    from portia.core import ports
+
+    monkeypatch.setattr(llamacpp, "_is_llama_server", lambda port: False)
+    monkeypatch.setattr(llamacpp, "_answering", lambda port: port == 9000)
+    monkeypatch.setattr(ports, "is_free", lambda host, port: port != 9000)
+    said = llamacpp.port_problem(9000, window=9001)
+    assert said.endswith(" 9002 is free.")
+
+
+def test_a_port_above_the_last_one_is_refused_in_the_form():
+    with pytest.raises(ValueError, match="at most 65535"):
+        llamacpp.ServerConfig.from_form({"model": "/m.gguf", "port": "70000"})
+    with pytest.raises(ValueError, match="above zero"):
+        llamacpp.ServerConfig.from_form({"model": "/m.gguf", "port": "0"})
+
+
+def test_the_configured_port_is_the_servers_variable_else_the_saved_one(monkeypatch):
+    monkeypatch.delenv(llamacpp.PORT_VAR, raising=False)
+    assert llamacpp.configured_port() == llamacpp.DEFAULT_PORT
+    llamacpp.save_config(llamacpp.ServerConfig("/m.gguf", port=9100))
+    assert llamacpp.configured_port() == 9100
+    monkeypatch.setenv(llamacpp.PORT_VAR, "9200")
+    assert llamacpp.configured_port() == 9200
+
+
+def test_the_window_refuses_its_own_port_for_the_server_and_does_not_save_it(monkeypatch):
+    import asyncio
+
+    pytest.importorskip("nicegui", reason="the window needs the `ui` extra")
+    from portia.ui import engine
+    from portia.ui.state import App
+
+    app = App(url="http://127.0.0.1:8080")
+    app.server_form = {"model": "/m.gguf", "port": "8080"}
+    started: list = []
+    monkeypatch.setattr(llamacpp, "start", started.append)
+    assert asyncio.run(engine.start_server(app)) is False
+    assert "this portia window" in app.server_error
+    assert started == []
+    assert not llamacpp.CONFIG.exists(), "saved, the picker would ask the window for models"
+
+
+def test_the_window_knows_its_own_port_only_from_its_address():
+    pytest.importorskip("nicegui", reason="the window needs the `ui` extra")
+    from portia.ui import engine
+    from portia.ui.state import App
+
+    assert engine.window_port(App(url="http://127.0.0.1:8082")) == 8082
+    assert engine.window_port(App(url="")) is None
+    assert engine.window_port(App(url="http://127.0.0.1:None")) is None

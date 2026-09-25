@@ -6812,7 +6812,7 @@ def test_the_start_panel_picks_off_the_registry_and_keeps_a_path_behind_a_toggle
         assert sentence not in texts, "a sentence under a field is behind its ?"
     assert not [e for e in drawn if "field-hint" in e.classes]
     tips = [e for e in drawn if "help-tip" in e.classes]
-    assert len(tips) == 3, "model, path or repository, context"
+    assert len(tips) == 4, "model, path or repository, context, port"
     assert not [e for e in drawn if "server-elsewhere" in e.classes], "shut until asked"
     labels = [e.text for e in drawn if isinstance(e, ui.button)]
     assert screens.SERVER_ELSEWHERE in labels

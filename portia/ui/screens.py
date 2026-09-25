@@ -2022,6 +2022,8 @@ SERVER_CONTEXT_HINT = (
     "32768 leaves room for a chat."
 )
 SERVER_PORT = "Port"
+SERVER_PORT_HINT = "Where llama-server listens: any free port on this machine."
+SERVER_PORT_WINDOW = " This window is on {port}."
 SERVER_COMMAND = "What will run"
 SERVER_GO = "Start"
 SERVER_STARTING_GO = "Starting…"
@@ -2108,6 +2110,7 @@ def _server_panel() -> None:
                 _SERVER_INPUTS.append(
                     c.field(
                         SERVER_PORT,
+                        help=_port_hint(),
                         value=form.get("port", ""),
                         placeholder=str(_server_default("port")),
                         mono=True,
@@ -2123,6 +2126,12 @@ def _server_panel() -> None:
         with ui.element("div").classes("p-panel-actions"):
             _server_state(body=False)
     _server_busy()
+
+
+def _port_hint() -> str:
+    """The port is the user's to pick (`PROVIDERS.md` §4.9.1); say which one is taken here."""
+    window = engine.window_port(APP)
+    return SERVER_PORT_HINT + (SERVER_PORT_WINDOW.format(port=window) if window else "")
 
 
 def _server_default(key: str) -> int:
