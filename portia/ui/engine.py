@@ -304,6 +304,31 @@ async def list_models(app: App, kind: str) -> None:
     # follow it; a name someone picked on purpose is left alone.
     if app.provider == kind and app.model == before and provider.default_model != before:
         app.model = provider.default_model
+    _confirm_restored_model(app, kind, models)
+
+
+def _confirm_restored_model(app: App, kind: str, models: list[Any]) -> None:
+    """The first list from the provider a remembered model is on: is it still there?
+
+    `prefs` restores a server's model by name before anything has asked the
+    server (`App.model_unconfirmed`). A model deleted since would otherwise be
+    found by the preflight on the first Send, as a refusal about a model the
+    reader never picked in this window. An empty list proves nothing (the
+    server may be down), so the check waits for one with something in it.
+    """
+    from portia.agent import providers
+
+    if not app.model_unconfirmed or app.provider != kind or not models:
+        return
+    remembered, app.model_unconfirmed = app.model_unconfirmed, ""
+    if app.model != remembered or remembered in {m.name for m in models}:
+        return
+    provider = providers.get(kind)
+    app.model = provider.default_model
+    app.spend_alert = (
+        State.MODEL_GONE.format(model=remembered, provider=provider.label),
+        State.USING_INSTEAD.format(model=app.model),
+    )
 
 
 def _ask_provider(provider: Any) -> tuple[Any, list[Any]]:

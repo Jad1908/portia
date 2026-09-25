@@ -1264,13 +1264,16 @@ def test_dragging_a_pane_past_its_floor_closes_it():
     from portia.ui import app as app_module
 
     closed: list[str] = []
+    kept: list[int] = []
     floor = app_module.FILES_LIMITS[0]
 
-    app_module._past_the_floor(floor, floor, lambda: closed.append("files"))
+    app_module._dragged(floor, floor, lambda: closed.append("files"), kept.append)
     assert closed == [], "at the floor it is still readable"
+    assert kept == [floor], "and it is where the pane opens next time"
 
-    app_module._past_the_floor(floor - 1, floor, lambda: closed.append("files"))
+    app_module._dragged(floor - 1, floor, lambda: closed.append("files"), kept.append)
     assert closed == ["files"]
+    assert kept == [floor], "a width the pane closed at is not one to open at"
 
 
 def test_a_splitter_can_be_dragged_below_its_floor_at_all():
