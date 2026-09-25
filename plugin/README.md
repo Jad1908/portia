@@ -25,7 +25,10 @@ Open Claude Code in a folder that holds your data and say what you want from it.
 
 - **The tools**, served by `portia-mcp`. Read-only ones can be allowed once with
   "always allow". The four that write (`record_step`, `record_finding`,
-  `set_interpretation`, `set_group`) are worth keeping on "ask".
+  `set_interpretation`, `set_group`) are worth keeping on "ask". Claude Code's
+  prompt is the only confirmation here: portia's app asks before every save, and
+  inside Claude Code portia does not, so a writing tool on "always allow" saves
+  without asking anyone.
 - **A skill**, `portia`, which is the working method portia's own copilot follows.
 - **Two hooks.** One holds a reply once when Claude queried the data and did not
   review what it asked, which is how findings get kept. The other refuses Claude's
@@ -33,7 +36,9 @@ Open Claude Code in a folder that holds your data and say what you want from it.
   portia tool to use. It guards the file tools only. A shell command is not
   refused, so "Claude never reads the raw data" is an instruction here and not a
   guarantee. In portia's app it is a guarantee, because that copilot has no file
-  access at all.
+  access at all. The same hook refuses `record_step` and `run_spec` in a reply
+  that ran `portia index` or `portia connect scope`, until your next message:
+  reading new data and building on it are two steps, and you start the second.
 
 ## Charts
 

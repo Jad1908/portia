@@ -7,6 +7,10 @@
       {
         "matcher": "Edit|Write|MultiEdit|NotebookEdit|Read",
         "hooks": [{ "type": "command", "command": "portia-hook guard" }]
+      },
+      {
+        "matcher": "^mcp__.*portia.*__(record_step|run_spec)$",
+        "hooks": [{ "type": "command", "command": "portia-hook guard" }]
       }
     ]
   }

@@ -49,7 +49,9 @@ because the receipt carries the plotted values for a small chart.
 **Asking is `AskUserQuestion`, and a write is confirmed by Claude Code.** Ask the way
 the method says. When you call a tool that writes, the user sees Claude Code's own
 permission prompt with your arguments in it, so put the reason in your message before
-the call, where they will read it.
+the call, where they will read it. portia does not ask on top of that prompt, and a
+user who allowed a writing tool always sees none: say what you are about to record
+before you record it.
 
 **The reply is held once if you asked the data and reviewed nothing.** Call
 `review_queries` before you end any reply in which you called `query_data` or
@@ -115,7 +117,9 @@ connection cannot be opened from here, stop and tell them, with the two ways tha
 ## After indexing: the read
 
 Indexing measures. Reading is yours, and it is where a project starts. Once the
-command has listed what it indexed, do this for those sources:
+command has listed what it indexed, do this for those sources. From the moment the
+command runs until the user's next message, `record_step` and `run_spec` are refused:
+the rest of this reply is the reading job the section below describes.
 
 These sources were just indexed: the ones the command just listed.
 

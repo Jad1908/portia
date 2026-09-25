@@ -1,6 +1,7 @@
 """The Claude Code plugin: what it names has to exist, and its skill is a rendered copy."""
 
 import json
+import re
 import tomllib
 from pathlib import Path
 
@@ -54,8 +55,13 @@ def test_the_guard_is_matched_to_every_tool_it_knows_how_to_refuse():
     from portia.cli import hook
 
     hooks = json.loads((PLUGIN / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
-    (pre,) = hooks["PreToolUse"]
-    assert set(pre["matcher"].split("|")) == set(hook._WRITES) | set(hook._READS)
+    files, builds = hooks["PreToolUse"]
+    assert set(files["matcher"].split("|")) == set(hook._WRITES) | set(hook._READS)
+    # A build tool, under either install's prefix, and no other portia tool.
+    for prefix in ("mcp__plugin_portia_portia__", "mcp__portia__"):
+        for name in hook._BUILDS:
+            assert re.fullmatch(builds["matcher"], prefix + name)
+        assert not re.fullmatch(builds["matcher"], prefix + "query_data")
 
 
 def test_the_marketplace_points_at_the_plugin():

@@ -59,7 +59,7 @@ drivers. It puts three commands on the PATH. Check all three:
 ```bash
 portia --help         # lists: ui, build, connect, index, journal, ...
 portia-mcp --help     # the tool server Claude Code will start
-portia-hook --help    # the two rules Claude Code will run
+portia-hook --help    # the rules Claude Code will run
 ```
 
 If a command is not found, the tool folder is not on the PATH. `uv tool dir --bin` prints
@@ -86,7 +86,9 @@ not pick a new plugin up. In the new session `/mcp` should show `portia` as conn
 - The first time each portia tool is used Claude Code asks permission. The read-only tools
   are safe to allow always. The four that write (`record_step`, `record_finding`,
   `set_interpretation`, `set_group`) are worth leaving on "ask", because each one changes a
-  file the user will review.
+  file the user will review. That prompt is the only one: portia's window asks before every
+  save, and inside Claude Code portia does not, so a writing tool set to "always allow"
+  saves without anybody being asked. Tell the user that in one sentence.
 
 ## 3b. The app
 
