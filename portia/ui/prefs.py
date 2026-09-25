@@ -412,15 +412,30 @@ def sync(app: Any) -> None:
 
     Called once a second from the page and once more on the way out
     (`ui/app.py`). Nothing is written before `restore_machine` has run.
+
+    **Only the keys that moved in this process are written** (`_moved`).
+    Two windows on one machine are two processes (a second `python -m
+    portia.ui` takes the next free port), each holding what it read at its
+    own start. Writing the whole snapshot let the one that wrote last put
+    back every value the other had changed since: a theme picked on one
+    window undone by a pane dragged on the other. Now they overwrite each
+    other only on a setting both changed, where the later change is the one
+    to keep.
     """
     global _written_machine
     with _LOCK:
         if _written_machine is None:
             return
         now = machine_of(app)
-        if now != _written_machine:
-            update_machine(now)
+        moved = _moved(now, _written_machine)
+        if moved:
+            update_machine(moved)
             _written_machine = now
+
+
+def _moved(now: dict[str, Any], written: dict[str, Any]) -> dict[str, Any]:
+    """The keys whose value is not what this process last wrote or read."""
+    return {name: value for name, value in now.items() if written.get(name) != value}
 
 
 def forget_restore() -> None:

@@ -471,3 +471,25 @@ def test_a_project_that_will_not_open_leaves_the_picker_showing(tmp_path, launch
     monkeypatch.setattr(app_module, "open_at_start", refuse)
     app_module.restore()
     assert window.opened is False
+
+
+def test_two_windows_overwrite_each_other_only_on_what_both_changed():
+    """Two processes, each holding what it read at its own start: the one that
+    writes last must not put back what the other changed since."""
+    first, second = _app(), _app()
+    prefs.restore_machine(first)
+    written_by_first = prefs._written_machine
+    prefs.restore_machine(second)
+    written_by_second = prefs._written_machine
+
+    prefs._written_machine = written_by_first
+    first.theme = True
+    prefs.sync(first)
+
+    prefs._written_machine = written_by_second
+    second.files_width = 320
+    prefs.sync(second)
+
+    saved = prefs.machine()
+    assert saved["theme"] == "dark", "the other window's pick survives"
+    assert saved["files_width"] == 320
