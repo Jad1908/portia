@@ -89,3 +89,23 @@ def test_next_free_passes_over_what_it_is_told_to(monkeypatch):
     monkeypatch.setattr(ports, "is_free", lambda host, port: port != 9000)
     assert ports.next_free(HOST, 9000, tries=5, skip={9001}) == 9002
     assert ports.next_free(HOST, 65535, tries=5) in (None, 65535)
+
+
+def test_a_port_whose_server_just_closed_is_free():
+    """Connections left in TIME_WAIT by a server that closed are not a server.
+
+    Restarting portia straight after closing it refused `--port` as in use for
+    about thirty seconds, and moved the default window up a port (2026-09-25).
+    The server side closing first is what leaves its end in TIME_WAIT.
+    """
+    from portia.core import ports
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind((HOST, 0))
+        listener.listen()
+        port = listener.getsockname()[1]
+        client = socket.create_connection((HOST, port))
+        accepted, _ = listener.accept()
+        accepted.close()  # the server's end closes first: TIME_WAIT is on port
+        client.close()
+    assert ports.is_free(HOST, port)
