@@ -46,7 +46,6 @@ Nothing here formats anything for a human — that is the panes' job.
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import re
 import shutil
@@ -67,7 +66,7 @@ from portia.cli.import_data import plan as plan_copy
 from portia.core import cancel, feedback
 from portia.core.io import connect, find_data_files, load_table, source_table, supported_suffixes
 from portia.core.table import Table
-from portia.ui import graph, tree
+from portia.ui import graph, prefs, tree
 from portia.ui import state as State
 from portia.ui.state import App
 
@@ -89,20 +88,10 @@ RUNS_DIR = "runs"
 #: table.
 RUN_INDEX = "index.md"
 
-#: Recently opened projects. Not project state, so it lives with the user rather
-#: than inside any one ``.portia/``.
-RECENTS = Path.home() / ".config" / "portia" / "recents.json"
-RECENTS_KEPT = 8
-
-#: Which tables the canvas was last narrowed to, per project. **Beside recents
-#: rather than inside `.portia/`**: where you last looked is about you, not about
-#: the data — it is not a fact anyone else on the project should inherit through a
-#: commit, and the catalog is the record of what the data *is*.
-VIEWS = Path.home() / ".config" / "portia" / "views.json"
-#: Where each project's cards were dragged to, beside `VIEWS` and for the same
-#: reason: an arrangement is about the reader, not a fact anyone else on the
-#: project should inherit through a commit.
-LAYOUTS = Path.home() / ".config" / "portia" / "layouts.json"
+#: How many recent projects the picker lists. Where they are kept, and where
+#: the canvas filter and the dragged cards are kept beside them, is `prefs`:
+#: one file for everything the window remembers about the person using it.
+RECENTS_KEPT = prefs.RECENTS_KEPT
 
 
 # --- opening a project ------------------------------------------------------
@@ -880,19 +869,11 @@ def _osascript(script: str) -> list[str]:
 
 def recents() -> list[tuple[Path, str]]:
     """Recently opened project directories, newest first, with when they were opened."""
-    try:
-        entries = json.loads(RECENTS.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return []
-    return [(Path(e["path"]), e.get("opened", "")) for e in entries if isinstance(e, dict)]
+    return prefs.recents()
 
 
 def remember(root: Path) -> None:
-    kept = [(p, when) for p, when in recents() if p != root]
-    entries = [{"path": str(root), "opened": datetime.now().isoformat(timespec="minutes")}]
-    entries += [{"path": str(p), "opened": when} for p, when in kept]
-    RECENTS.parent.mkdir(parents=True, exist_ok=True)
-    RECENTS.write_text(json.dumps(entries[:RECENTS_KEPT], indent=2), encoding="utf-8")
+    prefs.remember_opened(root)
 
 
 def remembered_view(root: Path) -> frozenset[str] | None:
@@ -904,57 +885,33 @@ def remembered_view(root: Path) -> frozenset[str] | None:
     different states and the file distinguishes them by absence rather than by
     emptiness (`graph._visible`).
     """
-    try:
-        saved = json.loads(VIEWS.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    names = saved.get(str(root)) if isinstance(saved, dict) else None
-    return frozenset(names) if isinstance(names, list) else None
+    names = prefs.project(root).get("view")
+    return frozenset(str(n) for n in names) if isinstance(names, list) else None
 
 
 def remember_view(root: Path, names: frozenset[str] | None) -> None:
-    try:
-        saved = json.loads(VIEWS.read_text(encoding="utf-8"))
-        saved = saved if isinstance(saved, dict) else {}
-    except (OSError, ValueError):
-        saved = {}
-    if names is None:
-        saved.pop(str(root), None)
-    else:
-        saved[str(root)] = sorted(names)
-    VIEWS.parent.mkdir(parents=True, exist_ok=True)
-    VIEWS.write_text(json.dumps(saved, indent=2, sort_keys=True), encoding="utf-8")
+    prefs.update_project(root, {"view": None if names is None else sorted(names)})
 
 
 def remembered_layout(root: Path) -> dict[str, tuple[int, int]]:
     """Where this project's cards were last dragged to; empty when nothing was moved."""
-    saved = _read_json(LAYOUTS).get(str(root))
+    saved = prefs.project(root).get("layout")
     if not isinstance(saved, dict):
         return {}
     out = {}
     for name, delta in saved.items():
-        if isinstance(delta, list) and len(delta) == 2:
-            out[str(name)] = (int(delta[0]), int(delta[1]))
+        try:
+            dx, dy = (int(v) for v in delta)
+        except (TypeError, ValueError):
+            continue
+        out[str(name)] = (dx, dy)
     return out
 
 
 def remember_layout(root: Path, offsets: dict[str, tuple[int, int]]) -> None:
     """Write the arrangement back. An empty one removes the entry rather than storing it."""
-    saved = _read_json(LAYOUTS)
-    if offsets:
-        saved[str(root)] = {name: list(delta) for name, delta in sorted(offsets.items())}
-    else:
-        saved.pop(str(root), None)
-    LAYOUTS.parent.mkdir(parents=True, exist_ok=True)
-    LAYOUTS.write_text(json.dumps(saved, indent=2, sort_keys=True), encoding="utf-8")
-
-
-def _read_json(path: Path) -> dict:
-    try:
-        saved = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return saved if isinstance(saved, dict) else {}
+    layout = {name: list(delta) for name, delta in sorted(offsets.items())}
+    prefs.update_project(root, {"layout": layout or None})
 
 
 def has_context(app: App) -> bool:

@@ -149,7 +149,11 @@ async def _browse() -> None:
 
 
 def _recents() -> None:
-    entries = engine.recents()
+    # A folder that is not there is not drawn, and stays remembered: opening
+    # one creates it (`engine.open_project`), so a click on a project that was
+    # deleted or moved made an empty folder where it used to be. A drive that
+    # is not mounted today brings its projects back when it is.
+    entries = [(root, opened) for root, opened in engine.recents() if root.is_dir()]
     if not entries:
         return
     c.rule()
