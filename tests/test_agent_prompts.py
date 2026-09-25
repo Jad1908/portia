@@ -248,3 +248,105 @@ def test_the_query_exemption_cannot_swallow_prose():
         "to the user before recording the step, and never assert a number you did not measure."
     )
     assert not _is_query_text("You are portia, a data harmonization copilot. " * 5)
+
+
+# --- every prompt file is read by something ------------------------------------------
+
+#: The `prompts.*` calls that load a file, and the folder each one reads from.
+_LOADERS = ("load", "tool", "task", "error")
+
+
+def _loaded_prompt(node: ast.AST) -> str | None:
+    """``prompts.error("blocked_step", …)`` → ``errors/blocked_step``.
+
+    The receiver has to be ``prompts``: `load` and `error` are ordinary enough
+    words that matching on the method alone would collect other modules' calls.
+    """
+    if not isinstance(node, ast.Call) or not node.args:
+        return None
+    func = node.func
+    if not isinstance(func, ast.Attribute) or func.attr not in _LOADERS:
+        return None
+    if not isinstance(func.value, ast.Name) or func.value.id != "prompts":
+        return None
+    first = node.args[0]
+    if not isinstance(first, ast.Constant) or not isinstance(first.value, str):
+        return None
+    return first.value if func.attr == "load" else f"{func.attr}s/{first.value}"
+
+
+def _call_sites() -> dict[str, list[str]]:
+    """Every `prompts.*("name")` in portia, by the file it loads.
+
+    Read off the syntax tree rather than line by line: a line-wise scan once
+    reported four live refusals and the whole `merge` task as dead text, because
+    their loaders are wrapped over two lines.
+    """
+    found: dict[str, list[str]] = {}
+    for path in sorted(PACKAGE.rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            named = _loaded_prompt(node)
+            if named is not None:
+                found.setdefault(named, []).append(
+                    f"{path.relative_to(PACKAGE.parent)}:{node.lineno}"
+                )
+    return found
+
+
+def test_a_loader_wrapped_over_two_lines_is_still_found():
+    sites = _call_sites()
+
+    assert sites["errors/blocked_step"], "wrapped over two lines in handlers.py"
+    assert sites["tasks/merge"], "wrapped over two lines in cli/chat.py"
+
+
+def test_no_prompt_file_is_dead_text():
+    """A task or refusal nothing loads still gets edited, and a tool file with no tool is never sent."""
+    sites = _call_sites()
+    names = {t.name for t in tools.ALL_TOOLS}
+    orphans = []
+    for path in sorted(prompts.HERE.rglob("*.md")):
+        name = path.relative_to(prompts.HERE).with_suffix("").as_posix()
+        kind = name.split("/")[0] if "/" in name else ""
+        if kind == "tools" and name.split("/", 1)[1] not in names:
+            orphans.append(f"{name}.md: a description for no tool")
+        elif kind in ("tasks", "errors") and not sites.get(name):
+            orphans.append(f"{name}.md: nothing loads it")
+    assert not orphans, "\n".join(orphans)
+
+
+# --- every tool has a place on the ladder --------------------------------------------
+
+#: Where each tool sits in the disclosure ladder, in the words `copilot.md` uses.
+#: **A label, not a mechanism**: nothing in the engine ranks tools. It is written
+#: down here so that adding a tool means deciding where it goes, and the test
+#: below fails until someone has. `graph_lookup` is deliberately not a rung
+#: (`KNOWLEDGE_GRAPH.md` §9.1): the rungs are depth on one table, and the router
+#: is what tells you which table.
+LADDER = {
+    "graph_lookup": "router",
+    "get_context": "L1",
+    "describe_source": "L2",
+    "profile_source": "L3",
+    "join_findings": "L4",
+    "query_data": "L5",
+    "plot_data": "beside L5",
+    "view_chart": "beside plot_data",
+    "measure_overlaps": "measure",
+    "set_interpretation": "write",
+    "set_group": "write",
+    "record_step": "write",
+    "review_queries": "curate",
+    "record_finding": "write",
+    "ask_user": "ask",
+    "read_spec": "read",
+    "run_spec": "verify",
+}
+
+
+def test_every_tool_has_a_place_on_the_ladder():
+    names = {t.name for t in tools.ALL_TOOLS}
+    missing = sorted(names - set(LADDER))
+    assert not missing, f"place these in LADDER: {', '.join(missing)}"
+    stale = sorted(set(LADDER) - names)
+    assert not stale, f"LADDER names tools that no longer exist: {', '.join(stale)}"

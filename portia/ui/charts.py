@@ -692,7 +692,7 @@ def render_failed(key: str, message: str) -> None:
     has been saying on its own since §8 — a failure the middle pane knew about
     and the left pane did not was the same silence one pane further out.
     **The log** gets it because `runlog` tees at the edges and a reply written
-    over a chart nobody saw is exactly what `devtools.audit` exists to make
+    over a chart nobody saw is exactly what `devtools.traces` exists to make
     visible. **The copilot** gets it on its next receipt, via `drawn`, which is
     the one place that can hold a fact arriving after the tool call it belongs to
     (§11.2).

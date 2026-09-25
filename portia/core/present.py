@@ -45,7 +45,7 @@ def duration(seconds: float | None) -> str:
     """`0.8s` / `12s` / `3m 07s` / `1h 04m`. ``None`` reads as unknown, never zero.
 
     A run log stamps every record (`portia/runlog.py`), so both the terminal and
-    the audit page want to say how long something took, and they must say it the
+    `devtools.traces` want to say how long something took, and they must say it the
     same way. Nothing here judges the number: a long call is a long call, and
     whether it was worth the wait needs a goal this module does not have.
     """

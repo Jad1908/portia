@@ -818,7 +818,7 @@ def _charts(called: list[Event]) -> set[str]:
 def elapsed(start: str | None, end: str | None) -> float | None:
     """Seconds between two record stamps. ``None`` if either is absent or unreadable.
 
-    Public because both the audit page and `cli.history` ask it, and two
+    Public because both `devtools.traces` and `cli.history` ask it, and two
     implementations of "how long did that take" is the disagreement-about-a-
     number `core/present.py` exists to stop.
     """
@@ -834,9 +834,9 @@ def call_durations(run: Transcript) -> dict[str, float]:
     """Seconds each tool call took, by the SDK's call id, off the record stamps.
 
     The transcript pane draws a replayed call with the time it took beside the
-    volume that came back, the way it draws a live one, and the audit page
-    says the same number: both read it through here, so the window and the
-    page cannot disagree about how long a profile ran. A call with no result
+    volume that came back, the way it draws a live one. Both ends are
+    :func:`elapsed`, which `devtools.traces` uses too, so the window and the
+    viewer cannot disagree about how long a profile ran. A call with no result
     under it, or on a log written before stamps existed, is absent rather
     than zero.
     """
