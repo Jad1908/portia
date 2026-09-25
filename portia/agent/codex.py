@@ -27,6 +27,12 @@ piece, and each piece is where the §9.2 measurements landed:
   the interrupt's own reply included, is read until it returns.
 - **Resume.** A thread id, through ``thread/resume``, the way `resume=` is a
   session id on Claude.
+- **Review before you reply.** The Claude binary fires a ``Stop`` hook the
+  moment the model is about to end its turn, and `agent/curation.py` blocks it
+  once. Codex has no such moment: a turn that completed is over. So the hold is
+  a **second turn**, sent by portia straight after the first completes, whose
+  prompt is the reason the Claude hook would have given. The exchange still
+  ends in one `RESULT`, after the second turn, carrying both turns' tokens.
 
 The SDK's client is reached through :class:`_Codex`, one small adapter a test
 replaces (`_sdk_client`'s reason in `session.py`), because the SDK offloads a
@@ -44,7 +50,7 @@ from pathlib import Path
 from typing import Any
 
 from portia import catalog
-from portia.agent import ask, curation, events, providers, session, tools
+from portia.agent import ask, curation, events, prompts, providers, session, tools
 from portia.agent.providers import codex as codex_provider
 from portia.core import cancel
 
@@ -153,6 +159,13 @@ def usage_from(token_usage: dict[str, Any]) -> dict[str, Any]:
         "output_tokens": int(last.get("outputTokens") or 0),
         "reasoning_output_tokens": int(last.get("reasoningOutputTokens") or 0),
     }
+
+
+def _summed(a: dict[str, Any] | None, b: dict[str, Any]) -> dict[str, Any]:
+    """Two turns' `usage_from` added key by key: one exchange, one count."""
+    if a is None:
+        return dict(b)
+    return {key: int(a.get(key) or 0) + int(b.get(key) or 0) for key in {**a, **b}}
 
 
 def context_from(token_usage: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -380,29 +393,44 @@ class CodexConversation:
                     prompt, model=self.model, effort=self.effort, provider=self.provider
                 )
                 model = None if self.model in ("", codex_provider.ACCOUNT_DEFAULT) else self.model
-                self._turn = await self._client.turn(prompt, model=model, effort=self.effort)
-                async for method, params in self._client.stream(self._turn):
+                spent: dict[str, Any] | None = None
+                asking = prompt
+                while True:
+                    ended: dict[str, Any] | None = None
+                    counted = False
+                    self._turn = await self._client.turn(asking, model=model, effort=self.effort)
+                    async for method, params in self._client.stream(self._turn):
+                        while self._pending:
+                            yield self._pending.pop(0)
+                        if method == "thread/tokenUsage/updated":
+                            self._usage = params.get("tokenUsage") or {}
+                            counted = True
+                        elif (
+                            method == "item/started"
+                            and (params.get("item") or {}).get("type") == "mcpToolCall"
+                        ):
+                            self._calls.append(params["item"])
+                        for event in from_notification(method, params):
+                            if event.kind == events.TOOL_CALL:
+                                self.curator.saw_tool(str(event.data.get("name") or ""))
+                            yield event
+                        if method == "turn/completed":
+                            ended = params.get("turn") or {}
                     while self._pending:
                         yield self._pending.pop(0)
-                    if method == "thread/tokenUsage/updated":
-                        self._usage = params.get("tokenUsage") or {}
-                    elif (
-                        method == "item/started"
-                        and (params.get("item") or {}).get("type") == "mcpToolCall"
-                    ):
-                        self._calls.append(params["item"])
-                    for event in from_notification(method, params):
-                        if event.kind == events.TOOL_CALL:
-                            self.curator.saw_tool(str(event.data.get("name") or ""))
-                        yield event
-                    if method == "turn/completed":
-                        yield result_event(
-                            params.get("turn") or {},
-                            usage_from(self._usage) if self._usage else None,
-                            str(self.session_id),
-                        )
-                while self._pending:
-                    yield self._pending.pop(0)
+                    if counted and self._usage:
+                        spent = _summed(spent, usage_from(self._usage))
+                    if ended is None:
+                        break
+                    # The Stop hook's moment, after the fact: a turn that asked the
+                    # data and reviewed nothing gets one more, and only once
+                    # (`Curation.hold`). A turn the human stopped, or one that
+                    # failed, is not held: that reply was not the model's to end.
+                    if ended.get("status") == "completed" and self.curator.hold():
+                        asking = prompts.error("review_before_reply")
+                        continue
+                    yield result_event(ended, spent, str(self.session_id))
+                    break
         finally:
             ask.install_asker(previous)
             self._sending = False
