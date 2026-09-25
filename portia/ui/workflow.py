@@ -2411,7 +2411,7 @@ def spec_label(path: Path | None) -> str:
     return path.name if path else "no spec"
 
 
-_NO_SPECS = "No specs yet. The copilot writes one as it records steps. Each spec becomes a table."
+_NO_SPECS = "No specs yet."
 _NO_STEPS = "No steps yet. The copilot records one for each decision about the data."
 #: Said once, above the list — not on every row. The rows carry the narrower
 #: fact (`_STEP_NOT_RUN`), which is the one that can differ between them once a
