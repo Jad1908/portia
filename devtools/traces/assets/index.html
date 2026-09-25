@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>portia traces</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="app" id="app">
+  <aside class="side">
+    <div class="side-top">
+      <input id="search" class="search" placeholder="Search runs" autocomplete="off" spellcheck="false">
+      <div class="seg" id="seg">
+        <button data-set="working" class="on">Working set</button>
+        <button data-set="all">All logs</button>
+      </div>
+      <div class="tagbar" id="tagbar"></div>
+    </div>
+    <div class="list" id="list"></div>
+    <div class="side-foot">
+      <button class="ghost" id="keys-btn" title="Keyboard shortcuts">?</button>
+      <span class="count" id="count"></span>
+    </div>
+  </aside>
+  <main class="main" id="main"></main>
+  <aside class="drawer" id="drawer"></aside>
+</div>
+<div class="pop" id="pop" hidden></div>
+<script src="/app.js"></script>
+</body>
+</html>

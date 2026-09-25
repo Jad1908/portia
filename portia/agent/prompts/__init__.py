@@ -50,8 +50,7 @@ def tool(name: str, **fields: object) -> str:
     it was turned down. It needs a markdown parser in the prompt loader, and a
     heuristic that guesses wrong corrupts prompt text with nothing reviewing the
     result. Verbatim has no transformation to review: the file, the string in
-    `runlog`'s ``PROMPTS`` record, and what `devtools.context` renders are one
-    text. The cost accepted in exchange is that reflowing a paragraph in an
+    and `runlog`'s ``PROMPTS`` record are one text. The cost accepted in exchange is that reflowing a paragraph in an
     editor is a prompt change, which is why it shows up in a diff.
 
     ``fields`` fills placeholders with values the *code* owns — the set of

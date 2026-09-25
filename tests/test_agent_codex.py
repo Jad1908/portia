@@ -620,10 +620,17 @@ def test_only_the_codex_harness_is_offered_the_question_tool():
     )
 
 
-def test_the_question_tool_is_read_only_so_codex_runs_it_without_an_approval():
-    from devtools.context import read_only
+def _read_only(annotations) -> bool:
+    """The read-only hint on mcp 1.x or 2.x (the field was renamed)."""
+    for name in ("read_only_hint", "readOnlyHint"):
+        value = getattr(annotations, name, None)
+        if value is not None:
+            return bool(value)
+    return False
 
-    assert read_only(tools.ask_user.annotations) is True
+
+def test_the_question_tool_is_read_only_so_codex_runs_it_without_an_approval():
+    assert _read_only(tools.ask_user.annotations) is True
     assert tools.ask_user not in tools.READ_TOOLS and tools.ask_user not in tools.WRITE_TOOLS
 
 

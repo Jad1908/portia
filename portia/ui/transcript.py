@@ -1882,7 +1882,7 @@ def _event(event: events.Event, *, key: str = "think", job: bool = False) -> Non
         # An indexing job's prompt is the app's own template, not a message.
         # It was a shut disclosure here until 2026-09-23 and is nothing now
         # (the user's call): the banner says what the job is, the log keeps
-        # the text, and `devtools.audit` shows it to whoever tunes it.
+        # the text, and `devtools.traces` shows it to whoever tunes it.
         if not job:
             _prompt_row(event.data)
         return

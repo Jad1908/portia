@@ -43,10 +43,9 @@ runs/
 # whatever directory you point it at.
 /sandbox/
 
-# Audit pages rendered by `python -m devtools.audit`. Build output: the log they
-# were rendered from is the durable thing, and it lives in the project. Stamped
-# rather than overwritten because comparing a prompt change means keeping the
-# page from before it — so this folder fills up, and none of it is worth a diff.
+# Scratch for devtools: `devtools.traces` keeps its notes here when there is no
+# private docs/ folder to put them in (a fresh public clone). Notes point at logs
+# that can carry real table names, so they never reach the repo.
 /devtools/out/
 
 # The 1024px logo original. What the app uses is the 256px copy that ships with
