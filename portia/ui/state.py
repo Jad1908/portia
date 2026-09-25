@@ -681,6 +681,28 @@ class Chart:
     #: keeping the chart or throwing it away has to take the file with it.
     stashed: bool = False
 
+    @classmethod
+    def from_figure(cls, path: str, saved: dict, *, preview: bool = False) -> Chart:
+        """A saved figure as a tab: what `figures.load` read, keyed by its path.
+
+        One constructor for the two ways a figure becomes a tab, the gallery
+        (`charts.open_figure`) and a project reopened with it open (`prefs`),
+        so the two cannot build different tabs out of one file.
+        """
+        return cls(
+            name=saved.get("name") or Path(path).stem,
+            question=saved.get("question", ""),
+            vega=saved.get("vega") or {},
+            rows=saved.get("rows") or [],
+            columns=saved.get("columns") or [],
+            sql=saved.get("sql", ""),
+            inputs=saved.get("inputs") or [],
+            path=path,
+            notes=saved.get("notes", ""),
+            at=saved.get("at", ""),
+            preview=preview,
+        )
+
     @property
     def key(self) -> str:
         """What its tab is called on the strip, and what `App.chart` looks up.

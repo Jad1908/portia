@@ -54,7 +54,7 @@ from nicegui import ui
 from portia.agent import providers
 from portia.core import feedback as core_feedback
 from portia.ui import components as c
-from portia.ui import engine, feedback, screens, state, theme
+from portia.ui import engine, feedback, prefs, screens, state, theme
 from portia.ui.state import APP, BRIEF
 
 TITLE = "Settings"
@@ -619,6 +619,9 @@ async def _switch_project() -> None:
         return
     await exchange.close_all()
     _close()
+    # Where you were, written now: once the project is left there is no
+    # project for the next write to be about (`prefs.sync`).
+    prefs.sync(APP)
     APP.opened = False
     app_module.shell.refresh()
 

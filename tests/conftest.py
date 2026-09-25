@@ -80,6 +80,7 @@ def _never_the_users_window_files(tmp_path_factory, monkeypatch):
     # And what was last written, which is process state: one test's restore
     # must not make the next test's `sync` write.
     monkeypatch.setattr(prefs, "_written_machine", None)
+    monkeypatch.setattr(prefs, "_written_project", None)
     yield
 
 

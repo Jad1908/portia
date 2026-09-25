@@ -520,3 +520,361 @@ def test_a_value_the_file_already_holds_is_not_written_again(monkeypatch):
     monkeypatch.setattr(prefs, "update_machine", writes.append)
     prefs.sync(app)
     assert writes and "theme" not in writes[0], "only what the file does not hold yet"
+
+
+# --- one project's view -----------------------------------------------------
+
+
+def _opened(root):
+    from portia.ui import engine
+    from portia.ui.state import App
+
+    app = App()
+    engine.open_project(root, app)
+    app.opened = True
+    return app
+
+
+def _figure(root, name):
+    from portia import figures
+
+    chart = {
+        "tab": name,
+        "question": f"what is {name}",
+        "vega": {"mark": "bar"},
+        "rows": [{"a": 1}],
+        "columns": ["a"],
+        "sql": "select 1 as a",
+        "inputs": [],
+    }
+    return figures.save(chart, root=root).relative_to(root).as_posix()
+
+
+@pytest.fixture
+def brief_project(tmp_path, monkeypatch):
+    """A project whose brief is saved, the way `catalog.init_project` writes it."""
+    from portia import catalog
+
+    root = tmp_path / "proj"
+    root.mkdir()
+    monkeypatch.chdir(root)
+    catalog.init_project("A project with a brief.", portia_dir=".portia")
+    monkeypatch.chdir(tmp_path)
+    return root
+
+
+def test_saved_figure_tabs_come_back_where_they_were(brief_project):
+    from portia.ui.state import RIGHT, Chart
+
+    root = brief_project
+    first, second = _figure(root, "sales"), _figure(root, "costs")
+    app = _opened(root)
+    for path, group in ((first, None), (second, RIGHT)):
+        app.show_chart(Chart.from_figure(path, {"name": path}))
+        if group:
+            app.move_tab(path, group)
+    app.chart(first).height = 320
+    app.show_chart(Chart(name="unsaved", rows=[{"a": 1}]))  # only in memory
+    app.focus_tab(second)
+    prefs.sync(app)
+
+    back = _opened(root)
+    assert [c.key for c in back.charts] == [first, second]
+    assert back.chart(second).group == RIGHT
+    assert back.chart(first).height == 320
+    assert back.chart(first).rows == [{"a": 1}], "read from the file"
+    # The unsaved chart was showing on the left; it is gone, so the left half
+    # shows its first tab, the canvas.
+    assert back.active == {"left": "", "right": second}
+    assert back.focus_group == RIGHT
+
+
+def test_a_figure_deleted_since_is_not_reopened_and_the_right_half_slides_over(brief_project):
+    from portia.ui.state import CANVAS, LEFT, RIGHT, Chart
+
+    root = brief_project
+    gone, kept = _figure(root, "gone"), _figure(root, "kept")
+    app = _opened(root)
+    app.show_chart(Chart.from_figure(gone, {}))
+    app.show_chart(Chart.from_figure(kept, {}))
+    app.move_tab(kept, RIGHT)
+    app.move_tab(CANVAS, RIGHT)
+    assert app.keys(LEFT) == [gone]
+    prefs.sync(app)
+    (root / gone).unlink()
+
+    back = _opened(root)
+    assert back.keys(LEFT) == [CANVAS, kept], "a left half with nothing in it is not a layout"
+    assert back.keys(RIGHT) == []
+    assert back.active[RIGHT] == ""
+
+
+def test_one_preview_per_group_even_from_a_hand_edited_file(brief_project):
+    root = brief_project
+    a, b = _figure(root, "a"), _figure(root, "b")
+    _opened(root)
+    prefs.update_project(
+        root,
+        {"tabs": [{"path": a, "preview": True}, {"path": b, "preview": True}, {"path": 7}]},
+    )
+    back = _opened(root)
+    assert [c.preview for c in back.charts] == [True, False]
+
+
+def test_what_was_folded_comes_back(brief_project):
+    root = brief_project
+    app = _opened(root)
+    app.open_folders = frozenset({"data/raw"})
+    app.closed_folders = frozenset({"specs"})
+    app.figures_open, app.warehouse_open, app.report_open = False, False, False
+    app.figures_closed = frozenset({"figures/old"})
+    app.knowledge_columns = True
+    prefs.sync(app)
+
+    back = _opened(root)
+    assert back.open_folders == frozenset({"data/raw"})
+    assert back.closed_folders == frozenset({"specs"})
+    assert (back.figures_open, back.warehouse_open, back.report_open) == (False, False, False)
+    assert back.figures_closed == frozenset({"figures/old"})
+    assert back.knowledge_columns is True
+
+
+def test_one_projects_folds_do_not_follow_you_into_another(brief_project, tmp_path):
+    other = tmp_path / "other"
+    other.mkdir()
+    app = _opened(brief_project)
+    app.open_folders = frozenset({"data/raw"})
+    prefs.sync(app)
+    from portia.ui import engine
+
+    engine.open_project(other, app)
+    assert app.open_folders == frozenset()
+
+
+def test_a_half_written_message_is_kept(brief_project):
+    app = _opened(brief_project)
+    app.goal = "join orders to regions and"
+    prefs.sync(app)
+    assert _opened(brief_project).goal == "join orders to regions and"
+
+    app.goal = ""  # sent
+    prefs.sync(app)
+    assert _opened(brief_project).goal == ""
+
+
+def test_a_brief_being_typed_is_not_a_draft(tmp_path, monkeypatch):
+    """`App.goal` is also the brief screen's scratch; a brief is not a message."""
+    monkeypatch.chdir(tmp_path)
+    root = tmp_path / "fresh"
+    root.mkdir()
+    app = _opened(root)
+    assert not app.project_context
+    app.goal = "This project harmonizes"
+    prefs.sync(app)
+    assert "draft" not in prefs.project(root)
+
+
+def test_a_draft_is_not_restored_into_a_project_whose_brief_is_gone(brief_project):
+    app = _opened(brief_project)
+    app.goal = "half a message"
+    prefs.sync(app)
+    (brief_project / ".portia" / "project.yaml").unlink()
+    assert _opened(brief_project).goal == "", "it would land in the brief box"
+
+
+def test_a_selection_is_restored_only_if_it_still_exists(brief_project):
+    from portia.ui.state import BRIEF
+
+    app = _opened(brief_project)
+    app.select(BRIEF, "")
+    prefs.sync(app)
+    assert _opened(brief_project).selection == (BRIEF, "")
+
+    prefs.update_project(brief_project, {"selection": ["source", "orders"]})
+    assert _opened(brief_project).selection is None, "no such source in the catalog"
+    prefs.update_project(brief_project, {"selection": ["run", "report.md"]})
+    assert _opened(brief_project).selection is None, "a kind that is not restored"
+
+
+def test_leaving_a_project_writes_its_last_second(brief_project, tmp_path, monkeypatch):
+    """The page writes once a second; opening another project must not lose the
+    second in between."""
+    from portia.ui import engine
+
+    app = _opened(brief_project)
+    app.knowledge_columns = True  # no sync after this
+    other = tmp_path / "other"
+    other.mkdir()
+    engine.open_project(other, app)
+    assert prefs.project(brief_project)["knowledge_columns"] is True
+
+
+def test_a_project_whose_entry_was_not_read_is_never_written(brief_project, tmp_path):
+    """Otherwise a window pointed at a project some other way would overwrite
+    where you were with that window's defaults."""
+    app = _opened(brief_project)
+    app.root = tmp_path  # moved without `open_project`
+    app.goal = "x"
+    prefs.sync(app)
+    assert prefs.project(tmp_path) == {}
+
+
+# --- the spec and the chat, which open_at_start picks up ---------------------
+
+
+@pytest.fixture
+def window(monkeypatch, tmp_path):
+    from portia.ui import app as app_module
+    from portia.ui.state import App
+
+    fresh = App()
+    monkeypatch.setattr(app_module, "APP", fresh)
+    monkeypatch.chdir(tmp_path)
+    return app_module, fresh
+
+
+def _specs(root, *names):
+    import yaml
+
+    (root / "specs").mkdir(exist_ok=True)
+    for name in names:
+        (root / "specs" / f"{name}.yaml").write_text(
+            yaml.safe_dump({"sources": {}, "steps": []}), encoding="utf-8"
+        )
+
+
+def test_the_spec_left_open_is_opened_with_the_cards_left_open(brief_project, window):
+    app_module, app = window
+    _specs(brief_project, "a_first", "b_second", "c_third")
+    prefs.update_project(brief_project, {"spec": "b_second", "expanded": ["c_third", "gone"]})
+    app_module.open_at_start(brief_project)
+    assert app.spec_path.stem == "b_second"
+    assert app.expanded == frozenset({"c_third"}), "a card whose spec is gone is not opened"
+
+
+def test_the_spec_row_left_lit_is_lit_without_hiding_a_restored_tab(brief_project, window):
+    from portia.ui.state import SPEC
+
+    app_module, app = window
+    _specs(brief_project, "a_first", "b_second")
+    figure = _figure(brief_project, "sales")
+    prefs.update_project(
+        brief_project,
+        {
+            "spec": "b_second",
+            "selection": [SPEC, "b_second.yaml"],
+            "tabs": [{"path": figure}],
+            "active": {"left": figure},
+        },
+    )
+    app_module.open_at_start(brief_project)
+    assert app.selection == (SPEC, "b_second.yaml")
+    assert app.active["left"] == figure
+
+
+def test_a_spec_row_is_not_lit_for_a_spec_that_is_not_the_one_opened(brief_project, window):
+    from portia.ui.state import SPEC
+
+    app_module, app = window
+    _specs(brief_project, "a_first")
+    prefs.update_project(brief_project, {"spec": "gone", "selection": [SPEC, "gone.yaml"]})
+    app_module.open_at_start(brief_project)
+    assert app.selection is None
+
+
+def test_every_card_shut_is_remembered_as_every_card_shut(brief_project, window):
+    app_module, app = window
+    _specs(brief_project, "a_first", "b_second")
+    prefs.update_project(brief_project, {"spec": "b_second", "expanded": []})
+    app_module.open_at_start(brief_project)
+    assert app.expanded == frozenset()
+
+
+def test_a_spec_removed_since_falls_back_to_the_first(brief_project, window):
+    app_module, app = window
+    _specs(brief_project, "a_first", "b_second")
+    prefs.update_project(brief_project, {"spec": "renamed", "expanded": []})
+    app_module.open_at_start(brief_project)
+    assert app.spec_path.stem == "a_first"
+    assert app.expanded == frozenset({"a_first"}), "the remembered cards belonged to it"
+
+
+def test_the_chat_left_open_is_opened_again(brief_project, window, monkeypatch):
+    from portia.ui import exchange
+
+    app_module, app = window
+    log = brief_project / ".portia" / "chats" / "2026-09-25-chat.jsonl"
+    log.parent.mkdir(parents=True)
+    log.write_text("", encoding="utf-8")
+    opened: list = []
+    monkeypatch.setattr(exchange, "open_from_disk", opened.append)
+    prefs.update_project(brief_project, {"chat": "chats/2026-09-25-chat.jsonl"})
+    app_module.open_at_start(brief_project)
+    assert opened == [log.resolve()]
+
+
+@pytest.mark.parametrize(
+    "rel",
+    ["chats/missing.jsonl", "../../elsewhere/chats/x.jsonl", "sources/orders.yaml", 12],
+)
+def test_a_chat_that_is_gone_or_not_a_chat_is_not_opened(brief_project, window, monkeypatch, rel):
+    from portia.ui import exchange
+
+    app_module, _ = window
+    (brief_project / ".portia" / "sources").mkdir(exist_ok=True)
+    (brief_project / ".portia" / "sources" / "orders.yaml").write_text("", encoding="utf-8")
+    opened: list = []
+    monkeypatch.setattr(exchange, "open_from_disk", opened.append)
+    prefs.update_project(brief_project, {"chat": rel})
+    app_module.open_at_start(brief_project)
+    assert opened == []
+
+
+def test_a_chat_log_that_will_not_read_does_not_stop_the_project_opening(
+    brief_project, window, monkeypatch
+):
+    from portia.ui import exchange
+
+    app_module, app = window
+    log = brief_project / ".portia" / "chats" / "broken.jsonl"
+    log.parent.mkdir(parents=True)
+    log.write_text("{ not json", encoding="utf-8")
+
+    def broken(path):
+        raise ValueError("not a log")
+
+    monkeypatch.setattr(exchange, "open_from_disk", broken)
+    prefs.update_project(brief_project, {"chat": "chats/broken.jsonl"})
+    app_module.open_at_start(brief_project)
+    assert app.opened and app.open is None
+
+
+def test_two_windows_on_one_project_keep_each_others_changes(brief_project):
+    # Each window's first sync runs a second after it opens the project.
+    first = _opened(brief_project)
+    prefs.sync(first)
+    written_by_first = prefs._written_project
+    second = _opened(brief_project)
+    prefs.sync(second)
+    written_by_second = prefs._written_project
+
+    prefs._written_project = written_by_first
+    first.goal = "a draft typed in the first window"
+    prefs.sync(first)
+
+    prefs._written_project = written_by_second
+    second.knowledge_columns = True
+    prefs.sync(second)
+
+    saved = prefs.project(brief_project)
+    assert saved["draft"] == "a draft typed in the first window"
+    assert saved["knowledge_columns"] is True
+
+
+def test_a_project_opened_but_never_touched_is_still_remembered(brief_project):
+    """The project half's baseline is the file too, so what a project opened with
+    and never changed (its spec, its cards) reaches the file on the first sync."""
+    app = _opened(brief_project)
+    app.knowledge_columns = False
+    prefs.sync(app)
+    assert "expanded" in prefs.project(brief_project)
