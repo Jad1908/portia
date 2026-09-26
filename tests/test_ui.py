@@ -2670,6 +2670,31 @@ def test_following_the_newest_row_stops_the_moment_you_scroll_up():
     assert "keep(el)" in script
 
 
+def test_a_sticking_region_is_not_anchored_by_the_browser():
+    """`scroll.js` reads every scroll event on a keyed region as a person's.
+    Scroll anchoring moves the scroll too: as the tail was redrawn it left the
+    transcript 25 px short of its foot, which read as *scrolled up*, and the
+    chat stopped following for the rest of the conversation (2026-09-26)."""
+    css = (Path(c.__file__).parent / "assets" / "portia.css").read_text(encoding="utf-8")
+    rule = css.split('.p-scroll[data-scroll-stick="bottom"] {', 1)[1].split("}", 1)[0]
+    assert "overflow-anchor: none" in rule
+
+
+def test_a_sticking_region_does_not_read_its_own_move_as_a_person_leaving_the_foot():
+    """The event for `scroll.js`'s own move to the foot arrives a frame later and
+    reads that frame's geometry; rows that mounted in between made it look like
+    a person had scrolled up, on a page reloaded mid-chat and mid-stream alike
+    (2026-09-26). The second aim goes to the foot as it is then, not as it was."""
+    script = (Path(__file__).resolve().parents[1] / "portia/ui/assets/scroll.js").read_text(
+        encoding="utf-8"
+    )
+    listener = script.split('"scroll",', 1)[1].split("true,", 1)[0]
+
+    assert "aimed.get(e.target) === e.target.scrollTop" in listener
+    assert listener.index("aimed.get") < listener.index("remembered.set")
+    assert "const toFoot = (el) => put(el, el.scrollHeight)" not in script
+
+
 # --- progress: where the run is, said on the loop that can draw it -----------
 
 

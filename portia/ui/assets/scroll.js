@@ -27,6 +27,9 @@
 //     The transcript pinned itself with `scrollTop = 1e9` on every event, and
 //     when that landed before the new rows existed it clamped to 0 — the chat
 //     jumping to the top exactly when a question arrived or was answered.
+//     Such a region is unanchored (`portia.css`): a move this did not make is
+//     read as a person's, and the browser's scroll anchoring moving it a few
+//     rows short of the foot was read as one scrolling up (2026-09-26).
 //   * `data-scroll-to` — a token naming an element to bring into view, acted on
 //     **once per token**, the same shape as the canvas's focus mark. A repeated
 //     render is then harmless rather than something the server has to get right.
@@ -66,6 +69,14 @@
       // region that stays.
       const was = remembered.get(key);
       if (queued && e.target.scrollTop === 0 && was && was.top > 0) return;
+      // **Our own move to the foot is not a person leaving it** (2026-09-26).
+      // The event is dispatched a frame after `aim` moved the region and reads
+      // the geometry of *that* frame: rows that mounted in between put the foot
+      // further down, and this recorded *scrolled up*. On a page reloaded
+      // mid-chat the rows grew from 4,831 to 7,973 px between the two, and the
+      // chat never followed again.
+      if (aimed.get(e.target) === e.target.scrollTop) return;
+      aimed.delete(e.target);
       remembered.set(key, { top: e.target.scrollTop, foot: atFoot(e.target) });
     },
     true,
@@ -81,7 +92,25 @@
     });
   };
 
-  const toFoot = (el) => put(el, el.scrollHeight);
+  // el -> the scrollTop `aim` left it at, which is how the listener above knows
+  // the event is ours.
+  const aimed = new WeakMap();
+
+  const aim = (el) => {
+    el.scrollTop = el.scrollHeight;
+    aimed.set(el, el.scrollTop);
+  };
+
+  // Aimed again after layout, like `put`, but at the foot as it is *then*:
+  // the rows that arrive in between are the reason for the second aim, so
+  // aiming at the height measured before them stopped short.
+  const toFoot = (el) => {
+    aim(el);
+    requestAnimationFrame(() => {
+      const was = remembered.get(keyOf(el));
+      if (el.isConnected && !(was && !was.foot)) aim(el);
+    });
+  };
 
   const keep = (el) => {
     const was = remembered.get(keyOf(el));
