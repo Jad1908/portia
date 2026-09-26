@@ -60,6 +60,42 @@ def test_there_are_exactly_three_badge_variants():
     assert len(variants) == 3
 
 
+# --- prose: the copilot's markdown, as it writes it ---------------------------
+
+
+def _prose(text: str) -> str:
+    """What `c.markdown` puts on the page, through the function `ui.markdown` calls."""
+    from nicegui.elements.markdown import prepare_content
+
+    return prepare_content(text, extras=" ".join(c.MARKDOWN_EXTRAS))
+
+
+def test_a_list_right_under_a_sentence_is_a_list():
+    html = _prose("**Pipeline, this layer:**\n- `stg_a` (staging)\n- `stg_b` (staging)\n\nAfter.")
+    assert "<p><strong>Pipeline, this layer:</strong></p>" in html
+    assert "<li><code>stg_a</code> (staging)</li>" in html
+    assert "<p>After.</p>" in html
+
+
+def test_a_numbered_list_right_under_a_sentence_is_a_numbered_list():
+    html = _prose("Two options:\n1. keep it\n2. drop it")
+    assert "<p>Two options:</p>" in html
+    assert "<ol>\n<li>keep it</li>\n<li>drop it</li>\n</ol>" in html
+
+
+def test_a_cuddled_list_leaves_code_tables_and_identifiers_alone():
+    html = _prose(
+        "Joined on customer_id and name_x:\n"
+        "- first_name\n\n"
+        "```\n- not a list\n1. nor this\n```\n\n"
+        "Counts:\n| a | b |\n|---|---|\n| 1 | - |"
+    )
+    assert "<li>first_name</li>" in html
+    assert "customer_id and name_x" in html  # code-friendly: no emphasis from `_`
+    assert "- not a list\n1. nor this" in html  # a fence is still verbatim
+    assert "<td>-</td>" in html
+
+
 # --- app state ---------------------------------------------------------------
 
 
