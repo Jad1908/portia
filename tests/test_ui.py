@@ -2546,6 +2546,18 @@ def test_the_report_lists_the_spec_even_before_anything_has_run():
         assert all(result is None for _, result in workflow._blocks())
 
 
+def test_a_step_the_window_has_not_built_is_not_called_unrun():
+    """`record_step` measures a step before it enters the spec, and the copilot
+    quotes those numbers. A pane saying "not run" beside that reply was wrong:
+    what has not happened is Run in this window, which builds the table."""
+    from portia.ui import workflow
+
+    said = (workflow._NOT_BUILT + " " + workflow._STEP_NOT_BUILT).lower()
+    assert "not run" not in said
+    assert "measured when recorded" in said
+    assert "not built" in workflow._STEP_NOT_BUILT
+
+
 def test_a_measurement_whose_step_left_the_spec_is_still_drawn():
     """Dropping it would be the pane deciding a measurement did not happen."""
     from types import SimpleNamespace
