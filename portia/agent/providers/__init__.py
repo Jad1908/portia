@@ -2,9 +2,10 @@
 
 A **provider** is where the model the copilot runs on comes from: Anthropic's
 API, or an Ollama server on this machine. The loop is the same either way. The
-Claude Agent SDK's bundled binary drives it, and every mechanism portia leans on
-(the permission callback, `AskUserQuestion`, the Stop hook, interrupt, resume)
-lives in that binary rather than in the API it talks to. So a provider decides
+Claude Agent SDK drives it through a Claude Code binary, the machine's own or
+the SDK's bundled copy (:func:`choose_program`), and every mechanism portia
+leans on (the permission callback, `AskUserQuestion`, the Stop hook, interrupt,
+resume) lives in that binary rather than in the API it talks to. So a provider decides
 three things and nothing else: **which environment the binary is started with**,
 **which models it can offer**, and **what can be measured about one before a
 message is sent to it**.
@@ -35,6 +36,9 @@ from __future__ import annotations
 
 import importlib
 import os
+import platform
+import re
+import shutil
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -70,6 +74,20 @@ SETTINGS = Path.home() / ".config" / "portia" / "providers.yaml"
 BASE_URL_VAR = "ANTHROPIC_BASE_URL"
 TOKEN_VAR = "ANTHROPIC_AUTH_TOKEN"
 
+#: Where a harness's program came from (`Program.origin`, `docs/PROVIDERS.md`
+#: §4.10). `CONFIGURED` is the path in the machine's settings; `MACHINE` is the
+#: user's own install, found on ``PATH``; `BUNDLED` is the copy the harness's
+#: Python package carries. A kind, never a rank: a dashboard draws each by name.
+CONFIGURED = "configured"
+MACHINE = "machine"
+BUNDLED = "bundled"
+ORIGINS = (CONFIGURED, MACHINE, BUNDLED)
+ORIGIN_WORDS = {
+    CONFIGURED: "the configured path",
+    MACHINE: "the machine's own",
+    BUNDLED: "bundled with the SDK",
+}
+
 
 class ProviderUnavailable(RuntimeError):
     """The provider could not be reached, and this is what it said."""
@@ -102,6 +120,125 @@ class Model:
 
 
 @dataclass(frozen=True)
+class Program:
+    """The one program a harness runs, and why it is that one (`docs/PROVIDERS.md` §4.10).
+
+    ``version`` is the line the program printed for ``--version``
+    (``2.1.283 (Claude Code)``), empty where it printed none. ``passed_over``
+    is one line about the candidate not taken, empty where there was none:
+    the machine's copy that was older than the bundled one, or a launcher
+    script that cannot be started as the program.
+    """
+
+    path: str
+    origin: str
+    version: str = ""
+    passed_over: str = ""
+
+    @property
+    def origin_words(self) -> str:
+        """What a dashboard calls the origin."""
+        return ORIGIN_WORDS[self.origin]
+
+    def as_dict(self) -> dict[str, str]:
+        """The record a log keeps: where it was, where it came from, what it printed."""
+        out = {"path": self.path, "origin": self.origin, "version": self.version}
+        if self.passed_over:
+            out["passed_over"] = self.passed_over
+        return out
+
+
+_NUMBER = re.compile(r"(\d+(?:\.\d+)+)")
+
+
+def build_number(printed: str) -> tuple[int, ...]:
+    """The first dotted number in what a program printed for ``--version``; empty where there is none.
+
+    ``2.1.283 (Claude Code)`` and ``codex-cli 0.156.1`` both read; a tuple, so
+    ``2.1.283`` sorts after ``2.1.99``, which a string would not.
+    """
+    match = _NUMBER.search(printed)
+    return tuple(int(part) for part in match.group(1).split(".")) if match else ()
+
+
+#: What each program printed for ``--version``, by path and the file's stamp.
+#: A probe is a subprocess, 0.35 s for the bundled Claude Code on the machine
+#: this was built on, and the dashboard, the options and the log all ask; so
+#: each copy is asked once per process, and again when the file changes,
+#: which is what an update does.
+_printed: dict[tuple[str, int, int], str] = {}
+
+
+def remembered_version(path: str, probe: Callable[[str], str]) -> str:
+    """What ``path`` prints for ``--version``, asked once per copy (:data:`_printed`)."""
+    try:
+        stamp = os.stat(path)
+    except OSError:
+        return ""
+    key = (path, stamp.st_mtime_ns, stamp.st_size)
+    if key not in _printed:
+        try:
+            _printed[key] = probe(path)
+        except ProviderUnavailable:
+            _printed[key] = ""
+    return _printed[key]
+
+
+def machine_binary(name: str) -> str | None:
+    """The user's own ``name`` on ``PATH``; on Windows the real program before any launcher script."""
+    if platform.system() == "Windows":
+        return shutil.which(f"{name}.exe") or shutil.which(name)
+    return shutil.which(name)
+
+
+def choose_program(
+    *,
+    configured: str,
+    machine: str | None,
+    bundled: str | None,
+    printed: Callable[[str], str],
+) -> Program | None:
+    """Which of a harness's programs runs (`docs/PROVIDERS.md` §4.10).
+
+    The configured path when there is one, as it is. Else the machine's own
+    install when it is at least as new as the bundled copy, because the copy
+    the user updates knows today's models, and a copy older than the one
+    portia was built against may not know the SDK's flags. Else the bundled
+    copy. Else whichever exists, and ``None`` when neither does. ``printed``
+    is what a candidate says for ``--version``, asked only when the two have
+    to be compared; a candidate that prints no number cannot be compared and
+    is passed over for one that does. On Windows a launcher script on
+    ``PATH`` (npm's ``claude.cmd``) is passed over too: the SDK refuses to
+    start one.
+    """
+    if configured.strip():
+        expanded = os.path.expanduser(configured.strip())
+        path = expanded if Path(expanded).is_file() else shutil.which(expanded)
+        return Program(path, CONFIGURED, printed(path)) if path else None
+    over = ""
+    if machine and platform.system() == "Windows" and not machine.lower().endswith(".exe"):
+        over = f"{machine} is a launcher script, which cannot be started as the program"
+        machine = None
+    if machine and bundled:
+        mine, theirs = printed(machine), printed(bundled)
+        if build_number(mine) and (
+            not build_number(theirs) or build_number(mine) >= build_number(theirs)
+        ):
+            return Program(machine, MACHINE, mine)
+        over = (
+            f"{machine} prints no version"
+            if not build_number(mine)
+            else f"{machine} is {mine}, older than the bundled {theirs}"
+        )
+        return Program(bundled, BUNDLED, theirs, over)
+    if machine:
+        return Program(machine, MACHINE, printed(machine))
+    if bundled:
+        return Program(bundled, BUNDLED, printed(bundled), over)
+    return None
+
+
+@dataclass(frozen=True)
 class Status:
     """Whether the provider can be reached right now, and what it said.
 
@@ -118,6 +255,9 @@ class Status:
     version: str = ""
     account: str = ""
     remedy: str = ""
+    #: Which program answered and why it is that one, for the two harnesses
+    #: (§4.10); ``None`` for a server, and where nothing was found.
+    program: Program | None = None
 
 
 @dataclass(frozen=True)
@@ -127,8 +267,9 @@ class Settings:
     ``enabled`` is whether the picker offers it; the default is yes for every
     kind, and the dashboard is where a kind nobody has is switched off. Off
     means *not offered*: a chat that already ran on it still opens and says so.
-    ``binary`` is a path for a provider that runs one, empty for the bundled or
-    the one on ``PATH``; ``home`` is that binary's own configuration directory,
+    ``binary`` is a path for a provider that runs one, empty for
+    `choose_program`'s rule (the machine's own when it is at least as new as
+    the bundled copy); ``home`` is that binary's own configuration directory,
     empty for its default. ``env`` is the variables the provider's process is
     started with, on top of the machine's own: an API key, a base URL. A secret
     written here is written in the clear, in the user's home, which is where
@@ -360,3 +501,15 @@ CHARS_PER_TOKEN = 4
 def rough_tokens(chars: int) -> int:
     """About how many tokens ``chars`` characters of prompt cost. Rounded up."""
     return -(-int(chars) // CHARS_PER_TOKEN)
+
+
+#: The module that chooses each harness's program (`program_for`).
+HARNESS_MODULE = {CLAUDE: "anthropic", CODEX: "codex"}
+
+
+def program_for(harness: str) -> Program | None:
+    """The program ``harness`` runs now, chosen by that harness's own module (§4.10)."""
+    if harness not in HARNESS_MODULE:
+        raise ValueError(f"unknown harness {harness!r} — expected one of {', '.join(HARNESSES)}")
+    module = importlib.import_module(f"portia.agent.providers.{HARNESS_MODULE[harness]}")
+    return module.program()

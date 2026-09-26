@@ -462,6 +462,28 @@ def test_every_provider_turns_off_what_the_binary_would_add_to_the_context():
             assert options.env[key] == value, kind
 
 
+def test_the_claude_harness_runs_the_chosen_program(monkeypatch):
+    """`PROVIDERS.md` §4.10: the program is the machine's own when it is at
+    least as new as the bundled one, and the SDK is told which, on every
+    provider that runs this harness. Nothing found hands the choice back to
+    the SDK, which takes its bundled copy."""
+    from portia.agent import providers
+    from portia.agent.providers import anthropic
+
+    chosen = providers.Program("/opt/claude", providers.MACHINE, "2.1.300 (Claude Code)")
+    monkeypatch.setattr(anthropic, "program", lambda: chosen)
+    for kind in providers.KINDS:
+        if providers.get(kind).harness != providers.CLAUDE:
+            continue
+        options = session.build_options(
+            provider=kind, model=providers.get(kind).default_model, portia_dir="nowhere/.portia"
+        )
+        assert str(options.cli_path) == "/opt/claude", kind
+    assert options.setting_sources == []
+    monkeypatch.setattr(anthropic, "program", lambda: None)
+    assert session.build_options(portia_dir="nowhere/.portia").cli_path is None
+
+
 def test_ollama_starts_the_binary_pointed_at_the_local_server(monkeypatch):
     monkeypatch.delenv("OLLAMA_HOST", raising=False)
     options = session.build_options(

@@ -620,17 +620,18 @@ def no_machine_settings(monkeypatch, tmp_path):
 
 
 def test_the_anthropic_status_is_the_binarys_own_report(monkeypatch):
-    monkeypatch.setattr(anthropic, "binary", lambda: "/bin/claude")
-    monkeypatch.setattr(anthropic, "version", lambda: "2.1.280 (Claude Code)")
+    found = providers.Program("/bin/claude", providers.MACHINE, "2.1.280 (Claude Code)")
+    monkeypatch.setattr(anthropic, "program", lambda: found)
     monkeypatch.setattr(anthropic, "signed_in", lambda: (True, "signed in · claude.ai max"))
     status = anthropic.PROVIDER.status()
     assert status.reachable is True and status.version == "2.1.280 (Claude Code)"
     assert status.account == "signed in · claude.ai max"
+    assert status.program is found
     monkeypatch.setattr(anthropic, "signed_in", lambda: (None, ""))
     assert anthropic.PROVIDER.status().reachable is None
     monkeypatch.setattr(anthropic, "signed_in", lambda: (False, "not signed in"))
     assert anthropic.PROVIDER.status().remedy == anthropic.SIGN_IN_REMEDY
-    monkeypatch.setattr(anthropic, "binary", lambda: None)
+    monkeypatch.setattr(anthropic, "program", lambda: None)
     assert anthropic.PROVIDER.status().remedy == anthropic.INSTALL_REMEDY
 
 
@@ -679,7 +680,7 @@ def test_with_everything_switched_off_the_default_is_still_offered():
 
 def test_a_missing_binary_is_a_status_with_the_install_line(monkeypatch):
     monkeypatch.setattr(codex_provider, "bundled_binary", lambda: None)
-    monkeypatch.setattr(codex_provider.shutil, "which", lambda name: None)
+    monkeypatch.setattr(codex_provider, "machine_binary", lambda name: None)
     status = codex_provider.PROVIDER.status()
     assert status.reachable is False and status.remedy == codex_provider.INSTALL_REMEDY
     check = codex_provider.PROVIDER.preflight("x", prompt_chars=lambda: 10)
@@ -700,8 +701,11 @@ def test_a_base_url_routes_codex_to_a_local_server_and_needs_no_sign_in(monkeypa
     providers.save_settings(
         {"codex": providers.Settings(env={"OPENAI_BASE_URL": "http://127.0.0.1:11434/v1/"})}
     )
-    monkeypatch.setattr(codex_provider, "binary", lambda: "/bin/codex")
-    monkeypatch.setattr(codex_provider, "version", lambda: "codex-cli 0.156.0")
+    monkeypatch.setattr(
+        codex_provider,
+        "program",
+        lambda: providers.Program("/bin/codex", providers.BUNDLED, "codex-cli 0.156.0"),
+    )
     assert codex_provider.base_url() == "http://127.0.0.1:11434/v1"
     lines = codex_provider.overrides("http://127.0.0.1:5/mcp")
     assert 'model_providers.portia.base_url="http://127.0.0.1:11434/v1"' in lines
@@ -729,8 +733,11 @@ def test_every_non_negotiable_is_in_the_overrides():
 
 
 def test_a_signed_out_account_is_refused_in_codexs_own_words(monkeypatch):
-    monkeypatch.setattr(codex_provider, "binary", lambda: "/bin/codex")
-    monkeypatch.setattr(codex_provider, "version", lambda: "codex-cli 0.156.0")
+    monkeypatch.setattr(
+        codex_provider,
+        "program",
+        lambda: providers.Program("/bin/codex", providers.BUNDLED, "codex-cli 0.156.0"),
+    )
     monkeypatch.setattr(codex_provider, "signed_in", lambda: (False, "Not logged in"))
     status = codex_provider.PROVIDER.status()
     assert status.reachable is False and status.detail == "Not logged in"
@@ -746,7 +753,11 @@ def test_a_local_ollama_route_measures_fit_the_way_ollama_does(monkeypatch, serv
     providers.save_settings(
         {"codex": providers.Settings(env={"OPENAI_BASE_URL": "http://127.0.0.1:11434/v1"})}
     )
-    monkeypatch.setattr(codex_provider, "binary", lambda: "/bin/codex")
+    monkeypatch.setattr(
+        codex_provider,
+        "program",
+        lambda: providers.Program("/bin/codex", providers.BUNDLED, "codex-cli 0.156.0"),
+    )
     monkeypatch.delenv(ollama.HOST_VAR, raising=False)
     server(models=[QWEN], running=[_entry("qwen3:8b", 5_569_815_510, ctx=4096)])
     check = codex_provider.PROVIDER.preflight("qwen3:8b", prompt_chars=lambda: 60_000)
@@ -863,3 +874,177 @@ def test_the_window_knows_its_own_port_only_from_its_address():
     assert engine.window_port(App(url="http://127.0.0.1:8082")) == 8082
     assert engine.window_port(App(url="")) is None
     assert engine.window_port(App(url="http://127.0.0.1:None")) is None
+
+
+# --- which program a harness runs (`PROVIDERS.md` §4.10) -----------------------------
+
+
+def _printer(versions: dict[str, str]):
+    """A ``printed`` for `choose_program`: what each candidate says, and who was asked."""
+    asked: list[str] = []
+
+    def printed(path: str) -> str:
+        asked.append(path)
+        return versions.get(path, "")
+
+    printed.asked = asked  # type: ignore[attr-defined]
+    return printed
+
+
+MINE = "/home/me/.local/bin/claude"
+THEIRS = "/venv/claude_agent_sdk/_bundled/claude"
+
+
+def test_the_machines_own_program_runs_when_it_is_at_least_as_new_as_the_bundled_one():
+    """The copy the user updates knows today's models; the bundled one knows
+    the ones its SDK release did. Newer wins, and equal is the user's too."""
+    printed = _printer({MINE: "2.1.283 (Claude Code)", THEIRS: "2.1.280 (Claude Code)"})
+    found = providers.choose_program(configured="", machine=MINE, bundled=THEIRS, printed=printed)
+    assert found == providers.Program(MINE, providers.MACHINE, "2.1.283 (Claude Code)")
+    assert found.origin_words == "the machine's own" and found.passed_over == ""
+    same = _printer({MINE: "2.1.280 (Claude Code)", THEIRS: "2.1.280 (Claude Code)"})
+    assert (
+        providers.choose_program(configured="", machine=MINE, bundled=THEIRS, printed=same).origin
+        == providers.MACHINE
+    )
+
+
+def test_an_older_machine_copy_is_passed_over_for_the_bundled_one_and_says_so():
+    """A copy older than the one portia was built against may not know the
+    SDK's flags; the bundled one is the floor, and the line says which lost."""
+    printed = _printer({MINE: "2.1.100 (Claude Code)", THEIRS: "2.1.280 (Claude Code)"})
+    found = providers.choose_program(configured="", machine=MINE, bundled=THEIRS, printed=printed)
+    assert found.path == THEIRS and found.origin == providers.BUNDLED
+    assert found.version == "2.1.280 (Claude Code)"
+    assert (
+        found.passed_over
+        == f"{MINE} is 2.1.100 (Claude Code), older than the bundled 2.1.280 (Claude Code)"
+    )
+    assert found.as_dict()["passed_over"] == found.passed_over
+
+
+def test_a_configured_path_is_taken_as_it_is_and_nothing_else_is_asked(tmp_path):
+    own = tmp_path / "claude"
+    own.write_text("", encoding="utf-8")
+    printed = _printer({str(own): "1.0.0 (Claude Code)"})
+    found = providers.choose_program(
+        configured=f" {own} ", machine=MINE, bundled=THEIRS, printed=printed
+    )
+    assert found == providers.Program(str(own), providers.CONFIGURED, "1.0.0 (Claude Code)")
+    assert printed.asked == [str(own)]
+    assert (
+        providers.choose_program(
+            configured=str(tmp_path / "gone"), machine=MINE, bundled=THEIRS, printed=printed
+        )
+        is None
+    )
+
+
+def test_a_copy_that_prints_no_version_cannot_be_compared_and_is_passed_over():
+    mute = _printer({THEIRS: "2.1.280 (Claude Code)"})
+    found = providers.choose_program(configured="", machine=MINE, bundled=THEIRS, printed=mute)
+    assert found.origin == providers.BUNDLED and found.passed_over == f"{MINE} prints no version"
+    mute_bundle = _printer({MINE: "2.1.283 (Claude Code)"})
+    assert (
+        providers.choose_program(
+            configured="", machine=MINE, bundled=THEIRS, printed=mute_bundle
+        ).origin
+        == providers.MACHINE
+    )
+
+
+def test_with_one_copy_it_runs_and_with_none_there_is_nothing():
+    printed = _printer({MINE: "2.1.283 (Claude Code)", THEIRS: "2.1.280 (Claude Code)"})
+    assert (
+        providers.choose_program(configured="", machine=MINE, bundled=None, printed=printed).origin
+        == providers.MACHINE
+    )
+    assert (
+        providers.choose_program(
+            configured="", machine=None, bundled=THEIRS, printed=printed
+        ).origin
+        == providers.BUNDLED
+    )
+    assert (
+        providers.choose_program(configured="", machine=None, bundled=None, printed=printed) is None
+    )
+    assert printed.asked == [MINE, THEIRS]
+
+
+def test_on_windows_a_launcher_script_on_path_is_passed_over(monkeypatch):
+    """npm's ``claude.cmd`` is what ``PATH`` finds on a Windows machine, and the
+    SDK refuses to start it; the real program is preferred, else the bundled."""
+    monkeypatch.setattr(providers.platform, "system", lambda: "Windows")
+    shim, exe = r"C:\npm\claude.CMD", r"C:\Users\me\claude.exe"
+    printed = _printer({exe: "2.1.283 (Claude Code)", THEIRS: "2.1.280 (Claude Code)"})
+    found = providers.choose_program(configured="", machine=shim, bundled=THEIRS, printed=printed)
+    assert found.origin == providers.BUNDLED and "launcher script" in found.passed_over
+    assert (
+        providers.choose_program(configured="", machine=exe, bundled=THEIRS, printed=printed).origin
+        == providers.MACHINE
+    )
+    which = {"claude.exe": exe, "claude": shim}
+    monkeypatch.setattr(providers.shutil, "which", lambda name: which.get(name))
+    assert providers.machine_binary("claude") == exe
+
+
+def test_build_number_reads_both_harnesses_lines_and_sorts_numerically():
+    assert providers.build_number("2.1.283 (Claude Code)") == (2, 1, 283)
+    assert providers.build_number("codex-cli 0.156.1") == (0, 156, 1)
+    assert providers.build_number("") == () and providers.build_number("no number") == ()
+    assert providers.build_number("2.1.283") > providers.build_number("2.1.99")
+
+
+def test_a_version_is_asked_once_per_copy_and_again_when_the_file_changes(tmp_path, monkeypatch):
+    monkeypatch.setattr(providers, "_printed", {})
+    copy = tmp_path / "claude"
+    copy.write_text("", encoding="utf-8")
+    asked: list[str] = []
+
+    def probe(path: str) -> str:
+        asked.append(path)
+        return "2.1.283 (Claude Code)"
+
+    assert providers.remembered_version(str(copy), probe) == "2.1.283 (Claude Code)"
+    assert providers.remembered_version(str(copy), probe) == "2.1.283 (Claude Code)"
+    assert asked == [str(copy)]
+    import os
+
+    os.utime(copy, ns=(1, 1))
+    providers.remembered_version(str(copy), probe)
+    assert asked == [str(copy), str(copy)]
+    assert providers.remembered_version(str(tmp_path / "gone"), probe) == ""
+
+    def refuses(path: str) -> str:
+        raise providers.ProviderUnavailable("did not answer")
+
+    os.utime(copy, ns=(2, 2))
+    assert providers.remembered_version(str(copy), refuses) == ""
+
+
+def test_each_harness_chooses_its_program_by_the_shared_rule(monkeypatch):
+    """The Anthropic provider chooses the Claude Code every provider on that
+    harness runs; the Codex provider chooses its own. The same rule, applied
+    to each package's bundled copy and each name on ``PATH``."""
+    versions = {
+        MINE: "2.1.283 (Claude Code)",
+        THEIRS: "2.1.280 (Claude Code)",
+        "/usr/local/bin/codex": "codex-cli 0.150.0",
+        "/venv/codex_cli_bin/bin/codex": "codex-cli 0.156.1",
+    }
+    monkeypatch.setattr(providers, "_printed", {})
+    for module in (anthropic, codex_provider):
+        monkeypatch.setattr(module, "remembered_version", lambda path, probe: versions[path])
+    monkeypatch.setattr(anthropic, "machine_binary", lambda name: MINE)
+    monkeypatch.setattr(anthropic, "bundled_binary", lambda: THEIRS)
+    monkeypatch.setattr(codex_provider, "machine_binary", lambda name: "/usr/local/bin/codex")
+    monkeypatch.setattr(codex_provider, "bundled_binary", lambda: "/venv/codex_cli_bin/bin/codex")
+    assert anthropic.program().origin == providers.MACHINE and anthropic.binary() == MINE
+    assert anthropic.version() == "2.1.283 (Claude Code)"
+    chosen = codex_provider.program()
+    assert chosen.origin == providers.BUNDLED and chosen.path == "/venv/codex_cli_bin/bin/codex"
+    assert "older than the bundled" in chosen.passed_over
+    assert providers.program_for(providers.CLAUDE) == anthropic.program()
+    assert providers.program_for(providers.CODEX) == chosen
+    with pytest.raises(ValueError, match="unknown harness"):
+        providers.program_for("gemini")

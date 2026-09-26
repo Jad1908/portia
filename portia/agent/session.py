@@ -152,6 +152,13 @@ def build_options(
 
     return ClaudeAgentOptions(
         model=model,
+        # Which Claude Code runs the loop: the machine's own when it is at
+        # least as new as the bundled one, else the bundled one
+        # (`providers.choose_program`, `docs/PROVIDERS.md` §4.10). `None` hands
+        # the choice back to the SDK, which takes its bundled copy. The
+        # program is the user's; the profile it runs with is still this
+        # function's, `setting_sources=[]` below included.
+        cli_path=_anthropic.binary(),
         # Which server the binary talks to. Empty on Anthropic, on purpose:
         # portia writes no auth code and the account resolves inside the
         # binary (`PLAN.md` → Auth posture). Ollama's provider sets the base

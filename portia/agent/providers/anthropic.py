@@ -21,14 +21,22 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import os
 import platform
-import shutil
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from portia.agent.providers import Model, Preflight, Provider, ProviderUnavailable, Status
+from portia.agent.providers import (
+    Model,
+    Preflight,
+    Program,
+    Provider,
+    ProviderUnavailable,
+    Status,
+    choose_program,
+    machine_binary,
+    remembered_version,
+)
 
 #: The model is a config knob, never a hard dependency (`docs/PLAN.md`).
 #: Sonnet 5, a current model, since 2026-09-23 (the user's call): Haiku 4.5 is
@@ -61,7 +69,7 @@ MODELS = tuple(m.name for m in CATALOG)
 
 QUICK_TIMEOUT = 10.0
 INSTALL_REMEDY = (
-    "Install it with `pip install 'portia[agent]'`, which bundles the Claude Code binary."
+    "Install Claude Code, or `pip install 'portia[agent]'`, which bundles a copy of it."
 )
 SIGN_IN_REMEDY = "Sign in with `claude` in a terminal; the copilot uses that account."
 
@@ -79,19 +87,8 @@ def bundled_binary() -> str | None:
     return None
 
 
-def binary() -> str | None:
-    """The ``claude`` to ask: the settings' path, else the bundled one, else the one on ``PATH``."""
-    configured = PROVIDER.settings().binary.strip()
-    if configured:
-        expanded = os.path.expanduser(configured)
-        return expanded if Path(expanded).is_file() else shutil.which(expanded)
-    return bundled_binary() or shutil.which("claude")
-
-
-def _run(*args: str) -> tuple[int, str]:
-    program = binary()
-    if program is None:
-        raise ProviderUnavailable("Claude Code is not installed.")
+def _run_at(program: str, *args: str) -> tuple[int, str]:
+    """One command of ``program``; the code and what it printed."""
     try:
         done = subprocess.run(
             [program, *args],
@@ -106,10 +103,47 @@ def _run(*args: str) -> tuple[int, str]:
     return done.returncode, (done.stdout or done.stderr or "").strip()
 
 
+def _printed_version(program: str) -> str:
+    """The first line ``program --version`` prints."""
+    _, out = _run_at(program, "--version")
+    return out.splitlines()[0] if out else ""
+
+
+def program() -> Program | None:
+    """The Claude Code that runs, by `providers.choose_program`'s rule (`docs/PROVIDERS.md` §4.10).
+
+    The settings' path, else the machine's own when it is at least as new as
+    the bundled one, else the bundled one. The one program for every provider
+    on this harness: Ollama's and llama.cpp's chats run it too, and the path
+    is configured here, on the provider that *is* the harness.
+    """
+    return choose_program(
+        configured=PROVIDER.settings().binary,
+        machine=machine_binary("claude"),
+        bundled=bundled_binary(),
+        printed=lambda path: remembered_version(path, _printed_version),
+    )
+
+
+def binary() -> str | None:
+    """The path of the ``claude`` that runs (:func:`program`), ``None`` where there is none."""
+    found = program()
+    return found.path if found else None
+
+
+def _run(*args: str) -> tuple[int, str]:
+    found = binary()
+    if found is None:
+        raise ProviderUnavailable("Claude Code is not installed.")
+    return _run_at(found, *args)
+
+
 def version() -> str:
     """What ``claude --version`` prints, e.g. ``2.1.280 (Claude Code)``."""
-    _, out = _run("--version")
-    return out.splitlines()[0] if out else ""
+    found = program()
+    if found is None:
+        raise ProviderUnavailable("Claude Code is not installed.")
+    return found.version or _printed_version(found.path)
 
 
 def signed_in() -> tuple[bool | None, str]:
@@ -147,7 +181,8 @@ class Anthropic(Provider):
         return {}
 
     def status(self) -> Status:
-        if binary() is None:
+        found = program()
+        if found is None:
             return Status(
                 reachable=False, detail="Claude Code is not installed.", remedy=INSTALL_REMEDY
             )
@@ -157,10 +192,14 @@ class Anthropic(Provider):
         except ProviderUnavailable as exc:
             return Status(reachable=False, detail=str(exc), remedy=INSTALL_REMEDY)
         if ok is None:
-            return Status(reachable=None, detail="sign-in not measured", version=build)
+            return Status(
+                reachable=None, detail="sign-in not measured", version=build, program=found
+            )
         if not ok:
-            return Status(reachable=False, detail=words, version=build, remedy=SIGN_IN_REMEDY)
-        return Status(reachable=True, detail=words, version=build, account=words)
+            return Status(
+                reachable=False, detail=words, version=build, remedy=SIGN_IN_REMEDY, program=found
+            )
+        return Status(reachable=True, detail=words, version=build, account=words, program=found)
 
     def models(self) -> list[Model]:
         return list(self.static_models)

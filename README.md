@@ -44,8 +44,9 @@ docker compose up -d neo4j
 Neo4j holds the knowledge graph, which is where column lineage and measured overlaps live. The
 copilot reads it to work out which table to look at.
 
-The copilot runs on the [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overview), which
-installs Anthropic's Claude Code and runs it unmodified. Set `ANTHROPIC_API_KEY`, or use a
+The copilot runs on the [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overview) and
+drives Claude Code unmodified: your own install when it is at least as new as the copy the SDK
+bundles, else that copy. Set `ANTHROPIC_API_KEY`, or use a
 [local model](#local-models). portia has no sign-in of its own and never reads, stores or forwards
 a credential, so usage is billed to your own Anthropic account. Neo4j needs a password:
 

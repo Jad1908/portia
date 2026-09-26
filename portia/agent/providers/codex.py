@@ -38,7 +38,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
-import shutil
 import subprocess
 import urllib.error
 import urllib.request
@@ -50,9 +49,13 @@ from portia.agent.providers import (
     CODEX,
     Model,
     Preflight,
+    Program,
     Provider,
     ProviderUnavailable,
     Status,
+    choose_program,
+    machine_binary,
+    remembered_version,
     rough_tokens,
 )
 
@@ -130,13 +133,51 @@ def bundled_binary() -> str | None:
     return None
 
 
+def _run_at(
+    program: str, *args: str, timeout: float = QUICK_TIMEOUT, env: dict[str, str] | None = None
+) -> tuple[int, str]:
+    """One command of ``program``; the code and what it printed."""
+    try:
+        done = subprocess.run(
+            [program, *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=timeout,
+            env=env,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ProviderUnavailable(f"`codex {' '.join(args)}` did not answer: {exc}") from exc
+    return done.returncode, (done.stdout or done.stderr or "").strip()
+
+
+def _printed_version(program: str) -> str:
+    """The first line ``program --version`` prints, under no home: a version needs none."""
+    _, out = _run_at(program, "--version")
+    return out.splitlines()[0] if out else ""
+
+
+def program() -> Program | None:
+    """The ``codex`` that runs, by `providers.choose_program`'s rule (`docs/PROVIDERS.md` §4.10).
+
+    The settings' path, else the machine's own when it is at least as new as
+    the bundled one, else the bundled one. Which *program* runs is the user's;
+    the home it runs under stays portia's (:func:`home`), for the module
+    docstring's reason.
+    """
+    return choose_program(
+        configured=PROVIDER.settings().binary,
+        machine=machine_binary("codex"),
+        bundled=bundled_binary(),
+        printed=lambda path: remembered_version(path, _printed_version),
+    )
+
+
 def binary() -> str | None:
-    """The ``codex`` to run: the settings' path, else the bundled one, else the one on ``PATH``."""
-    configured = PROVIDER.settings().binary.strip()
-    if configured:
-        expanded = os.path.expanduser(configured)
-        return expanded if Path(expanded).is_file() else shutil.which(expanded)
-    return bundled_binary() or shutil.which("codex")
+    """The path of the ``codex`` that runs (:func:`program`), ``None`` where there is none."""
+    found = program()
+    return found.path if found else None
 
 
 def login_home() -> Path:
@@ -179,29 +220,18 @@ def process_env() -> dict[str, str]:
 
 def _run(*args: str, timeout: float = QUICK_TIMEOUT) -> tuple[int, str]:
     """One ``codex`` command, under portia's home; the code and what it printed."""
-    program = binary()
-    if program is None:
+    found = binary()
+    if found is None:
         raise ProviderUnavailable("Codex is not installed.")
-    env = {**os.environ, **process_env()}
-    try:
-        done = subprocess.run(
-            [program, *args],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=timeout,
-            env=env,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise ProviderUnavailable(f"`codex {' '.join(args)}` did not answer: {exc}") from exc
-    return done.returncode, (done.stdout or done.stderr or "").strip()
+    return _run_at(found, *args, timeout=timeout, env={**os.environ, **process_env()})
 
 
 def version() -> str:
     """What ``codex --version`` prints, e.g. ``codex-cli 0.156.0``."""
-    _, out = _run("--version")
-    return out.splitlines()[0] if out else ""
+    found = program()
+    if found is None:
+        raise ProviderUnavailable("Codex is not installed.")
+    return found.version or _printed_version(found.path)
 
 
 def signed_in() -> tuple[bool, str]:
@@ -348,8 +378,8 @@ class Codex(Provider):
         }
 
     def status(self) -> Status:
-        program = binary()
-        if program is None:
+        found = program()
+        if found is None:
             return Status(reachable=False, detail="Codex is not installed.", remedy=INSTALL_REMEDY)
         try:
             build = version()
@@ -358,20 +388,25 @@ class Codex(Provider):
         url = base_url()
         if url:
             return Status(
-                reachable=True, detail=f"routed to {url}", version=build, account="local server"
+                reachable=True,
+                detail=f"routed to {url}",
+                version=build,
+                account="local server",
+                program=found,
             )
         try:
             ok, words = signed_in()
         except ProviderUnavailable as exc:
-            return Status(reachable=False, detail=str(exc), version=build)
+            return Status(reachable=False, detail=str(exc), version=build, program=found)
         if not ok:
             return Status(
                 reachable=False,
                 detail=words or "Not signed in.",
                 version=build,
                 remedy=SIGN_IN_REMEDY,
+                program=found,
             )
-        return Status(reachable=True, detail=words, version=build, account=words)
+        return Status(reachable=True, detail=words, version=build, account=words, program=found)
 
     def models(self) -> list[Model]:
         url = base_url()
@@ -381,15 +416,16 @@ class Codex(Provider):
 
     def preflight(self, model: str, *, prompt_chars: Callable[[], int]) -> Preflight:
         """What can be measured before a message goes: the binary, the route, and a local model's fit."""
-        program = binary()
+        found = program()
         chars = int(prompt_chars())
         facts: dict[str, Any] = {
-            "binary": program,
+            "binary": found.path if found else None,
             "prompt_chars": chars,
             "prompt_tokens_about": rough_tokens(chars),
         }
-        if program is None:
+        if found is None:
             return Preflight(False, facts, reason="Codex is not installed.", remedy=INSTALL_REMEDY)
+        facts["origin"] = found.origin
         url = base_url()
         if url:
             facts["base_url"] = url
