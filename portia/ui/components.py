@@ -1311,7 +1311,13 @@ def flag_badge(name: str, variant: str = "") -> ui.label:
 #: came out as "customer" followed by italics with the underscores eaten. Column
 #: names are the identifiers this whole product is about; a renderer that
 #: silently rewrites them is worse than one that shows raw asterisks.
-MARKDOWN_EXTRAS = ["fenced-code-blocks", "tables", "code-friendly"]
+#:
+#: ``cuddled-lists`` lets a list start on the line after a sentence, which is
+#: how the copilot writes one ("**This layer:**" then "- `stg_a` ..."). Without
+#: it markdown2 wants a blank line first, and the list came out as one paragraph
+#: with dashes in it. The cost is a hard-wrapped line that happens to open with
+#: "- " or "2024. " becoming a list; the copilot writes a paragraph as one line.
+MARKDOWN_EXTRAS = ["fenced-code-blocks", "tables", "code-friendly", "cuddled-lists"]
 
 
 def markdown(value: str) -> ui.markdown:
