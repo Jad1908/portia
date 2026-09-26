@@ -465,6 +465,17 @@ html body {
   flex: 1 1 auto;
 }
 
+/* **A region that follows its foot is not anchored** (2026-09-26). The browser's
+ * scroll anchoring holds a row in view still when the rows around it change,
+ * by moving the scroll itself — and `scroll.js` cannot tell that move from a
+ * person's. As the transcript's tail was redrawn it landed the region 25 px
+ * short of its foot, `scroll.js` read that as *scrolled up*, and the chat stopped
+ * following for the rest of the conversation. Here the foot is the anchor, and
+ * `scroll.js` holds it. */
+.p-scroll[data-scroll-stick="bottom"] {
+  overflow-anchor: none;
+}
+
 .p-pad {
   padding: var(--sp-lg);
 }
