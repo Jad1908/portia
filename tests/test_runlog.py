@@ -75,7 +75,9 @@ def test_the_header_holds_only_what_is_true_of_the_whole_chat(tmp_path):
     log = runlog.start(tmp_path, cwd=tmp_path)
     header = runlog.read(log.path).header
 
-    assert set(header) == {"started", "kind", "cwd", "portia_sha"}
+    # The harness is fixed for the life of a chat too, and rides here when a
+    # program was chosen on this machine (`test_the_header_says_which_program`).
+    assert set(header) - {runlog.HARNESS} == {"started", "kind", "cwd", "portia_sha"}
 
 
 def test_what_makes_two_chats_comparable_is_recorded(tmp_path):
@@ -740,3 +742,37 @@ def test_an_indexing_log_records_the_tools_the_job_was_offered(tmp_path):
     assert "set_interpretation" in run.prompts["tools"]
     assert "record_step" not in run.prompts["tools"]
     assert "run_spec" not in run.prompts["tools"]
+
+
+def test_the_header_says_which_program_drove_the_loop(tmp_path, monkeypatch):
+    """`PROVIDERS.md` §4.10 — two logs on two Claude Code versions are not the
+    same run, and until this field the difference survived nowhere. A hosted
+    log carries none: the harness is the host's. A resumed chat is a new
+    process that may have chosen differently, so the mark says again."""
+    from portia.agent import providers
+
+    chosen = providers.Program("/opt/claude", providers.MACHINE, "2.1.283 (Claude Code)")
+    monkeypatch.setattr(providers, "program_for", lambda harness: chosen)
+    log = runlog.start(tmp_path, cwd=tmp_path)
+    header = runlog.read(log.path).header
+    assert header[runlog.HARNESS] == {
+        "kind": providers.CLAUDE,
+        "path": "/opt/claude",
+        "origin": providers.MACHINE,
+        "version": "2.1.283 (Claude Code)",
+    }
+    hosted = runlog.start(tmp_path, cwd=tmp_path, host="claude-code", prompts={})
+    assert runlog.HARNESS not in runlog.read(hosted.path).header
+
+    later = providers.Program("/venv/_bundled/claude", providers.BUNDLED, "2.1.280 (Claude Code)")
+    monkeypatch.setattr(providers, "program_for", lambda harness: later)
+    runlog.resume(log.path, tmp_path)
+    marks = [
+        json.loads(line)
+        for line in log.path.read_text(encoding="utf-8").splitlines()
+        if json.loads(line)["kind"] == runlog.RESUMED
+    ]
+    assert marks[-1]["data"][runlog.HARNESS]["origin"] == providers.BUNDLED
+
+    monkeypatch.setattr(providers, "program_for", lambda harness: None)
+    assert runlog.HARNESS not in runlog.read(runlog.start(tmp_path, cwd=tmp_path).path).header

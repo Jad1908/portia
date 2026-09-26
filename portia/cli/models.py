@@ -32,6 +32,10 @@ def _list(args: argparse.Namespace) -> None:
         print(
             f"{provider.kind:10s} {provider.label}  [{state}{': ' + status.detail if status.detail else ''}]"
         )
+        if status.program is not None:
+            print(f"    program:  {status.program.path} · {status.program.origin_words}")
+            if status.program.passed_over:
+                print(f"    passed over:  {status.program.passed_over}")
         if status.reachable is False:
             print(f"    {provider.start_remedy or 'start it and list again'}")
             continue

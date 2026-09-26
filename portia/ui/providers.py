@@ -63,6 +63,8 @@ BINARY_WHY = (
     "The program this harness runs. Empty means your own install when it is at least "
     "as new as the bundled one, else the bundled one."
 )
+PROGRAM = "program"
+PASSED_OVER = "passed over"
 HOME_WHAT = "Sign-in home"
 HOME_WHY = "Where its own sign-in lives. Empty means the vendor's default."
 SETTINGS_FILE = "Saved in"
@@ -196,6 +198,13 @@ def _detail(kind: str, settings: providers.Settings) -> None:
             c.kv("version", status.version)
         if status is not None and status.account:
             c.kv("account", status.account)
+        if status is not None and status.program is not None:
+            # Which copy runs and where it came from, and the one it was
+            # chosen over: the fact behind an *update required* that an
+            # updated `claude` did not fix (`docs/PROVIDERS.md` §4.10).
+            c.kv(PROGRAM, f"{status.program.path} · {status.program.origin_words}")
+            if status.program.passed_over:
+                c.kv(PASSED_OVER, status.program.passed_over)
         c.kv("harness", provider.harness)
     if (
         status is not None
