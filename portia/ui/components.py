@@ -1547,9 +1547,10 @@ def acknowledged_banner(
     (docs/EVALUATION.md, Run 5). On screen it is a banner, at the top of its
     step, and if a step is both acknowledged and clean-looking the banner wins.
 
-    ``measured`` is the outcome report, when there is one. Before a write there
-    isn't — the step has not run — so the banner names the flags and says what
-    they mean without inventing a number the engine never produced.
+    ``measured`` is the outcome report, when there is one. Before Run has built
+    the table there isn't — the numbers from when the step was recorded are not
+    kept here — so the banner names the flags and says what they mean without
+    inventing a number this window never measured.
     """
     with ui.element("div").classes("ack-banner") as banner:
         ui.label("acknowledged override").classes("t-caption c-accent uppercase")

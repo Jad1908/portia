@@ -992,7 +992,7 @@ def _report() -> None:
         if APP.results:
             _run_header()
         elif not APP.running and not APP.run_error:
-            c.caption(_NOT_RUN)
+            c.caption(_NOT_BUILT)
         for step, result in blocks:
             # A slot per block, so picking a step redraws the block it
             # shuts and the one it opens and nothing else (`_select_step`).
@@ -1281,14 +1281,14 @@ def _step_block(step: dict, result: Any) -> None:
 
 
 def _block_head(step: dict, result: Any, *, opened: bool) -> None:
-    """Which step this is, and whether it has been run. The whole row opens it."""
+    """Which step this is, and whether this window has built it. The whole row opens it."""
     with ui.element("div").classes("report-block-head") as head:
         ui.icon("expand_more" if opened else "chevron_right").classes("report-caret")
         ui.label(step["id"]).classes("t-mono c-ink")
         c.chip(step.get("op") or "?")
         ui.element("div").classes("flex-1")
         if result is None:
-            c.caption(_STEP_NOT_RUN)
+            c.caption(_STEP_NOT_BUILT)
     head.on("click", lambda i=step["id"]: _select_step(i))
 
 
@@ -2414,10 +2414,16 @@ def spec_label(path: Path | None) -> str:
 _NO_SPECS = "No specs yet."
 _NO_STEPS = "No steps yet. The copilot records one for each decision about the data."
 #: Said once, above the list — not on every row. The rows carry the narrower
-#: fact (`_STEP_NOT_RUN`), which is the one that can differ between them once a
+#: fact (`_STEP_NOT_BUILT`), which is the one that can differ between them once a
 #: spec has been edited since the last run.
-_NOT_RUN = "Not run yet. Run the spec to measure these steps."
-_STEP_NOT_RUN = "not run"
+#: **Not "not run".** `record_step` executes and measures a step before it
+#: enters the spec, and the copilot quotes those numbers, so a pane saying the
+#: step never ran contradicted the chat beside it. What has not happened is Run in
+#: this window: the table is not built, so there are no numbers here to show.
+_NOT_BUILT = (
+    "Measured when recorded, not built yet. Run builds the table and shows its numbers here."
+)
+_STEP_NOT_BUILT = "not built"
 _ZOOM_IN_TIP = "Zoom in"
 _ZOOM_OUT_TIP = "Zoom out"
 _RECENTER_TIP = "Reset zoom and centre. Double-click the canvas does the same."
