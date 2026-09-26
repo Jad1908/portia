@@ -4289,6 +4289,25 @@ body.body--dark .p-panel {
   background: var(--surface);
 }
 
+/* Its hover card. vis-network injects its own — verdana on a pale yellow — so
+   this out-specifies it with the container's class. A transient overlay, so it
+   may carry the one soft shadow DESIGN.md allows; the lines are property names
+   and values, so they are mono like every other fact in the app. */
+.p-knowledge div.vis-tooltip {
+  padding: var(--sp-sm) var(--sp-md);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--body);
+  background: var(--surface-elevated);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--r-sm);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+body.body--dark .p-knowledge div.vis-tooltip {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+}
+
 /* A picker row for a folder with nothing readable under it. Dimmed and
    un-clickable, because it is not a thing you can pick — a *kind*, which is
    what prominence is allowed to say (DESIGN.md), and not a rank. */

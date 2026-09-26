@@ -7401,3 +7401,49 @@ def test_a_started_server_moves_the_model_with_the_provider():
 
     source = inspect.getsource(screens._start_server)
     assert "APP.model = llamacpp.PROVIDER.default_model" in source
+
+
+def _knowledge_js() -> str:
+    import portia.ui
+
+    return (Path(portia.ui.__file__).parent / "assets" / "knowledge.js").read_text(encoding="utf-8")
+
+
+def test_the_knowledge_graph_holds_no_colour_of_its_own():
+    """It drew in saturated blue, purple and green that nothing else in portia
+    uses. Every colour now comes off a `portia.css` token at draw time, so a
+    re-hue is still one token and the graph cannot drift from the app again."""
+    import re
+
+    import portia.ui
+
+    js = _knowledge_js()
+    assert not re.search(r"#[0-9a-fA-F]{3,8}\b|rgba?\(", js), "a literal colour"
+    css = (Path(portia.ui.__file__).parent / "assets" / "portia.css").read_text(encoding="utf-8")
+    dark = css[css.index("body.body--dark {") :]
+    for name in set(re.findall(r't\("([a-z-]+)"\)', js)):
+        assert f"--{name}:" in css, name
+        if not name.startswith("font-"):
+            assert f"--{name}:" in dark.split("}")[0], f"{name} has no dark value"
+
+
+def test_every_kind_the_graph_holds_has_a_look():
+    """A kind vis-network has no group for gets a colour from its own default
+    palette, which is the saturated set this replaced."""
+    import re
+
+    from portia.knowledge import schema
+
+    kinds = re.search(r"const KINDS = \[(.*?)\];", _knowledge_js()).group(1)
+    assert sorted(re.findall(r'"(\w+)"', kinds)) == sorted(schema.LABELS)
+
+
+def test_a_theme_switch_restyles_the_graph_in_place():
+    """The tokens hang off `body.body--dark`, so they are read on `body`, and
+    the settings panel and the system preference both land as that class.
+    Restyled with `setOptions` rather than redrawn, which would run the force
+    layout again and move every node."""
+    js = _knowledge_js()
+    assert "getComputedStyle(document.body)" in js
+    assert 'attributeFilter: ["class"]' in js
+    assert "el.__network.setOptions(look)" in js
