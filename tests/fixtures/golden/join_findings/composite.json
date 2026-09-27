@@ -173,6 +173,72 @@
     "null_key_left_rows": [],
     "null_key_right_rows": [],
     "fan_out_examples": [],
+    "predicted_nulls": {
+      "inner": {
+        "result_rows": 0,
+        "kept_unmatched": {
+          "left": 0,
+          "right": 0
+        },
+        "left": {
+          "booking_id": 0,
+          "rooms_sold": 0,
+          "revenue": 0
+        },
+        "right": {
+          "event_name": 0,
+          "expected_attendance": 0
+        }
+      },
+      "left": {
+        "result_rows": 14,
+        "kept_unmatched": {
+          "left": 14,
+          "right": 0
+        },
+        "left": {
+          "booking_id": 0,
+          "rooms_sold": 0,
+          "revenue": 0
+        },
+        "right": {
+          "event_name": 14,
+          "expected_attendance": 14
+        }
+      },
+      "right": {
+        "result_rows": 7,
+        "kept_unmatched": {
+          "left": 0,
+          "right": 7
+        },
+        "left": {
+          "booking_id": 7,
+          "rooms_sold": 7,
+          "revenue": 7
+        },
+        "right": {
+          "event_name": 0,
+          "expected_attendance": 0
+        }
+      },
+      "outer": {
+        "result_rows": 21,
+        "kept_unmatched": {
+          "left": 14,
+          "right": 7
+        },
+        "left": {
+          "booking_id": 7,
+          "rooms_sold": 7,
+          "revenue": 7
+        },
+        "right": {
+          "event_name": 14,
+          "expected_attendance": 14
+        }
+      }
+    },
     "example_row_columns": {
       "left": [
         "hotel_id",

@@ -118,6 +118,64 @@
         "n_right": 1
       }
     ],
+    "predicted_nulls": {
+      "inner": {
+        "result_rows": 8,
+        "kept_unmatched": {
+          "left": 0,
+          "right": 0
+        },
+        "left": {
+          "order_id": 0,
+          "amount": 0
+        },
+        "right": {
+          "name": 0
+        }
+      },
+      "left": {
+        "result_rows": 10,
+        "kept_unmatched": {
+          "left": 2,
+          "right": 0
+        },
+        "left": {
+          "order_id": 0,
+          "amount": 0
+        },
+        "right": {
+          "name": 2
+        }
+      },
+      "right": {
+        "result_rows": 9,
+        "kept_unmatched": {
+          "left": 0,
+          "right": 1
+        },
+        "left": {
+          "order_id": 1,
+          "amount": 1
+        },
+        "right": {
+          "name": 0
+        }
+      },
+      "outer": {
+        "result_rows": 11,
+        "kept_unmatched": {
+          "left": 2,
+          "right": 1
+        },
+        "left": {
+          "order_id": 1,
+          "amount": 1
+        },
+        "right": {
+          "name": 2
+        }
+      }
+    },
     "example_row_columns": {
       "left": [
         "customer_id",

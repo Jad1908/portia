@@ -1023,8 +1023,9 @@ def join_findings(
     """What joining two sources on these keys would actually do — plus the rows.
 
     Returns key-level facts (overlap, coverage, relationship, fan-out, and the
-    row counts each `how` would produce) *and* example rows: the unmatched ones,
-    the null-key ones, the keys repeated most. Nothing here is ranked or scored.
+    row counts each `how` would produce), the nulls each `how` would leave in the
+    carried columns, *and* example rows: the unmatched ones, the null-key ones,
+    the keys repeated most. Nothing here is ranked or scored.
     Whether a dropped row is a catastrophe or a non-event depends on the goal,
     which only you have.
 

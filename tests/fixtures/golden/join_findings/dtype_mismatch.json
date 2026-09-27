@@ -136,6 +136,76 @@
     "null_key_left_rows": [],
     "null_key_right_rows": [],
     "fan_out_examples": [],
+    "predicted_nulls": {
+      "inner": {
+        "result_rows": 0,
+        "kept_unmatched": {
+          "left": 0,
+          "right": 0
+        },
+        "left": {
+          "customer_id": 0,
+          "amount": 0
+        },
+        "right": {
+          "hotel_name": 0,
+          "city": 0,
+          "country": 0,
+          "rooms": 0
+        }
+      },
+      "left": {
+        "result_rows": 8,
+        "kept_unmatched": {
+          "left": 8,
+          "right": 0
+        },
+        "left": {
+          "customer_id": 1,
+          "amount": 0
+        },
+        "right": {
+          "hotel_name": 8,
+          "city": 8,
+          "country": 8,
+          "rooms": 8
+        }
+      },
+      "right": {
+        "result_rows": 5,
+        "kept_unmatched": {
+          "left": 0,
+          "right": 5
+        },
+        "left": {
+          "customer_id": 5,
+          "amount": 5
+        },
+        "right": {
+          "hotel_name": 0,
+          "city": 0,
+          "country": 0,
+          "rooms": 0
+        }
+      },
+      "outer": {
+        "result_rows": 13,
+        "kept_unmatched": {
+          "left": 8,
+          "right": 5
+        },
+        "left": {
+          "customer_id": 6,
+          "amount": 5
+        },
+        "right": {
+          "hotel_name": 8,
+          "city": 8,
+          "country": 8,
+          "rooms": 8
+        }
+      }
+    },
     "example_row_columns": {
       "left": [
         "order_id",

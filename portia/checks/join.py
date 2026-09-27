@@ -552,12 +552,111 @@ def join_findings(
         "null_key_left_rows": _null_key_rows(left, lkeys, lcols),
         "null_key_right_rows": _null_key_rows(right, rkeys, rcols),
         "fan_out_examples": _table_fan_out(left, lkeys, right, rkeys, comparable),
+        "predicted_nulls": predicted_nulls(
+            report,
+            _carried_nulls(left, lkeys, right, rkeys, comparable, _carried(lcols, lkeys)),
+            _carried_nulls(right, rkeys, left, lkeys, comparable, _carried(rcols, rkeys)),
+        ),
         # **What a row is, stated rather than left to be inferred.** Three rows
         # of six columns off a 191-column table look like a six-column table, and
         # a reader who counts them has been told something false about the source.
         "example_row_columns": {"left": lcols, "right": rcols},
     }
     return {"report": report, "evidence": evidence}
+
+
+def _carried(columns: list[str], keys: list[str]) -> list[str]:
+    """The example columns that are not keys: the ones a join carries across as they are.
+
+    Keys are left out. A shared key is coalesced into one column, and a key's
+    nulls are what the unmatched counts already are.
+    """
+    return [c for c in columns if c not in keys]
+
+
+def _carried_nulls(
+    this: Table, keys: list[str], other: Table, other_keys: list[str], comparable, columns
+) -> dict[str, tuple[int, int, int]]:
+    """Per carried column of ``this`` side: its nulls, those on matched rows, and those weighted.
+
+    Three numbers each, in one query: ``this`` grouped by key with a null count
+    per column, joined to the other side's key multiplicities. A matched row
+    with a null appears once per match, so the weighted sum is the nulls it
+    contributes to the joined rows; the difference between the first two is the
+    nulls on rows that match nothing, which a join keeping this side carries
+    once. Null keys stay a group of their own and match nothing, as in the join.
+    """
+    if not columns:
+        return {}
+    d = this.dialect
+    exprs = _key_exprs(keys, comparable, d)
+    select = ", ".join(f"{e} AS tk{i}" for i, e in enumerate(exprs))
+    nulls = ", ".join(
+        f"{d.count_where(f'{d.quote(c)} IS NULL')} AS n{i}" for i, c in enumerate(columns)
+    )
+    ordinals = ", ".join(str(i + 1) for i in range(len(keys)))
+    side = f"SELECT {select}, {nulls} FROM {subquery(this.query)} GROUP BY {ordinals}"
+    theirs = _key_counts(other, other_keys, comparable, "ok", "oc")
+    match = " AND ".join(f"side_nulls.tk{i} = other_keys.ok{i}" for i in range(len(keys)))
+    matched = "other_keys.oc IS NOT NULL"
+    aggregates = []
+    for i in range(len(columns)):
+        n = f"side_nulls.n{i}"
+        aggregates += [
+            f"coalesce(sum({n}), 0)",
+            f"coalesce({d.sum_where(n, matched)}, 0)",
+            f"coalesce({d.sum_where(f'{n} * other_keys.oc', matched)}, 0)",
+        ]
+    row = this.con.execute(
+        f"WITH side_nulls AS ({side}), other_keys AS ({theirs}) "
+        f"SELECT {', '.join(aggregates)} FROM side_nulls LEFT JOIN other_keys ON {match}"
+    ).fetchone()
+    return {
+        column: (int(row[3 * i] or 0), int(row[3 * i + 1] or 0), int(row[3 * i + 2] or 0))
+        for i, column in enumerate(columns)
+    }
+
+
+def predicted_nulls(report: dict, left: dict, right: dict) -> dict:
+    """How many rows of each join type's result would hold a null in each carried column.
+
+    **The nulls a join creates, measured before it is built** (`BACKLOG.md` →
+    Checks, `SPRINT.md` F2). The report counts keys, and a left join that keeps
+    every row reports nothing dropped however many of them found no match:
+    500 bookings, 160 with an event, and the check said *500 rows, none
+    dropped* while the table it described had no event on 340. The copilot may
+    not work that number out for itself (a number it did not receive is a
+    number it may not write), so it is computed here.
+
+    Each column's count is the nulls it already had, repeated as the join
+    repeats its row, plus one per row the join keeps with nothing from that
+    column's side. ``kept_unmatched`` is that second part, which is the same for
+    every column of a side: the rows whose whole other half is empty. ``left``
+    and ``right`` are :func:`_carried_nulls` for each side.
+    """
+    inner = report["joins"]["inner"]
+    unmatched = {"left": inner["left_dropped"], "right": inner["right_dropped"]}
+    out: dict[str, dict] = {}
+    for how in report["joins"]:
+        kept = {side: unmatched[side] if _keeps(how, side) else 0 for side in unmatched}
+        out[how] = {
+            "result_rows": report["joins"][how]["result_rows"],
+            "kept_unmatched": kept,
+            "left": {
+                column: weighted + (total - matched if _keeps(how, "left") else 0) + kept["right"]
+                for column, (total, matched, weighted) in left.items()
+            },
+            "right": {
+                column: weighted + (total - matched if _keeps(how, "right") else 0) + kept["left"]
+                for column, (total, matched, weighted) in right.items()
+            },
+        }
+    return out
+
+
+def _keeps(how: str, side: str) -> bool:
+    """Whether a join of type ``how`` keeps this side's unmatched rows. Only left, right and outer do."""
+    return how == "outer" or how == side
 
 
 def _rows_as_records(con, sql: str, columns: list[str]) -> list[dict]:
@@ -724,4 +823,19 @@ def render_findings(findings: dict) -> str:
             lines += [f"    {row}" for row in ev[key]]
     if ev["fan_out_examples"]:
         lines.append(f"  keys repeated on either side (n_left × n_right): {ev['fan_out_examples']}")
+    lines += _render_predicted_nulls(ev["predicted_nulls"])
     return "\n".join(lines)
+
+
+def _render_predicted_nulls(predicted: dict) -> list[str]:
+    """One line per join type: which carried columns would come out null, in how many rows."""
+    lines = ["", "  nulls in the result, by join type (the example columns, keys left out):"]
+    for how, block in predicted.items():
+        parts = [
+            f"{side} {column} {n}"
+            for side in ("left", "right")
+            for column, n in block[side].items()
+            if n
+        ]
+        lines.append(f"    {how:<6} {block['result_rows']:>6} rows   {', '.join(parts) or 'none'}")
+    return lines
