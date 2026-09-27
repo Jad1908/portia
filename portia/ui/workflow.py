@@ -1606,8 +1606,13 @@ def _remove(name: str) -> None:
 
 
 def _ask_form(name: str) -> None:
-    """Say what the copilot got wrong; it re-reads with that in hand."""
-    with ui.element("div").classes("question-form"):
+    """Say what the copilot got wrong; it re-reads with that in hand.
+
+    A boxed card (`ask-form`): a form on a pane, not a turn in a chat. It wore
+    the transcript's `question-form` class until that stopped being a box
+    *(2026-09-27)*.
+    """
+    with ui.element("div").classes("ask-form"):
         ui.label(_ASK_HEADING).classes("t-heading-sm")
         c.caption(_ASK_WHY)
         note = (
