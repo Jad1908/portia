@@ -648,6 +648,10 @@ def _null_key_rows(this: Table, keys: list[str], columns: list[str]) -> list[dic
 def _table_fan_out(left: Table, lkeys, right: Table, rkeys, comparable) -> list[dict]:
     """Shared keys duplicated on either side — the source of row multiplication.
 
+    Either side's, whatever ``fan_out`` says: a key the right side repeats is
+    what multiplies the left's rows, and one the left repeats is what a right
+    join multiplies. A lookup's keys are here with ``n_right`` 1.
+
     Worst first, ties broken by the key so the answer is the same every run.
     """
     keyout = ", ".join(f"l.lk{i}" for i in range(len(lkeys)))
@@ -719,5 +723,5 @@ def render_findings(findings: dict) -> str:
             lines.append(f"  {title} (sample):")
             lines += [f"    {row}" for row in ev[key]]
     if ev["fan_out_examples"]:
-        lines.append(f"  fan-out keys (n_left × n_right): {ev['fan_out_examples']}")
+        lines.append(f"  keys repeated on either side (n_left × n_right): {ev['fan_out_examples']}")
     return "\n".join(lines)
