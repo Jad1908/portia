@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from portia.checks.join import join_report
+from portia.checks.join import flags_for, join_report
 from portia.checks.outcome import MERGE_SUFFIXES
 from portia.core.table import Table
 from portia.ops.base import OpResult, named_from
@@ -105,7 +105,9 @@ def apply_join(
         "matches_prediction": result_rows == predicted["result_rows"],
         "left_dropped": predicted["left_dropped"],
         "right_dropped": predicted["right_dropped"],
-        "flags": diagnosis["flags"],
+        # Read for the join actually built: a right join keeps the right table's
+        # rows, so a repeat of one of those is its fan-out (`checks.join.fans_out`).
+        "flags": flags_for(diagnosis, how),
     }
     return OpResult(table=merged, provenance=provenance, compiled=compiled)
 

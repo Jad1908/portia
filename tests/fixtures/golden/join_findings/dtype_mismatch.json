@@ -58,7 +58,9 @@
     "fan_out": {
       "max_left_to_right": 0,
       "max_right_to_left": 0,
-      "result_per_matched_left": 0.0
+      "result_per_matched_left": 0.0,
+      "extra_left_copies": 0,
+      "extra_right_copies": 0
     },
     "joins": {
       "inner": {

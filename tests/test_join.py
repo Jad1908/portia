@@ -9,10 +9,10 @@ import json
 import pandas as pd
 import pytest
 
-from portia.checks.join import join_report, render_text
+from portia.checks.join import flags_for, join_report, render_text
 from portia.core.serialize import to_json
 from portia.core.table import Table
-from portia.fixtures import sales_customers, sales_orders
+from portia.fixtures import city_events, hotels, reservations, sales_customers, sales_orders
 
 
 @pytest.fixture
@@ -45,6 +45,89 @@ def test_inner_join_silently_drops_left_rows(report):
 def test_fan_out_detected(report):
     assert report["fan_out"]["max_left_to_right"] == 2
     assert "fan_out" in report["flags"]
+
+
+#: A lookup: every event names one venue, and V1 hosts three of them. Event 5's
+#: venue is missing from the dimension, so a left join keeps it with no match.
+EVENTS = pd.DataFrame({"event_id": [1, 2, 3, 4, 5], "venue_id": ["V1", "V1", "V1", "V2", "V3"]})
+VENUES = pd.DataFrame({"venue_id": ["V1", "V2"], "capacity": [500, 80]})
+
+
+def test_a_lookup_does_not_fan_out(table):
+    """Each event comes out once, so nothing multiplies it; V1 repeating is the lookup working.
+
+    Until 2026-09-27 the flag read either side's key multiplicity, and V1's three
+    events raised it on a join whose result holds every event exactly once.
+    """
+    report = join_report(table(EVENTS), table(VENUES), on="venue_id")
+    assert report["relationship"] == "many:1"
+    assert report["fan_out"]["max_right_to_left"] == 3  # what used to raise the flag
+    assert report["fan_out"]["extra_left_copies"] == 0
+    assert report["fan_out"]["extra_right_copies"] == 2  # V1 three times: two past the first
+    assert "fan_out" not in report["flags"]
+
+
+def test_the_same_pair_the_other_way_round_fans_out(table):
+    report = join_report(table(VENUES), table(EVENTS), on="venue_id")
+    assert report["relationship"] == "1:many"
+    assert report["fan_out"]["extra_left_copies"] == 2
+    assert "fan_out" in report["flags"]
+
+
+def test_extra_copies_are_what_a_join_adds_to_the_side_it_keeps(report):
+    """Row for row: a left join returns the left's rows plus its extra copies, a right join the right's."""
+    fan, joins = report["fan_out"], report["joins"]
+    assert joins["left"]["result_rows"] == report["left"]["n_rows"] + fan["extra_left_copies"]
+    assert joins["right"]["result_rows"] == report["right"]["n_rows"] + fan["extra_right_copies"]
+    assert (fan["extra_left_copies"], fan["extra_right_copies"]) == (2, 3)
+
+
+@pytest.mark.parametrize(
+    "how,fans", [("inner", False), ("left", False), ("right", True), ("outer", True)]
+)
+def test_a_join_type_reads_fan_out_for_the_side_it_keeps(table, how, fans):
+    """A right join keeps the venues, and V1 comes out three times: that is its fan-out."""
+    report = join_report(table(EVENTS), table(VENUES), on="venue_id")
+    assert ("fan_out" in flags_for(report, how)) is fans
+    assert flags_for(report) == report["flags"]
+
+
+def test_the_extra_copies_are_the_rows_that_double_count(table, con):
+    """The hotel fixture's planted fan-out, built and counted, against what the check said.
+
+    Paris (once its spelling is cleaned) and Amsterdam each have two events on
+    2026-06-12, so four bookings match two events. The check counts four extra
+    copies without building anything; the built join has four more rows than
+    bookings, and its revenue is exactly those four bookings' revenue too high.
+    """
+    res, hot, evt = table(reservations()), table(hotels()), table(city_events())
+    bookings = Table(
+        "bookings",
+        f"SELECT r.*, lower(h.city) AS city FROM ({res.query}) r "
+        f"LEFT JOIN ({hot.query}) h USING (hotel_id)",
+        con,
+    )
+    events = Table(
+        "events",
+        f"SELECT lower(trim(city_name)) AS city, event_date AS stay_date, event_name "
+        f"FROM ({evt.query})",
+        con,
+    )
+    report = join_report(bookings, events, on=["city", "stay_date"])
+    assert report["fan_out"]["extra_left_copies"] == 4
+    assert "fan_out" in report["flags"]
+
+    built = con.execute(
+        f"SELECT count(*) - count(DISTINCT b.booking_id), sum(b.revenue) "
+        f"FROM ({bookings.query}) b LEFT JOIN ({events.query}) e USING (city, stay_date)"
+    ).fetchone()
+    doubled = con.execute(
+        f"SELECT sum(revenue) FROM ({bookings.query}) "
+        f"WHERE booking_id IN ('B0001', 'B0002', 'B0004', 'B0009')"
+    ).fetchone()[0]
+    total = con.execute(f"SELECT sum(revenue) FROM ({res.query})").fetchone()[0]
+    assert built[0] == report["fan_out"]["extra_left_copies"]
+    assert built[1] - total == doubled == 5240
 
 
 def test_null_keys_flagged(report):

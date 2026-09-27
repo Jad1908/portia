@@ -308,7 +308,6 @@
         "right_dropped": 1,
         "flags": [
           "left_rows_dropped",
-          "fan_out",
           "right_rows_dropped"
         ]
       },
@@ -465,7 +464,6 @@
         "right_dropped": 1,
         "flags": [
           "left_rows_dropped",
-          "fan_out",
           "null_keys",
           "right_rows_dropped"
         ]

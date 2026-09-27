@@ -24,7 +24,7 @@ The exact result-row formula, per join type, from key multiplicities:
     outer  = inner + both of the above
 
 **Two implementations, one set of rules**, as in `checks.profiling`: everything
-that turns measurements into a report — `_assemble`, `_relationship`, `_flags` —
+that turns measurements into a report — `_assemble`, `_relationship`, `flags_for` —
 takes plain numbers and is shared, so the tiers cannot drift into two subtly
 different reports.
 """
@@ -140,6 +140,13 @@ def _assemble(
             "result_per_matched_left": round_float(inner_rows / matched_left)
             if matched_left
             else 0.0,
+            # **What the multiplicities do to the result, counted.** A matched
+            # row appears once per match, so every row past the first copy of
+            # one is extra: summed, these are what a total over that side's
+            # column would be inflated by, row for row. The same in every join
+            # type, since an unmatched row appears at most once.
+            "extra_left_copies": inner_rows - matched_left,
+            "extra_right_copies": inner_rows - matched_right,
         },
         # Row conservation across every join type — the drop report. left/right
         # dropped = distinct rows from that side that don't survive the join.
@@ -166,14 +173,7 @@ def _assemble(
             },
         },
     }
-    report["flags"] = _flags(
-        report,
-        dropped_left=dropped_left,
-        dropped_right=dropped_right,
-        inner_rows=inner_rows,
-        null_keys=L["null_rows"] + R["null_rows"],
-        max_fanout=max(ov["max_left_to_right"], ov["max_right_to_left"]),
-    )
+    report["flags"] = flags_for(report)
     return report
 
 
@@ -198,23 +198,59 @@ def _relationship(left_unique: bool, right_unique: bool) -> str:
     return "many:many"
 
 
-def _flags(report, *, dropped_left, dropped_right, inner_rows, null_keys, max_fanout) -> list[str]:
+#: Which side's rows a join type keeps whole. ``fan_out`` is about the table
+#: whose rows the result is supposed to hold one of each: repeating the *other*
+#: side's rows is what a lookup does. ``inner`` keeps neither whole and takes
+#: the left, the side every other field of the report is written from.
+KEPT_SIDES = {
+    "inner": ("left",),
+    "left": ("left",),
+    "right": ("right",),
+    "outer": ("left", "right"),
+}
+
+
+def fans_out(report: dict, how: str = "left") -> bool:
+    """Whether a join of this type repeats a row of the side it keeps.
+
+    **Not either side's key multiplicity**, which is what this flag read until
+    2026-09-27. A fact table joined to its dimension has a dimension key shared
+    by many rows on the left, so ``max_right_to_left`` is well above one on every
+    ordinary lookup — and the result still holds each left row exactly once. The
+    flag fired on nearly every fact-to-dimension join, which is how the one
+    warning that protects a total gets learned as noise (`BACKLOG.md` → Checks,
+    `SPRINT.md` F1). The right side's repetition is not hidden: ``relationship``
+    says ``many:1`` and ``extra_right_copies`` counts it.
+    """
+    counts = report["fan_out"]
+    return any(counts[f"extra_{side}_copies"] > 0 for side in KEPT_SIDES[how])
+
+
+def flags_for(report: dict, how: str = "left") -> list[str]:
+    """The report's flags, for a join of type ``how``.
+
+    Read off the report alone, so the op can ask again once it knows ``how``.
+    The report is formed before anyone has chosen a join type, and its own list
+    reads ``fan_out`` for the left side; a ``right`` join keeps the right
+    table's rows, and repeats of those are what multiply it.
+    """
+    inner = report["joins"]["inner"]
     flags: list[str] = []
     if not report["key_dtype_match"]:
         flags.append("key_dtype_mismatch")  # most severe: likely zero real matches
-    if inner_rows == 0:
+    if inner["result_rows"] == 0:
         flags.append("no_matches")
     if report["relationship"] == "many:many":
         flags.append("many_to_many")
-    if dropped_left > 0:
+    if inner["left_dropped"] > 0:
         flags.append("left_rows_dropped")
-    if max_fanout > 1:
+    if fans_out(report, how):
         flags.append("fan_out")
-    if null_keys > 0:
+    if report["left"]["n_null_keys"] + report["right"]["n_null_keys"] > 0:
         flags.append("null_keys")
     if report["overlap"]["left_coverage"] < LOW_COVERAGE:
         flags.append("low_overlap")
-    if dropped_right > 0:
+    if inner["right_dropped"] > 0:
         flags.append("right_rows_dropped")
     return flags
 
@@ -648,7 +684,9 @@ def render_text(report: dict) -> str:
         "",
         f"  key coverage: {report['overlap']['left_coverage']:.0%} of left, "
         f"{report['overlap']['right_coverage']:.0%} of right match",
-        f"  fan-out: 1 left row -> up to {report['fan_out']['max_left_to_right']} right",
+        f"  fan-out: 1 left row -> up to {report['fan_out']['max_left_to_right']} right; "
+        f"{report['fan_out']['extra_left_copies']} extra copies of left rows, "
+        f"{report['fan_out']['extra_right_copies']} of right rows",
         "",
         "  result rows / dropped, by join type:",
     ]

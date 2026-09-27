@@ -49,7 +49,9 @@
   "fan_out": {
     "max_left_to_right": 1,
     "max_right_to_left": 4,
-    "result_per_matched_left": 1.0
+    "result_per_matched_left": 1.0,
+    "extra_left_copies": 0,
+    "extra_right_copies": 9
   },
   "joins": {
     "inner": {
@@ -75,7 +77,6 @@
   },
   "flags": [
     "left_rows_dropped",
-    "fan_out",
     "right_rows_dropped"
   ]
 }

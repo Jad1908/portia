@@ -16,4 +16,10 @@ buries the one column that explains why it did not match. 'example_row_columns' 
 you got — do not read the width of an example row as the width of the table. Name 'left_columns'
 or 'right_columns' to choose the rest yourself; the keys are included either way.
 
+'fan_out' means a row of the left table would come out more than once, so a left or inner join
+returns more rows than the left puts in and a total over a left column comes out too high.
+'extra_left_copies' counts those rows. The right table's rows repeating is what every lookup does:
+'relationship' says many:1 and 'extra_right_copies' counts it. Put the table whose rows you are
+keeping on the left.
+
 The findings are unranked: whether a dropped row matters is your call, not the check's.
