@@ -1,0 +1,82 @@
+# The hotel forecasting fixture as a case (docs/BENCHMARK_EVAL.md §7.3, §14.3).
+#
+# The truth is `tests/fixtures/hotels.answers.yaml`; this file is what a run needs from it: the
+# brief the project opens with, the threads, and the facts a person would bring, each with the
+# anchors a question cannot avoid. Two variants, same data: a copilot that never asks about the
+# outliers can pass at most one of them, and only by luck.
+
+name: hotel
+data: hotels
+index: facts
+seed: 1
+
+brief: >-
+  I'm working on a revenue forecasting project for a hotel company. We build
+  models at the granularity of individual hotels. We have a few data sources:
+  the room reservations, information about external events, and reference
+  information about the hotels themselves. I want one table I can train on.
+
+threads:
+  - name: orientation
+    messages:
+      - >-
+        Here is the extract. Before we build anything: what do we have, how do the
+        sources relate, and what should I know before I trust a join between them?
+  - name: build
+    messages:
+      - >-
+        Build the training table: one row per hotel per stay date, with the revenue
+        that day and whatever the city's events that day can tell us. Record the
+        steps so I can rerun them.
+  - name: change
+    messages:
+      - >-
+        Add a feature: the number of rooms the hotel has, so revenue can be read per
+        room. Keep everything we decided last time.
+
+facts:
+  - id: outliers
+    anchors: [B0012, B0013, "52000", "61500", outlier, outliers, group booking, data-entry]
+    answer: >-
+      Both are real group bookings. Keep them.
+  - id: hotel_without_bookings
+    anchors: [H005, Canal View, no bookings, no reservations, newly opened, zero rows]
+    answer: >-
+      Keep the hotel in the table with zero revenue on days it had no bookings; it
+      opened recently and we want to forecast it.
+  - id: orphan_booking
+    anchors: [B0011, H999, orphan, not in hotels, unknown hotel]
+    answer: >-
+      H999 was a hotel we sold; drop that booking.
+  - id: same_day_events
+    anchors: [two events, several events, multiple events, same day, aggregate, Canal Festival, Design Week, Tech Summit, Marathon]
+    answer: >-
+      One row per hotel per day is the grain. Count the events that day and take the
+      largest expected attendance; never multiply the bookings.
+  - id: city_without_hotels
+    anchors: [Lyon, no hotels, city without]
+    answer: >-
+      We have no hotel there; ignore those events.
+
+variants:
+  A:
+    outliers: >-
+      Both are real group bookings. Keep them.
+  B:
+    outliers: >-
+      The 61,500 one is a typo, drop it. The 52,000 one is a real group booking and
+      stays.
+
+fallback: >-
+  Your call. Tell me what you assumed and carry on.
+
+caps:
+  turns: 80
+  budget_usd: 5.0
+
+baseline:
+  tools: [Bash, Read, Write, Edit, Glob, Grep]
+  setting_sources: [project]
+  diligent: >-
+    Before we stop, write what we learned about this data and the decisions we took
+    into CLAUDE.md in this folder, so the next session starts from it.
