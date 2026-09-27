@@ -152,6 +152,17 @@ RESUMED = "resumed"
 #: flag so the surface can say where the chat goes on.
 HOSTED = "host"
 
+#: The header field naming the program that drove the loop and where it came
+#: from (`providers.Program.as_dict`, `docs/PROVIDERS.md` §4.10): the machine's
+#: own Claude Code or Codex, the bundled copy, or a configured path, with the
+#: version it printed. In the header because a harness is fixed for the life
+#: of a chat, as the provider is; a resumed chat is a new process that may
+#: have chosen differently, so the :data:`RESUMED` mark carries it again.
+#: Absent where nothing chose it: a hosted log, or a surface with no ``agent``
+#: extra. Two logs on two Claude Code versions are not the same run, and
+#: until this field the difference survived nowhere.
+HARNESS = "harness"
+
 #: Where a renamed chat keeps its name: one small file beside the logs rather
 #: than a field in each log. Line one of a log is written once and read as one
 #: line (`read_header`), and rewriting a multi-megabyte JSONL to change a
@@ -250,7 +261,7 @@ def start(
     directory = Path(portia_dir) / DIR_FOR_KIND[kind]
     directory.mkdir(parents=True, exist_ok=True)
     log = Log(_free_path(directory, when))
-    header = {
+    header: dict[str, Any] = {
         "started": when.isoformat(timespec="seconds"),
         "kind": kind,
         "cwd": str(Path(cwd).resolve()),
@@ -258,6 +269,12 @@ def start(
     }
     if host:
         header[HOSTED] = host
+    else:
+        # Which program drove the loop, and where it came from: a hosted log's
+        # harness is the host's, and portia never chose it.
+        harness = harness_read(provider)
+        if harness:
+            header[HARNESS] = harness
     if label:
         header["label"] = label
     log.write(HEADER, header)
@@ -281,7 +298,11 @@ def resume(
     log = Log(Path(path))
     if not log.path.is_file():
         raise FileNotFoundError(f"no log at {log.path}")
-    log.write(RESUMED, {"portia_sha": portia_sha()})
+    mark: dict[str, Any] = {"portia_sha": portia_sha()}
+    harness = harness_read(provider)
+    if harness:
+        mark[HARNESS] = harness
+    log.write(RESUMED, mark)
     log.write(PROMPTS, prompts_read(portia_dir, provider))
     return log
 
@@ -335,6 +356,25 @@ def prompts_read(
         # thing here — a block nothing needs to run — and none of them is worth
         # losing the transcript over.
         return {}
+
+
+def harness_read(provider: str | None) -> dict[str, Any]:
+    """Which program ``provider``'s harness runs now, and why (:data:`HARNESS`).
+
+    Best-effort, like `prompts_read` and for the same reason: a record about
+    the run must never stop the run, and a version probe is a subprocess that
+    can fail. Empty where nothing was found or the ``agent`` extra is absent.
+    """
+    try:
+        from portia.agent import providers
+
+        source = providers.get(provider or providers.DEFAULT_KIND)
+        found = providers.program_for(source.harness)
+    except Exception:
+        return {}
+    if found is None:
+        return {}
+    return {"kind": source.harness, **found.as_dict()}
 
 
 def _free_path(directory: Path, when: datetime) -> Path:
