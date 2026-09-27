@@ -59,7 +59,10 @@ NAME = "Name"
 VALUE = "Value"
 KNOWN = "portia reads:"
 BINARY_WHAT = "Binary path"
-BINARY_WHY = "The program this provider runs. Empty means the bundled one, else the one on PATH."
+BINARY_WHY = (
+    "The program this harness runs. Empty means your own install when it is at least "
+    "as new as the bundled one, else the bundled one."
+)
 HOME_WHAT = "Sign-in home"
 HOME_WHY = "Where its own sign-in lives. Empty means the vendor's default."
 SETTINGS_FILE = "Saved in"

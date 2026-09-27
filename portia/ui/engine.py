@@ -476,13 +476,18 @@ async def preflight(app: App, kind: str, model: str) -> Any:
     from portia.agent import providers, session
 
     provider = providers.get(kind)
-    return await asyncio.to_thread(
-        partial(
-            provider.preflight,
-            model,
-            prompt_chars=lambda: session.prompt_chars(app.portia_dir, kind),
+
+    def measure() -> Any:
+        # The harness's program is chosen here too, off the loop, so the
+        # version probes it costs (`providers.remembered_version`) are paid
+        # before the log's header and the options ask for it on the loop
+        # (`docs/PROVIDERS.md` §4.10).
+        providers.program_for(provider.harness)
+        return provider.preflight(
+            model, prompt_chars=lambda: session.prompt_chars(app.portia_dir, kind)
         )
-    )
+
+    return await asyncio.to_thread(measure)
 
 
 def needs_connection(app: App) -> bool:
