@@ -14,8 +14,8 @@ import json
 import sys
 from pathlib import Path
 
+from devtools.bench import baseline, invariants, run
 from devtools.bench import case as cases
-from devtools.bench import invariants, run
 from portia.agent import session
 
 
@@ -47,6 +47,9 @@ def main(argv: list[str] | None = None) -> int:
     runner.add_argument("--effort", default=None, choices=session.EFFORTS)
     runner.add_argument("--provider", default=session.DEFAULT_PROVIDER)
     runner.add_argument("--out", type=Path, default=run.DEFAULT_OUT)
+    runner.add_argument(
+        "--arm", default=run.ARM_PORTIA, choices=run.ARMS, help="which side of the comparison"
+    )
 
     args = parser.parse_args(argv)
     if args.command == "check":
@@ -63,16 +66,29 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "run":
         loaded = cases.load(args.case)
-        result = asyncio.run(
-            run.run_case(
-                loaded,
-                variant=args.variant,
-                model=args.model,
-                effort=args.effort,
-                provider=args.provider,
-                out=args.out,
+        if args.arm == run.ARM_PORTIA:
+            result = asyncio.run(
+                run.run_case(
+                    loaded,
+                    variant=args.variant,
+                    model=args.model,
+                    effort=args.effort,
+                    provider=args.provider,
+                    out=args.out,
+                )
             )
-        )
+        else:
+            result = asyncio.run(
+                baseline.run_baseline(
+                    loaded,
+                    variant=args.variant,
+                    diligent=args.arm == run.ARM_BASELINE_DILIGENT,
+                    model=args.model,
+                    effort=args.effort,
+                    provider=args.provider,
+                    out=args.out,
+                )
+            )
         print(f"{result.project}")
         for thread in result.threads:
             print(

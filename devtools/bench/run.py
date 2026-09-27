@@ -32,10 +32,14 @@ from portia.core.io import find_data_files
 from portia.core.serialize import to_json
 from portia.spec import REPORT_STAMP
 
-#: Which side of the comparison a run is (§5). A kind, never a rank.
+#: Which side of the comparison a run is (§5). A kind, never a rank. The
+#: baseline comes in two versions (§5.4): as shipped, and diligent, where the
+#: scripted user asks it to write down what it learned at the end of each
+#: thread. portia gets no such instruction, because its memory is automatic.
 ARM_PORTIA = "portia"
 ARM_BASELINE = "baseline"
-ARMS = (ARM_PORTIA, ARM_BASELINE)
+ARM_BASELINE_DILIGENT = "baseline-diligent"
+ARMS = (ARM_PORTIA, ARM_BASELINE, ARM_BASELINE_DILIGENT)
 
 #: Where runs land when nowhere is given: gitignored, beside the viewer's notes.
 DEFAULT_OUT = Path(__file__).resolve().parents[1] / "out" / "bench"
@@ -51,6 +55,10 @@ NO_VARIANT = "base"
 
 #: The name of the indexing thread, when the case asks the copilot to index.
 INDEXING_THREAD = "indexing"
+
+#: Where the baseline reads the brief: the file Claude Code reads on its own
+#: in a project, and the one the diligent version is asked to write to.
+BASELINE_BRIEF = "CLAUDE.md"
 
 
 @dataclass
@@ -117,13 +125,17 @@ def run_dir(out: Path, case: cases.Case, variant: str | None, arm: str, when: da
     return out / case.name / (variant or NO_VARIANT) / arm / when.strftime(REPORT_STAMP)
 
 
-def prepare_project(case: cases.Case, root: Path) -> Path:
-    """A fresh project under ``root``: the data written, the brief set, the facts indexed.
+def prepare_project(case: cases.Case, root: Path, *, arm: str = ARM_PORTIA) -> Path:
+    """A fresh project under ``root``: the data written, and the brief where the arm reads it.
 
     Deterministic and free: the fixture builders are, `catalog.index_source`
-    is, and nothing here runs a model. What the copilot adds on top (summaries,
-    roles, groups) is a thread's work, so a case that wants it says
-    ``index: copilot`` and gets an indexing job before its first thread.
+    is, and nothing here runs a model. For portia the brief is the project
+    context and the facts are indexed into the catalog; what the copilot adds
+    on top (summaries, roles, groups) is a thread's work, so a case that wants
+    it says ``index: copilot`` and gets an indexing job before its first
+    thread. For the baseline the brief is the project's `CLAUDE.md`, which is
+    where a Claude Code user writes what a project is for, and there is no
+    catalog at all: that is the thing being compared (§5.4).
     """
     project = root / PROJECT_DIR
     data_dir = project / DATA_DIR
@@ -135,6 +147,9 @@ def prepare_project(case: cases.Case, root: Path) -> Path:
             builder().to_csv(data_dir / f"{name}.csv", index=False)
     else:
         shutil.copytree(case.data, data_dir, dirs_exist_ok=True)
+    if arm != ARM_PORTIA:
+        (project / BASELINE_BRIEF).write_text(case.brief.strip() + "\n", encoding="utf-8")
+        return project
     portia_dir = project / catalog.DEFAULT_DIR
     catalog.init_project(case.brief, portia_dir=portia_dir)
     catalog.set_data_dir(DATA_DIR, portia_dir=portia_dir)
@@ -254,10 +269,7 @@ async def _thread(
         max_budget_usd=case.max_budget_usd,
         client_factory=client_factory,
     )
-    async with chat:
-        for message in messages:
-            async for event in chat.send(message):
-                log.event(event)
+    await drive(chat, log, messages)
     transcript = runlog.read(log.path)
     return ThreadRun(
         name=name,
@@ -266,6 +278,14 @@ async def _thread(
         session_id=chat.session_id,
         summary=runlog.summary(transcript),
     )
+
+
+async def drive(chat: session.Conversation, log: runlog.Log, messages: tuple[str, ...]) -> None:
+    """One chat, its messages in order, each sent when the previous reply ends, every event teed."""
+    async with chat:
+        for message in messages:
+            async for event in chat.send(message):
+                log.event(event)
 
 
 def write_result(run: Run, folder: Path) -> Path:
