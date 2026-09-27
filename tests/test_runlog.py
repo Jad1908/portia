@@ -76,8 +76,71 @@ def test_the_header_holds_only_what_is_true_of_the_whole_chat(tmp_path):
     header = runlog.read(log.path).header
 
     # The harness is fixed for the life of a chat too, and rides here when a
-    # program was chosen on this machine (`test_the_header_says_which_program`).
-    assert set(header) - {runlog.HARNESS} == {"started", "kind", "cwd", "portia_sha"}
+    # program was chosen on this machine (`test_the_header_says_which_program`),
+    # as do the pins (`test_the_header_pins_what_makes_two_logs_comparable`).
+    assert set(header) - {runlog.HARNESS, *runlog.PINS} == {"started", "kind", "cwd"}
+
+
+# --- the pins ----------------------------------------------------------------
+
+
+def test_the_header_pins_what_makes_two_logs_comparable(tmp_path):
+    """`BENCHMARK_EVAL.md` §4, principle 5 — two runs are comparable only if
+    exactly one of model, effort, portia sha, prompt hash, SDK version and data
+    seed differs. The sha alone never covered the prompts: the brief is built
+    from `.portia/`, which moves as the project is indexed."""
+    from portia import catalog
+
+    catalog.init_project("a hotel forecasting project", portia_dir=tmp_path)
+    log = runlog.start(tmp_path, cwd=tmp_path, seed=7)
+    header_line, prompts_line = log.path.read_text(encoding="utf-8").splitlines()[:2]
+    header = json.loads(header_line)["data"]
+
+    assert header[runlog.SEED] == 7
+    assert header[runlog.SDK], "the installed Agent SDK's version"
+    # Line one says which words; line two is the words, and a reader can check.
+    assert header[runlog.PROMPTS_SHA] == runlog.prompts_sha(json.loads(prompts_line)["data"])
+    assert len(header[runlog.PROMPTS_SHA]) == runlog.PROMPTS_SHA_CHARS
+    assert runlog.pins(runlog.read(log.path))[runlog.SEED] == 7
+
+
+def test_a_different_brief_is_a_different_prompts_sha(tmp_path):
+    """The brief is part of what the model read, so two projects give two digests."""
+    from portia import catalog
+
+    first, second = tmp_path / "one", tmp_path / "two"
+    catalog.init_project("forecasting hotel revenue", portia_dir=first)
+    catalog.init_project("matching supplier invoices", portia_dir=second)
+
+    a = runlog.read_header(runlog.start(first, cwd=tmp_path).path)
+    b = runlog.read_header(runlog.start(second, cwd=tmp_path).path)
+    assert a[runlog.PROMPTS_SHA] != b[runlog.PROMPTS_SHA]
+    assert a[runlog.SDK] == b[runlog.SDK]
+
+
+def test_a_chat_on_real_data_records_no_seed(tmp_path):
+    """Absent, never a made-up zero: a seed is a fact about generated data only."""
+    log = runlog.start(tmp_path, cwd=tmp_path)
+    header = runlog.read_header(log.path)
+    assert runlog.SEED not in header
+    assert runlog.pins(runlog.read(log.path))[runlog.SEED] is None
+    assert runlog.summary(runlog.read(log.path))[runlog.SEED] is None
+
+
+def test_a_resumed_chat_pins_the_prompts_it_reads_now(tmp_path):
+    """A later process may read different words; the mark says which."""
+    log = runlog.start(tmp_path, cwd=tmp_path)
+    runlog.resume(log.path, tmp_path)
+    records = [json.loads(line) for line in log.path.read_text(encoding="utf-8").splitlines()]
+    mark = next(r["data"] for r in records if r["kind"] == runlog.RESUMED)
+    assert mark[runlog.PROMPTS_SHA] == runlog.prompts_sha(records[-1]["data"])
+    assert mark[runlog.SDK]
+
+
+def test_an_empty_prompts_record_has_no_digest():
+    """Without the `agent` extra nothing was composed, and a pin that says
+    otherwise would be the header being wrong about the one thing it is for."""
+    assert runlog.prompts_sha({}) is None
 
 
 def test_what_makes_two_chats_comparable_is_recorded(tmp_path):

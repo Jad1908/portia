@@ -50,6 +50,7 @@ would be least visible.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import subprocess
@@ -163,6 +164,31 @@ HOSTED = "host"
 #: until this field the difference survived nowhere.
 HARNESS = "harness"
 
+#: The header fields that **pin** a run: what has to be equal for two logs to be
+#: about the same thing (`docs/BENCHMARK_EVAL.md` §4, principle 5). Two runs are
+#: comparable only if exactly one of model, effort and these differs, and a
+#: report that puts them side by side checks that first. ``portia_sha`` says
+#: which engine; :data:`PROMPTS_SHA` says which words the model read, because
+#: the prompts are the least stable thing in the repo and a sha of the code
+#: does not cover the brief, which is built from `.portia/`; :data:`SDK` says
+#: which Agent SDK drove the binary; :data:`SEED` says which data, for a run
+#: on a generated estate, and is absent on every other log rather than a
+#: made-up zero. Model and effort are not here: they ride on each exchange's
+#: `PROMPT` event, because a chat can span several.
+PROMPTS_SHA = "prompts_sha"
+SDK = "sdk"
+SEED = "seed"
+PINS = ("portia_sha", PROMPTS_SHA, SDK, SEED)
+
+#: How much of the prompts' digest the header keeps. Twelve hex characters is
+#: 48 bits, enough that two prompt versions never share one and short enough
+#: to read in a list beside the seven-character `portia_sha`.
+PROMPTS_SHA_CHARS = 12
+
+#: The distribution the SDK version is read off. The SDK is the one dependency
+#: that changes what the binary is told and how, so its version is a pin.
+SDK_DISTRIBUTION = "claude-agent-sdk"
+
 #: Where a renamed chat keeps its name: one small file beside the logs rather
 #: than a field in each log. Line one of a log is written once and read as one
 #: line (`read_header`), and rewriting a multi-megabyte JSONL to change a
@@ -228,8 +254,12 @@ def start(
     host: str | None = None,
     prompts: dict[str, Any] | None = None,
     label: str | None = None,
+    seed: str | int | None = None,
 ) -> Log:
     """Open a log for one **chat** and write its header.
+
+    ``seed`` is the data seed of a run on a generated estate (:data:`SEED`);
+    left out for a chat on real data, which has no seed to record.
 
     ``label`` is what a job is about — the sources an indexing job reads — and
     it goes in the header because it is true of the whole file and it is what
@@ -261,11 +291,15 @@ def start(
     directory = Path(portia_dir) / DIR_FOR_KIND[kind]
     directory.mkdir(parents=True, exist_ok=True)
     log = Log(_free_path(directory, when))
+    # Read before the header is written, because the header pins a digest of
+    # it: line two is the words, line one says which words.
+    read = prompts_read(portia_dir, provider, builds=kind == CHAT) if prompts is None else prompts
     header: dict[str, Any] = {
         "started": when.isoformat(timespec="seconds"),
         "kind": kind,
         "cwd": str(Path(cwd).resolve()),
         "portia_sha": portia_sha(),
+        **_pins(read, seed),
     }
     if host:
         header[HOSTED] = host
@@ -279,8 +313,7 @@ def start(
         header["label"] = label
     log.write(HEADER, header)
     # A job reads: its model is offered no build tool, and the record says so.
-    read = prompts_read(portia_dir, provider, builds=kind == CHAT)
-    log.write(PROMPTS, read if prompts is None else prompts)
+    log.write(PROMPTS, read)
     return log
 
 
@@ -298,12 +331,13 @@ def resume(
     log = Log(Path(path))
     if not log.path.is_file():
         raise FileNotFoundError(f"no log at {log.path}")
-    mark: dict[str, Any] = {"portia_sha": portia_sha()}
+    read = prompts_read(portia_dir, provider)
+    mark: dict[str, Any] = {"portia_sha": portia_sha(), **_pins(read, None)}
     harness = harness_read(provider)
     if harness:
         mark[HARNESS] = harness
     log.write(RESUMED, mark)
-    log.write(PROMPTS, prompts_read(portia_dir, provider))
+    log.write(PROMPTS, read)
     return log
 
 
@@ -375,6 +409,43 @@ def harness_read(provider: str | None) -> dict[str, Any]:
     if found is None:
         return {}
     return {"kind": source.harness, **found.as_dict()}
+
+
+def _pins(read: dict[str, Any], seed: str | int | None) -> dict[str, Any]:
+    """The pins a header or a resume mark carries, each only when known (:data:`PINS`)."""
+    out: dict[str, Any] = {}
+    digest = prompts_sha(read)
+    if digest:
+        out[PROMPTS_SHA] = digest
+    version = sdk_version()
+    if version:
+        out[SDK] = version
+    if seed is not None:
+        out[SEED] = seed
+    return out
+
+
+def prompts_sha(read: dict[str, Any]) -> str | None:
+    """A short digest of what the model read (:data:`PROMPTS_SHA`); ``None`` for an empty record.
+
+    Over the record as the log writes it, so a reader can recompute it from line
+    two and check the header against the file. ``None`` rather than the digest of
+    nothing when `prompts_read` could compose nothing: a log without the
+    ``agent`` extra has no prompts to pin, and a pin that says so is wrong.
+    """
+    if not read:
+        return None
+    return hashlib.sha256(to_json_line(read).encode("utf-8")).hexdigest()[:PROMPTS_SHA_CHARS]
+
+
+def sdk_version() -> str | None:
+    """The installed Agent SDK's version (:data:`SDK`), or ``None`` without the ``agent`` extra."""
+    from importlib import metadata
+
+    try:
+        return metadata.version(SDK_DISTRIBUTION)
+    except metadata.PackageNotFoundError:
+        return None
 
 
 def _free_path(directory: Path, when: datetime) -> Path:
@@ -727,6 +798,24 @@ def read(path: str | Path) -> Transcript:
 # --- what it can answer without any labels ----------------------------------
 
 
+def pins(run: Transcript) -> dict[str, Any]:
+    """What pins this run, for a comparison to check (:data:`PINS`).
+
+    The four header pins plus the model and effort the chat opened on: the six
+    facts `docs/BENCHMARK_EVAL.md` §4 says two runs may differ in by exactly
+    one. A fact the log never recorded is ``None``, and a comparison treats
+    ``None`` against a value as a difference, because an unknown pin is not a
+    matching one. This lists; deciding whether two runs may sit side by side
+    is the report's job, in `devtools/`, and never a verdict on either run.
+    """
+    prompts = _of(run, events.PROMPT)
+    return {
+        "model": _first_model(run, prompts),
+        "effort": _first_effort(run, prompts),
+        **{key: run.header.get(key) for key in PINS},
+    }
+
+
 def summary(run: Transcript) -> dict[str, Any]:
     """Counts, not verdicts — **across the whole chat**.
 
@@ -771,6 +860,11 @@ def summary(run: Transcript) -> dict[str, Any]:
             (e.data.get("session_id") for e in reversed(results) if e.data.get("session_id")), None
         ),
         "portia_sha": run.header.get("portia_sha"),
+        # The rest of what pins the run (:data:`PINS`), read off the header
+        # like the sha; absent where the log never recorded them.
+        PROMPTS_SHA: run.header.get(PROMPTS_SHA),
+        SDK: run.header.get(SDK),
+        SEED: run.header.get(SEED),
         # How many later processes picked this chat up. A count, like the rest.
         "resumes": len(run.resumes),
         # Rungs pulled, in what order, and **what each one was about** — the
