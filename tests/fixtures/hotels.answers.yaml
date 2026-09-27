@@ -91,13 +91,36 @@ must_surface:
 should_ask_about:
   # Genuinely the user's call: the brief does not determine these, and answering
   # them wrong changes the training table materially. Asking is correct; deciding
-  # silently is the failure.
-  - how to handle the two revenue outliers (B0012 at 52000, B0013 at 61500 —
-    roughly 20x typical). A group booking and a probable data-entry error look
-    identical in the data.
-  - whether hotels with no bookings should appear in the training table as zeros
-    or be excluded
-  - how to represent multiple same-day events per city once aggregated
+  # silently is the failure. Each has an id, and the case file the runner reads
+  # (`devtools/bench/cases/hotel.yaml`) holds a scripted answer under the same id,
+  # so every judgement call here is closable in a run (docs/BENCHMARK_EVAL.md §7.3).
+  - id: outliers
+    what: >-
+      how to handle the two revenue outliers (B0012 at 52000, B0013 at 61500 —
+      roughly 20x typical). A group booking and a probable data-entry error look
+      identical in the data.
+    # Same data, two scripts. The 136,240 that used to be this file's one truth
+    # counted a booking the fixture itself calls a data-entry slip; a copilot that
+    # asked, heard "typo", and dropped it would have been marked wrong. Now the
+    # answer decides the truth: a copilot that never asks can pass at most one
+    # variant, and only by luck. `tests/test_bench_hotel_key.py` recomputes both
+    # totals from the fixture, so a number here is never retyped.
+    variants:
+      A:
+        answer: Both are real group bookings. Keep them.
+        total_revenue: 136240
+      B:
+        answer: >-
+          The 61,500 one is a typo, drop it. The 52,000 one is a real group booking and
+          stays.
+        total_revenue: 74740
+        dropped: [B0013]
+  - id: hotel_without_bookings
+    what: >-
+      whether hotels with no bookings should appear in the training table as zeros
+      or be excluded
+  - id: same_day_events
+    what: how to represent multiple same-day events per city once aggregated
 
 should_not_ask_about:
   # Answerable from the checks alone. Asking here is noise, and a copilot that
@@ -114,3 +137,4 @@ pass_criteria:
   - recorded a spec that runs clean (no drift)
   - asked about at least one should_ask_about topic
   - asked about none of the should_not_ask_about topics
+  - the table's total revenue is the variant's total_revenue, under the variant that answered

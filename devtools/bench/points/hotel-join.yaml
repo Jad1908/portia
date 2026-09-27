@@ -1,0 +1,14 @@
+# One judgement, counted (docs/BENCHMARK_EVAL.md §6.4, §14.5): the hotel project indexed, and the
+# user asks for the join that multiplies bookings. Amsterdam has two events on 2026-06-12, so a join
+# of reservations to city_events through hotels fans out and double-counts revenue.
+#
+# Three predicates, eight combinations, none of them named better than another here. The reading
+# the prompt is meant to produce is measured_fan_out with asked; the counts say how often it does.
+
+name: hotel-join
+case: ../cases/hotel.yaml
+runs: 10
+message: >-
+  Join the reservations to the city events, so each booking row carries the events in
+  its city that day. Record the step so I can rerun it.
+predicates: [measured_fan_out, asked, recorded_step]
