@@ -4,6 +4,8 @@ python -m devtools.bench invariants sandbox/            # every log under a root
 python -m devtools.bench invariants some/.portia --strict --json
 python -m devtools.bench check devtools/bench/cases/hotel.yaml
 python -m devtools.bench run devtools/bench/cases/hotel.yaml --variant B --model claude-haiku-4-5
+python -m devtools.bench run devtools/bench/cases/hotel.yaml --arm baseline-diligent
+python -m devtools.bench point devtools/bench/points/hotel-join.yaml --runs 10
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ import json
 import sys
 from pathlib import Path
 
-from devtools.bench import baseline, invariants, run
+from devtools.bench import baseline, invariants, points, run
 from devtools.bench import case as cases
 from portia.agent import session
 
@@ -51,7 +53,32 @@ def main(argv: list[str] | None = None) -> int:
         "--arm", default=run.ARM_PORTIA, choices=run.ARMS, help="which side of the comparison"
     )
 
+    point = sub.add_parser(
+        "point", help="one judgement, N runs on fresh copies, the outcomes counted"
+    )
+    point.add_argument("point", type=Path)
+    point.add_argument("--runs", type=int, default=None, help="how many (default: the file's)")
+    point.add_argument("--model", default=session.DEFAULT_MODEL)
+    point.add_argument("--effort", default=None, choices=session.EFFORTS)
+    point.add_argument("--provider", default=session.DEFAULT_PROVIDER)
+    point.add_argument("--out", type=Path, default=points.DEFAULT_OUT)
+
     args = parser.parse_args(argv)
+    if args.command == "point":
+        loaded_point = points.load(args.point)
+        tally, path = asyncio.run(
+            points.run_point(
+                loaded_point,
+                runs=args.runs,
+                model=args.model,
+                effort=args.effort,
+                provider=args.provider,
+                out=args.out,
+            )
+        )
+        print(points.render(tally))
+        print(f"tally at {path}")
+        return 0
     if args.command == "check":
         try:
             loaded = cases.load(args.case)
