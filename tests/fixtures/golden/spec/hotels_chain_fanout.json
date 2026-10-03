@@ -206,7 +206,6 @@
         "right_dropped": 1,
         "flags": [
           "left_rows_dropped",
-          "fan_out",
           "right_rows_dropped"
         ]
       },

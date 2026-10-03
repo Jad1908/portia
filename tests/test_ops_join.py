@@ -32,6 +32,18 @@ def test_provenance_is_json_serializable(table):
     assert json.loads(json.dumps(res.provenance))["op"] == "join"
 
 
+def test_a_join_reports_the_fan_out_of_the_side_it_keeps(table):
+    """One many:1 pair, two join types. A left join holds each event once; a right
+    join keeps the venues and repeats V1 three times, which is its fan-out."""
+    events = table(pd.DataFrame({"event_id": [1, 2, 3, 4], "venue_id": ["V1", "V1", "V1", "V2"]}))
+    venues = table(pd.DataFrame({"venue_id": ["V1", "V2"], "capacity": [500, 80]}))
+    left = apply_join(events, venues, how="left", on="venue_id")
+    right = apply_join(events, venues, how="right", on="venue_id")
+    assert "fan_out" not in left.provenance["flags"]
+    assert "fan_out" in right.provenance["flags"]
+    assert right.table.count() == right.provenance["input_rows"]["right"] + 2
+
+
 def test_bad_how_raises():
     with pytest.raises(ValueError, match="how must be one of"):
         apply_join(pd.DataFrame({"k": [1]}), pd.DataFrame({"k": [1]}), how="cross", on="k")

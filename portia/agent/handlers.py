@@ -1024,7 +1024,7 @@ def join_findings(
 
     Returns key-level facts (overlap, coverage, relationship, fan-out, and the
     row counts each `how` would produce) *and* example rows: the unmatched ones,
-    the null-key ones, the worst fan-out keys. Nothing here is ranked or scored.
+    the null-key ones, the keys repeated most. Nothing here is ranked or scored.
     Whether a dropped row is a catastrophe or a non-event depends on the goal,
     which only you have.
 
