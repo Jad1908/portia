@@ -155,7 +155,8 @@ uv run pre-commit install
 ```
 
 [GRAPH_SCHEMA.md](public_docs/GRAPH_SCHEMA.md) describes what you will find in the knowledge graph, with
-Cypher recipes. See [CONTRIBUTING.md](CONTRIBUTING.md) before opening an issue.
+Cypher recipes. [BENCHMARK_EVAL.md](public_docs/BENCHMARK_EVAL.md) is how portia gets measured: the
+method, and the tooling under `devtools/bench/`. See [CONTRIBUTING.md](CONTRIBUTING.md) before opening an issue.
 
 ## License
 
