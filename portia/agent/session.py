@@ -66,6 +66,12 @@ BINARY_ENV = {
 
 PROMPT_PATH = Path(__file__).parent / "prompts" / "copilot.md"
 
+#: What `Conversation` accepts in place of `build_options`: given the
+#: permission callback the chat built and its curator, hand back the SDK
+#: options to open the client with. Keyword arguments, so a builder that
+#: ignores the curator says so by name.
+OptionsBuilder = Callable[..., Any]
+
 
 def build_system_prompt(portia_dir: str = catalog.DEFAULT_DIR) -> str:
     """L0 (how to work) + L1 (this project), composed into one system prompt.
@@ -309,6 +315,7 @@ class Conversation:
         builds: bool = True,
         max_turns: int | None = None,
         max_budget_usd: float | None = None,
+        options_builder: OptionsBuilder | None = None,
     ) -> None:
         #: Questions and approvals are emitted from inside `can_use_tool` while
         #: the message stream is paused waiting on it, so they land here and
@@ -319,24 +326,35 @@ class Conversation:
         #: about *this* reply and a question from three messages ago was the
         #: last reply's to keep.
         self.curator = curation.Curation()
-        self._options = build_options(
-            model=model,
-            effort=effort,
-            cwd=cwd,
-            portia_dir=portia_dir,
-            curator=self.curator,
-            resume=resume,
-            provider=provider,
-            builds=builds,
-            max_turns=max_turns,
-            max_budget_usd=max_budget_usd,
-            can_use_tool=ask.build_can_use_tool(
-                answer=answer,
-                confirm=confirm,
-                emit=self._pending.append,
-                auto_allow=auto_allow,
-            ),
+        can_use_tool = ask.build_can_use_tool(
+            answer=answer,
+            confirm=confirm,
+            emit=self._pending.append,
+            auto_allow=auto_allow,
         )
+        # The options are portia's unless a caller brings its own builder: the
+        # one seam through which something that is not portia's copilot can
+        # borrow this loop, its drain order and its log shape. The benchmark's
+        # baseline is that caller (`devtools/bench/baseline.py`,
+        # `docs/BENCHMARK_EVAL.md` §5.5). What it may not borrow is the
+        # permission callback, which stays this class's, so a question and a
+        # write are one event shape in every log whoever built the options.
+        if options_builder is not None:
+            self._options = options_builder(can_use_tool=can_use_tool, curator=self.curator)
+        else:
+            self._options = build_options(
+                model=model,
+                effort=effort,
+                cwd=cwd,
+                portia_dir=portia_dir,
+                curator=self.curator,
+                resume=resume,
+                provider=provider,
+                builds=builds,
+                max_turns=max_turns,
+                max_budget_usd=max_budget_usd,
+                can_use_tool=can_use_tool,
+            )
         self._factory = client_factory or _sdk_client
         self._client: Any = None
         self._sending = False
