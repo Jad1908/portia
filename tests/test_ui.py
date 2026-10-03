@@ -817,6 +817,115 @@ def test_an_answer_is_never_read_off_the_next_question():
     assert transcript._answered_after(rows, 1) is True
 
 
+# --- the question form is a callout (2026-09-27) -----------------------------
+
+
+def _pending_question(questions: list[dict]):
+    import asyncio
+
+    from portia.agent import events
+
+    loop = asyncio.new_event_loop()
+    return Decision(events.QUESTION, {"questions": questions}, loop.create_future()), loop
+
+
+def _having(slot, name: str) -> list:
+    return [e for e in slot.descendants() if name in getattr(e, "classes", [])]
+
+
+def test_a_question_is_a_callout_that_ends_on_its_answer_box():
+    """The user, 2026-09-27: smaller, leaner, more modern. No card head, no
+    pill, no framed list, no footer: a kind line per question naming its
+    header, the options as rows, and one box holding the free text and the one
+    Answer, in the last block, so the card ends on what settles it."""
+    from portia.ui import transcript
+    from portia.ui.state import App
+
+    decision, loop = _pending_question(
+        [
+            {
+                "question": "which grain?",
+                "header": "Grain",
+                "options": [{"label": "day"}, {"label": "hour"}],
+            },
+            {"question": "which states?", "options": [{"label": "active"}], "multiSelect": True},
+        ]
+    )
+    try:
+        with _as_app(transcript, App()), ui.element("div") as slot:
+            transcript._question_form(decision)
+    finally:
+        loop.close()
+
+    for gone in ("decision-head", "decision-pill", "decision-actions"):
+        assert not _having(slot, gone), gone
+    assert [e.text for e in _having(slot, "question-kind-label")] == [
+        "Grain",
+        transcript._QUESTION_TITLE,
+    ]
+    boxes = _having(slot, "answer-box")
+    assert len(boxes) == 2, "every question has its own field"
+    (answer,) = _having(slot, "answer-send")
+    assert "btn-primary" in answer.classes
+    assert answer in list(boxes[-1].descendants())
+    assert answer not in list(boxes[0].descendants())
+    assert len(_having(slot, "option-row--multi")) == 1
+    for box in boxes:
+        (field,) = _having(box, "answer-field")
+        bound = {listener.type for listener in field._event_listeners.values()}
+        assert set(transcript.SEND_KEYS) <= bound, "Cmd+Enter answers, as it sends"
+
+
+def test_the_answer_shortcut_answers_with_the_text_the_keystroke_carried(monkeypatch):
+    """`_go_from_key`'s rule, for the reason measured on 2026-09-06: the bound
+    value can arrive after the keystroke, so the key brings its own text."""
+    from types import SimpleNamespace
+
+    from portia.ui import transcript
+    from portia.ui.state import App
+
+    redrawn = []
+    monkeypatch.setattr(transcript, "_decided", lambda: redrawn.append(True))
+    decision, loop = _pending_question(
+        [{"question": "which grain?", "options": [{"label": "day"}]}]
+    )
+    try:
+        with _as_app(transcript, App()):
+            transcript._answer_from_key(decision, "which grain?", SimpleNamespace(args="the hour"))
+    finally:
+        loop.close()
+    assert decision.resolved and decision.outcome == {"which grain?": "the hour"}
+    assert redrawn == [True], "the card settles the way the button settles it"
+
+
+def test_the_question_form_has_a_rule_not_a_box():
+    """The one live accent edge on screen is a rule, not a border round a card;
+    the list has no frame; the answer box takes the focus accent the composer
+    does; and the pill's accent variant went with the head it sat in."""
+    import re
+    from pathlib import Path
+
+    css = (Path(c.__file__).parent / "assets" / "portia.css").read_text(encoding="utf-8")
+    form = re.search(r"\n\.question-form \{(.*?)\n\}", css, re.S).group(1)
+    assert "border-left: 2px solid var(--accent-primary)" in form
+    assert not re.search(r"\n  background|\n  border:", form), "a rule, not a box"
+    options = re.search(r"\n\.option-list \{(.*?)\n\}", css, re.S).group(1)
+    assert "border" not in options and "background" not in options
+    focused = re.search(r"\n\.answer-box:focus-within \{(.*?)\n\}", css, re.S).group(1)
+    assert "border-color: var(--accent-primary)" in focused
+    assert ".decision-pill--accent" not in css
+    assert ".ask-form {" in css, "the middle pane's ask form kept the box under its own name"
+
+
+def test_the_middle_pane_ask_form_keeps_its_box_under_its_own_name():
+    import inspect
+
+    from portia.ui import workflow
+
+    code = inspect.getsource(workflow._ask_form).split('"""')[-1]
+    assert '"ask-form"' in code and "question-form" not in code
+
+
 # --- width behaviour --------------------------------------------------------
 
 

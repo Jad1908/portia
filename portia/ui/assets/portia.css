@@ -3699,10 +3699,10 @@ body.body--dark .p-panel {
  * saying what it wants. They used to open on a lone mute caption, which reads
  * as a note *about* the thing under it rather than as the thing itself.
  *
- * The pill takes the accent on a question and stays uncoloured on a write. Kind
- * and not rank: a question is the loop waiting on a sentence from you, a write
- * is the loop offering to make something durable, and neither is worse than the
- * other. */
+ * The write's alone since 2026-09-27: the question is a callout in the flow
+ * (`question-form`) and opens on its own kind line. The pill is uncoloured, a
+ * write being the loop offering to make something durable, and the accent
+ * pill it had on a question went with the card it sat on. */
 .decision-head {
   display: flex;
   align-items: center;
@@ -3730,65 +3730,47 @@ body.body--dark .p-panel {
   padding: 1px var(--sp-sm);
   white-space: nowrap;
 }
-/* The accent as a *foreground* on a soft wash — the accent-badge job it is
- * already allowed, not a fourth place the solid fill appears. */
-.decision-pill--accent {
-  color: var(--accent-text);
-  background: var(--accent-soft);
-  border-color: color-mix(in srgb, var(--accent-primary) 35%, transparent);
-}
-
-/* The only element on screen with a live accent border, so the eye finds it
- * without a colour-coded alarm. Never a modal. */
+/* ── question-form: the copilot has stopped to ask ─────────────────────────
+ *
+ * A callout in the flow of the chat, not a boxed form (2026-09-27). One accent
+ * rule down the left edge is the whole of its chrome: it keeps the job the
+ * card's border had, the one live accent edge on screen, at a fraction of the
+ * ink. The boxed card it replaced, and why each part of it went, is kept in
+ * DESIGN.md beside the reversal. Never a modal. */
 .question-form {
-  background: var(--surface-card);
-  border: 1px solid color-mix(in srgb, var(--accent-primary) 60%, transparent);
-  border-radius: var(--r-md);
-  padding: var(--sp-lg);
   display: flex;
   flex-direction: column;
   gap: var(--sp-md);
+  margin: var(--sp-xs) 0;
+  padding: var(--sp-xxs) 0 var(--sp-xxs) var(--sp-md);
+  border-left: 2px solid var(--accent-primary);
 }
-
-/* The options, ruled off from each other inside one box rather than floating as
- * separate cards. Four bordered rectangles stacked with a gap read as four
- * things to consider; one list reads as one question. */
-.option-list {
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-sm);
-  overflow: hidden;
-  background: var(--surface-elevated);
-}
-
-.option-row {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--sp-sm);
-  padding: var(--sp-sm) var(--sp-md);
-  border-top: 1px solid var(--hairline-soft);
-  cursor: pointer;
-}
-.option-row:first-child {
-  border-top: none;
-}
-.option-row:hover {
-  background: var(--surface-card);
-}
-.option-row--selected {
-  background: var(--accent-soft);
-}
-
-.option-body {
+.question-block {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-xxs);
-  min-width: 0;
+  gap: var(--sp-sm);
+}
+
+/* What kind of moment this is and what it is about: a glyph and the
+ * question's header, or *Question* when it has none. The chat header's back
+ * control's type, because it is the same kind of line. */
+.question-kind {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--mute);
+}
+.question-kind-icon {
+  font-size: 14px;
+  flex: 0 0 auto;
 }
 
 /* The question and its option descriptions are markdown — the copilot writes a
  * column name as `code`, and a plain label showed the backticks. The wrappers
  * are what keep the type: a markdown paragraph is `body-md` by default, and
- * these two are a heading and a caption-weight line. */
+ * these two are a heading and a muted line. */
 .question-head .p-markdown p,
 .question-head .p-markdown {
   font-size: 15px;
@@ -3800,10 +3782,50 @@ body.body--dark .p-panel {
 }
 .option-description .p-markdown p {
   color: var(--mute);
+  line-height: 1.45;
   margin: 0;
 }
 .option-description .p-markdown p + p {
   margin-top: var(--sp-xs);
+}
+
+/* The options are plain rows, pulled out to the rule so a row's wash runs past
+ * the text edge the way a menu row's does. No box round them: a question with
+ * its options under it reads as one question, and the box was a second frame
+ * inside the card's. */
+.option-list {
+  display: flex;
+  flex-direction: column;
+  margin-left: calc(-1 * var(--sp-sm));
+}
+
+.option-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-sm);
+  padding: var(--sp-xs) var(--sp-sm);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.option-row:hover {
+  background: var(--hairline-soft);
+}
+.option-row--selected {
+  background: var(--accent-soft);
+}
+
+.option-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xxs);
+  min-width: 0;
+}
+.option-label {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.1px;
+  line-height: 1.45;
+  color: var(--ink);
 }
 
 /* Whether an option is picked, and how many may be — a circle for one, a box for
@@ -3813,7 +3835,7 @@ body.body--dark .p-panel {
   width: 14px;
   height: 14px;
   flex: 0 0 auto;
-  margin-top: 3px;
+  margin-top: 2px;
   border: 1px solid var(--hairline-strong);
   border-radius: var(--r-full);
   background: var(--surface);
@@ -3830,11 +3852,76 @@ body.body--dark .p-panel {
   box-shadow: inset 0 0 0 2px var(--surface);
 }
 
-/* The free-text box is a peer of the options, not a second form. It stays
- * always — typing an objection is a first-class action — and reads quietly
- * until it is focused. */
+/* The answer box is the composer in miniature: the free text and Answer in
+ * one box, the field borderless inside it, the accent on the box while it is
+ * focused. It replaced a bordered textarea, a rule and a footer with a button
+ * on its far side — three rows saying *type here, then press this*, where one
+ * box says it the way the composer under it already does. The button sits at
+ * the foot of the field, so it stays put while the field grows. */
+.answer-box {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-xs);
+  background: var(--surface-elevated);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  padding: var(--sp-xs) var(--sp-xs) var(--sp-xs) var(--sp-sm);
+}
+.answer-box:focus-within {
+  border-color: var(--accent-primary);
+}
+.answer-field {
+  flex: 1 1 auto;
+  min-width: 0;
+}
 .answer-field .q-field__control {
   background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  min-height: 0;
+}
+.answer-field .q-field__control:before,
+.answer-field .q-field__control:after {
+  display: none;
+}
+/* One line to start. Quasar's textarea opens at 52px, two lines with the box
+ * under them; `autogrow` takes it from a line to the cap as the answer is typed. */
+.answer-field textarea {
+  color: var(--body);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 4px 0;
+  min-height: 0;
+  max-height: 160px;
+}
+.answer-field .q-field__control-container {
+  padding-top: 0;
+}
+.answer-field textarea::placeholder {
+  color: var(--stone);
+  opacity: 1;
+}
+/* One line high beside a one-line field; the transcript's Send is the composer
+ * bar's height for the same reason. */
+.answer-box .btn.q-btn {
+  min-height: 28px;
+  padding: 4px 12px;
+  flex: 0 0 auto;
+}
+
+/* The middle pane's *ask the copilot* form (`workflow._ask_form`): a boxed
+ * card, because it is a form on a pane and not a turn in a chat. It wore the
+ * question form's class until the question form stopped being a box. */
+.ask-form {
+  background: var(--surface-card);
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 60%, transparent);
+  border-radius: var(--r-md);
+  padding: var(--sp-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-md);
 }
 
 .write-confirm {
@@ -3853,10 +3940,11 @@ body.body--dark .p-panel {
   gap: var(--sp-xxs);
 }
 
-/* What settles the decision, ruled off from what is being decided. The same
- * footer in both components, because both are the loop stopping for a human and
- * two that had to be kept looking alike would drift. Right-aligned: the eye
- * leaves a form at its end, and that is where the thing that closes it goes. */
+/* What settles a write, ruled off from what is being decided. Right-aligned:
+ * the eye leaves a form at its end, and that is where the thing that closes it
+ * goes. The question form had the same footer until 2026-09-27, when its
+ * Answer moved into its answer box; a write's Deny and Allow are two buttons
+ * and stay a footer. */
 .decision-actions {
   display: flex;
   align-items: center;

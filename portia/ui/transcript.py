@@ -2210,23 +2210,24 @@ def _decision(decision: Decision) -> None:
         _write_confirm(decision) if not decision.resolved else _resolved_write(decision)
 
 
-def _decision_head(icon: str, title: str, pill: str, *, accent: bool = False) -> None:
-    """What kind of moment this is, at the top of the card it opens.
+def _decision_head(icon: str, title: str, pill: str) -> None:
+    """What kind of moment this is, at the top of the write card it opens.
 
-    The two components the loop stops on used to open on a lone `{colors.mute}`
-    caption, which reads as a note about the thing under it rather than as the
-    thing itself. A card with a named head says *what is being asked of you*
-    before the eye has to work it out from the controls below.
+    The write used to open on a lone `{colors.mute}` caption, which reads as a
+    note about the thing under it rather than as the thing itself. A card with
+    a named head says *what is being asked of you* before the eye has to work
+    it out from the payload below.
 
-    The pill takes the accent on a question and stays uncoloured on a write. That
-    is kind and not rank: a question is the loop waiting on you, and a write is
-    the loop offering to make something durable — neither is worse than the
-    other, and the one that wants a *sentence* out of you is the one that says so.
+    **The question no longer shares it** *(2026-09-27)*. It had the same head
+    with the pill in the accent, *waiting for you*, over a boxed card; the
+    question is a callout in the flow now (`_question_form`) and opens on its
+    own kind line. The pill here stays uncoloured: a write is the loop offering
+    to make something durable, and the card's hairline says so.
     """
     with ui.element("div").classes("decision-head"):
         ui.icon(icon).classes("decision-head-icon")
         ui.label(title).classes("decision-head-title")
-        ui.label(pill).classes("decision-pill" + (" decision-pill--accent" if accent else ""))
+        ui.label(pill).classes("decision-pill")
 
 
 def _interrupted_decision(decision: Decision) -> None:
@@ -2241,37 +2242,56 @@ def _interrupted_decision(decision: Decision) -> None:
 
 
 def _question_form(decision: Decision) -> None:
-    """The form, with its actions ruled off at the foot.
+    """The question, in the flow of the chat, ending on the box that answers it.
 
-    **The footer is the shape of a decision.** Everything above it is what is
-    being asked; the one thing below it is what settles it, and separating them
-    is what stops a form reading as a stack of controls you scroll through. It is
-    the same footer as `write-confirm`, because both are the loop stopping for a
-    human and two footers that had to be kept looking alike would drift.
+    **A callout, not a form** *(2026-09-27)*. It was a boxed card: an accent
+    border round everything, a head with a pill saying *waiting for you*, the
+    options in a bordered list, a bordered textarea under them, a rule, and a
+    button with an icon on the far side of it. Six hundred pixels for two
+    options, and it read as a form to fill in where the copilot had asked one
+    sentence. Now it is one accent rule down the left edge, the question, the
+    options as plain rows, and one box at the foot that is the composer in
+    miniature, the free text and **Answer** in it. The rule keeps the job the
+    border had, the one live accent edge on screen, and the box keeps the
+    footer's: the card ends on the thing that settles it.
+
+    **The accent is on the thing that resumes the loop.** A pending question is
+    the one moment the app is stopped waiting on a human, and it is not a
+    write: the accent's scarcity rule is satisfied because the composer shows
+    Stop, not Send, while a message is in flight. Approving a *write* is still
+    deliberately its own card (`_write_confirm`, DESIGN.md).
+
+    Several questions stack their blocks and share the one Answer, which sits
+    in the last box: it answers all of them, and the card still ends on it.
     """
+    questions = decision.payload["questions"]
     with ui.element("div").classes("question-form decision-card"):
-        _decision_head("help_outline", _QUESTION_TITLE, _WAITING_ON_YOU, accent=True)
-        for question in decision.payload["questions"]:
-            _one_question(decision, question)
-        with ui.element("div").classes("decision-actions"):
-            # **The accent is on the thing that resumes the loop.** A pending
-            # question is the one moment the app is stopped waiting on a human,
-            # and it is not a write: the accent's scarcity rule is satisfied
-            # because the composer is showing Stop, not Send, while a message is
-            # in flight. Approving a *write* is still deliberately not this
-            # (`_write_confirm`, DESIGN.md).
-            c.button("Answer", lambda: _submit_answers(decision), kind="primary", icon="check")
+        for at, question in enumerate(questions):
+            _one_question(decision, question, answer=at == len(questions) - 1)
 
 
-def _one_question(decision: Decision, question: dict) -> None:
+def _one_question(decision: Decision, question: dict, *, answer: bool) -> None:
+    """One question: its kind line, the sentence, the options, the answer box.
+
+    **The kind line names what the question is about** *(2026-09-27)*. The SDK
+    gives each question a short ``header`` (*Paris scope*, *Grain*), and it was
+    drawn as an upper-case caption under a card head that said **Question**
+    beside a pill. One quiet line now, a glyph and the header, or *Question*
+    when there is none: the glyph says what kind of moment this is, the word
+    says what it is about, and nothing under it is repeated above it.
+
+    ``answer`` puts the Answer button in this block's box: the last block's,
+    so the card ends on it whatever the count.
+    """
     key = question["question"]
     draft = decision.draft.setdefault(key, {CHOSEN: [], FREE_TEXT: ""})
     multi = bool(question.get("multiSelect"))
 
     rows: dict[str, ui.element] = {}
-    with ui.element("div").classes("stack-sm"):
-        if question.get("header"):
-            c.caption(str(question["header"]).upper())
+    with ui.element("div").classes("question-block"):
+        with ui.element("div").classes("question-kind"):
+            ui.icon("help_outline").classes("question-kind-icon")
+            ui.label(str(question.get("header") or _QUESTION_TITLE)).classes("question-kind-label")
         # The copilot writes markdown, and it writes a column name as `code`.
         # Set as a plain label, the most important sentence in the app showed
         # its own punctuation — the same failure `TEXT` was fixed for, in the
@@ -2286,9 +2306,39 @@ def _one_question(decision: Decision, question: dict) -> None:
             for option in question.get("options") or []:
                 label = str(option.get("label", ""))
                 rows[label] = _option_row(option, draft, rows, multi=multi)
-        ui.textarea(placeholder=_ANSWER_PLACEHOLDER).classes(
-            "p-field p-editor answer-field w-full"
-        ).props("borderless autogrow").bind_value(draft, FREE_TEXT)
+        # The composer in miniature: the free text and, in the last block, the
+        # button, in one box. Typing an objection is a first-class action and
+        # the answer goes through verbatim, so the field is always there.
+        with ui.element("div").classes("answer-box"):
+            field = (
+                ui.textarea(placeholder=_ANSWER_PLACEHOLDER)
+                .classes("answer-field")
+                .props("borderless autogrow")
+                .bind_value(draft, FREE_TEXT)
+            )
+            for combination in SEND_KEYS:
+                field.on(
+                    combination,
+                    lambda e, k=key: _answer_from_key(decision, k, e),
+                    js_handler=SEND_JS,
+                )
+            if answer:
+                c.button("Answer", lambda: _submit_answers(decision), kind="primary").classes(
+                    "answer-send"
+                ).tooltip(_ANSWER_TIP)
+
+
+def _answer_from_key(decision: Decision, key: str, event) -> None:
+    """Answer on `SEND_KEYS` from the answer box, with the text the key brought.
+
+    The composer's rule, for the composer's reason (`_go_from_key`): the box is
+    bound to the draft and the button reads it, and a keystroke has no gap for
+    the bound value to arrive in, so the client's own text goes on the draft
+    before `_submit_answers` reads it. Everything after is the button's path.
+    """
+    if isinstance(event.args, str):
+        decision.draft.setdefault(key, {CHOSEN: [], FREE_TEXT: ""})[FREE_TEXT] = event.args
+    _submit_answers(decision)
 
 
 def _option_row(option: dict, draft: dict, rows: dict, *, multi: bool) -> ui.element:
@@ -2307,7 +2357,7 @@ def _option_row(option: dict, draft: dict, rows: dict, *, multi: bool) -> ui.ele
     with ui.element("div").classes(classes) as row:
         ui.element("div").classes("option-mark")
         with ui.element("div").classes("option-body"):
-            ui.label(label).classes("t-body-strong c-ink pre-wrap")
+            ui.label(label).classes("option-label pre-wrap")
             if option.get("description"):
                 # Markdown for the same reason the question is: a description
                 # naming a column names it in backticks.
@@ -2748,10 +2798,10 @@ _DELETE_BUSY = "Stop it first, then delete it."
 _UNANSWERED = "The exchange ended with this question unanswered."
 _INTERRUPTED = "stopped before this was answered"
 
-#: What each of the two decision components says it is. One quiet line each: the
-#: accent border already finds the eye, and neither is a warning — a question is
-#: the loop working, and a write waiting on a yes/no is the loop working too.
-_WAITING_ON_YOU = "waiting for you"
+#: What the write card says it wants, in its head's pill. One quiet line: the
+#: card's own border already finds the eye, and it is not a warning — a write
+#: waiting on a yes/no is the loop working. The question form has no pill
+#: *(2026-09-27)*: its Answer button and its accent rule say it is waiting.
 _NEEDS_APPROVAL = "needs your approval"
 _NOTHING_SAID = "Pick an option or type an answer."
 
@@ -2826,6 +2876,8 @@ _SEND_TIP = "Send · \u2318\u21a9 or Ctrl\u21a9"
 _GOAL_PLACEHOLDER = "What do you want from this data?"
 _FOLLOW_UP_PLACEHOLDER = "Reply, or ask for something else…"
 _ANSWER_PLACEHOLDER = "Or answer in your own words"
+#: The same keystroke as Send, named on the button the same way.
+_ANSWER_TIP = "Answer · \u2318\u21a9 or Ctrl\u21a9"
 #: Indexing is a **job**, not a conversation (`docs/CONVERSATION.md` §6): the app
 #: ran it on your behalf, it has a defined end, and there is nothing to reply to.
 #: Correcting what it decided is `Ask the copilot` on the source itself, which is
