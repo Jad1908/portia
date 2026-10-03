@@ -1,6 +1,7 @@
 Measure what joining two tables on given keys would actually do: key overlap and coverage, the
 relationship (1:1 / 1:many / many:many), fan-out, how many rows each join type would produce and
-drop — plus example unmatched rows, null-key rows, and the keys repeated most on either side.
+drop, and how many of them would hold a null in each carried column — plus example unmatched rows,
+null-key rows, and the keys repeated most on either side.
 
 Call this BEFORE deciding anything about a merge. Every merge, not just the first one.
 
@@ -15,6 +16,12 @@ An example row shows its key columns first, then a few more, because a row as wi
 buries the one column that explains why it did not match. 'example_row_columns' says which ones
 you got — do not read the width of an example row as the width of the table. Name 'left_columns'
 or 'right_columns' to choose the rest yourself; the keys are included either way.
+
+'predicted_nulls' gives, per join type, the rows of the result that would hold a null in each
+carried column: the nulls a column already has, repeated as the join repeats its row, plus the rows
+the join keeps with nothing from that column's side ('kept_unmatched'). A left join that drops
+nothing can still leave most of the right side's columns empty, and this is where that shows. It
+covers the columns the example rows carry, keys left out.
 
 'fan_out' means a row of the left table would come out more than once, so a left or inner join
 returns more rows than the left puts in and a total over a left column comes out too high.

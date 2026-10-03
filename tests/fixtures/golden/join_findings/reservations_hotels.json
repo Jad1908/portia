@@ -124,6 +124,84 @@
         "n_right": 1
       }
     ],
+    "predicted_nulls": {
+      "inner": {
+        "result_rows": 13,
+        "kept_unmatched": {
+          "left": 0,
+          "right": 0
+        },
+        "left": {
+          "booking_id": 0,
+          "stay_date": 0,
+          "rooms_sold": 0,
+          "revenue": 0
+        },
+        "right": {
+          "hotel_name": 0,
+          "city": 0,
+          "country": 0,
+          "rooms": 0
+        }
+      },
+      "left": {
+        "result_rows": 14,
+        "kept_unmatched": {
+          "left": 1,
+          "right": 0
+        },
+        "left": {
+          "booking_id": 0,
+          "stay_date": 0,
+          "rooms_sold": 0,
+          "revenue": 0
+        },
+        "right": {
+          "hotel_name": 1,
+          "city": 1,
+          "country": 1,
+          "rooms": 1
+        }
+      },
+      "right": {
+        "result_rows": 14,
+        "kept_unmatched": {
+          "left": 0,
+          "right": 1
+        },
+        "left": {
+          "booking_id": 1,
+          "stay_date": 1,
+          "rooms_sold": 1,
+          "revenue": 1
+        },
+        "right": {
+          "hotel_name": 0,
+          "city": 0,
+          "country": 0,
+          "rooms": 0
+        }
+      },
+      "outer": {
+        "result_rows": 15,
+        "kept_unmatched": {
+          "left": 1,
+          "right": 1
+        },
+        "left": {
+          "booking_id": 1,
+          "stay_date": 1,
+          "rooms_sold": 1,
+          "revenue": 1
+        },
+        "right": {
+          "hotel_name": 1,
+          "city": 1,
+          "country": 1,
+          "rooms": 1
+        }
+      }
+    },
     "example_row_columns": {
       "left": [
         "hotel_id",

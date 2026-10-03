@@ -116,6 +116,80 @@
         "n_right": 1
       }
     ],
+    "predicted_nulls": {
+      "inner": {
+        "result_rows": 8,
+        "kept_unmatched": {
+          "left": 0,
+          "right": 0
+        },
+        "left": {
+          "hotel_id": 0,
+          "hotel_name": 0,
+          "country": 0,
+          "rooms": 0
+        },
+        "right": {
+          "event_date": 0,
+          "event_name": 0,
+          "expected_attendance": 0
+        }
+      },
+      "left": {
+        "result_rows": 8,
+        "kept_unmatched": {
+          "left": 0,
+          "right": 0
+        },
+        "left": {
+          "hotel_id": 0,
+          "hotel_name": 0,
+          "country": 0,
+          "rooms": 0
+        },
+        "right": {
+          "event_date": 0,
+          "event_name": 0,
+          "expected_attendance": 0
+        }
+      },
+      "right": {
+        "result_rows": 10,
+        "kept_unmatched": {
+          "left": 0,
+          "right": 2
+        },
+        "left": {
+          "hotel_id": 2,
+          "hotel_name": 2,
+          "country": 2,
+          "rooms": 2
+        },
+        "right": {
+          "event_date": 0,
+          "event_name": 0,
+          "expected_attendance": 0
+        }
+      },
+      "outer": {
+        "result_rows": 10,
+        "kept_unmatched": {
+          "left": 0,
+          "right": 2
+        },
+        "left": {
+          "hotel_id": 2,
+          "hotel_name": 2,
+          "country": 2,
+          "rooms": 2
+        },
+        "right": {
+          "event_date": 0,
+          "event_name": 0,
+          "expected_attendance": 0
+        }
+      }
+    },
     "example_row_columns": {
       "left": [
         "city",

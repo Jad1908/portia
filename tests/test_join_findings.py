@@ -156,3 +156,114 @@ def test_the_example_rows_quote_a_key_as_the_table_spells_it_not_as_it_was_typed
     found = join_findings(left.using(Spy()), right.using(Spy()), left_on="order_id", right_on="ID")
     assert [r["ORDER_ID"] for r in found["evidence"]["unmatched_left_rows"]] == [2, 3]
     assert not [sql for sql in asked if '"ID"' in sql or '"order_id"' in sql]
+
+
+# --- predicted nulls ----------------------------------------------------------
+
+#: Every join type, as the op spells it and as SQL does.
+_SQL = {"inner": "INNER JOIN", "left": "LEFT JOIN", "right": "RIGHT JOIN", "outer": "FULL JOIN"}
+
+
+def _built_nulls(con, left, right, lkeys, rkeys, lcols, rcols) -> dict:
+    """Build each join and count, per carried column, the rows where it is null: the truth."""
+    match = " AND ".join(f'l."{a}" = r."{b}"' for a, b in zip(lkeys, rkeys, strict=True))
+    out = {}
+    for how, sql in _SQL.items():
+        counts = [f'count(*) FILTER (WHERE l."{c}" IS NULL)' for c in lcols] + [
+            f'count(*) FILTER (WHERE r."{c}" IS NULL)' for c in rcols
+        ]
+        row = con.execute(
+            f"SELECT count(*), {', '.join(counts)} FROM ({left.query}) l {sql} ({right.query}) r "
+            f"ON {match}"
+        ).fetchone()
+        out[how] = {
+            "result_rows": row[0],
+            "left": dict(zip(lcols, row[1 : 1 + len(lcols)], strict=True)),
+            "right": dict(zip(rcols, row[1 + len(lcols) :], strict=True)),
+        }
+    return out
+
+
+def test_a_left_join_says_how_many_rows_it_leaves_without_an_event(table):
+    """The backlog's case, as numbers: most bookings have no event, and nothing is dropped."""
+    bookings = table(
+        pd.DataFrame({"booking_id": range(500), "city": ["Paris"] * 160 + ["Lyon"] * 340})
+    )
+    events = table(pd.DataFrame({"city": ["Paris"], "event_name": ["Tech Summit"]}))
+    found = join_findings(bookings, events, on="city")
+    assert found["report"]["joins"]["left"] == {
+        "result_rows": 500,
+        "left_dropped": 0,
+        "right_dropped": 0,
+    }
+    left_join = found["evidence"]["predicted_nulls"]["left"]
+    assert left_join["result_rows"] == 500
+    assert left_join["kept_unmatched"] == {"left": 340, "right": 0}
+    assert left_join["right"] == {"event_name": 340}
+
+
+def test_a_null_already_there_is_repeated_as_the_join_repeats_its_row(table):
+    """Two events for one key, one of them unnamed: that null comes out once per booking."""
+    bookings = table(pd.DataFrame({"booking_id": [1, 2, 3], "city": ["Paris", "Paris", "Rome"]}))
+    events = table(pd.DataFrame({"city": ["Paris", "Paris"], "event_name": ["Tech Summit", None]}))
+    predicted = join_findings(bookings, events, on="city")["evidence"]["predicted_nulls"]
+    # inner: 2 bookings x 2 events, one of each pair unnamed. left: those 2, and Rome with none.
+    assert predicted["inner"]["right"] == {"event_name": 2}
+    assert predicted["left"]["right"] == {"event_name": 3}
+
+
+def test_predicted_nulls_cover_the_example_columns(wide):
+    """Keys are left out: a key's nulls are the unmatched counts, and a shared key is coalesced."""
+    found = join_findings(*wide, on="country")
+    evidence = found["evidence"]
+    predicted = evidence["predicted_nulls"]["left"]
+    assert len(predicted["left"]) == SAMPLE_ROW_COLUMNS
+    for side in ("left", "right"):
+        keys = found["report"]["keys"][side]
+        assert list(predicted[side]) == [
+            c for c in evidence["example_row_columns"][side] if c not in keys
+        ]
+
+
+@pytest.mark.parametrize("seed", range(12))
+def test_predicted_nulls_are_what_the_built_join_holds(con, seed):
+    """Against every join type actually built, on random tables with every awkward case in them.
+
+    Duplicated keys on both sides, null keys on both, nulls in carried columns on
+    matched and unmatched rows, keys found on one side only, a composite key.
+    """
+    import random
+
+    rng = random.Random(seed)
+
+    def rows(n, values):
+        return [
+            (
+                rng.choice([*values, None]),
+                rng.choice(["a", "b", None]),
+                rng.choice([1, 2, None]),
+                rng.choice(["x", None]),
+            )
+            for _ in range(n)
+        ]
+
+    left_rows = rows(rng.randint(0, 30), range(6))
+    right_rows = rows(rng.randint(0, 30), range(3, 9))
+    for name, data in (("pl", left_rows), ("pr", right_rows)):
+        con.execute(f"CREATE OR REPLACE TABLE {name} (k INTEGER, k2 VARCHAR, v INTEGER, w VARCHAR)")
+        if data:
+            con.executemany(f"INSERT INTO {name} VALUES (?, ?, ?, ?)", data)
+    from portia.core.table import Table
+
+    left = Table.from_name("pl", con)
+    right = Table.from_name("pr", con)
+    for lkeys, rkeys in ((["k"], ["k"]), (["k", "k2"], ["k", "k2"])):
+        found = join_findings(left, right, left_on=lkeys, right_on=rkeys)
+        predicted = found["evidence"]["predicted_nulls"]
+        lcols = [c for c in found["evidence"]["example_row_columns"]["left"] if c not in lkeys]
+        rcols = [c for c in found["evidence"]["example_row_columns"]["right"] if c not in rkeys]
+        truth = _built_nulls(con, left, right, lkeys, rkeys, lcols, rcols)
+        for how, measured in truth.items():
+            assert predicted[how]["result_rows"] == measured["result_rows"], how
+            assert predicted[how]["left"] == measured["left"], how
+            assert predicted[how]["right"] == measured["right"], how
