@@ -36,6 +36,31 @@ def test_the_canvas_is_not_a_member_of_the_chart_list():
     assert [c.name for c in app.charts] == ["Events by month"]
 
 
+def test_tab_zero_is_named_for_what_it_holds(monkeypatch):
+    """The label and the glyph are what tab zero is holding, never *Pipeline*
+    over something else.
+
+    The brief, the graph and the gallery are selected with an empty name, so a
+    label read off the name alone said *Pipeline* over all three (2026-09-27).
+    """
+    from portia.ui import charts, state
+
+    app = App()
+    monkeypatch.setattr(charts, "APP", app)
+
+    assert (charts._canvas_label(), charts._canvas_icon()) == ("Pipeline", "account_tree")
+    for kind, name in state.PINNED.items():
+        app.select(kind, "")
+        assert charts._canvas_label() == name
+        assert charts._canvas_icon() != "account_tree"
+    app.select(state.SOURCE, "orders")
+    assert charts._canvas_label() == "orders"
+    app.select(state.BUILT, "stg_orders")
+    assert (charts._canvas_label(), charts._canvas_icon()) == ("stg_orders", "code")
+    app.select(None)
+    assert charts._canvas_label() == "Pipeline"
+
+
 # --- a chart stays in its project ---------------------------------------------
 
 

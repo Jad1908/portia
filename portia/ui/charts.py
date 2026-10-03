@@ -44,11 +44,13 @@ from portia.ui import components as c
 from portia.ui.state import (
     APP,
     BRIEF,
+    BUILT,
     CANVAS,
     FIGURES,
     KNOWLEDGE,
     MODEL,
     OUTPUT,
+    PINNED,
     RIGHT,
     RUN,
     SOURCE,
@@ -172,9 +174,15 @@ def _canvas_label() -> str:
     this tab — so a source, a saved run or the brief is what it says while one of
     those is open. A saved figure is no longer among them: a figure has a tab of
     its own now (§6.4).
+
+    **A pinned row has no name to read**, because there is one of each: the
+    brief, the graph and the gallery select with an empty one. Reading the name
+    alone put *Pipeline* on the tab over all three, beside a glyph that already
+    said otherwise *(2026-09-27)*. Their names are `state.PINNED`, the ones the
+    rows on the left carry.
     """
-    _, name = APP.selection or ("", "")
-    return name or _CANVAS_TAB
+    kind, name = APP.selection or ("", "")
+    return name or PINNED.get(kind, _CANVAS_TAB)
 
 
 def _canvas_icon() -> str:
@@ -796,6 +804,9 @@ _TAB_ICON = {
     SOURCE: "table_chart",
     UNINDEXED: "table_chart",
     MODEL: "code",
+    # A built table is the left pane's model row, so it wears the model glyph.
+    # It was missing here and fell through to the canvas's `account_tree`.
+    BUILT: "code",
     OUTPUT: "description",
     RUN: "description",
     BRIEF: "notes",

@@ -54,6 +54,7 @@ from portia.ui.state import (
     KNOWLEDGE,
     MODEL,
     OUTPUT,
+    PINNED,
     RUN,
     SOURCE,
     SPEC,
@@ -89,7 +90,6 @@ EMPTY_TREE = "No readable data files in this directory. Add data to begin."
 _ON_STRIP = "open"
 
 #: The gallery's own strings (`docs/VISUALIZATION.md` §6).
-GALLERY = "Figures"
 GALLERY_ROOT = "Figures (top level)"
 NEW_FOLDER_TIP = "New folder"
 NEW_FOLDER_HINT = "Folder name"
@@ -374,7 +374,7 @@ def _brief_row() -> None:
     """
     row = _row(
         lambda: APP.is_selected(BRIEF, ""),
-        name="Project brief",
+        name=PINNED[BRIEF],
         icon="notes",
         on_click=lambda: _select(BRIEF, ""),
     )
@@ -434,7 +434,7 @@ def _knowledge_row() -> None:
     """
     _row(
         lambda: APP.is_selected(KNOWLEDGE, ""),
-        name="Knowledge graph",
+        name=PINNED[KNOWLEDGE],
         icon="hub",
         on_click=lambda: _select(KNOWLEDGE, ""),
     )
@@ -495,7 +495,7 @@ def _figures_header(saved: list[dict]) -> None:
     count = len(saved) + sum(1 for chart in APP.charts if not chart.saved)
     row = _row(
         lambda: APP.is_selected(state.FIGURES, ""),
-        name=GALLERY,
+        name=PINNED[state.FIGURES],
         icon="photo_library",
         meta=str(count) if count else "",
         on_click=_toggle_gallery,

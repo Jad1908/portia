@@ -43,6 +43,7 @@ __all__ = [
     "UNINDEXED",
     "BRIEF",
     "FIGURES",
+    "PINNED",
     "CANVAS",
     "GOAL",
     "INDEXING",
@@ -99,6 +100,13 @@ KNOWLEDGE = "knowledge"
 #: it yet. **An empty section is the point** *(2026-09-03)* — a heading that only
 #: appears once you have used the feature cannot tell you the feature is there.
 FIGURES = "figures"
+
+#: What each pinned row is called. There is one brief, one graph and one gallery,
+#: so each is selected with an **empty name**, and anything saying what is
+#: selected reads the name here: the row on the left, and tab zero's label on the
+#: strip. That label looked for a name in the selection, found none, and read
+#: *Pipeline* over all three *(2026-09-27)*.
+PINNED = {BRIEF: "Project brief", KNOWLEDGE: "Knowledge graph", FIGURES: "Figures"}
 
 #: **There is no selection kind for one saved figure**, and there was
 #: *(2026-09-03)*. A figure opens as a tab now (`docs/VISUALIZATION.md` §6.4), so
