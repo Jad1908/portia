@@ -41,7 +41,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
-from portia.agent import events
+from portia.agent import events, prompts
 
 #: Given the SDK's question payload, return ``{question text: answer}``.
 AnswerFn = Callable[[list[dict]], Awaitable[dict[str, Any]]]
@@ -129,12 +129,11 @@ def build_can_use_tool(
         )
         if allowed:
             return PermissionResultAllow(updated_input=input_data)
-        return PermissionResultDeny(
-            message=(
-                "The user declined this write. Ask what they'd prefer instead of "
-                "retrying the same call."
-            )
-        )
+        # Read at the exact moment the model decides what to do next, so it is
+        # a prompt file like every other refusal (`prompts.error`), not a
+        # string here: short enough to slip under the inline-string test and
+        # load-bearing all the same.
+        return PermissionResultDeny(message=prompts.error("write_declined"))
 
     return can_use_tool
 
