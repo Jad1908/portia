@@ -115,8 +115,17 @@ def build_options(
     resume: str | None = None,
     provider: str = DEFAULT_PROVIDER,
     builds: bool = True,
+    max_turns: int | None = None,
+    max_budget_usd: float | None = None,
 ) -> Any:
     """Assemble ``ClaudeAgentOptions`` for a portia session.
+
+    ``max_turns`` and ``max_budget_usd`` are the SDK's own caps on one
+    exchange, and they are set nowhere in the app on purpose: a person
+    watching is the cap. They exist for a run with nobody at the keyboard
+    (`devtools/bench`, `docs/BENCHMARK_EVAL.md` §8.5), where a loop that never
+    ends spends the week's quota. ``None`` leaves the SDK's default, which is
+    no cap.
 
     ``builds`` is off for a job that reads (`tools.BUILD_TOOLS`): the server
     does not list `record_step` or `run_spec`, and the permission list does not
@@ -209,6 +218,8 @@ def build_options(
         cwd=str(cwd) if cwd else None,
         hooks=cast(Any, _curation_hooks(curator)) if curator is not None else None,
         resume=resume,
+        max_turns=max_turns,
+        max_budget_usd=max_budget_usd,
     )
 
 
@@ -296,6 +307,8 @@ class Conversation:
         resume: str | None = None,
         provider: str = DEFAULT_PROVIDER,
         builds: bool = True,
+        max_turns: int | None = None,
+        max_budget_usd: float | None = None,
     ) -> None:
         #: Questions and approvals are emitted from inside `can_use_tool` while
         #: the message stream is paused waiting on it, so they land here and
@@ -315,6 +328,8 @@ class Conversation:
             resume=resume,
             provider=provider,
             builds=builds,
+            max_turns=max_turns,
+            max_budget_usd=max_budget_usd,
             can_use_tool=ask.build_can_use_tool(
                 answer=answer,
                 confirm=confirm,
@@ -488,6 +503,8 @@ async def run(
     portia_dir: str = catalog.DEFAULT_DIR,
     provider: str = DEFAULT_PROVIDER,
     builds: bool = True,
+    max_turns: int | None = None,
+    max_budget_usd: float | None = None,
 ) -> AsyncIterator[events.Event]:
     """One exchange, in a chat that lasts exactly as long as it does.
 
@@ -506,6 +523,8 @@ async def run(
         portia_dir=portia_dir,
         provider=provider,
         builds=builds,
+        max_turns=max_turns,
+        max_budget_usd=max_budget_usd,
     ) as chat:
         async for event in chat.send(prompt):
             yield event

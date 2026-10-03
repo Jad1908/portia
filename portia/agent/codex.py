@@ -291,11 +291,19 @@ class CodexConversation:
         resume: str | None = None,
         provider: str = codex_provider.PROVIDER.kind,
         builds: bool = True,
+        max_turns: int | None = None,
+        max_budget_usd: float | None = None,
     ) -> None:
         if effort is not None and effort not in session.EFFORTS:
             raise ValueError(
                 f"unknown effort {effort!r} — expected one of {', '.join(session.EFFORTS)}"
             )
+        # Refused rather than dropped, like effort on a provider that ignores
+        # it: this harness has no turn or budget cap of its own, and a cap that
+        # is set and quietly not applied is the failure an unattended run
+        # sets one to prevent.
+        if max_turns is not None or max_budget_usd is not None:
+            raise ValueError("the Codex harness has no turn or budget cap; leave both unset")
         self._answer = answer
         self._confirm = confirm
         self._auto_allow = auto_allow
