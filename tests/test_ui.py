@@ -6777,7 +6777,7 @@ def test_a_fresh_window_opens_the_picker_on_current_models_with_legacy_folded():
 def test_a_legacy_pick_opens_its_fold():
     from portia.ui import state
 
-    fresh = state.App(provider="anthropic", model="claude-haiku-4-5")
+    fresh = state.App(provider="anthropic", model="claude-sonnet-4-6")
     original, state.APP = state.APP, fresh
     try:
         with ui.element("div") as slot:
