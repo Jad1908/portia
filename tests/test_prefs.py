@@ -228,12 +228,12 @@ def test_a_window_closed_on_the_picker_opens_on_the_picker(tmp_path):
 
 def test_a_provider_switched_off_since_is_not_restored_and_the_composer_says_so(monkeypatch):
     _only_these_providers(monkeypatch, "anthropic")
-    prefs.update_machine({"provider": "ollama", "model": "qwen3:8b", "effort": "medium"})
+    prefs.update_machine({"provider": "ollama", "model": "qwen3:8b", "effort": "high"})
     app = _app()
     prefs.restore_machine(app)
     assert app.provider == "anthropic"
     assert app.model != "qwen3:8b"
-    assert app.effort == "medium", "effort is not the provider's"
+    assert app.effort == "high", "effort is not the provider's"
     reason, remedy = app.spend_alert
     assert "Ollama" in reason and "switched off" in reason
     assert remedy.startswith("Using ")
