@@ -1159,13 +1159,6 @@ body.body--dark .p-panel {
 .settings-body > * {
   flex-shrink: 0;
 }
-/* The effort segments' `spend-detail` is a full *line* in the composer's
- * wrapping row (`flex: 1 0 100%`). Inside a `setting`, which is a column, the
- * same 100% is a *height*: the row was sized to its setting and the segments
- * sat on the next setting's title (2026-09-23, measured in Copilot). */
-.setting > .spend-detail {
-  flex: 0 0 auto;
-}
 .settings-foot {
   display: flex;
   justify-content: flex-end;
@@ -2734,16 +2727,6 @@ body.body--dark .p-panel {
   min-width: 24px;
 }
 
-/* The mode picker in the composer bar and in Settings (`c.approval_mode`).
- * A field, like the model select beside it, in the sans face because a mode is
- * a word and not an identifier. */
-.approval-mode .q-field__control {
-  min-height: 28px;
-}
-.approval-mode .q-field__native {
-  font-size: 12px;
-}
-
 .menu-row--head {
   border-bottom: 1px solid var(--hairline);
   flex: 0 0 auto;
@@ -4083,7 +4066,7 @@ body.body--dark .p-panel {
   border: 1px solid var(--hairline);
   border-radius: var(--r-md);
   overflow: hidden;
-  /* A size container, so the effort control below can switch layout on the
+  /* A size container, so the mode picker below can fold its name on the
    * *pane's* width — a media query only knows the window's. Safe here because
    * the composer is a block whose width is the pane's, never its content's. */
   container-type: inline-size;
@@ -4137,17 +4120,20 @@ body.body--dark .p-panel {
  * and the model name is the longest string in the bar — left to share the room
  * evenly, it wrapped the word Stop down the middle.
  *
- * **It wraps rather than truncating**, because before a chat is open it holds
- * five effort segments as well as the model, which is wider than a 400px pane
- * however hard the two are squeezed. Clipped, the segments overprinted the
- * model name; on their own line they are the same control, one row lower. */
+ * **A column whose first line never wraps** *(2026-10-06)*: the model, the
+ * effort and the mode are one row of menus, and a provider's note or *Start
+ * the server…* goes under it. It wrapped until then, because five effort
+ * segments beside the model were wider than a 400px pane, and a pane drag
+ * moved them between one line and two. */
 .composer-spend {
   flex: 0 1 auto;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: flex-start;
   row-gap: var(--sp-xs);
 }
 .composer-spend > * {
   min-width: 0;
+  max-width: 100%;
 }
 .composer-spend .t-caption {
   white-space: nowrap;
@@ -4165,32 +4151,6 @@ body.body--dark .p-panel {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* The model picker sits *inside* the box, so it drops its own. A bordered field
- * on a bordered bar inside a bordered composer is three boxes for one word.
- * 220, up from 170: with the filter input no longer reserving width the cap is
- * what actually limits a local model's name, and `deepseek-r1:1.5b · 2.2 GB`
- * needs more than 170 at the mono 12px. The row still caps it lower on a
- * narrow pane. */
-.composer-bar .p-field {
-  max-width: 220px;
-}
-.composer-bar .p-field .q-field__control {
-  background: transparent;
-  border-color: transparent;
-  padding: 0 var(--sp-xs);
-  min-height: 24px;
-}
-.composer-bar .p-field .q-field__native {
-  font-size: 11px;
-  color: var(--mute);
-}
-.composer-bar .p-field .q-field__append {
-  padding-left: 0;
-}
-.composer-bar .p-field.q-field--focused .q-field__control {
-  background: var(--accent-soft);
 }
 
 /* What the chat has cost and how full it is, under the box it belongs to.
@@ -5701,6 +5661,26 @@ body.tab-dragging .tab-drop {
 .spend-row {
   flex-wrap: nowrap;
   align-items: center;
+  gap: 2px;
+}
+/* On the spend row the menus are bare words, T3 Code's: no fill and no
+ * border until hovered or open. Three bordered buttons in a bordered composer
+ * were three more boxes than the row needs, and the borders cost the model's
+ * name its room in a 370px pane. */
+.spend-row .modelpick-trigger,
+.spend-row .choice-trigger {
+  background: transparent;
+  border-color: transparent;
+}
+.spend-row .modelpick-trigger:hover,
+.spend-row .choice-trigger:hover,
+.spend-row .modelpick-trigger[aria-expanded="true"],
+.spend-row .choice-trigger[aria-expanded="true"] {
+  background: var(--hairline-soft);
+}
+.spend-row .choice-trigger.disabled,
+.spend-row .choice-trigger:disabled {
+  background: transparent;
 }
 /* The model picker, closed (`DESIGN.md` → `model-picker`): the provider's
  * mark, the model's name and a caret, as one tertiary button. It grows to the
@@ -5708,12 +5688,126 @@ body.tab-dragging .tab-drop {
  * than moving the slot beside it (→ Layout stability). */
 .spend-row .modelpick-trigger {
   flex: 0 1 auto;
-  min-width: 64px;
+  /* The mark and the caret: at the pane's 260px floor the name is all that
+   * gives way, down to nothing, before anything reaches Send. */
+  min-width: 44px;
   max-width: 340px;
   height: 24px;
   min-height: 24px;
-  padding: 0 var(--sp-xs) 0 var(--sp-sm);
+  padding: 0 2px 0 var(--sp-xs);
 }
+/* The effort and the mode beside it (`DESIGN.md` → `choice-menu`): the
+ * model picker's button with a shorter name, and none of them shrinks but the
+ * model's, so a narrower pane ellipsizes one name and moves nothing else. */
+.spend-row .choice-trigger {
+  flex: 0 0 auto;
+  height: 24px;
+  min-height: 24px;
+  padding: 0 2px 0 var(--sp-xs);
+}
+.choice-trigger .q-btn__content {
+  flex-wrap: nowrap;
+  gap: 2px;
+}
+.choice-trigger-name {
+  font-size: 13px;
+  color: var(--body);
+  white-space: nowrap;
+}
+.choice-trigger-icon {
+  font-size: 15px;
+  color: var(--body);
+}
+.choice-trigger.disabled .choice-trigger-name {
+  color: var(--mute);
+}
+/* T3 Code's divider between two menus: a hairline the height of a glyph. */
+.spend-rule {
+  flex: 0 0 1px;
+  align-self: center;
+  margin: 0 2px;
+  width: 1px;
+  height: 14px;
+  background: var(--hairline);
+}
+/* One discrete change, at one width of the pane (→ Layout stability, rules 4
+ * and 5): the mode's name goes and its lock stays, with the name in the
+ * button's `aria-label`. Below this the composer bar cannot hold the model, the effort, the
+ * mode's name and Send on one line. */
+@container (max-width: 480px) {
+  .spend-row .approval-mode .choice-trigger-name {
+    display: none;
+  }
+}
+/* And at the pane's floor, the carets beside the effort and the lock: the
+ * words are still the buttons, and the room goes to the model's name. */
+@container (max-width: 300px) {
+  .spend-row .choice-trigger .modelpick-caret {
+    display: none;
+  }
+}
+
+/* A `choice-menu`, open: a heading if it has one, then a row per value, the
+ * picked one ticked. Sized to its rows, which never change while it is open. */
+.q-menu.choice-menu {
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  padding: var(--sp-xs);
+  min-width: 180px;
+  max-width: 320px;
+}
+.choice-menu-heading {
+  padding: var(--sp-xs) var(--sp-sm) 2px;
+  font-size: 11px;
+  color: var(--mute);
+}
+.choice-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-sm);
+  padding: 6px var(--sp-sm);
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+.choice-row:hover {
+  background: var(--hairline-soft);
+}
+.choice-row--picked {
+  background: var(--accent-soft);
+}
+.choice-row-icon {
+  flex: 0 0 auto;
+  font-size: 15px;
+  line-height: 18px;
+  color: var(--body);
+}
+.choice-row-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.choice-row-name {
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--ink);
+}
+.choice-row-tip {
+  font-size: 11px;
+  color: var(--mute);
+}
+.choice-row-check {
+  flex: 0 0 auto;
+  font-size: 16px;
+  line-height: 18px;
+  color: var(--accent-text);
+  visibility: hidden;
+}
+.choice-row--picked .choice-row-check {
+  visibility: visible;
+}
+
 .modelpick-trigger .q-btn__content {
   flex-wrap: nowrap;
   gap: var(--sp-xs);
@@ -5950,36 +6044,6 @@ body.tab-dragging .tab-drop {
   min-width: 0;
   height: 24px;
   overflow: hidden;
-}
-/* The effort segments, the parked chat's "effort low", or — on a provider that
- * ignores effort — nothing, at the same height. The second row is part of the
- * control's shape, so picking a provider never changes the height of the
- * composer under the message being written. */
-.spend-detail {
-  display: flex;
-  align-items: center;
-  min-height: 24px;
-  min-width: 0;
-  /* A full line even when empty: a zero-width flex item shares its line with
-   * whatever follows, which put the approval picker a row higher on Ollama
-   * than on Anthropic — the exact jump the reserved row exists to prevent. */
-  flex: 1 0 100%;
-}
-/* The five effort segments never re-wrap one button at a time. Wide, they are
- * one line; below the width where five fit, they are a 3 + 2 grid — one
- * discrete change at one breakpoint, with every button in a fixed cell. Flex
- * wrap gave the same band a *migrating* split (low medium high xhigh / max,
- * then low medium high / xhigh max, …), so a pane drag re-slotted buttons per
- * pixel and staircased the composer's height under the textarea. */
-.spend-detail .segmented-control {
-  flex-wrap: nowrap;
-}
-@container (max-width: 358px) {
-  .spend-detail .segmented-control {
-    display: grid;
-    grid-template-columns: repeat(3, max-content);
-    row-gap: var(--sp-xs);
-  }
 }
 .prompt-row-spend,
 .chat-row-spend {

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -604,6 +605,7 @@ def model_effort(
     on_start: Callable[[str], Any] | None = None,
     provider_fixed: bool = False,
     on_model: Callable[[], Any] | None = None,
+    beside: Callable[[], Any] | None = None,
 ) -> None:
     """What an exchange will spend: where the model comes from, the model, the effort.
 
@@ -635,16 +637,16 @@ def model_effort(
     (`docs/CONVERSATION.md` §7). Effort is not drawn at all on a provider that
     ignores it (`Provider.honours_effort`), for the same reason.
 
-    **The control keeps one shape whichever provider is picked** (`DESIGN.md` →
-    Layout stability). The spinner and the refresh button share one fixed
-    `spend-slot` that exists whether or not either is drawn, and the effort
-    segments sit in a `spend-detail` row that keeps its height, empty, when a
-    provider ignores effort — measured before this, switching Anthropic → Ollama in the
-    composer moved the textarea and every control above it, and the refresh
-    button wrapped onto a line of its own because the select claimed the row.
+    **One line of menus, T3 Code's shape** *(2026-10-06, the user's call)*:
+    the model picker, then the effort as a `choice_menu`, then whatever
+    ``beside`` draws (the composer's mode picker). The effort was five
+    segments on a second row until then, and a pane drag reshuffled them
+    between one line and a 3 + 2 grid. The row never wraps, so a narrower
+    pane shrinks the model's name and moves nothing (`DESIGN.md` → Layout
+    stability). The spinner and the refresh button share one fixed
+    `spend-slot` that exists whether or not either is drawn.
     """
     from portia.agent import providers
-    from portia.agent.session import EFFORTS
     from portia.ui.state import APP
 
     kind = app.provider or providers.DEFAULT_KIND
@@ -676,6 +678,16 @@ def model_effort(
                 button("", lambda: on_refresh(kind), icon="refresh", micro=True).tooltip(
                     _LIST_AGAIN
                 )
+        # No effort control at all on a provider that ignores it: a disabled
+        # one would be a setting that sets nothing. A parked chat's effort is
+        # stated in the same place, disabled, since a client keeps the one it
+        # was opened with (`docs/CONVERSATION.md` §7).
+        if provider.honours_effort:
+            spend_rule()
+            effort_menu(app.effort, on_effort, enabled=not effort_disabled)
+        if beside is not None:
+            spend_rule()
+            beside()
     status = APP.provider_status.get(kind)
     note = _provider_note(provider, listed, status)
     if note:
@@ -689,18 +701,6 @@ def model_effort(
     # 2026-09-14). Starting and stopping happen in the panel and only there.
     if not provider_fixed:
         server_controls(kind, on_start)
-    with ui.element("div").classes("spend-detail"):
-        if not provider.honours_effort:
-            # Nothing, at the row's height. It said *Effort is a Claude
-            # setting. Ollama ignores it.* until 2026-09-18, on the argument
-            # that saying why beats a blank. The user read it as noise about a
-            # control that is not there, and the row is what layout stability
-            # needs, not the sentence.
-            pass
-        elif effort_disabled:
-            caption(f"effort {app.effort}" if app.effort else "default effort")
-        else:
-            segmented(EFFORTS, app.effort, on_effort)
 
 
 def _drawn_list(kind: str) -> list | None:
@@ -1157,9 +1157,136 @@ MODE_TIPS = {
     "ask": "Every write to a spec or the catalog stops for you first.",
     "autopilot": "Every write goes through, recording a step included. Questions still stop.",
 }
+#: A mode's mark, T3 Code's: a shut lock for the one that stops, an open one for
+#: the one that does not. The same size and ink for both: kind, never rank.
+MODE_ICONS = {"ask": "lock", "autopilot": "lock_open"}
+#: The SDK's effort words, spelled for a person on the effort menu.
+EFFORT_LABELS = {
+    "low": "Low",
+    "medium": "Medium",
+    "high": "High",
+    "xhigh": "Extra high",
+    "max": "Max",
+}
+EFFORT_HEADING = "Effort"
+#: A chat or app with no effort picked: the provider's own default is spent.
+EFFORT_UNSET = "Default"
 
 
-def approval_mode(app, on_change: Callable[[], Any] | None = None) -> ui.select:
+@dataclass
+class ChoiceMenu:
+    """A drawn `choice_menu`: what a value moved elsewhere sets in place."""
+
+    trigger: ui.button
+    label: ui.label
+    icon: ui.icon | None
+    rows: dict[str, ui.element]
+    labels: Mapping[str, str]
+    icons: Mapping[str, str]
+    value: str | None = None
+
+    def show(self, value: str | None) -> None:
+        """Say ``value`` on the button and tick it in the menu, redrawing nothing."""
+        if self.trigger.is_deleted or value == self.value:
+            return
+        self.value = value
+        name = self.labels.get(value or "", EFFORT_UNSET)
+        self.label.set_text(name)
+        self.trigger.props(f"aria-label={prop_value(name)}")
+        if self.icon is not None and value is not None and value in self.icons:
+            self.icon.name = self.icons[value]
+        mark_selected(self.rows, value or "", "choice-row--picked")
+
+
+def choice_menu(
+    labels: Mapping[str, str],
+    current: str | None,
+    on_pick: Callable[[str], Any],
+    *,
+    heading: str = "",
+    icons: Mapping[str, str] | None = None,
+    tips: Mapping[str, str] | None = None,
+    enabled: bool = True,
+    kind: str = "",
+) -> ChoiceMenu:
+    """One value out of a few, as a button that opens a menu (`DESIGN.md` → `choice-menu`).
+
+    Closed, a `button-tertiary` 24px high: the value's mark if it has one, its
+    name, a caret. Open, a short menu of the values, an optional heading over
+    them, each row its name and, where ``tips`` holds one, a line on what it
+    does; the current one carries a tick. **No tooltip on the button**: it drew
+    over the open menu, whose rows already say what each value does, and a
+    name folded away on a narrow pane is in the button's ``aria-label`` and
+    on the menu one press away. T3 Code's shape for its effort and
+    access pickers, and the user's call for ours (2026-10-06): the effort was
+    five segments and the mode a select, two looks for one kind of control.
+
+    **A pick shuts the menu, says itself on the button and moves the tick, and
+    only then calls ``on_pick``** (`DESIGN.md` → Layout stability, rule 6), so
+    a caller whose only reason to redraw was the highlight has none. The
+    returned `ChoiceMenu` is how another copy of the same setting follows.
+    """
+    icons = icons or {}
+    tips = tips or {}
+    trigger = ui.button(color=None).props("unelevated no-caps dense")
+    trigger.classes(f"btn btn-tertiary choice-trigger {kind}".strip())
+    said = labels.get(current or "", EFFORT_UNSET)
+    trigger.props(f"aria-label={prop_value(said)}")
+    with trigger:
+        glyph = icons.get(current or "")
+        mark = ui.icon(glyph).classes("choice-trigger-icon") if glyph else None
+        name = ui.label(said).classes("choice-trigger-name")
+        ui.icon("expand_more").classes("modelpick-caret")
+    drawn = ChoiceMenu(trigger, name, mark, {}, labels, icons, current)
+    if not enabled:
+        trigger.set_enabled(False)
+        return drawn
+
+    def pick(value: str, menu: ui.menu) -> Any:
+        menu.close()
+        drawn.show(value)
+        return on_pick(value)
+
+    with trigger, ui.menu().classes("choice-menu").props("no-focus") as menu:
+        if heading:
+            ui.label(heading).classes("choice-menu-heading")
+        for value, text in labels.items():
+            row = ui.element("div").classes("choice-row")
+            if value == current:
+                row.classes("choice-row--picked")
+            row.on("click", lambda v=value: pick(v, menu))
+            with row:
+                if value in icons:
+                    ui.icon(icons[value]).classes("choice-row-icon")
+                with ui.element("div").classes("choice-row-text"):
+                    ui.label(text).classes("choice-row-name")
+                    if value in tips:
+                        ui.label(tips[value]).classes("choice-row-tip")
+                ui.icon("check").classes("choice-row-check")
+            drawn.rows[value] = row
+    return drawn
+
+
+def effort_menu(current: str | None, on_effort: Callable[[str], Any], *, enabled: bool = True):
+    """The effort, as a `choice_menu` under one heading."""
+    from portia.agent.session import EFFORTS
+
+    return choice_menu(
+        {effort: EFFORT_LABELS[effort] for effort in EFFORTS},
+        current,
+        on_effort,
+        heading=EFFORT_HEADING,
+        enabled=enabled,
+        kind="effort-menu",
+    )
+
+
+def spend_rule() -> None:
+    """The hairline between two menus on the spend row, T3 Code's divider."""
+    ui.element("span").classes("spend-rule")
+
+
+def approval_mode(app, on_change: Callable[[], Any] | None = None) -> ChoiceMenu:
     """Which writes stop for you: ask first, or autopilot.
 
     One control in two places, the composer and Settings, bound to the same
@@ -1167,41 +1294,38 @@ def approval_mode(app, on_change: Callable[[], Any] | None = None) -> ui.select:
     the chip was drawn only while autopilot was on, so the normal case had no
     control at all and the mode could only be changed from a dialog. A picker
     beside the model and the effort is the third fact about *how this message
-    will run*, and it is VS Code's placement for the same control.
+    will run*, and it is VS Code's placement for the same control. **A
+    `choice_menu` since 2026-10-06**, a lock and the mode's name closed and
+    each mode with its one line open; it was a Quasar select until then.
 
-    The value is a word rather than the bool so the select has two named
+    The value is a word rather than the bool so the menu has two named
     options; `App.set_mode` translates.
     """
     from portia.ui import state
 
-    select = ui.select(
-        {mode: MODE_LABELS[mode] for mode in state.MODES},
-        value=app.mode,
-    ).props("borderless dense options-dense")
-    select.classes("p-field approval-mode")
-    with select:
-        tip = ui.tooltip(MODE_TIPS[app.mode]).props(f"delay={TOOLTIP_DELAY}")
-
-    def picked(e) -> None:
-        app.set_mode(str(e.value))
-        # The tooltip says what the mode does, so it follows the pick in place:
-        # a redraw of the card around the select was the only thing moving it.
-        tip.set_text(MODE_TIPS[app.mode])
+    def picked(mode: str) -> None:
+        app.set_mode(mode)
         if on_change is not None:
             on_change()
 
-    select.on_value_change(picked)
-    return select
+    return choice_menu(
+        {mode: MODE_LABELS[mode] for mode in state.MODES},
+        app.mode,
+        picked,
+        icons=MODE_ICONS,
+        tips=MODE_TIPS,
+        kind="approval-mode",
+    )
 
 
-def show_mode(select: ui.select | None, app) -> None:
+def show_mode(drawn: ChoiceMenu | None, app) -> None:
     """Set a drawn `approval_mode` picker to the mode now in force, redrawing nothing.
 
     For the copy of the picker that was not pressed: the composer's when
     Settings or a write card moved the mode, and Settings' when the composer did.
     """
-    if select is not None and not select.is_deleted and select.value != app.mode:
-        select.set_value(app.mode)
+    if drawn is not None:
+        drawn.show(app.mode)
 
 
 def setting(title: str, description: str = "", *, help: str = "") -> ui.element:

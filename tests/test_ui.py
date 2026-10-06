@@ -1567,6 +1567,7 @@ def test_a_setting_that_only_moves_a_highlight_moves_it_in_place():
     assert ["picked" in r.classes for r in rows.values()] == [False, False, True]
 
     assert "mark_selected(" in inspect.getsource(c.segmented)
+    assert "mark_selected(" in inspect.getsource(c.ChoiceMenu.show)
     assert "c.mark_selected(" in inspect.getsource(settings._set_theme)
     assert "c.mark_selected(" in inspect.getsource(settings._show_tab)
     for fn in (settings._set_theme, settings._set_effort):
@@ -1587,6 +1588,58 @@ def test_a_segment_pressed_moves_its_wash_before_the_caller_hears():
     handle_event(click.handler, ClickEventArguments(sender=buttons[1], client=buttons[1].client))
     assert picked == ["high"]
     assert ["seg-active" in b.classes for b in buttons] == [False, True]
+
+
+def test_a_menu_pick_says_itself_on_the_button_before_the_caller_hears():
+    """The effort and the mode are menus (2026-10-06): a pick renames the
+    button and moves the tick in place, and the caller has nothing to redraw."""
+    heard = []
+    with ui.element("div"):
+        drawn = c.effort_menu("low", lambda effort: heard.append((effort, drawn.label.text)))
+    row = drawn.rows["high"]
+    click = next(x for x in row._event_listeners.values() if x.type == "click")
+    from nicegui.events import GenericEventArguments, handle_event
+
+    handle_event(click.handler, GenericEventArguments(sender=row, client=row.client, args={}))
+    assert heard == [("high", "High")]
+    assert [k for k, r in drawn.rows.items() if "choice-row--picked" in r.classes] == ["high"]
+
+
+def test_a_parked_chat_states_its_effort_and_offers_none():
+    with ui.element("div") as slot:
+        drawn = c.effort_menu("medium", lambda effort: None, enabled=False)
+    assert drawn.label.text == "Medium" and not drawn.trigger.enabled
+    assert not any("choice-menu" in e.classes for e in slot.descendants())
+
+
+def test_the_spend_row_is_one_line_of_menus_that_never_wraps():
+    """Effort was five segments on a row of its own that re-gridded on a pane
+    drag; the mode was a select. Now the model, the effort and the mode are one
+    row, and only the model's name gives way (the user, 2026-10-06)."""
+    import re
+
+    from portia.ui import theme
+
+    css = theme.CSS.read_text(encoding="utf-8")
+
+    def block(selector):
+        # Every rule for the selector, since the bare look shares one with the model's.
+        found = re.findall(re.escape(selector) + r" \{([^}]*)\}", css)
+        assert found, f"{selector} is not styled"
+        return "".join(found)
+
+    assert "flex-wrap: nowrap" in block(".spend-row")
+    assert "flex: 0 1 auto" in block(".spend-row .modelpick-trigger")
+    assert "flex: 0 0 auto" in block(".spend-row .choice-trigger")
+    assert "spend-detail" not in css and "segmented-control" not in block(".spend-row")
+
+    drawn = []
+    with ui.element("div") as slot:
+        c.model_effort(App(), lambda effort: None, beside=lambda: drawn.append(1))
+    row = next(e for e in slot.descendants() if "spend-row" in e.classes)
+    kinds = [e for e in row.descendants() if "choice-trigger" in e.classes]
+    assert [("effort-menu" in e.classes) for e in kinds] == [True]
+    assert drawn == [1], "the mode is drawn on the same row"
 
 
 def test_a_field_turns_required_in_place():
@@ -1638,10 +1691,8 @@ def test_picking_a_provider_redraws_its_detail_and_nothing_else(monkeypatch):
 
 
 def test_the_settings_body_lays_its_sections_out_as_the_composer_does_not():
-    """Three rules measured in a browser on 2026-09-23. The effort segments'
-    `spend-detail` is a full line in the composer's wrapping row, and inside a
-    `setting` (a column) the same 100% became a height, so the segments sat on
-    the next setting's title. A section is never squeezed to fit the box. And
+    """Rules measured in a browser on 2026-09-23. A section is never squeezed
+    to fit the box. And
     the providers dashboard is stretched to the body, or its rows' unwrapped
     status lines set its width and push the detail off the right edge."""
     import re
@@ -1655,7 +1706,6 @@ def test_the_settings_body_lays_its_sections_out_as_the_composer_does_not():
         assert found, f"{selector} is not styled"
         return found.group(1)
 
-    assert "flex: 0 0 auto" in block(".setting > .spend-detail")
     assert "flex-shrink: 0" in block(".settings-body > *")
     assert "align-self: stretch" in block(".providers-layout")
     assert "flex-wrap: nowrap" in block(".provider-row .provider-row-state")
@@ -4616,9 +4666,10 @@ def test_the_composer_states_the_mode_whichever_it_is():
         app = _App()
         app.autopilot = on
         with ui.element("div"):
-            select = c.approval_mode(app)
-        assert select.value == (state.AUTOPILOT if on else state.ASK)
-        assert set(select.options) == set(state.MODES)
+            drawn = c.approval_mode(app)
+        assert drawn.value == (state.AUTOPILOT if on else state.ASK)
+        assert drawn.label.text == c.MODE_LABELS[drawn.value]
+        assert set(drawn.rows) == set(state.MODES)
 
 
 def test_the_picker_and_the_flag_are_one_setting():
@@ -6716,8 +6767,7 @@ def test_a_server_with_no_models_offers_none_and_says_nothing_about_effort():
     ]
     assert not trigger.enabled
     assert not any("modelpick-menu" in e.classes for e in drawn)
-    detail = next(e for e in drawn if "spend-detail" in e.classes)
-    assert not list(detail.descendants()), "the row is reserved, and empty"
+    assert not any("effort-menu" in e.classes for e in drawn), "no effort on a provider ignoring it"
 
 
 def test_the_picker_splits_current_from_legacy_and_keeps_a_name_nobody_listed():

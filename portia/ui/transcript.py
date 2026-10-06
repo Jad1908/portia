@@ -922,7 +922,7 @@ def _stop_indexing() -> None:
 
 
 def _set_indexing_effort(effort: str) -> None:
-    """Nothing redraws: the segment pressed has already moved (`c.segmented`)."""
+    """Nothing redraws: the menu pressed has already moved (`c.choice_menu`)."""
     APP.effort = effort
 
 
@@ -1134,16 +1134,22 @@ def _composer_spend(chat) -> None:
             on_refresh=_list_models_clicked,
             on_start=_open_server_dialog,
             provider_fixed=parked,
+            beside=_composer_mode,
         )
-        # The third fact about how this message will run, beside the other two
-        # (`c.approval_mode`). Read live by `exchange.auto_allow`, so changing
-        # it applies to the next write rather than the next chat.
-        _MODE_PICKER["composer"] = c.approval_mode(APP, _mode_changed)
+
+
+def _composer_mode() -> None:
+    """The third fact about how this message will run, on the row with the other two.
+
+    `c.approval_mode`, read live by `exchange.auto_allow`, so changing it
+    applies to the next write rather than the next chat.
+    """
+    _MODE_PICKER["composer"] = c.approval_mode(APP, _mode_changed)
 
 
 #: The composer's mode picker as drawn, so a mode moved elsewhere is shown in
 #: place (`show_mode`).
-_MODE_PICKER: dict[str, ui.select] = {}
+_MODE_PICKER: dict[str, c.ChoiceMenu] = {}
 
 
 def show_mode() -> None:
@@ -1243,7 +1249,7 @@ def _exchange_banner(turn) -> None:
 def _set_effort(effort: str) -> None:
     """The open chat's effort, or the default a new one starts with.
 
-    Nothing is redrawn: the segment pressed has already moved (`c.segmented`).
+    Nothing is redrawn: the menu pressed has already moved (`c.choice_menu`).
     """
     if APP.open is not None and APP.open.continuable:
         APP.open.effort = effort

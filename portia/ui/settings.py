@@ -231,7 +231,7 @@ def _section() -> None:
     *(2026-09-23, the user: "every floating card gets a full refresh when it's
     clicked")*. An effort press rebuilt 50 of the card's 86 elements, the
     provider picker and the Writes setting with it, to move one wash. The
-    segments move themselves (`c.segmented`), a theme card and a nav row move
+    menus move themselves (`c.choice_menu`), a theme card and a nav row move
     a class (`c.mark_selected`), *Customize* shows and hides what it folds, and
     the two parts whose shape depends on a pick are refreshables of their own:
     `_spend` for the provider, `_data_place` for where the data lives.
@@ -324,7 +324,7 @@ def _spend() -> None:
 
 
 #: This panel's mode picker as drawn, set in place when the mode moves elsewhere.
-_MODE_SELECT: dict[str, ui.select] = {}
+_MODE_SELECT: dict[str, c.ChoiceMenu] = {}
 
 
 def _mode_picker() -> None:
@@ -565,7 +565,7 @@ def _set_theme(label: str) -> None:
 
 
 def _set_effort(effort: str) -> None:
-    """The segment has moved itself (`c.segmented`); the composer behind follows."""
+    """The menu has moved itself (`c.choice_menu`); the composer behind follows."""
     from portia.ui import transcript
 
     APP.effort = effort
