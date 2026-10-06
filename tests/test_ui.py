@@ -917,6 +917,28 @@ def test_the_question_form_has_a_rule_not_a_box():
     assert ".ask-form {" in css, "the middle pane's ask form kept the box under its own name"
 
 
+def test_the_composer_text_starts_at_the_box_inset_and_not_quasars():
+    """Quasar pads a textarea 17px above its text for a floating label, and its
+    container 2px more: the first line sat 28px under the composer's edge. The
+    box's own 12px is the only space above it now, and no rule sits over the box."""
+    import inspect
+    import re
+    from pathlib import Path
+
+    from portia.ui import transcript
+
+    css = (Path(c.__file__).parent / "assets" / "portia.css").read_text(encoding="utf-8")
+
+    def rule(selector: str) -> str:
+        return re.search(r"\n" + re.escape(selector) + r" \{(.*?)\n\}", css, re.S).group(1)
+
+    assert "\n  padding: 0;" in rule(".composer-field textarea")
+    assert "\n  padding: 0;" in rule(".composer-field .q-field__control-container")
+    assert "padding: var(--sp-md) var(--sp-md) 0" in rule(".composer-field .q-field__control")
+    assert "box-shadow: 0 0 0 3px var(--accent-soft)" in rule(".answer-box:focus-within")
+    assert "c.rule()" not in inspect.getsource(transcript._composer)
+
+
 def test_the_middle_pane_ask_form_keeps_its_box_under_its_own_name():
     import inspect
 

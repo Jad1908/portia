@@ -3877,7 +3877,8 @@ body.body--dark .p-panel {
  * focused. It replaced a bordered textarea, a rule and a footer with a button
  * on its far side — three rows saying *type here, then press this*, where one
  * box says it the way the composer under it already does. The button sits at
- * the foot of the field, so it stays put while the field grows. */
+ * the foot of the field, so it stays put while the field grows. Its focus ring
+ * is the composer's rule, under the composer. */
 .answer-box {
   display: flex;
   align-items: flex-end;
@@ -3886,9 +3887,9 @@ body.body--dark .p-panel {
   border: 1px solid var(--hairline);
   border-radius: var(--r-md);
   padding: var(--sp-xs) var(--sp-xs) var(--sp-xs) var(--sp-sm);
-}
-.answer-box:focus-within {
-  border-color: var(--accent-primary);
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
 }
 .answer-field {
   flex: 1 1 auto;
@@ -4095,29 +4096,64 @@ body.body--dark .p-panel {
  * it and the settings and the send sit on a bar along its foot.
  *
  * The focus wash lands on the box rather than the field — one of the accent's
- * three jobs, and the whole composer is what is focused. */
+ * three jobs, and the whole composer is what is focused.
+ *
+ * **Rounder, with no rule above it** *(2026-10-06, the user: "clunky and
+ * awkward")*. `{rounded.xl}`, the strong hairline the pinned row takes on this
+ * white pane, and the box alone marking where the transcript ends: a pane-wide
+ * rule over a bordered box was two edges for one boundary. What scrolls under
+ * the dock fades out over its last 12px rather than being cut mid-line. */
+.composer-dock {
+  position: relative;
+}
+.composer-dock::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: var(--sp-md);
+  background: linear-gradient(to bottom, transparent, var(--surface));
+  pointer-events: none;
+}
 .composer {
   display: flex;
   flex-direction: column;
   background: var(--surface-elevated);
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-md);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--r-xl);
   overflow: hidden;
   /* A size container, so the mode picker below can fold its name on the
    * *pane's* width — a media query only knows the window's. Safe here because
    * the composer is a block whose width is the pane's, never its content's. */
   container-type: inline-size;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
 }
-.composer:focus-within {
+/* The focus ring the start panel's fields wear: the edge takes the accent and
+ * a 3px `accent-soft` halo sits outside it. A ring, not a shadow — it is the
+ * focused-input job, and nothing else on screen draws one. */
+.composer:focus-within,
+.answer-box:focus-within {
   border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+/* **The first line starts 13px under the edge** *(2026-10-06)*. It started
+ * 28px under it: Quasar pads a textarea 17px above its text, for a floating
+ * label this field does not have, and the control and its container added 10px
+ * more. All of it goes, and the box's own 12px is the only space above the text,
+ * the same inset as at the sides. */
 .composer-field .q-field__control {
   background: transparent;
   border: none;
   border-radius: 0;
-  padding: var(--sp-sm) var(--sp-md) 0;
+  padding: var(--sp-md) var(--sp-md) 0;
   min-height: 0;
+}
+.composer-field .q-field__control-container {
+  padding: 0;
 }
 .composer-field .q-field__control:before,
 .composer-field .q-field__control:after {
@@ -4128,8 +4164,11 @@ body.body--dark .p-panel {
   font-family: var(--font-sans);
   font-size: 13px;
   line-height: 1.5;
-  /* Long enough to be worth typing into, short enough to leave the transcript
-   * the pane. `autogrow` takes it from here. */
+  padding: 0;
+  /* Two lines at rest, because a goal is a paragraph (§7.1's reason for Enter
+   * writing a newline), and long enough to be worth typing into; capped short
+   * enough to leave the transcript the pane. `autogrow` goes between the two. */
+  min-height: 3em;
   max-height: 200px;
 }
 .composer-field textarea::placeholder {
@@ -4137,12 +4176,14 @@ body.body--dark .p-panel {
   opacity: 1;
 }
 
+/* Centred, so the menus and Send share a midline; 8px all round, so Send sits
+ * as far from the box's corner as the text sits from its side, near enough. */
 .composer-bar {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
   gap: var(--sp-sm);
-  padding: var(--sp-xs) var(--sp-sm) var(--sp-sm);
+  padding: var(--sp-sm);
   min-width: 0;
 }
 .composer-spend,
@@ -4206,13 +4247,16 @@ body.body--dark .p-panel {
 
 /* What the chat has cost and how full it is, under the box it belongs to.
  * Counts, never a verdict — nothing here says a chat is too long or too
- * expensive, which would need a goal this panel has no way to know. */
+ * expensive, which would need a goal this panel has no way to know. Inset
+ * as far as the text in the box, so the line reads as the box's and does not
+ * hang off its rounded corner. */
 .composer-meta {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-sm);
   min-width: 0;
+  padding: 0 var(--sp-md);
 }
 
 /* ── misc ─────────────────────────────────────────────────────────────────── */

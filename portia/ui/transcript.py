@@ -1070,8 +1070,8 @@ def _composer(chat) -> None:
     live = APP.live
     busy_here = chat is not None and chat.busy
     busy_elsewhere = live is not None and not busy_here
-    c.rule()
-    with ui.element("div").classes("p-pad stack-sm"):
+    # No rule above it: the box is the edge (`composer-dock` in the CSS).
+    with ui.element("div").classes("composer-dock p-pad stack-sm"):
         with ui.element("div").classes("composer"):
             field = (
                 ui.textarea(placeholder=_placeholder(chat))
