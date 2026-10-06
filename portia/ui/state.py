@@ -1189,10 +1189,11 @@ class App:
     canvas_group: str = LEFT
 
     #: Exchange settings, remembered between exchanges, and the three below
-    #: between launches too (`ui/prefs`).
+    #: between launches too (`ui/prefs`). Medium effort since 2026-10-06 (the
+    #: user's call), beside the Sonnet 5.5 default: low stays one press away.
     goal: str = ""
     model: str = ""
-    effort: str | None = "low"
+    effort: str | None = "medium"
     #: A model restored from the last launch that its provider has not listed
     #: yet. A server's list is a network call that happens after the window
     #: opens (`engine.list_models`), so a model deleted since cannot be caught
