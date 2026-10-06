@@ -417,8 +417,7 @@ async def close_chat(chat: Chat) -> None:
         chat.rows = []
         chat.exchanges = []
         chat.timings = {}
-        chat.settled = 0
-        chat.settled_slot = None
+        chat.slots = {}
         chat.generation += 1
     chat.log = None
 

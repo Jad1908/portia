@@ -42,7 +42,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from nicegui import ui
+from nicegui import context, ui
 
 from portia import runlog
 from portia.agent import events, providers
@@ -197,6 +197,13 @@ def stream_view() -> None:
     (the same renderers, so the logged half and the live half cannot
     disagree), and that part never changes either.
 
+    **The slot is this tab's** (`Chat.slots`, by client id). Every tab on the
+    window draws this pane, and the slot used to be one per chat: the last tab
+    to draw owned it, `settle` appended there, and every other tab's tail let
+    go of rows nothing then drew. With a second tab open, the tab being
+    watched dropped each run of calls as a thinking block settled it
+    (2026-10-06).
+
     Rebuilt whole only at human pace, with `pane`: a message sent, a chat
     opened, an exchange ending.
     """
@@ -209,12 +216,13 @@ def stream_view() -> None:
             c.caption(_PICKED_UP)
     elif not chat.rows and not _starting(chat) and not _failed(chat) and not _profiled(chat):
         c.empty_note(_IDLE_JOB if chat.is_job else _IDLE)
-    chat.settled = settled_before(chat.rows, busy=chat.busy)
+    settled = settled_before(chat.rows, busy=chat.busy)
     # `contents`, so the rows inside sit in the scroll region's own stack
     # rather than in a box of their own.
-    chat.settled_slot = ui.element("div").classes("contents")
-    with chat.settled_slot:
-        _draw(chat, 0, chat.settled)
+    slot = ui.element("div").classes("contents")
+    chat.slots[slot.client.id] = state.SettledSlot(slot, settled)
+    with slot:
+        _draw(chat, 0, settled)
     tail_view()
 
 
@@ -225,7 +233,8 @@ def tail_view() -> None:
     if chat is None:
         return
     keys = _key_prefix(chat)
-    _draw(chat, chat.settled, None)
+    slot = chat.slots.get(context.client.id)
+    _draw(chat, slot.settled if slot else 0, None)
     if _starting(chat):
         _starting_rows(chat)
     # At the foot, where the newest card is and where the scroll already
@@ -315,22 +324,25 @@ def _starting_rows(chat) -> None:
 
 
 def settle(chat) -> bool:
-    """Draw what has settled since the last event into its slot; say if that worked.
+    """Draw what has settled since the last event into each tab's slot; say if that worked.
 
-    Appending, not rebuilding: the slot is the element `stream_view` left on
-    the chat, and a row drawn into it is a small patch beside rows that are
-    not touched. ``False`` when the slot is gone — the pane was rebuilt under
-    it or this chat is not the one on screen — and the caller falls back to a
-    whole redraw.
+    Appending, not rebuilding: a slot is the element `stream_view` left on the
+    chat for one tab, and a row drawn into it is a small patch beside rows
+    that are not touched. Every tab's slot, because every tab's `tail_view`
+    stops drawing a row the moment it settles. A slot whose tab closed or
+    whose pane was rebuilt is dropped. ``False`` when none is left — this chat
+    is not the one on screen anywhere — and the caller falls back to a whole
+    redraw.
     """
-    slot = chat.settled_slot
-    if slot is None or slot.is_deleted:
+    chat.slots = {key: slot for key, slot in chat.slots.items() if not slot.element.is_deleted}
+    if not chat.slots:
         return False
     boundary = settled_before(chat.rows, busy=chat.busy)
-    if boundary > chat.settled:
-        with slot:
-            _draw(chat, chat.settled, boundary)
-        chat.settled = boundary
+    for slot in chat.slots.values():
+        if boundary > slot.settled:
+            with slot.element:
+                _draw(chat, slot.settled, boundary)
+            slot.settled = boundary
     return True
 
 
