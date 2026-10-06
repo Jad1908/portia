@@ -37,7 +37,7 @@ dev = [
     "pre-commit>=3.7",
 ]
 agent = [
-    "claude-agent-sdk>=0.2.128",
+    "claude-agent-sdk>=0.2.163",
 ]
 ui = [
     "nicegui>=2.0",
@@ -46,8 +46,8 @@ ui = [
 # app-server`, and portia's tools reach it over a loopback MCP server, which
 # the `agent` extra's `mcp` already serves. Optional like every provider.
 codex = [
-    "claude-agent-sdk>=0.2.128",
-    "openai-codex>=0.156",
+    "claude-agent-sdk>=0.2.163",
+    "openai-codex>=0.160.1",
 ]
 # The knowledge graph (docs/KNOWLEDGE_GRAPH.md). Optional on purpose, §6.6: a
 # stopped container must not break the product, so nothing outside
