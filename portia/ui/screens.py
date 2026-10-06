@@ -2677,7 +2677,7 @@ async def _interpret_switched() -> None:
 
 
 def _set_indexing_effort(effort: str) -> None:
-    """The segment has moved itself (`c.segmented`); the composer's copy follows."""
+    """The menu has moved itself (`c.choice_menu`); the composer's copy follows."""
     from portia.ui import transcript
 
     APP.effort = effort
