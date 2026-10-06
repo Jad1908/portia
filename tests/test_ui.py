@@ -6242,23 +6242,73 @@ def test_a_streamed_event_appends_to_the_settled_slot_and_never_rebuilds_it():
     chat.rows.extend([text, *_calls(("1", "describe_source"))])
     with _as_app(transcript, app), ui.element("div"):
         transcript.stream_view()
-    slot = chat.settled_slot
-    assert slot is not None and chat.settled == 1
-    drawn_first = [e.id for e in slot.descendants()]
+    (slot,) = chat.slots.values()
+    assert slot.settled == 1
+    drawn_first = [e.id for e in slot.element.descendants()]
 
     # A message arrives: the run of calls settles, the message is the tail.
     chat.rows.append(text)
     with _as_app(transcript, app):
         assert transcript.settle(chat) is True
-    assert chat.settled == 3
-    drawn_after = [e.id for e in slot.descendants()]
+    assert slot.settled == 3
+    drawn_after = [e.id for e in slot.element.descendants()]
     assert drawn_after[: len(drawn_first)] == drawn_first  # appended, not rebuilt
     assert len(drawn_after) > len(drawn_first)
 
     # Nothing new settled: nothing drawn.
     with _as_app(transcript, app):
         assert transcript.settle(chat) is True
-    assert [e.id for e in slot.descendants()] == drawn_after
+    assert [e.id for e in slot.element.descendants()] == drawn_after
+
+
+def test_every_tab_on_the_window_gets_the_rows_that_settle():
+    """Every tab draws the pane, so every tab has a settled slot of its own.
+
+    One slot per chat belonged to the tab that drew last. With a second tab
+    open, the first tab's tail let go of each run of calls as a thinking block
+    settled it, and nothing drew them again until the next whole redraw
+    (2026-10-06, a live build chat).
+    """
+    from nicegui import Client
+    from nicegui.page import page
+
+    from portia.agent import events
+    from portia.ui import transcript
+    from portia.ui.state import App
+
+    app = App()
+    chat = app.new_chat()
+    app.show_chat(chat)
+    chat.exchange = state.Exchange(prompt="x", model="m", effort=None)
+    chat.rows.extend(_calls(("1", "describe_source"), ("2", "describe_source")))
+    with _as_app(transcript, app), ui.element("div"):
+        transcript.stream_view()
+    # The second tab draws after the first, so it is the one a single slot
+    # per chat would have kept.
+    other = Client(page("/"))
+    try:
+        with _as_app(transcript, app), other, ui.element("div"):
+            transcript.stream_view()
+        assert len(chat.slots) == 2
+        drawn = {key: len(list(slot.element.descendants())) for key, slot in chat.slots.items()}
+
+        chat.rows.append(events.Event(events.THINKING, {"text": ""}))
+        with _as_app(transcript, app):
+            assert transcript.settle(chat) is True
+        for key, slot in chat.slots.items():
+            assert slot.settled == 4
+            assert len(list(slot.element.descendants())) > drawn[key], key
+
+        # A tab that closes leaves the other one settling on its own.
+        other.delete()
+        chat.rows.append(events.Event(events.TEXT, {"text": "so"}))
+        with _as_app(transcript, app):
+            assert transcript.settle(chat) is True
+        (slot,) = chat.slots.values()
+        assert slot.settled == 5
+    finally:
+        if other.id in Client.instances:
+            other.delete()
 
 
 def test_settling_with_no_slot_asks_for_the_whole_redraw():
@@ -6270,9 +6320,10 @@ def test_settling_with_no_slot_asks_for_the_whole_redraw():
     assert transcript.settle(chat) is False
     with ui.element("div") as slot:
         pass
-    chat.settled_slot = slot
+    chat.slots[slot.client.id] = state.SettledSlot(slot)
     slot.delete()
     assert transcript.settle(chat) is False
+    assert chat.slots == {}
 
 
 def test_an_event_for_a_chat_not_on_screen_redraws_nothing(monkeypatch):

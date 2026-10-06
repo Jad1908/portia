@@ -328,6 +328,18 @@ class Timing:
 
 
 @dataclass
+class SettledSlot:
+    """Where one tab drew a chat's settled rows, and how far it has drawn them.
+
+    The element is NiceGUI's and this module never touches it
+    (`transcript.stream_view`).
+    """
+
+    element: Any
+    settled: int = 0
+
+
+@dataclass
 class Chat:
     """One chat, or one job, as the window holds it (`docs/CHAT_SESSIONS.md`).
 
@@ -418,12 +430,11 @@ class Chat:
     #: the transcript's entrance keys and nothing else reads it.
     generation: int = 0
     #: How far the transcript has drawn this chat's rows as settled, and the
-    #: element it drew them into (`transcript.stream_view`). The slot is
-    #: NiceGUI's and this module never touches it — it is held here because a
-    #: streamed event has to find it, and the chat is the one thing an event
-    #: knows. Both reset with the rows.
-    settled: int = 0
-    settled_slot: Any = None
+    #: element it drew them into, **one per browser tab**, by NiceGUI client id,
+    #: because every tab draws the pane (`transcript.stream_view`). Held here
+    #: because a streamed event has to find them, and the chat is the one thing
+    #: an event knows. Reset with the rows.
+    slots: dict[str, SettledSlot] = field(default_factory=dict)
     #: **Profiling is running ahead of this job's exchange** *(2026-09-23)*. An
     #: indexing job used to exist only from the moment its model turn started,
     #: so for the ten minutes a warehouse took to profile there was nowhere to
