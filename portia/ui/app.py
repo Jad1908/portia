@@ -169,6 +169,9 @@ def page() -> None:
     # A card on the canvas, let go of somewhere else (`assets/canvas.js`). The
     # client moved it and its arrows live; the server records where it landed.
     ui.on("portia:card-move", _card_moved)
+    # A closed pane dragged back open from its rail, let go of past the pane's
+    # floor (`assets/rail.js`). The width is where the edge was let go.
+    ui.on("portia:pane-open", _pane_dragged_open)
     # A chart the browser could not draw (`docs/VISUALIZATION.md` §11). The one
     # thing the client reports that is not a gesture: the renderer refused a spec
     # portia's own guard passed, and until this existed the failure lived in a
@@ -231,6 +234,24 @@ def _figure_moved(event) -> None:
     figure = str(payload.get("figure") or "")
     if figure:
         artifacts.move_figure(figure, str(payload.get("folder") or ""))
+
+
+def _pane_dragged_open(event) -> None:
+    """A rail was dragged past its pane's floor and let go. One event, the whole gesture.
+
+    The width is kept first, so the pane opens where the edge was dropped;
+    `_width` holds it inside this window's limits when the pane is drawn.
+    """
+    args = event.args or {}
+    width = args.get("width")
+    if not isinstance(width, (int, float)):
+        return
+    if args.get("pane") == FILES:
+        _files_dragged(int(width))
+        _open_files()
+    elif args.get("pane") == TRANSCRIPT:
+        _transcript_dragged(int(width))
+        _open_transcript()
 
 
 def _tab_moved(event) -> None:
@@ -371,7 +392,7 @@ def _window() -> None:
                     with files.after:
                         _workflow_and_transcript()
             else:
-                _rail("Files", "folder", "chevron_right", _open_files)
+                _rail(FILES, "folder", "chevron_right", _open_files, _files_limits())
                 _workflow_and_transcript()
 
 
@@ -384,7 +405,7 @@ def _workflow_and_transcript() -> None:
         # middle of it. Same trap `.p-pane` documents.
         with ui.element("div").classes("p-pane-row"):
             _middle()
-            _rail("Transcript", "forum", "chevron_left", _open_transcript)
+            _rail(TRANSCRIPT, "forum", "chevron_left", _open_transcript, _transcript_limits())
         return
     # `reverse` so the pixel size applies to the transcript rather than to the
     # workflow: the pane with a real minimum is the one the number should govern.
@@ -402,7 +423,7 @@ def _workflow_and_transcript() -> None:
             _right()
 
 
-def _rail(name: str, icon: str, arrow: str, reopen) -> None:
+def _rail(name: str, icon: str, arrow: str, reopen, limits: tuple[int, int]) -> None:
     """A closed pane, as the strip of edge it left behind.
 
     The toolbar used to carry a Files and a Transcript toggle, which is two
@@ -413,8 +434,19 @@ def _rail(name: str, icon: str, arrow: str, reopen) -> None:
 
     It is deliberately not a sliver of the pane. A 28px stripe of a file tree
     reads as a rendering failure; a rail reads as a thing you press.
+
+    **And a thing you drag** *(2026-10-06, the user)*: a pane closed by
+    dragging its edge comes back by dragging the rail, past the same floor
+    that closed it (`assets/rail.js`). The rail states the pane, the side it
+    opens from and its limits, and the client does the rest.
     """
-    with ui.element("div").classes("p-rail"):
+    lower, upper = limits
+    side = "left" if name == FILES else "right"
+    rail = ui.element("div").classes("p-rail")
+    rail.props(
+        f"data-rail={name} data-rail-side={side} data-rail-floor={lower} data-rail-ceiling={upper}"
+    )
+    with rail:
         c.button("", reopen, icon=arrow, micro=True).tooltip(_RAIL_TIP.format(name=name))
         ui.icon(icon).classes("p-rail-icon")
 
@@ -947,7 +979,10 @@ RUN_SOME_TIP = "Run {tables} and everything they read"
 SAVE_TIP = "Save tables and reports"
 STOP_TIP = "Stop this run"
 ACTION_TIPS = (RUN_ALL_TIP, SAVE_TIP)
-_RAIL_TIP = "Show {name}. Drag its edge past the minimum width to close it again."
+_RAIL_TIP = "Show {name}, or drag it open. Drag its edge narrow to close it again."
+#: The two side panes, as a rail names them and `assets/rail.js` reports them.
+FILES = "Files"
+TRANSCRIPT = "Transcript"
 _NOTHING_TO_BUILD = "No specs to build yet. The copilot writes one as it records steps."
 #: **Says what survived, not what was lost.** A stopped build keeps the models it
 #: finished — they are compiled from the specs on disk and are not provisional —

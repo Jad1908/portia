@@ -433,6 +433,43 @@ html body {
   border-right: 1px solid var(--hairline);
 }
 
+/* The rail is also a handle: press and drag it away from the window's edge
+ * to bring the pane back at the width you let go of (`assets/rail.js`). */
+.p-rail {
+  cursor: col-resize;
+}
+.p-rail .btn {
+  cursor: pointer;
+}
+/* Where the pane's edge will land, drawn by `rail.js` while the rail is
+ * dragged: the would-be pane as a wash, its edge as a line. Dashed and stone
+ * short of the floor, where letting go leaves the pane shut; the accent past
+ * it, the colour a splitter's edge takes while it is dragged. */
+.p-rail-guide {
+  position: fixed;
+  z-index: 3000;
+  pointer-events: none;
+  box-sizing: border-box;
+  background: transparent;
+}
+.p-rail-guide--left {
+  border-right: 2px dashed var(--stone);
+}
+.p-rail-guide--right {
+  border-left: 2px dashed var(--stone);
+}
+.p-rail-guide--open {
+  background: var(--accent-soft);
+  border-style: solid;
+  border-color: var(--accent-primary);
+}
+/* While a rail is dragged, nothing under the pointer selects or hovers. */
+body.p-rail-dragging,
+body.p-rail-dragging * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+
 /* Which pane it brings back. The arrow above says which way; this says what. */
 .p-rail-icon {
   color: var(--stone);

@@ -115,6 +115,9 @@ MOTION_JS = ASSETS / "motion.js"
 #: search, the legacy fold, the row under the arrow keys. The canvas's rule:
 #: a round trip per keystroke would rebuild the box being typed into.
 MODELPICK_JS = ASSETS / "modelpick.js"
+#: A closed pane dragged back open from its rail. `tabs.js`'s reason: the rail
+#: can be rebuilt between the press and the release.
+RAIL_JS = ASSETS / "rail.js"
 BEHAVIOUR = (
     CANVAS_JS,
     VIEWPORT_JS,
@@ -126,6 +129,7 @@ BEHAVIOUR = (
     PICK_JS,
     MOTION_JS,
     MODELPICK_JS,
+    RAIL_JS,
 )
 
 #: The graph explorer's renderer — the one third-party script the window loads.

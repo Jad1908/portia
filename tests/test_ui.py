@@ -1490,6 +1490,47 @@ def test_the_pane_beside_a_rail_states_both_its_dimensions():
     assert "width: 100%" in block.group(1) and "height: 100%" in block.group(1)
 
 
+def test_a_closed_pane_comes_back_where_its_rail_was_let_go(monkeypatch):
+    """Closing a pane is a drag, and since 2026-10-06 so is opening one (the
+    user). The client resolves the gesture (`assets/rail.js`) and the server
+    hears the pane and the width once; the width is kept before the pane opens,
+    so it opens at it."""
+    from portia.ui import app as app_module
+    from portia.ui import theme
+
+    opened = []
+    monkeypatch.setattr(app_module, "_set_panes", lambda **k: opened.append(k))
+    monkeypatch.setattr(app_module.APP, "files_width", None)
+    monkeypatch.setattr(app_module.APP, "transcript_width", None)
+
+    def event(**args):
+        return SimpleNamespace(args=args)
+
+    app_module._pane_dragged_open(event(pane=app_module.FILES, width=300))
+    app_module._pane_dragged_open(event(pane=app_module.TRANSCRIPT, width=440.4))
+    app_module._pane_dragged_open(event(pane=app_module.FILES, width="wide"))
+    app_module._pane_dragged_open(event(pane="Elsewhere", width=200))
+    assert opened == [{"files": True}, {"transcript": True}]
+    assert app_module.APP.files_width == 300 and app_module.APP.transcript_width == 440
+
+    assert theme.RAIL_JS in theme.BEHAVIOUR
+    script = theme.RAIL_JS.read_text(encoding="utf-8")
+    assert "portia:pane-open" in script and "railFloor" in script
+
+
+def test_a_rail_states_its_pane_its_side_and_its_limits():
+    """What `rail.js` needs to draw the guide and to know when letting go opens
+    the pane: the same floor that closed it, and the ceiling the window allows."""
+    from portia.ui import app as app_module
+
+    with ui.element("div") as slot:
+        app_module._rail(app_module.TRANSCRIPT, "forum", "chevron_left", lambda: None, (260, 700))
+    rail = next(e for e in slot.descendants() if "p-rail" in e.classes)
+    assert rail.props["data-rail"] == app_module.TRANSCRIPT
+    assert rail.props["data-rail-side"] == "right"
+    assert (rail.props["data-rail-floor"], rail.props["data-rail-ceiling"]) == ("260", "700")
+
+
 def test_every_settings_tab_has_something_to_draw():
     """A tab with no body renders an empty panel, and the failure is silent."""
     from portia.ui import settings
