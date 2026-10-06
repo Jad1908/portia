@@ -2587,7 +2587,7 @@ def test_send_carries_the_accent_whatever_the_workflow_pane_is_doing():
     from portia.ui import transcript
 
     source = re.sub(r"\s+", " ", inspect.getsource(transcript._composer))
-    assert re.search(r'c\.button\( ?"Send", _go, kind="primary"', source)
+    assert re.search(r'c\.button\( ?"", _go, kind="primary"', source)
     assert "spec_has_steps" not in source, "Send no longer asks what the middle pane holds"
 
 
@@ -2600,8 +2600,8 @@ def test_inside_the_transcript_only_one_accent_fill_is_ever_drawn():
     from portia.ui import transcript
 
     source = inspect.getsource(transcript._composer)
-    send = source.index('"Send"')
-    stop = source.index('"Stop"')
+    send = source.index("_SEND")
+    stop = source.index("_STOP")
     assert stop < send, "Stop is the in-flight branch; Send is the other one"
 
 

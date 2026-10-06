@@ -1087,9 +1087,12 @@ def _composer(chat) -> None:
                 with ui.element("div").classes("composer-send"):
                     if busy_here:
                         # The spinner says it is alive and Stop names the only
-                        # thing to do about it.
+                        # thing to do about it. Round and wordless like Send,
+                        # in the same place, so the bar keeps its shape.
                         ui.spinner(size="sm")
-                        c.button("Stop", _stop, kind="tertiary", icon="stop")
+                        stop = c.button("", _stop, kind="tertiary", icon="stop")
+                        stop.classes("composer-go").props(f"aria-label={_STOP}")
+                        stop.tooltip(_STOP)
                     elif APP.preflight_status:
                         # A local model loading before the first message
                         # (`PROVIDERS.md` §5). Nothing to stop yet, and Send
@@ -1097,13 +1100,18 @@ def _composer(chat) -> None:
                         ui.spinner(size="sm")
                         c.caption(APP.preflight_status)
                     else:
+                        # **A round arrow, no word** *(2026-10-06, the user's
+                        # call, after T3 Code)*: the word cost the model's name
+                        # ~50px of a 370px bar. The tooltip and the
+                        # `aria-label` still say Send.
                         send = c.button(
-                            "Send",
+                            "",
                             _go,
                             kind="primary",
                             icon="arrow_upward",
                             enabled=not busy_elsewhere,
                         )
+                        send.classes("composer-go").props(f"aria-label={_SEND}")
                         send.tooltip(_busy_tip(live) if busy_elsewhere else _SEND_TIP)
         with ui.element("div").classes("composer-meta"):
             # Always a container, even when there is nothing to count: without
@@ -2878,6 +2886,8 @@ _MODEL_GLYPH = "code"
 #: The keystroke that sends, named where a pointer will look for it. The button
 #: says what it does and this says how else to do it; a shortcut nothing draws
 #: is one only the person who wrote it knows about.
+_SEND = "Send"
+_STOP = "Stop"
 _SEND_TIP = "Send · \u2318\u21a9 or Ctrl\u21a9"
 _GOAL_PLACEHOLDER = "What do you want from this data?"
 _FOLLOW_UP_PLACEHOLDER = "Reply, or ask for something else…"

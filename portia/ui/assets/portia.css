@@ -4143,6 +4143,20 @@ body.body--dark .p-panel {
 .composer-send {
   flex: 0 0 auto;
 }
+/* Send and Stop, round and wordless, T3 Code's (2026-10-06): the word cost the
+ * model's name a fifth of a 370px bar. One size for both, so pressing Send
+ * and getting Stop changes the fill and the glyph and nothing else. */
+.composer-send .btn.q-btn.btn-icon.composer-go {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+  border-radius: var(--r-full);
+}
+.composer-send .composer-go .q-icon {
+  font-size: 18px;
+}
 /* The preflight line ("loading qwen3:8b…") reports; it does not reflow the bar
  * it reports into. Capped, because it shares the bar with the spend controls
  * and a long model name would squeeze them mid-wait. */
@@ -5734,7 +5748,7 @@ body.tab-dragging .tab-drop {
  * and 5): the mode's name goes and its lock stays, with the name in the
  * button's `aria-label`. Below this the composer bar cannot hold the model, the effort, the
  * mode's name and Send on one line. */
-@container (max-width: 480px) {
+@container (max-width: 440px) {
   .spend-row .approval-mode .choice-trigger-name {
     display: none;
   }
