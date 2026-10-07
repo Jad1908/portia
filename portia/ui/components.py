@@ -103,8 +103,8 @@ def field(
 
     A form field says up front what it needs (`DESIGN.md` → `field`): the word
     *required* or *optional* sits beside the label in caption size, so nobody
-    finds out from a refusal. The box is `p-input` — 30px, hairline, the accent
-    wash on focus — rather than Quasar's 56px default, which read as a form
+    finds out from a refusal. The box is `p-input` — the composer's box at
+    30px, with its focus ring — rather than Quasar's 56px default, which read as a form
     built from someone else's kit. ``secret`` draws a password box with the
     reveal toggle; what is typed there is never written anywhere by portia.
 

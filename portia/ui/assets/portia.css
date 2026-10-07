@@ -691,12 +691,23 @@ body.p-rail-dragging * {
 
 /* ── inputs (Quasar chrome, flattened to hairlines) ───────────────────────── */
 
+/* **Every text box is the composer's box** *(2026-10-07, the user: "all the
+ * text boxes of the app to use this new version")*. The strong hairline, the
+ * focus ring and the text at the box's own 12px inset, which the composer took
+ * on the day before. A box of one line is `{rounded.lg}` and a box you write a
+ * paragraph into is the composer's `{rounded.xl}`: 16px on a 30px box is a
+ * pill, and a pill is a toggle here. The answer box, a one-liner with its
+ * button inside, follows the same rule. Every one-line box carries `p-input`
+ * too, so none keeps Quasar's 56px or 40px around a 30px line. */
 .p-field .q-field__control {
   background: var(--surface-elevated);
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-md);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--r-lg);
   padding: 0 var(--sp-md);
   min-height: 32px;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
 }
 .p-field .q-field__control:before,
 .p-field .q-field__control:after {
@@ -715,9 +726,11 @@ body.p-rail-dragging * {
   color: var(--stone);
   opacity: 1;
 }
+/* The composer's ring, not the wash it replaced: a tinted box under its own
+ * text read as a selected row. */
 .p-field.q-field--focused .q-field__control {
-  background: var(--accent-soft);
   border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .p-field .q-field__marginal,
 .p-field .q-icon {
@@ -731,9 +744,18 @@ body.p-rail-dragging * {
   font-size: 12px;
   font-feature-settings: normal;
 }
+/* A paragraph box: `{rounded.xl}`, and the first line 13px under the edge. It
+ * sat 28px under it, the composer's old fault: Quasar pads a textarea 17px for a
+ * floating label none of these has, and its container 2px more. */
 .p-editor .q-field__control {
-  padding-top: var(--sp-sm);
-  padding-bottom: var(--sp-sm);
+  padding: var(--sp-md);
+  border-radius: var(--r-xl);
+}
+.p-editor .q-field__control-container {
+  padding: 0;
+}
+.p-editor textarea {
+  padding: 0;
 }
 
 /* The brief: a box you are meant to write a paragraph into, so it opens at the
@@ -3884,9 +3906,9 @@ body.body--dark .p-panel {
   align-items: flex-end;
   gap: var(--sp-xs);
   background: var(--surface-elevated);
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-md);
-  padding: var(--sp-xs) var(--sp-xs) var(--sp-xs) var(--sp-sm);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--r-lg);
+  padding: var(--sp-xs) var(--sp-xs) var(--sp-xs) var(--sp-md);
   transition:
     border-color 120ms ease,
     box-shadow 120ms ease;
@@ -5211,8 +5233,8 @@ body.tab-dragging .tab-drop {
 /* --- Fields, alerts and choice cards (docs/CONNECTOR.md, 2026-09-04) --------
  *
  * `field` is a labelled input that says up front whether it is required. The
- * box is `p-input`: 30px, hairline, the accent wash on focus — Quasar's 56px
- * default under `.p-field` read as a form from someone else's kit. */
+ * box is `p-input`: 30px, otherwise the `p-field` box — Quasar's 56px default
+ * under `.p-field` read as a form from someone else's kit. */
 .field {
   display: flex;
   flex-direction: column;
@@ -5249,8 +5271,6 @@ body.tab-dragging .tab-drop {
 .p-input .q-field__control {
   min-height: 30px;
   height: 30px;
-  padding: 0 var(--sp-sm);
-  border-radius: var(--r-md);
 }
 .p-input .q-field__native,
 .p-input .q-field__input {
@@ -6159,10 +6179,17 @@ body.tab-dragging .tab-drop {
 
 /* The start panel (`screens._server_panel`, DESIGN.md → `server-panel`), the
  * Settings pass applied *(2026-09-23)*: a card the width of what it asks for,
- * each sentence behind a *?*, and fields drawn lean. A lean field is a soft
+ * each sentence behind a *?*, and fields drawn lean. A lean field was a soft
  * fill with no border at rest and the accent ring on focus, 32px, with its
  * label above it in the body ink: the hairline box beside a hairline card was
- * a box inside a box. Scoped to the panel; the other forms keep `p-input`. */
+ * a box inside a box.
+ *
+ * **The fill went on 2026-10-07**, when every text box became the composer's
+ * box (`inputs`, near the top): one box read the same way everywhere was what
+ * the user asked for. The box's edge is the strong hairline, a step heavier
+ * than the card's own, so it no longer echoes the card's edge. The ring the
+ * fill wore on focus is the one every box wears now. The 32px and the 12px text
+ * stay: they are the panel's density, not its look. */
 .q-dialog__inner > div.p-panel.server-panel {
   max-width: min(520px, 92vw);
 }
@@ -6179,34 +6206,12 @@ body.tab-dragging .tab-drop {
 .server-form .p-input .q-field__control {
   min-height: 32px;
   height: 32px;
-  padding: 0 var(--sp-md);
-  background: var(--hairline-soft);
-  border: 1px solid transparent;
-  border-radius: var(--r-md);
-  transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
-}
-.server-form .p-input .q-field__control:hover {
-  border-color: var(--hairline);
-}
-.server-form .p-input.q-field--focused .q-field__control {
-  background: var(--surface-elevated);
-  border-color: var(--accent-primary);
-  box-shadow: 0 0 0 3px var(--accent-soft);
-}
-.server-form .p-input .q-field__control::before,
-.server-form .p-input .q-field__control::after {
-  display: none;
 }
 .server-form .p-input .q-field__native,
 .server-form .p-input .q-field__input {
   min-height: 30px;
   line-height: 30px;
   font-size: 12px;
-}
-.server-form .p-input .q-field__native::placeholder,
-.server-form .p-input .q-field__input::placeholder {
-  color: var(--ash);
-  opacity: 1;
 }
 .server-form .server-select .q-field__append {
   height: 30px;

@@ -671,8 +671,8 @@ def _new_folder_field(depth: int = 1) -> None:
     with ui.element("div").classes("gallery-new").style(f"--depth:{depth}"):
         box = (
             ui.input(placeholder=NEW_FOLDER_HINT)
-            .classes("p-field w-full")
-            .props("borderless dense autofocus")
+            .classes("p-field p-input w-full")
+            .props("borderless dense hide-bottom-space autofocus")
         )
         box.bind_value(APP, "figures_new_name")
         box.on("keydown.enter", _make_folder)
