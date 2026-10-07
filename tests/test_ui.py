@@ -939,6 +939,38 @@ def test_the_composer_text_starts_at_the_box_inset_and_not_quasars():
     assert "c.rule()" not in inspect.getsource(transcript._composer)
 
 
+def test_every_text_box_is_the_composers_box():
+    """The composer's look on every `p-field`: the strong hairline, the focus ring
+    rather than a wash, a paragraph box with no Quasar padding over its first
+    line, and every one-line box `p-input`, so none keeps Quasar's 56px."""
+    import re
+    from pathlib import Path
+
+    from portia.ui import artifacts, charts, screens, workflow
+
+    css = (Path(c.__file__).parent / "assets" / "portia.css").read_text(encoding="utf-8")
+
+    def rule(selector: str) -> str:
+        return re.search(r"\n" + re.escape(selector) + r" \{(.*?)\n\}", css, re.S).group(1)
+
+    box = rule(".p-field .q-field__control")
+    assert "border: 1px solid var(--hairline-strong)" in box
+    focused = rule(".p-field.q-field--focused .q-field__control")
+    assert "box-shadow: 0 0 0 3px var(--accent-soft)" in focused
+    assert "background" not in focused, "the focus wash came back"
+    assert "border-radius: var(--r-xl)" in rule(".p-editor .q-field__control")
+    assert "\n  padding: 0;" in rule(".p-editor textarea")
+    assert "\n  padding: 0;" in rule(".p-editor .q-field__control-container")
+    assert "hairline-strong" in rule(".answer-box")
+    assert "background" not in rule(".server-form .p-input .q-field__control")
+
+    for module in (artifacts, charts, screens, workflow):
+        source = Path(module.__file__).read_text(encoding="utf-8")
+        for match in re.finditer(r"ui\.input\(.*?\.classes\(\"([^\"]*)\"\)", source, re.S):
+            if "p-field" in match.group(1):
+                assert "p-input" in match.group(1), f"{module.__name__}: {match.group(1)}"
+
+
 def test_the_middle_pane_ask_form_keeps_its_box_under_its_own_name():
     import inspect
 

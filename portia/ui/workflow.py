@@ -1663,8 +1663,8 @@ def _editable_column_row(col: dict):
             c.chip(str(col.get("inferred") or col.get("dtype") or ""))
         role = (
             ui.input(value=col.get("role") or "")
-            .classes("p-field p-field-mono w-full")
-            .props("borderless dense")
+            .classes("p-field p-input p-field-mono w-full")
+            .props("borderless dense hide-bottom-space")
         )
         c.mono(_null_rate(col), small=True)
         c.mono(str(col.get("n_distinct", "—")), small=True)

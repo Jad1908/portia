@@ -376,8 +376,8 @@ def _keep_where(chart: Chart, folders: list[str]) -> None:
                         button.classes("seg-active")
             new = (
                 ui.input(placeholder=_NEW_FOLDER)
-                .classes("p-field w-full")
-                .props("borderless dense")
+                .classes("p-field p-input w-full")
+                .props("borderless dense hide-bottom-space")
             )
             new.bind_value(chart, "keep_folder")
 

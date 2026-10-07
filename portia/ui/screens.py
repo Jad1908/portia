@@ -126,8 +126,8 @@ def _by_path(submit, *, placeholder: str, label: str) -> None:
     with field:
         path = (
             ui.input(placeholder=placeholder)
-            .classes("p-field p-field-mono flex-1")
-            .props("borderless")
+            .classes("p-field p-input p-field-mono flex-1")
+            .props("borderless dense hide-bottom-space")
         )
         c.button("Open", lambda: submit(path.value), kind=_path_kind())
 
@@ -2495,8 +2495,8 @@ def _import_destination() -> None:
         if not APP.import_to_data_dir:
             (
                 ui.input(placeholder=DESTINATION_PLACEHOLDER)
-                .classes("p-field p-field-mono w-full")
-                .props("borderless")
+                .classes("p-field p-input p-field-mono w-full")
+                .props("borderless dense hide-bottom-space")
                 .bind_value(APP, "import_destination")
             )
             c.caption(DESTINATION_ROOT)
