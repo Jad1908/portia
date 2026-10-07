@@ -875,3 +875,51 @@ def test_a_filled_chart_lifts_its_ancestors_over_the_other_panes():
     js, css = _asset("chart.js"), _asset("portia.css")
     assert 'host.classList.add("chart-full-host")' in js
     assert ".chart-full-host {\n  z-index: 5000 !important;" in css
+
+
+# --- the note on a saved figure (2026-10-07) ---------------------------------
+
+
+def _saved(tmp_path, monkeypatch, notes: str = "first thought"):
+    from portia import figures
+    from portia.ui import charts
+
+    app = App(root=tmp_path)
+    monkeypatch.setattr(charts, "APP", app)
+    monkeypatch.setattr(charts, "_refresh", lambda: None)
+    path = figures.save({"tab": "Orders", "rows": [{"x": 1}]}, notes=notes, root=tmp_path)
+    chart = a_chart("Orders", path=path.relative_to(tmp_path).as_posix(), notes=notes)
+    app.show_chart(chart)
+    return chart, path
+
+
+def test_a_saved_note_opens_on_what_is_saved_and_writes_back(tmp_path, monkeypatch):
+    import json
+
+    from portia.ui import charts
+
+    chart, path = _saved(tmp_path, monkeypatch)
+    chart.keep_notes = "a draft an earlier Cancel left"
+    charts._open_note(chart)
+    assert chart.keeping and chart.keep_notes == "first thought"
+
+    chart.keep_notes = "second thought "
+    charts._save_note(chart)
+
+    assert not chart.keeping
+    assert chart.notes == "second thought"
+    assert json.loads(path.read_text(encoding="utf-8"))["notes"] == "second thought"
+
+
+def test_a_note_that_cannot_be_written_keeps_the_box_open(tmp_path, monkeypatch):
+    from portia.ui import charts
+
+    chart, path = _saved(tmp_path, monkeypatch)
+    charts._open_note(chart)
+    path.unlink()
+    chart.keep_notes = "second thought"
+    charts._save_note(chart)
+
+    assert chart.keeping
+    assert "not a figure" in chart.keep_error
+    assert chart.notes == "first thought"

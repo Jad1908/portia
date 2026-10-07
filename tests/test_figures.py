@@ -117,3 +117,25 @@ def test_a_failure_is_taken_once_and_a_redraw_clears_it(tmp_path):
     figures.stash_failure("rates", "no such mark", tmp_path)
     figures.stash(_drawn(), tmp_path)  # drawn again: the old failure is about the old spec
     assert figures.take_stash_failures(tmp_path) == {}
+
+
+def test_a_note_is_rewritten_and_nothing_else_is(tmp_path):
+    """The note is the one field a person typed, so it is the one they may change.
+    The rows and the date were measured; a sentence written later leaves them."""
+    import json
+
+    path = figures.save(_chart("Cities"), notes="first thought", root=tmp_path)
+    before = json.loads(path.read_text(encoding="utf-8"))
+
+    figures.set_notes(path.relative_to(tmp_path), "  second thought \n", root=tmp_path)
+
+    after = json.loads(path.read_text(encoding="utf-8"))
+    assert after["notes"] == "second thought"
+    assert {k: v for k, v in after.items() if k != "notes"} == {
+        k: v for k, v in before.items() if k != "notes"
+    }
+
+
+def test_a_note_for_a_figure_that_is_gone_is_refused(tmp_path):
+    with pytest.raises(ValueError, match="not a figure"):
+        figures.set_notes("figures/gone.json", "hello", root=tmp_path)

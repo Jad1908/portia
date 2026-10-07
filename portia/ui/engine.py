@@ -2166,6 +2166,11 @@ def load_figure(app: App, path: str) -> dict:
     return figures.load(app.root / path)
 
 
+def set_figure_notes(app: App, path: str, notes: str) -> None:
+    """Rewrite a saved figure's note (`figures.set_notes`). Raises `ValueError`."""
+    figures.set_notes(path, notes, root=app.root)
+
+
 def saved_figures(app: App) -> list[dict]:
     """Every figure in the gallery, each with its repo-relative ``path``."""
     return figures.load_all(app.root)

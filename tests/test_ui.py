@@ -958,8 +958,10 @@ def test_every_text_box_is_the_composers_box():
     focused = rule(".p-field.q-field--focused .q-field__control")
     assert "box-shadow: 0 0 0 3px var(--accent-soft)" in focused
     assert "background" not in focused, "the focus wash came back"
-    assert "border-radius: var(--r-xl)" in rule(".p-editor .q-field__control")
+    assert "border-radius: var(--r-xl)" in rule(".p-editor--tall .q-field__control")
     assert "\n  padding: 0;" in rule(".p-editor textarea")
+    # One line at rest: Quasar's 52px opened an empty note box 78px tall.
+    assert "min-height: 0;" in rule(".p-editor textarea")
     assert "\n  padding: 0;" in rule(".p-editor .q-field__control-container")
     assert "hairline-strong" in rule(".answer-box")
     assert "background" not in rule(".server-form .p-input .q-field__control")

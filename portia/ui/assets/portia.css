@@ -694,10 +694,11 @@ body.p-rail-dragging * {
 /* **Every text box is the composer's box** *(2026-10-07, the user: "all the
  * text boxes of the app to use this new version")*. The strong hairline, the
  * focus ring and the text at the box's own 12px inset, which the composer took
- * on the day before. A box of one line is `{rounded.lg}` and a box you write a
- * paragraph into is the composer's `{rounded.xl}`: 16px on a 30px box is a
- * pill, and a pill is a toggle here. The answer box, a one-liner with its
- * button inside, follows the same rule. Every one-line box carries `p-input`
+ * on the day before. The radius goes by the height a box rests at: one line is
+ * `{rounded.lg}`, and the brief, 200px at rest like the composer's two lines,
+ * is `{rounded.xl}`. 16px on a 30px box is a pill, and a pill is a toggle
+ * here. The answer box, a one-liner with its button inside, follows the same
+ * rule. Every one-line box carries `p-input`
  * too, so none keeps Quasar's 56px or 40px around a 30px line. */
 .p-field .q-field__control {
   background: var(--surface-elevated);
@@ -744,18 +745,24 @@ body.p-rail-dragging * {
   font-size: 12px;
   font-feature-settings: normal;
 }
-/* A paragraph box: `{rounded.xl}`, and the first line 13px under the edge. It
- * sat 28px under it, the composer's old fault: Quasar pads a textarea 17px for a
- * floating label none of these has, and its container 2px more. */
+/* A paragraph box: the first line 13px under the edge. It sat 28px under it,
+ * the composer's old fault: Quasar pads a textarea 17px for a floating label
+ * none of these has, and its container 2px more. `{rounded.lg}`, because it
+ * rests at one line (below); the brief, 200px at rest, is `{rounded.xl}`. */
 .p-editor .q-field__control {
   padding: var(--sp-md);
-  border-radius: var(--r-xl);
 }
 .p-editor .q-field__control-container {
   padding: 0;
 }
+/* **One line at rest** *(2026-10-07, the user: the note box on a chart "is too
+ * big")*. Quasar holds a textarea at 52px, so an empty *Notes, optional* opened
+ * 78px tall: three lines of box for a field you may leave blank. `autogrow`
+ * takes it from one line as you type, as the answer box's does. The brief is
+ * `p-editor--tall` and keeps its 200px. */
 .p-editor textarea {
   padding: 0;
+  min-height: 0;
 }
 
 /* The brief: a box you are meant to write a paragraph into, so it opens at the
@@ -770,6 +777,7 @@ body.p-rail-dragging * {
  * ended. */
 .p-editor--tall .q-field__control {
   min-height: 200px;
+  border-radius: var(--r-xl);
   align-items: stretch;
 }
 .p-editor--tall .q-field__control-container,
