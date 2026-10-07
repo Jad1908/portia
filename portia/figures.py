@@ -193,6 +193,24 @@ def move(rel: str | Path, folder: str, root: str | Path = ".") -> Path:
     return destination
 
 
+def set_notes(rel: str | Path, notes: str, root: str | Path = ".") -> None:
+    """Rewrite a figure's note and nothing else.
+
+    **The note is the one field a person typed**, so it is the one field a
+    person may change after the fact. Everything else on the record was
+    measured, and ``at`` stays: it says when the rows were kept, and a sentence
+    written about them later does not make them newer. Read raw rather than
+    through `load`, so an edit never quietly migrates an old figure's encoding.
+    """
+    path = Path(root) / rel
+    if not path.is_file():
+        raise ValueError(f"{rel} is not a figure that exists.")
+    with open(path, encoding="utf-8") as f:
+        doc = json.load(f)
+    doc["notes"] = notes.strip()
+    _write(path, doc)
+
+
 def remove(rel: str | Path, root: str | Path = ".") -> None:
     """Delete a figure, or an empty folder.
 

@@ -265,8 +265,7 @@ def pane(chart: Chart, group: str = "") -> None:
     """
     with c.scroll_area(f"chart:{chart.key}", classes="p-pad stack-lg chart-scroll"):
         _chart_header(chart)
-        if chart.notes:
-            c.markdown(chart.notes)
+        _note(chart)
         if chart.pending:
             c.caption(_RUNNING)
         elif chart.error:
@@ -275,6 +274,74 @@ def pane(chart: Chart, group: str = "") -> None:
             _figure(chart, group)
         _keep(chart)
         _query(chart)
+
+
+def _note(chart: Chart) -> None:
+    """The note on a saved figure, under the question, and where it is changed.
+
+    **The note is editable once saved** *(2026-10-07, the user)*. It is the one
+    field on a figure a person typed, so it is the one a person may change; the
+    rows, the query and the date were measured and stay as they were. The box
+    opens where the note is read, in its place, because a form that acts
+    somewhere other than where it opened makes you go and check afterwards
+    (§6.4). It reuses the Keep form's fields: on a saved chart there is no Keep
+    form, so ``keeping`` can only mean this one.
+
+    A saved figure with no note offers to add one, in the same place. An
+    unsaved chart has no note yet: what is typed into its Keep form is a draft.
+    """
+    if chart.saved and chart.keeping:
+        _note_form(chart)
+        return
+    if chart.notes:
+        c.markdown(chart.notes)
+    if chart.saved:
+        c.button(
+            _EDIT_NOTE if chart.notes else _ADD_NOTE,
+            lambda: _open_note(chart),
+            icon="edit",
+            micro=True,
+        ).classes("self-start")
+
+
+def _note_form(chart: Chart) -> None:
+    """The note in a box, with Save and Cancel: the Keep form without its folder,
+    which on a saved figure is a drag in the gallery and not a field."""
+    with ui.element("div").classes("stack-sm"):
+        (
+            ui.textarea(placeholder=_NOTES_HINT)
+            .classes("p-field p-editor w-full")
+            .props("borderless autogrow autofocus")
+            .bind_value(chart, "keep_notes")
+        )
+        if chart.keep_error:
+            ui.label(chart.keep_error).classes("t-body-sm c-error pre-wrap")
+        with ui.element("div").classes("chart-keep-actions"):
+            c.button(_SAVE, lambda: _save_note(chart), kind="primary")
+            c.button(_CANCEL, lambda: _close_keep(chart))
+
+
+def _open_note(chart: Chart) -> None:
+    """Open the box on what is saved, never on a draft an earlier Cancel left."""
+    chart.keeping = True
+    chart.keep_notes = chart.notes
+    chart.keep_error = ""
+    _refresh()
+
+
+def _save_note(chart: Chart) -> None:
+    """Write the note into the file, or say why not with what was typed still there."""
+    from portia.ui import engine
+
+    try:
+        engine.set_figure_notes(APP, chart.path, chart.keep_notes)
+    except (OSError, ValueError) as exc:
+        chart.keep_error = str(exc)
+    else:
+        chart.notes = chart.keep_notes.strip()
+        chart.keeping = False
+        chart.keep_error = ""
+    _refresh()
 
 
 def _keep(chart: Chart) -> None:
@@ -824,6 +891,8 @@ _CANVAS_TAB = "Pipeline"
 _KEEP = "Keep"
 _KEEP_TIP = "Save this figure to the project"
 _NOTES_HINT = "Notes, optional"
+_EDIT_NOTE = "Edit note"
+_ADD_NOTE = "Add a note"
 _WHERE = "Saving to {folder}"
 _TOP_LEVEL = "Figures"
 _NEW_FOLDER = "New folder name"
