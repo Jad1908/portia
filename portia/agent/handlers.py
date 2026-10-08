@@ -872,7 +872,7 @@ def profile_source(
     trade-off (`BACKLOG.md` → Checks), not a consequence of this one.
     """
     if STEP_REF in source:
-        profile = profiling.profile(_step_table(source))
+        profile = profiling.profile(_step_table(source, portia_dir))
         return {
             "source": source,
             "summary": "",
@@ -1440,7 +1440,7 @@ def _table(ref: str, portia_dir: str, con=None):
     reads both sides at once, and DuckDB cannot join across handles.
     """
     if STEP_REF in ref:
-        return _step_table(ref, con)
+        return _step_table(ref, portia_dir, con)
     con = con or connect()
     try:
         return source_table(
@@ -1506,26 +1506,31 @@ def written_table(ref: str, models: dict, root: Path, con, portia_dir: str) -> s
     return str(written) if entry.get("fingerprint") == pipeline.fingerprint(doc) else None
 
 
-def _step_table(ref: str, con=None):
+def _step_table(ref: str, portia_dir: str, con=None):
     """Reach the table an earlier step produced, by re-running up to it.
 
     Only up to it: a later step may be the one being diagnosed and may not run
     at all yet. Executing the prefix is what ``record_step`` already does to
     measure a candidate, so this adds no new machinery — it just makes the same
     table reachable to a *read-only* check, before anything is written.
+
+    **The spec is found by name and run from the project root** *(2026-10-08)*,
+    as ``record_step`` finds and runs it. The root used to be the spec's
+    grandparent, which is ``specs/`` for a spec in a layer folder, so every
+    source path resolved one directory too deep.
     """
     spec_path, _, step_id = ref.partition(STEP_REF)
-    doc = spec.load_spec(spec_path)
+    root = _project_root(portia_dir)
+    models = spec.discover_specs(root)
+    _, path = _resolve_spec(spec_path, models, root)
+    doc = spec.load_spec(path)
     steps = doc.get("steps") or []
     ids = [s["id"] for s in steps]
     if step_id not in ids:
         known = ", ".join(ids) or "(no steps yet)"
         raise ValueError(f"no step {step_id!r} in {spec_path} — have: {known}")
     prefix = {**doc, "steps": steps[: ids.index(step_id) + 1]}
-    root = Path(spec_path).parent.parent
-    return spec.run_spec(
-        prefix, base_dir=root, con=con or connect(), models=spec.discover_specs(root)
-    )[-1].table
+    return spec.run_spec(prefix, base_dir=root, con=con or connect(), models=models)[-1].table
 
 
 def _known_name(name: str, portia_dir: str) -> str:
