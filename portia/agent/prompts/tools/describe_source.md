@@ -15,6 +15,12 @@ remember to ask:
 - 'findings': what earlier chats asked this table with a query and what it
   said, grouped by the table on the other side, capped, with the total stated.
 
+A table too wide to send one line per column comes back grouped by type
+instead: per type, its count, its first and last names, and how many of its
+columns carry each role and each flag. A type with only a few columns is still
+listed in full, and every column is counted. To read one column inside a big
+group, call `profile_source` with 'columns' naming it.
+
 'source' is an indexed source or a MODEL this project builds, by name. After you
 record a step, describe the model it built: that is how you check the table is
 what you meant before anything reads it.

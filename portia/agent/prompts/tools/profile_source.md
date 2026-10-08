@@ -20,6 +20,13 @@ That read is the audit every layer ends with.
 n_rows and n_cols describe the whole table. Naming a column that does not exist is
 refused rather than skipped.
 
+Without 'columns', a table too wide to send one line per column comes back grouped
+by type: per type, its count, its first and last names, how many columns carry each
+flag and role, the spread of null rate and of distinct count, and the lowest min and
+highest max. A type with only a few columns is listed in full, and every column is
+counted. Then name 'columns' for the ones you need. Too many named columns are
+refused, not grouped.
+
 How to read what comes back:
 
 - A column whose distinct count equals the row count with no nulls is unique IN

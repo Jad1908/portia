@@ -3,7 +3,8 @@
 Every tool here is a thin wrapper: validate nothing, decide nothing, just call
 the matching function in ``handlers.py`` and hand back its evidence as text.
 Compact JSON for most of it, and `core/columnar.py`'s table where the evidence
-is one record per column (:func:`_evidence`'s ``encode``).
+is one record per column (:func:`_evidence`'s ``encode``), grouped by type when
+a table is too wide for that (``coarser``).
 Keeping the wrappers this thin is the point — the logic lives in `handlers`
 where it can be tested without the SDK, and this file stays a translation layer
 we can swap if the harness ever changes.
@@ -62,6 +63,9 @@ SERVER_NAME = "portia"
 #: so the real ceiling is somewhere between. This sits just above the
 #: known-good end, because the limit is on tokens and characters are only a
 #: proxy for them — the same length of denser text may not fit.
+#:
+#: Past it a result is refused (`_too_large`), except a whole table's columns,
+#: which come back grouped by type when that fits (`_by_type`).
 RESULT_BUDGET = 30_000
 
 _READ_ONLY = ToolAnnotations(readOnlyHint=True)
@@ -160,8 +164,54 @@ def _too_large(size: int) -> dict[str, Any]:
 _as_columns = partial(columnar.render, records="columns")
 
 
+def _by_type(payload: dict, **fields: Any) -> dict:
+    """A column-shaped answer grouped by type, saying so before anything else.
+
+    **What the two column rungs send instead of a refusal** when one line per
+    column is over `RESULT_BUDGET` (2026-10-08). A table of 1,579 columns was
+    56,289 characters described and 211,563 profiled, so both were refused and
+    the copilot could read it only by naming columns it had never seen. A
+    refusal is right where a narrower question exists to point at; for a whole
+    table's columns there is none short of names the copilot has not been
+    shown. So the answer comes at a coarser grain, built from the dict the
+    handler already returned: no second scan, and every column counted in
+    exactly one group (`core/columnar.by_type`). A grouped answer that is itself
+    over the budget is refused as before.
+
+    The notice comes first because a grouped answer read as a complete list is
+    the failure the budget exists to stop.
+    """
+    notice = prompts.error(
+        "result_grouped",
+        n_columns=f"{len(payload['columns']):,}",
+        listed=columnar.LISTED_GROUP,
+        examples=columnar.GROUP_EXAMPLES,
+    )
+    return {"grouped": notice, **columnar.by_type(payload, records="columns", **fields)}
+
+
+#: `describe_source` grouped: roles and flags tallied, and nothing measured,
+#: because L2 is the rung of meaning and statistics belong to L3. An unprofiled
+#: warehouse table carries a ``dtype`` and no ``inferred``, and groups on that.
+_described_by_type = partial(_by_type, typed_by=("inferred", "dtype"), tallied=("role", "flags"))
+
+#: `profile_source` grouped: the same, plus the spread of the two numbers every
+#: column has and the range of the values a numeric group holds.
+_profiled_by_type = partial(
+    _by_type,
+    typed_by=("inferred",),
+    tallied=("role", "flags"),
+    spread=("null_rate", "n_distinct"),
+    lowest=("min",),
+    highest=("max",),
+)
+
+
 async def _evidence(
-    call: Callable[[], Any], *, encode: Callable[[Any], str] = to_json_compact
+    call: Callable[[], Any],
+    *,
+    encode: Callable[[Any], str] = to_json_compact,
+    coarser: Callable[[Any], Any] | None = None,
 ) -> dict[str, Any]:
     """Run one handler off the event loop and hand back what it found.
 
@@ -183,6 +233,11 @@ async def _evidence(
     rather than estimating from the dict, because the encoders differ —
     `core/columnar.py` and compact JSON do not cost the same per record.
 
+    ``coarser`` is the same evidence at a coarser grain, for a tool whose whole
+    answer has no narrower question behind it (:func:`_by_type`). It is tried
+    only past the budget and sent only within it; otherwise the refusal is the
+    one there always was, with the full answer's size.
+
     **The worker runs under the exchange's cancel scope** (`stopping`), so the
     connection a handler opens through `core/io.connect` registers with it and
     Stop reaches the query — the same mechanism Run, Build and the indexing
@@ -197,7 +252,12 @@ async def _evidence(
             return call()
 
     try:
-        text = encode(await asyncio.to_thread(stoppable))
+        found = await asyncio.to_thread(stoppable)
+        text = encode(found)
+        if len(text) > RESULT_BUDGET and coarser is not None:
+            coarse = to_json_compact(coarser(found))
+            if len(coarse) <= RESULT_BUDGET:
+                text = coarse
     except cancel.Cancelled:
         return _stopped()
     except Exception as exc:  # noqa: BLE001 - surfaced to the agent, not swallowed
@@ -240,7 +300,9 @@ async def get_context(args: dict[str, Any]) -> dict[str, Any]:
 )
 async def describe_source(args: dict[str, Any]) -> dict[str, Any]:
     return await _evidence(
-        lambda: handlers.describe_source(args["source"], **_dir(args)), encode=_as_columns
+        lambda: handlers.describe_source(args["source"], **_dir(args)),
+        encode=_as_columns,
+        coarser=_described_by_type,
     )
 
 
@@ -318,6 +380,9 @@ async def profile_source(args: dict[str, Any]) -> dict[str, Any]:
     return await _evidence(
         lambda: handlers.profile_source(args["source"], columns=args.get("columns"), **_dir(args)),
         encode=_as_columns,
+        # Named columns are already the narrower question; too many of them is
+        # refused, as it always was.
+        coarser=_profiled_by_type if args.get("columns") is None else None,
     )
 
 
