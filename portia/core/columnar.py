@@ -209,6 +209,50 @@ def by_type(
     return {**head, f"{records}_by_type": groups}
 
 
+def shorten(value: Any) -> Any:
+    """``value`` with every long run of names or numbers given as its count and its ends.
+
+    **For a report whose width is the table's** *(2026-10-08)*: `record_step`'s
+    outcome names every column with a null rate and every column each input put
+    into the output, so a step over a 1,579-column table came back at 80,633
+    characters, most of it two lists of column names. :func:`by_type` cannot
+    help there, because those are not records to group; they are runs.
+
+    So any list of plain values, and any map of names to plain values, longer
+    than :data:`LISTED_GROUP` becomes ``count``, the ``first`` and ``last``
+    :data:`GROUP_EXAMPLES` in the order the report had them, and, when the
+    values are numbers, their ``spread``. Everything shorter, and everything that
+    is not a run of plain values, is kept as it was and walked into. Nothing is
+    dropped without being counted, and nothing is reordered by what it holds.
+    """
+    if isinstance(value, Mapping):
+        if len(value) > LISTED_GROUP and all(map(_plain, value.values())):
+            names = list(value)
+            run: dict[str, Any] = {
+                "count": len(names),
+                "first": {name: value[name] for name in names[:GROUP_EXAMPLES]},
+                "last": {name: value[name] for name in names[-GROUP_EXAMPLES:]},
+            }
+            numbers = _numbers(value.values())
+            if len(numbers) == len(names):
+                run["spread"] = _spread(numbers)
+            return run
+        return {key: shorten(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        if len(value) > LISTED_GROUP and all(map(_plain, value)):
+            return {
+                "count": len(value),
+                "first": list(value[:GROUP_EXAMPLES]),
+                "last": list(value[-GROUP_EXAMPLES:]),
+            }
+        return [shorten(item) for item in value]
+    return value
+
+
+def _plain(value: Any) -> bool:
+    return value is None or isinstance(value, str | int | float | bool)
+
+
 def _items(values: Iterable[Any]) -> Iterable[Any]:
     """Every value worth a tally: a list's items one by one, and no nulls."""
     for value in values:

@@ -15,6 +15,7 @@ import json
 import pytest
 
 from portia.agent import tools
+from portia.core.serialize import to_json_compact
 
 
 def _call(name: str, args: dict) -> dict:
@@ -386,3 +387,133 @@ def test_the_grouped_forms_read_the_fields_the_handlers_send(meters):
     assert floats(profiled)["n_columns"] == 12
     for answer in (described, profiled):
         assert sum(g["n_columns"] for g in answer["columns_by_type"]) == 15
+
+
+# --- a step over a wide table, shortened, and a write never refused (2026-10-08) ---
+
+
+@pytest.fixture
+def wide_project(tmp_path, monkeypatch):
+    """An indexed source wide enough that a `SELECT *` step's report is over the budget.
+
+    Long names rather than thousands of columns: the report's width is names,
+    and a few hundred long ones cross the budget without a minute of profiling.
+    """
+    import pandas as pd
+
+    from portia.catalog import index_source, init_project
+
+    monkeypatch.chdir(tmp_path)
+    names = [f"meter_reading_at_building_number_{i:04d}_kwh" for i in range(400)]
+    frame = pd.DataFrame(
+        {name: [float(i + h) if h % 3 else None for h in range(6)] for i, name in enumerate(names)}
+    )
+    frame.to_csv("meters.csv", index=False)
+    portia_dir = tmp_path / ".portia"
+    init_project("hourly readings, one column per building", portia_dir=portia_dir)
+    index_source("meters.csv", portia_dir=portia_dir)
+    return str(portia_dir)
+
+
+_WIDE_STEP = {
+    "id": "all_meters",
+    "op": "sql",
+    "inputs": ["meters"],
+    "sql": "SELECT * FROM meters",
+    "rationale": "Every building's readings, unchanged.",
+}
+
+
+def test_a_step_over_a_wide_table_comes_back_shortened_not_refused(wide_project, tmp_path):
+    from portia.agent import handlers
+
+    full = handlers.record_step("specs/wide_a.yaml", dict(_WIDE_STEP), portia_dir=wide_project)
+    assert len(to_json_compact(full)) > tools.RESULT_BUDGET, "the fixture is not wide enough"
+
+    result = _call(
+        "record_step",
+        {"spec_path": "specs/wide.yaml", "step": dict(_WIDE_STEP), "portia_dir": wide_project},
+    )
+
+    assert "is_error" not in result, _text(result)[:300]
+    answer = json.loads(_text(result))
+    assert list(answer)[0] == "shortened"
+    assert answer["step_id"] == "all_meters" and answer["outcome"]["n_cols"] == 400
+    assert answer["outcome"]["null_rates"]["count"] == 400
+    assert (tmp_path / "specs" / "wide.yaml").exists()
+
+
+def test_running_a_wide_spec_comes_back_shortened(wide_project):
+    from portia.agent import handlers
+
+    handlers.record_step("specs/wide.yaml", dict(_WIDE_STEP), portia_dir=wide_project)
+
+    result = _call("run_spec", {"spec_path": "specs/wide.yaml"})
+
+    assert "is_error" not in result, _text(result)[:300]
+    answer = json.loads(_text(result))
+    assert list(answer)[0] == "shortened"
+    (step,) = answer["steps"]
+    assert step["id"] == "all_meters" and step["outcome"]["n_cols"] == 400
+
+
+def test_a_write_whose_report_cannot_fit_is_answered_with_a_receipt(monkeypatch):
+    """Never *you have none of it* after a write that happened: that reads as failure,
+    and a copilot that believes it records the step twice."""
+    written = {
+        "spec": "specs/wide.yaml",
+        "step_id": "all_meters",
+        "n_steps": 1,
+        "outcome": {
+            "n_rows": 24,
+            "n_cols": 400,
+            "flags": [],
+            "note": "x" * (2 * tools.RESULT_BUDGET),
+        },
+    }
+    monkeypatch.setattr(tools.handlers, "record_step", lambda *a, **k: written)
+
+    result = _call("record_step", {"spec_path": "specs/wide.yaml", "step": dict(_WIDE_STEP)})
+
+    assert "is_error" not in result
+    answer = json.loads(_text(result))
+    assert list(answer)[0] == "receipt"
+    assert "WAS recorded" in answer["receipt"] and "specs/wide.yaml#all_meters" in answer["receipt"]
+    assert answer["outcome"] == {"n_rows": 24, "n_cols": 400, "flags": []}
+    assert answer["step_id"] == "all_meters"
+
+
+def test_a_read_too_large_even_shortened_is_still_refused(monkeypatch):
+    """The receipt is for writes; a read past the budget keeps the refusal."""
+    monkeypatch.setattr(
+        tools.handlers,
+        "run_spec",
+        lambda *a, **k: {"spec": "s", "note": "x" * (2 * tools.RESULT_BUDGET)},
+    )
+
+    result = _call("run_spec", {"spec_path": "s"})
+
+    assert result["is_error"] is True and "NOT sent" in _text(result)
+
+
+def test_a_wide_built_table_reads_back_grouped(monkeypatch):
+    columns = [
+        {
+            "name": f"meter_{i:04d}",
+            "inferred": "float",
+            "null_rate": 0.01,
+            "n_distinct": 9,
+            "flags": [],
+        }
+        for i in range(2000)
+    ]
+    payload = {"spec": "specs/wide.yaml", "model": "wide", "measured": {"columns": columns}}
+    monkeypatch.setattr(tools.handlers, "read_spec", lambda *a, **k: payload)
+
+    result = _call("read_spec", {"spec": "wide", "measured": True})
+
+    assert "is_error" not in result, _text(result)[:300]
+    answer = json.loads(_text(result))
+    assert list(answer)[0] == "shortened"
+    (floats,) = answer["measured"]["columns_by_type"]
+    assert floats["n_columns"] == 2000 and floats["first"][0] == "meter_0000"

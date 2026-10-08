@@ -313,3 +313,59 @@ def test_a_table_nobody_profiled_groups_on_its_declared_type():
     )["columns_by_type"]
 
     assert group["dtype"] == "NUMBER(38,0)" and group["n_columns"] == 3
+
+
+# --- a report whose width is the table's, shortened (2026-10-08) -------------
+
+
+def _outcome(n: int) -> dict:
+    """An outcome report over ``n`` columns, the shape `record_step` sends."""
+    names = [f"meter_{i:04d}" for i in range(n)]
+    return {
+        "n_rows": 24,
+        "n_cols": n,
+        "null_rates": {name: round(0.01 * (i % 7), 2) or 0.5 for i, name in enumerate(names)},
+        "all_null_columns": [],
+        "contribution": {"meters": {"columns_in_output": names, "n_columns": n}},
+        "flags": [],
+    }
+
+
+def test_a_long_run_of_names_is_its_count_and_its_ends():
+    short = columnar.shorten(_outcome(1579))
+    run = short["contribution"]["meters"]["columns_in_output"]
+
+    assert run == {
+        "count": 1579,
+        "first": [f"meter_{i:04d}" for i in range(5)],
+        "last": [f"meter_{i:04d}" for i in range(1574, 1579)],
+    }
+    assert short["contribution"]["meters"]["n_columns"] == 1579
+
+
+def test_a_long_map_of_numbers_keeps_its_ends_and_their_spread():
+    rates = columnar.shorten(_outcome(1579))["null_rates"]
+
+    assert rates["count"] == 1579
+    assert list(rates["first"]) == [f"meter_{i:04d}" for i in range(5)]
+    assert rates["first"]["meter_0001"] == 0.01
+    assert set(rates["spread"]) == set(columnar.SPREAD)
+    assert rates["spread"]["max"] == 0.5
+
+
+def test_what_is_short_or_not_a_run_is_kept_as_it_was():
+    """Ten names are cheaper than their summary, and a list of records is not a run."""
+    report = _outcome(10)
+    report["steps"] = [{"id": f"s{i}", "flags": []} for i in range(30)]
+
+    assert columnar.shorten(report) == report
+
+
+def test_shortening_is_small_enough_and_says_nothing_new():
+    report = _outcome(1579)
+    short = columnar.shorten(report)
+
+    assert len(to_json(short)) < len(to_json(report)) / 20
+    assert {k: short[k] for k in ("n_rows", "n_cols", "flags")} == {
+        k: report[k] for k in ("n_rows", "n_cols", "flags")
+    }

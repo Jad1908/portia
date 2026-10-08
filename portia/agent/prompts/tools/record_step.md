@@ -186,3 +186,11 @@ table: different tables can go different places, and nothing defaults it. Which
 database and which schema, and whether recording creates the table now or the user's
 Run does, is in the brief's *Where the data lives*. A spec keeps one target; to move
 a table, the user edits the file.
+
+## A wide table
+
+A step over a very wide table can report more than one answer can carry: the outcome names every
+column with a null rate and every column each input put into the output. Then the answer comes back
+shortened, saying so first: each long list given as its count, its ends and, for numbers, their
+spread. If even that does not fit, you get a receipt instead, saying the step was recorded and
+where. Either way the step was recorded; never record it again because its report was short.

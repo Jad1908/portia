@@ -195,16 +195,79 @@ def _by_type(payload: dict, **fields: Any) -> dict:
 #: warehouse table carries a ``dtype`` and no ``inferred``, and groups on that.
 _described_by_type = partial(_by_type, typed_by=("inferred", "dtype"), tallied=("role", "flags"))
 
-#: `profile_source` grouped: the same, plus the spread of the two numbers every
-#: column has and the range of the values a numeric group holds.
-_profiled_by_type = partial(
-    _by_type,
-    typed_by=("inferred",),
-    tallied=("role", "flags"),
-    spread=("null_rate", "n_distinct"),
-    lowest=("min",),
-    highest=("max",),
-)
+#: How a measured table's columns are grouped: roles and flags tallied, the
+#: spread of the two numbers every column has, and the range of the values a
+#: numeric group holds. A built table nobody profiled groups on its ``dtype``.
+_MEASURED_GROUPS: dict[str, Any] = {
+    "typed_by": ("inferred", "dtype"),
+    "tallied": ("role", "flags"),
+    "spread": ("null_rate", "n_distinct"),
+    "lowest": ("min",),
+    "highest": ("max",),
+}
+
+#: `profile_source` grouped: what `describe_source` tallies, plus the numbers.
+_profiled_by_type = partial(_by_type, **_MEASURED_GROUPS)
+
+
+def _shortened(payload: dict) -> dict:
+    """A report too long to send whole, every long run in it given as its count and ends.
+
+    **For the tools whose answer is a report about a table, not its columns**
+    *(2026-10-08)*: `record_step`, `run_spec` and `read_spec`. A step over a
+    1,579-column table came back at 80,633 characters, most of it the outcome
+    naming every column with a null rate and every column each input put into
+    the output; it was refused, and the refusal told the copilot it had none of
+    an answer to a write that had already happened. Shortened by
+    `core/columnar.shorten`, the same report is a few kilobytes and every run
+    in it is still counted. The notice comes first, as `_by_type`'s does.
+    """
+    notice = prompts.error(
+        "result_shortened", listed=columnar.LISTED_GROUP, examples=columnar.GROUP_EXAMPLES
+    )
+    return {"shortened": notice, **columnar.shorten(payload)}
+
+
+def _spec_shortened(payload: dict) -> dict:
+    """`read_spec` shortened, a built table's columns grouped as `profile_source` groups them.
+
+    ``measured`` is the model's catalog entry, a record per column, so it is
+    grouped by type rather than cut into runs; everything else is a report.
+    """
+    measured = payload.get("measured")
+    if isinstance(measured, dict) and isinstance(measured.get("columns"), list):
+        grouped = columnar.by_type(measured, records="columns", **_MEASURED_GROUPS)
+        payload = {**payload, "measured": grouped}
+    return _shortened(payload)
+
+
+#: The fields of `record_step`'s answer a receipt keeps: where it was written,
+#: what it is called, and the outcome's shape and flags, which is what the
+#: copilot needs to know the write happened and whether anything is wrong.
+_RECEIPT_FIELDS = ("spec", "step_id", "superseded", "n_steps", "layer", "target", "written_to")
+_RECEIPT_OUTCOME = ("n_rows", "n_cols", "flags")
+
+
+def _step_receipt(payload: dict, size: int) -> dict:
+    """What `record_step` did, when even its shortened report does not fit.
+
+    **A write is never answered with a refusal** *(2026-10-08)*. `_too_large`
+    says *you have none of it, do not call this again*, which after a read is
+    true and harmless. After `record_step` the step is already in the spec and
+    its model indexed, so the same words read as *it failed*, and a copilot
+    that believes it records the step a second time. The receipt says that it
+    was recorded, where, and the outcome's shape, and how to read the rest.
+    """
+    outcome = payload.get("outcome") or {}
+    spec_path = str(payload.get("spec") or "")
+    step_ref = f"{spec_path}#{payload.get('step_id')}"
+    return {
+        "receipt": prompts.error(
+            "step_receipt", size=f"{size:,}", budget=f"{RESULT_BUDGET:,}", step=step_ref
+        ),
+        **{key: payload.get(key) for key in _RECEIPT_FIELDS},
+        "outcome": {key: outcome.get(key) for key in _RECEIPT_OUTCOME},
+    }
 
 
 async def _evidence(
@@ -212,6 +275,7 @@ async def _evidence(
     *,
     encode: Callable[[Any], str] = to_json_compact,
     coarser: Callable[[Any], Any] | None = None,
+    receipt: Callable[[Any, int], Any] | None = None,
 ) -> dict[str, Any]:
     """Run one handler off the event loop and hand back what it found.
 
@@ -238,6 +302,11 @@ async def _evidence(
     only past the budget and sent only within it; otherwise the refusal is the
     one there always was, with the full answer's size.
 
+    ``receipt`` is for a tool that writes: past the budget even coarsened, it
+    is sent in the refusal's place, given the size that did not fit, because a
+    write that happened must never be answered with *you have none of it*
+    (:func:`_step_receipt`).
+
     **The worker runs under the exchange's cancel scope** (`stopping`), so the
     connection a handler opens through `core/io.connect` registers with it and
     Stop reaches the query — the same mechanism Run, Build and the indexing
@@ -258,6 +327,10 @@ async def _evidence(
             coarse = to_json_compact(coarser(found))
             if len(coarse) <= RESULT_BUDGET:
                 text = coarse
+            elif receipt is not None:
+                text = to_json_compact(receipt(found, len(coarse)))
+        elif len(text) > RESULT_BUDGET and receipt is not None:
+            text = to_json_compact(receipt(found, len(text)))
     except cancel.Cancelled:
         return _stopped()
     except Exception as exc:  # noqa: BLE001 - surfaced to the agent, not swallowed
@@ -886,7 +959,9 @@ async def record_step(args: dict[str, Any]) -> dict[str, Any]:
             supersedes=args.get("supersedes"),
             target=args.get("target"),
             **_dir(args),
-        )
+        ),
+        coarser=_shortened,
+        receipt=_step_receipt,
     )
 
 
@@ -918,7 +993,8 @@ async def read_spec(args: dict[str, Any]) -> dict[str, Any]:
             journal=bool(args.get("journal")),
             measured=bool(args.get("measured")),
             **_dir(args),
-        )
+        ),
+        coarser=_spec_shortened,
     )
 
 
@@ -929,7 +1005,7 @@ async def read_spec(args: dict[str, Any]) -> dict[str, Any]:
     annotations=_READ_ONLY,
 )
 async def run_spec(args: dict[str, Any]) -> dict[str, Any]:
-    return await _evidence(lambda: handlers.run_spec(args["spec_path"]))
+    return await _evidence(lambda: handlers.run_spec(args["spec_path"]), coarser=_shortened)
 
 
 def _dir(args: dict[str, Any]) -> dict[str, str]:
