@@ -1543,7 +1543,7 @@ def _known_name(name: str, portia_dir: str) -> str:
     rule: exact first, then a unique case-insensitive match, else as it came.
     """
     root = _project_root(portia_dir)
-    known = [*catalog.load_catalog(portia_dir)["sources"], *spec.discover_specs(root)]
+    known = [*catalog.source_names(portia_dir), *spec.discover_specs(root)]
     return dialects.resolve_columns([name], known)[0]
 
 
@@ -1556,14 +1556,18 @@ def _entry(source: str, portia_dir: str) -> dict:
     after every build starts with (`docs/COPILOT.md` §3). An unknown name is
     told about both halves, because *no indexed source* on a model that exists
     reads as *that table does not exist* when the truth is *not by that name*.
+
+    **One entry is read, not the catalog** *(2026-10-08)*. Every tool that names
+    a table comes through here, `query_data` once per input, and it loaded every
+    source's YAML twice: 0.9-1.5 s of a `describe_source` that asks DuckDB
+    nothing, on a project with two 1,579-column entries of 265 kB each.
     """
     source = _known_name(source, portia_dir)
-    cat = catalog.load_catalog(portia_dir)
-    entry = cat["sources"].get(source)
+    entry = catalog.load_source(source, portia_dir)
     if entry is None:
         entry = catalog.load_models(portia_dir).get(source)
     if entry is None:
-        known = ", ".join(cat["sources"]) or "(none indexed)"
+        known = ", ".join(catalog.source_names(portia_dir)) or "(none indexed)"
         models = ", ".join(sorted(catalog.load_models(portia_dir))) or "(none built)"
         raise ValueError(
             f"no indexed source or built model {source!r} — sources: {known}; models: {models}"

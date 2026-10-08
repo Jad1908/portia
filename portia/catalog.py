@@ -904,6 +904,38 @@ def _look(path: Path, seen: Seen) -> bool:
     return True
 
 
+def source_names(portia_dir: str | Path = DEFAULT_DIR) -> list[str]:
+    """The indexed sources' names, as :func:`load_catalog`'s ``sources`` keys, reading no entry.
+
+    For a caller that needs to know what is there, not what it holds: a tool
+    resolving the name it was given (`agent/handlers._known_name`). It read the
+    whole catalog for that, twice per call with `_entry` beside it, and on a
+    project with two 1,579-column tables that was a second of YAML for a
+    6-column answer (2026-10-08).
+    """
+    d = Path(portia_dir)
+    return _listed(d, _read(d / "project.yaml") if (d / "project.yaml").exists() else {})
+
+
+def load_source(name: str, portia_dir: str | Path = DEFAULT_DIR) -> dict | None:
+    """One source's entry, exactly as :func:`load_catalog` would hold it, or ``None``."""
+    d = Path(portia_dir)
+    return _read(d / "sources" / f"{name}.yaml") if name in source_names(d) else None
+
+
+def _listed(d: Path, proj: dict) -> list[str]:
+    """What counts as indexed: registered in ``project.yaml`` with its entry on disk.
+
+    `reload_catalog`'s rule, for a caller that wants the names without the
+    entries, so the name a tool resolves and the entry it then reads cannot
+    disagree with the whole catalog about whether a source exists
+    (`tests/test_catalog.py` holds the two to the same answer).
+    """
+    return [
+        name for name in (proj.get("sources") or {}) if (d / "sources" / f"{name}.yaml").exists()
+    ]
+
+
 # --- building an entry ------------------------------------------------------
 
 
