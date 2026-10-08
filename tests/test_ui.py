@@ -6814,7 +6814,7 @@ def test_a_window_that_never_switched_provider_offers_every_anthropic_model():
         state.APP = original
     assert _picker_rows(slot) == list(providers.anthropic.MODELS)
     legacy = [e for e in slot.descendants() if "modelpick-legacy" in e.classes]
-    assert len(legacy) == sum(m.legacy for m in providers.anthropic.CATALOG) == 7
+    assert len(legacy) == sum(m.legacy for m in providers.anthropic.CATALOG) == 8
 
 
 def test_the_picker_is_one_control_for_the_provider_and_the_model():

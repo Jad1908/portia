@@ -278,6 +278,7 @@ def test_a_columnar_result_reads_back_as_tables():
 
 def test_model_ids_read_as_their_names():
     assert logs.model_label("claude-haiku-4-5-20251001") == "Haiku 4.5"
+    assert logs.model_label("claude-haiku-5-5") == "Haiku 5.5"
     assert logs.model_label("claude-sonnet-5") == "Sonnet 5"
     assert logs.model_label("qwen3:8b") == "qwen3:8b"
     assert logs.model_label(None) == "?"

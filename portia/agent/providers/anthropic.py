@@ -48,16 +48,18 @@ DEFAULT_MODEL = "claude-sonnet-5-5"
 
 #: Every model Claude Code's own ``/model`` picker offers, in its order and
 #: split as it splits them: the four it names by alias, then the rest
-#: (`docs/PROVIDERS.md` §5.1). Read off the ``models`` list Claude Code 2.1.286,
-#: the binary ``claude-agent-sdk`` 0.2.163 bundles, reports when a client
-#: connects; a model newer than the lock is one a picker can still be typed
-#: into, because ``--model`` takes anything the SDK accepts and this list is a
-#: convenience, never a validation set.
+#: (`docs/PROVIDERS.md` §5.1). Read off the ``models`` list Claude Code 2.1.294
+#: reports when a client connects. No ``claude-agent-sdk`` bundles a binary that
+#: new yet: 0.2.164's 2.1.292 runs Haiku 5.5 as a model it does not recognise
+#: (`docs/PROVIDERS.md` §5.3). A model newer than the lock is one a picker can
+#: still be typed into, because ``--model`` takes anything the SDK accepts and
+#: this list is a convenience, never a validation set.
 CATALOG = (
     Model("claude-opus-5-5", label="Claude Opus 5.5"),
     Model("claude-fable-5-1", label="Claude Fable 5.1"),
     Model("claude-sonnet-5-5", label="Claude Sonnet 5.5"),
-    Model("claude-haiku-4-5", label="Claude Haiku 4.5"),
+    Model("claude-haiku-5-5", label="Claude Haiku 5.5"),
+    Model("claude-haiku-4-5", label="Claude Haiku 4.5", legacy=True),
     Model("claude-sonnet-5", label="Claude Sonnet 5", legacy=True),
     Model("claude-opus-5", label="Claude Opus 5", legacy=True),
     Model("claude-fable-5", label="Claude Fable 5", legacy=True),
