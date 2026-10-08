@@ -201,6 +201,90 @@ def test_the_slot_is_restored_after_the_exchange():
     assert tools._stop is None
 
 
+# --- the data is read by one call at a time (2026-10-08) ------------------------
+
+
+def _handler(name: str):
+    return next(t for t in tools.ALL_TOOLS if t.name == name).handler
+
+
+_QUERY = {"sql": "SELECT 1", "inputs": ["a"], "question": "q"}
+
+
+def test_calls_that_read_data_take_turns_and_the_others_do_not(monkeypatch):
+    """A harness runs a message's read-only calls together, and each opens its own
+    database sized to most of the machine: three wide `query_data` calls at once
+    swapped a 16 GB laptop. A catalog read is never held behind them."""
+    import threading
+    import time
+
+    lock = threading.Lock()
+    running = {"now": 0, "most": 0}
+
+    def busy(*args, **kwargs):
+        with lock:
+            running["now"] += 1
+            running["most"] = max(running["most"], running["now"])
+        time.sleep(0.2)
+        with lock:
+            running["now"] -= 1
+        return {"ok": True}
+
+    for name in ("profile_source", "query_data", "describe_source"):
+        monkeypatch.setattr(tools.handlers, name, busy)
+
+    async def burst(calls):
+        return await asyncio.gather(*(_handler(name)(args) for name, args in calls))
+
+    asyncio.run(
+        burst([("profile_source", {"source": "a"}), ("query_data", _QUERY), ("profile_source", {})])
+    )
+    assert running["most"] == tools.DATA_READERS == 1
+
+    running["most"] = 0
+    asyncio.run(burst([("describe_source", {"source": s}) for s in "abc"]))
+    assert running["most"] == 3
+
+
+def test_a_call_waiting_its_turn_is_ended_by_a_press(monkeypatch):
+    """Nothing runs while a call waits, so there is no query for Stop to
+    interrupt; the wait itself has to notice the press."""
+    import threading
+
+    from portia.core import cancel
+
+    started, release = threading.Event(), threading.Event()
+
+    def holds_the_data(*args, **kwargs):
+        started.set()
+        release.wait(5)
+        return {"ok": True}
+
+    def must_not_run(*args, **kwargs):
+        raise AssertionError("ran after the press")
+
+    monkeypatch.setattr(tools.handlers, "profile_source", holds_the_data)
+    monkeypatch.setattr(tools.handlers, "query_data", must_not_run)
+    scope = cancel.Scope()
+
+    async def press_while_waiting():
+        first = asyncio.ensure_future(_handler("profile_source")({"source": "a"}))
+        await asyncio.to_thread(started.wait, 5)
+        waiting = asyncio.ensure_future(_handler("query_data")(_QUERY))
+        await asyncio.sleep(0.2)
+        scope.cancel()
+        stopped = await asyncio.wait_for(waiting, 5)
+        release.set()
+        await first
+        return stopped
+
+    with tools.stopping(scope):
+        stopped = asyncio.run(press_while_waiting())
+    scope.close()
+
+    assert stopped["is_error"] is True and "Stop" in _text(stopped)
+
+
 # --- a job that reads is offered no way to build (2026-09-23) -------------------
 
 

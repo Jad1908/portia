@@ -26,14 +26,16 @@ place it happens.
 
 Each handler opens its own DuckDB connection inside the call (`core/io.connect`),
 so moving the whole call to a worker keeps a connection and its use on one
-thread, which is what `core/table.py` requires. Nothing here is shared across
-tools, so there is nothing for two of them to race over.
+thread, which is what `core/table.py` requires. No connection is shared across
+tools, so there is nothing for two of them to race over; what they share is the
+machine's memory, which is why only `DATA_READERS` of them read data at once.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import threading
 from collections.abc import Callable, Iterator
 from functools import partial
 from typing import Any
@@ -77,6 +79,44 @@ _READ_ONLY = ToolAnnotations(readOnlyHint=True)
 #: kept running: a BigQuery profile pressed at 204 s finished at 372 s, on the
 #: meter, three minutes after the loop had given up on it (2026-09-06).
 _stop: cancel.Scope | None = None
+
+
+#: How many tool calls may read data at once in this process: **one**.
+#:
+#: A harness runs every read-only tool of a message together (Claude Code up to
+#: ten), and each call opens its own DuckDB database, each sized to 80% of the
+#: machine's memory. On a 16 GB laptop with two 1,579-column CSVs, three
+#: `query_data` calls at once peaked at 2.5-3.3 GB, took free memory to 16 MB,
+#: grew the system's compressed memory by 1.9 GB and swapped in two runs of
+#: four, 0.6 GB once; one at a time they peaked at 2.7-2.8 GB, left 73 MB free
+#: and did not swap (2026-10-08). The cost is the sum of the calls rather than
+#: the longest: none on three profiles, +15% on the three heaviest calls of that
+#: job, +40% on three wide queries, whose time was mostly the CSV sniff, which
+#: runs on one core. Two at a time was as fast as ungated and grew compressed
+#: memory by 0.7-1.1 GB: less, and no bound.
+#:
+#: Only the tools that open a connection wait (`_evidence`'s ``reads_data``):
+#: a catalog read or a write of prose is never held behind a query.
+DATA_READERS = 1
+
+_readers = threading.BoundedSemaphore(DATA_READERS)
+
+
+@contextlib.contextmanager
+def _reading_data() -> Iterator[None]:
+    """Hold one of the `DATA_READERS` places for the call, waiting where Stop can reach it.
+
+    Nothing is running while a call waits, so there is no query to interrupt:
+    the wait checks the scope every `cancel.INTERRUPT_EVERY` instead, and a press
+    ends it as a stop rather than leaving a thread queued behind a query that
+    nobody wants any more.
+    """
+    while not _readers.acquire(timeout=cancel.INTERRUPT_EVERY):
+        cancel.check()
+    try:
+        yield
+    finally:
+        _readers.release()
 
 
 @contextlib.contextmanager
@@ -161,7 +201,10 @@ _as_columns = partial(columnar.render, records="columns")
 
 
 async def _evidence(
-    call: Callable[[], Any], *, encode: Callable[[Any], str] = to_json_compact
+    call: Callable[[], Any],
+    *,
+    encode: Callable[[Any], str] = to_json_compact,
+    reads_data: bool = False,
 ) -> dict[str, Any]:
     """Run one handler off the event loop and hand back what it found.
 
@@ -190,10 +233,14 @@ async def _evidence(
     the worker rather than here because `cancel.scope` translates whatever the
     interrupted driver raised into `Cancelled`, and that translation has to
     wrap the call, not the await.
+
+    ``reads_data`` is set by the tools whose handler opens a connection, and
+    such a call waits its turn among `DATA_READERS` before it starts, inside
+    the scope, so a press reaches it there too.
     """
 
     def stoppable() -> Any:
-        with cancel.scope(_stop):
+        with cancel.scope(_stop), _reading_data() if reads_data else contextlib.nullcontext():
             return call()
 
     try:
@@ -293,7 +340,9 @@ async def graph_lookup(args: dict[str, Any]) -> dict[str, Any]:
     },
 )
 async def measure_overlaps(args: dict[str, Any]) -> dict[str, Any]:
-    return await _evidence(lambda: handlers.measure_overlaps(args["pairs"], **_dir(args)))
+    return await _evidence(
+        lambda: handlers.measure_overlaps(args["pairs"], **_dir(args)), reads_data=True
+    )
 
 
 @tool(
@@ -318,6 +367,7 @@ async def profile_source(args: dict[str, Any]) -> dict[str, Any]:
     return await _evidence(
         lambda: handlers.profile_source(args["source"], columns=args.get("columns"), **_dir(args)),
         encode=_as_columns,
+        reads_data=True,
     )
 
 
@@ -357,7 +407,8 @@ async def query_data(args: dict[str, Any]) -> dict[str, Any]:
             limit=args.get("limit"),
             offset=args.get("offset") or 0,
             **_dir(args),
-        )
+        ),
+        reads_data=True,
     )
 
 
@@ -408,7 +459,7 @@ async def plot_data(args: dict[str, Any]) -> dict[str, Any]:
     The rows are published before the receipt is built, so a chart is on screen
     by the time the agent is told about it.
     """
-    return await _evidence(lambda: _draw(args))
+    return await _evidence(lambda: _draw(args), reads_data=True)
 
 
 def _draw(args: dict[str, Any]) -> dict:
@@ -782,7 +833,8 @@ async def join_findings(args: dict[str, Any]) -> dict[str, Any]:
             left_columns=args.get("left_columns"),
             right_columns=args.get("right_columns"),
             **_dir(args),
-        )
+        ),
+        reads_data=True,
     )
 
 
@@ -821,7 +873,8 @@ async def record_step(args: dict[str, Any]) -> dict[str, Any]:
             supersedes=args.get("supersedes"),
             target=args.get("target"),
             **_dir(args),
-        )
+        ),
+        reads_data=True,
     )
 
 
@@ -864,7 +917,7 @@ async def read_spec(args: dict[str, Any]) -> dict[str, Any]:
     annotations=_READ_ONLY,
 )
 async def run_spec(args: dict[str, Any]) -> dict[str, Any]:
-    return await _evidence(lambda: handlers.run_spec(args["spec_path"]))
+    return await _evidence(lambda: handlers.run_spec(args["spec_path"]), reads_data=True)
 
 
 def _dir(args: dict[str, Any]) -> dict[str, str]:
