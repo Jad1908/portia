@@ -697,14 +697,33 @@ def test_connected_columns_that_do_not_fit_are_shared_evenly_and_say_so():
         *_table("none", 10),
     ]
     choice = query.choose_columns(["many", "few", "none"], rows, cap=40)
-    # 37 places after the three tables: `few` takes 3, so `many` may take 34.
-    assert choice.connected_per_table == 34
-    assert _drawn(choice, "many") == list(range(1, 35))
+    # 37 places after the three tables: `few` takes 3 and `none` its five, so
+    # `many` may take 29, and the picture is exactly the cap.
+    assert choice.connected_per_table == 29
+    assert _drawn(choice, "many") == list(range(1, 30))
     assert _drawn(choice, "few") == [1, 2, 3]
     assert choice.per_table == query.MIN_COLUMNS_SHOWN, "no room is left, so the fewest"
     assert _drawn(choice, "none") == [1, 2, 3, 4, 5]
-    assert choice.connected_cut and (choice.connected, choice.connected_shown) == (53, 37)
-    assert choice.left_out == {"many": 16, "none": 5}
+    assert choice.connected_cut and (choice.connected, choice.connected_shown) == (53, 32)
+    assert choice.left_out == {"many": 21, "none": 5}
+    assert len(choice.ids) + 3 == 40
+
+
+def test_the_picture_never_holds_more_than_the_cap():
+    """Regression (2026-10-08): two models whose 1,579 columns were all lineage
+    drew 698 nodes past a cap of 600, because every other table's floor of five
+    was added on top of their share, and a picture that size never came to rest."""
+    tables = ["wide_a", "wide_b", *(f"t{i:02d}" for i in range(18))]
+    rows = [
+        *_table("wide_a", 1579, connected=range(1, 1580)),
+        *_table("wide_b", 1579, connected=range(1, 1580)),
+        *(row for name in tables[2:] for row in _table(name, 40)),
+    ]
+    choice = query.choose_columns(tables, rows)
+
+    assert len(choice.ids) + len(tables) <= query.MAX_GRAPH_NODES
+    assert all(len(_drawn(choice, name)) == query.MIN_COLUMNS_SHOWN for name in tables[2:])
+    assert len(_drawn(choice, "wide_a")) == len(_drawn(choice, "wide_b")) > 200
 
 
 def test_a_column_no_table_lists_is_drawn_and_counts_nothing():

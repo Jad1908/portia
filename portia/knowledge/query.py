@@ -765,18 +765,25 @@ def choose_columns(
     linked = {table: [row for row in rows if row.connected] for table, rows in groups}
     n_connected = sum(len(rows) for rows in linked.values())
     room = cap - len(tables)
-    share = None
-    if n_connected > room:
-        share = max(MIN_COLUMNS_SHOWN, _fair_share([len(r) for r in linked.values()], room))
     per_table = _clamp((room - n_connected) // len(tables)) if tables else MIN_COLUMNS_SHOWN
+    # What each table would draw: every connected column, then its others in
+    # file order up to N. **When that does not fit, every table gets the same
+    # most** (2026-10-08): the floor of N used to be added on top of a share of
+    # the connected columns, so two models whose 1,579 columns were all lineage
+    # drew 698 nodes past a cap of 600, and a picture that size never comes to
+    # rest. The share is taken over what each table wants, so the picture
+    # stays inside the cap and a table with columns still shows some.
+    wants = {table: max(len(linked[table]), min(per_table, len(rows))) for table, rows in groups}
+    share = _fair_share(list(wants.values()), room) if sum(wants.values()) > room else None
 
     ids: list[str] = []
     sizes: dict[str, int] = {}
     left_out: dict[str, int] = {}
     connected_shown = 0
     for table, rows in groups:
-        drawn = linked[table] if share is None else linked[table][:share]
-        rest = [row for row in rows if not row.connected][: max(0, per_table - len(drawn))]
+        budget = wants[table] if share is None else min(wants[table], share)
+        drawn = linked[table][:budget]
+        rest = [row for row in rows if not row.connected][: budget - len(drawn)]
         keep = {row.id for row in (*drawn, *rest)}
         ids += [row.id for row in rows if row.id in keep]
         connected_shown += len(drawn)
@@ -793,7 +800,7 @@ def choose_columns(
         sizes=sizes,
         left_out=left_out,
         connected_shown=connected_shown,
-        connected_per_table=share,
+        connected_per_table=share if connected_shown < n_connected else None,
     )
 
 
