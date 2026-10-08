@@ -46,6 +46,7 @@ Nothing here formats anything for a human — that is the panes' job.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import re
 import shutil
@@ -714,6 +715,14 @@ async def _hops(
     profile was on disk. Off elsewhere, because a reload reads every entry and a
     local project indexing two hundred files would spend longer reloading than
     profiling.
+
+    **The last reload takes the stamp** *(2026-10-08)*. `exchange.watch_project`
+    stands down while a run of the window's own is writing (`App.indexing_stop`):
+    it noticed each entry land and read the whole catalog again on the loop, two
+    to four seconds a file on a project with two 1,579-column tables. Every caller
+    redraws when the run ends, so the watcher's next look has nothing left to
+    find. The stamp is taken before the read, in `exchange._sync_artifacts`'
+    order, so a file another process writes during the read is still seen.
     """
     names: list[str] = []
     finished: list = []
@@ -738,6 +747,10 @@ async def _hops(
             if reload_each:
                 refresh_catalog(app)
     finally:
+        # A project whose specs cannot be listed stamps nothing, and the watcher
+        # reads it again: the stamp must never be what fails a run.
+        with contextlib.suppress(OSError, ValueError):
+            app.artifact_stamp = artifact_stamp(app)
         refresh_catalog(app)
     # The graph is the catalog restated, so a run that stopped or half failed
     # still syncs what it did manage rather than leaving the two disagreeing.
@@ -1886,8 +1899,14 @@ def source_states(app: App) -> list[SourceState]:
     of them made "what is left to do here" a question you answered by comparing
     two places. Sorted by name, never by state: which sources need attention is a
     judgment, and ordering by it would be the screen making it (`DESIGN.md`).
+
+    **The sources come from `app.catalog`, never off disk** *(2026-10-08)*. This
+    read every entry again, twice per drawing of the Indexing tab, on the loop:
+    3.8 s a draw on a project with two 1,579-column tables, after indexing had
+    ended. Everything that writes the catalog while the window is open reloads
+    it before the tab can draw (`refresh_catalog`'s callers, `exchange._sync_artifacts`).
     """
-    entries = catalog.load_catalog(app.portia_dir).get("sources") or {}
+    entries = app.sources
     known = {entry.get("source") for entry in entries.values()}
     states = [
         SourceState(

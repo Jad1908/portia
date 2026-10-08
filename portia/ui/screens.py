@@ -3131,12 +3131,14 @@ def _catch_up_workspace() -> None:
 
     The way out is offered beside a running index now, so the run can end with
     the add-data screen gone. The left pane drew the catalog as it was when
-    they walked in, and nothing else would tell it that sources have arrived.
+    they walked in, and nothing else would tell it that sources have arrived:
+    `exchange.watch_project` stands down while a run writes, so this is the
+    one redraw of the panes it wrote into (2026-10-08).
     """
-    from portia.ui import artifacts, transcript
+    from portia.ui import exchange, transcript
 
     if APP.left_add_data:
-        artifacts.pane.refresh()
+        exchange.redraw_artifacts()
         transcript.pane.refresh()
 
 

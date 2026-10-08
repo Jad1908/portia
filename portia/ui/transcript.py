@@ -776,7 +776,7 @@ def _source_states() -> None:
         with ui.element("div").classes("index-list"):
             for source in states:
                 _source_state_row(source)
-    _index_actions()
+    _index_actions(states)
 
 
 def _select_all(states) -> None:
@@ -841,7 +841,7 @@ def _tick_source(name: str, on: bool) -> None:
 
 
 @ui.refreshable
-def _index_actions() -> None:
+def _index_actions(states: list) -> None:
     """Two actions, because they cost different things.
 
     Profiling is deterministic and free; reading costs a model turn. A single
@@ -854,8 +854,13 @@ def _index_actions() -> None:
     rather than a pair of selects for the reason that control exists — three
     hand-rolled copies is how they stop agreeing — and it sits *with* the cost
     caption, the same shape the add-data screen uses.
+
+    **``states`` are the rows drawn above it** *(2026-10-08)*. It asked
+    `engine.source_states` again, so every drawing of the tab read the
+    catalog twice. A redraw of these buttons alone (a tick, a provider) keeps
+    the rows it was last given, which are the rows still on screen.
     """
-    ticked = [s for s in engine.source_states(APP) if s.name in APP.index_ticks]
+    ticked = [s for s in states if s.name in APP.index_ticks]
     files, remote = engine.to_index(ticked)
     to_index = [*files, *remote]
     to_read = [s for s in ticked if s.indexed]
@@ -992,7 +997,9 @@ async def _index_ticked() -> None:
         # In the `finally`, with the status it reads: the spinner this tab drew
         # is taken down by this tab whatever ended the run. It used to follow
         # the `try`, so an error left it turning over a job that had died.
-        artifacts.pane.refresh()
+        # The left and middle panes too, from the catalog the run's last hop
+        # read: the watcher stood down while it wrote (`watch_project`).
+        exchange_driver.redraw_artifacts()
         pane.refresh()
     note = f"Profiled {c.count(len(done), 'source')}."
     if failed:

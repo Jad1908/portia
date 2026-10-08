@@ -157,6 +157,10 @@ def page() -> None:
     ui.on("portia:spec", _spec_picked)
     # A click on a gallery row, with one press told from two (`assets/pick.js`).
     ui.on("portia:opens", _row_opened)
+    # A press on a folder or a file in the left tree, by its path, from the same
+    # script. Here and not on the row: a refresh that replaced the row while the
+    # press was queued took a row's own handler with it (`artifacts.tree_pressed`).
+    ui.on("portia:tree", _tree_pressed)
     # A figure dragged into a folder, likewise already resolved
     # (`assets/gallery.js`). At page level for the same reason as the rest.
     ui.on("portia:figure-move", _figure_moved)
@@ -315,6 +319,15 @@ def _row_opened(event) -> None:
     kind, _, ident = opens.partition(":")
     if kind and ident:
         artifacts.opened(kind, ident, reveal=bool(args.get("reveal")))
+
+
+def _tree_pressed(event) -> None:
+    """A folder or a file in the left tree was pressed. One press is the whole gesture."""
+    from portia.ui import artifacts
+
+    rel = str((event.args or {}).get("tree") or "")
+    if rel:
+        artifacts.tree_pressed(rel)
 
 
 def _spec_picked(event) -> None:

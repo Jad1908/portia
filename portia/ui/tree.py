@@ -376,6 +376,20 @@ def crumbs(at: str) -> tuple[tuple[str, str], ...]:
     return tuple(trail)
 
 
+def find(nodes: tuple[Node, ...], rel: str, depth: int = 0) -> tuple[Node, int] | None:
+    """The node at ``rel`` and the depth it is drawn at, or ``None`` if the tree has none.
+
+    What a press on a row is resolved with (`artifacts.tree_pressed`): the row
+    names its path, and the tree it was drawn from says what is there.
+    """
+    for node in nodes:
+        if node.rel == rel:
+            return node, depth
+        if node.is_folder and rel.startswith(f"{node.rel}/"):
+            return find(node.children, rel, depth + 1)
+    return None
+
+
 def folders(nodes: tuple[Node, ...]) -> list[str]:
     """Every folder path in the tree, depth-first. For tests and for seeding."""
     found: list[str] = []

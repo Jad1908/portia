@@ -1036,10 +1036,24 @@ def render_source(entry: dict) -> str:
 
 # --- yaml io (block style, stable order, hand-editable) ---------------------
 
+#: libyaml's parser when PyYAML was built with it, else the pure-Python one.
+#:
+#: **For reading only** *(2026-10-08)*. The window reads every entry again each
+#: time the catalog moves (`ui/engine.refresh_catalog`), on its event loop, and
+#: on a project with two 1,579-column tables the pure-Python scanner took 1.3 s
+#: for eighteen files; libyaml takes 0.2 s and reads the same values.
+#:
+#: **Writing stays pure Python, because libyaml would not write the same bytes**,
+#: and the catalog is read as a diff. Its emitter escapes any character past
+#: U+FFFF, so a sample holding an emoji would be rewritten as ``"\U0001F600"``,
+#: and it folds a long double-quoted string (one with a tab, say) at different
+#: places. Both are pinned in `tests/test_catalog.py`.
+_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
 
 def _read(path: Path) -> dict:
     with open(path, encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+        return yaml.load(f, Loader=_LOADER) or {}
 
 
 def _write(path: Path, data: dict) -> None:

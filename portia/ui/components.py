@@ -1593,6 +1593,7 @@ def artifact_row(
     on_click: Callable[..., Any] | None = None,
     pick: str | None = None,
     opens: str | None = None,
+    tree: str | None = None,
     light: str = "",
 ) -> ui.element:
     """One file portia knows about. Selected is one of the accent's three jobs.
@@ -1624,6 +1625,12 @@ def artifact_row(
         # a position — never a name somebody wrote a sentence into — but a path
         # runs through a folder somebody named, and that can hold a space.
         row.props(f"data-opens={prop_value(opens)}")
+    if tree is not None:
+        # A folder or a file in the left tree, by its repo-relative path: the
+        # press reaches the server as that path, through `assets/pick.js`, and
+        # never as this element, which a refresh may have replaced while the
+        # press waited behind a busy loop (`artifacts.tree_pressed`).
+        row.props(f"data-tree={prop_value(tree)}")
     with row:
         if caret:
             ui.icon(caret).classes("artifact-caret")
@@ -1651,7 +1658,8 @@ def artifact_row(
     # **No `dblclick` handler, deliberately.** Clicking a row refreshes this pane,
     # which replaces the row — so the browser sees two clicks on two different
     # elements and never dispatches one. A row that needs the distinction passes
-    # `pick` and is driven by `assets/pick.js` instead.
+    # `pick` and is driven by `assets/pick.js` instead; one that only has to
+    # survive being replaced passes `tree`.
     return row
 
 

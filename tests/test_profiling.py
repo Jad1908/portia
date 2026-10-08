@@ -239,6 +239,53 @@ def test_only_a_rescanning_format_is_parsed_up_front():
     assert rescans("anything.parquet") is False
 
 
+def test_the_per_column_questions_name_what_they_read(tmp_path, monkeypatch):
+    """`Table.ref` is an aliased ``SELECT *``, and DuckDB bound that star to
+    every column and pruned back to one for each per-column question: on a
+    1,579-column file about 13 ms of planning to under a millisecond of work,
+    twice a column, so a profile grew with the square of the width
+    (2026-10-08). `profile_path` opened the file, so it names what the
+    questions read, the parsed copy of a CSV or a Parquet file's reader call,
+    and the numbers do not move. A table handed to `profile` is read as before."""
+    from portia.checks import profiling
+    from portia.core.io import connect, load_table, read_query, read_relation, write_table
+
+    pd.DataFrame({"id": range(5), "grp": list("aabbc"), "n": [1.5] * 5}).to_csv(
+        tmp_path / "wide.csv", index=False
+    )
+    con = connect()
+    try:
+        write_table(load_table(tmp_path / "wide.csv", con), tmp_path / "wide.parquet")
+        lazy = {
+            suffix: profile(load_table(tmp_path / f"wide.{suffix}", con))
+            for suffix in ("csv", "parquet")
+        }
+    finally:
+        con.close()
+    asked: list[str] = []
+    real_sql = Table.sql
+
+    def recording(self, select, **kw):
+        asked.append(select)
+        return real_sql(self, select, **kw)
+
+    monkeypatch.setattr(Table, "sql", recording)
+    for suffix, named in (
+        ("csv", f"FROM {profiling._PARSED_ONCE} AS "),
+        ("parquet", f"FROM {read_relation(tmp_path / 'wide.parquet')} AS "),
+    ):
+        asked.clear()
+        profiled = profiling.profile_path(tmp_path / f"wide.{suffix}")
+        profiled.pop("source")
+        assert profiled == lazy[suffix], suffix
+        assert len(asked) == 3 + 1, "a sample per column and a modal value for the one string"
+        assert all(f'{named}"wide" WHERE' in select for select in asked), suffix
+        assert not [select for select in asked if "(SELECT * FROM" in select], suffix
+    assert read_query(tmp_path / "wide.parquet") == (
+        f"SELECT * FROM {read_relation(tmp_path / 'wide.parquet')}"
+    )
+
+
 def test_the_parsed_copy_does_not_outlive_the_profile(tmp_path):
     """It lives on the connection `profile_path` opens and closes, so nothing is
     left behind on disk or in a database portia keeps — there isn't one."""

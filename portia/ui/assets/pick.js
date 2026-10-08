@@ -23,6 +23,12 @@
 // The cost is one short delay on a single click. That is a real cost and it is
 // the right trade: the alternative on offer was a double click that needed three
 // or four attempts, and a single click that sometimes selected the row above.
+//
+// **A row with nothing to wait for goes at once** (2026-10-08): a folder or any
+// other file in the left tree, where one press is the whole gesture. It comes
+// through here for the other half of the reason. A press bound to the row's own
+// element was lost when a refresh replaced the row while the press waited
+// behind a busy server, so these rows send their path, as the others do.
 (() => {
   if (window.__portiaPick) return;
   window.__portiaPick = true;
@@ -33,18 +39,20 @@
   // double-click faster than the maximum they are allowed.
   const DOUBLE_MS = 260;
 
-  // The row identity is a **spec path** or an `opens` token, not an element: the
-  // element is exactly the thing that does not survive.
+  // The row identity is a **spec path**, an `opens` token or a tree path, not
+  // an element: the element is exactly the thing that does not survive.
   let pending = null; // { id, event, timer }
 
-  // Two kinds of row use this, and the difference is only which event carries
-  // the answer. A spec row selects and reveals on the canvas; a gallery row
-  // opens a tab, as a preview on one press and for keeps on two
+  // Two kinds of row tell one press from two, and the difference is only which
+  // event carries the answer. A spec row selects and reveals on the canvas; a
+  // gallery row opens a tab, as a preview on one press and for keeps on two
   // (`docs/VISUALIZATION.md` §3.8). The gesture is identical and so is the
-  // reason it cannot be reconstructed on the server.
+  // reason it cannot be reconstructed on the server. A tree row has one press
+  // and no second meaning, so it is `once`.
   const KINDS = [
     { attribute: "data-spec", event: "portia:spec", field: "spec" },
     { attribute: "data-opens", event: "portia:opens", field: "opens" },
+    { attribute: "data-tree", event: "portia:tree", field: "tree", once: true },
   ];
 
   const send = (row, reveal) => {
@@ -62,7 +70,8 @@
     for (const kind of KINDS) {
       const element = target.closest(`[${kind.attribute}]`);
       if (element) {
-        return { id: element.getAttribute(kind.attribute), event: kind.event, field: kind.field };
+        const { event, field, once } = kind;
+        return { id: element.getAttribute(kind.attribute), event, field, once };
       }
     }
     return null;
@@ -94,6 +103,10 @@
         const waiting = pending;
         settle();
         send(waiting, false);
+      }
+      if (row.once) {
+        send(row, false);
+        return;
       }
       pending = {
         id: row.id,

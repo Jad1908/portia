@@ -32,7 +32,7 @@ from typing import Any
 from portia.core import backend, cancel
 from portia.core import dialect as dialects
 from portia.core.dialect import Dialect
-from portia.core.io import connect, load_table, rescans
+from portia.core.io import connect, load_table, read_relation, rescans
 from portia.core.serialize import round_float, to_jsonable
 from portia.core.table import Table
 
@@ -115,15 +115,16 @@ def profile_path(path: str | Path, **load_kwargs: Any) -> dict:
     """
     con = connect()
     try:
-        prof = profile(_source(path, con), **load_kwargs)
+        table, read_as = _source(path, con)
+        prof = profile(table, read_as=read_as, **load_kwargs)
     finally:
         con.close()
     prof["source"] = str(path)
     return prof
 
 
-def _source(path: str | Path, con: Any) -> Table:
-    """The table to profile: the file itself, or one parse of it.
+def _source(path: str | Path, con: Any) -> tuple[Table, str]:
+    """The table to profile, the file itself or one parse of it, and its name after ``FROM``.
 
     **A profile is one scan plus two questions per column.** Every scalar
     statistic comes from a single pass (:func:`_stat_exprs`), but `_table_samples`
@@ -136,26 +137,44 @@ def _source(path: str | Path, con: Any) -> Table:
     of. Parsing once first is what closes that gap; the per-column queries were
     never the expensive part, the parse behind each of them was.
 
-    **Only for formats that re-scan.** Parquet is columnar and its per-column
-    reads are already nearly free, so it stays lazy and is never copied.
+    **Only for formats that re-scan.** Parquet is columnar and a per-column read
+    parses nothing, so it stays lazy and is never copied.
 
     Peak memory *fell* — 5647 MB to 2578 MB on that file — because each of those
     191 parses was buffering too. The copy is bounded by the file and DuckDB
     spills it past ``memory_limit`` rather than failing, so the worst case is
     disk. `DUCKDB_MIGRATION.md` §14.
+
+    **And each question names what it reads** *(2026-10-08)*, the parsed copy or
+    the Parquet file's reader call, rather than `Table.ref`, which is an aliased
+    ``SELECT *``: DuckDB bound that star to every column and pruned back to one
+    on every question. On 1,579 columns that was about 13 ms of planning against
+    0.6 ms of work, twice a column, so the questions grew with the square of the
+    width. Named, that file profiles to the same numbers in 15 s rather than 31 s
+    as CSV, and in 9 s rather than 32 s as Parquet. The alias is the table's
+    own name, so a column qualified by it reads as it did.
     """
     table = load_table(path, con)
+    alias = table.dialect.quote(table.name)
     if not rescans(path):
-        return table
+        return table, f"{read_relation(path)} AS {alias}"
     con.execute(f"CREATE TEMP TABLE {_PARSED_ONCE} AS SELECT * FROM ({table.query})")
-    return Table(name=table.name, query=f"SELECT * FROM {_PARSED_ONCE}", con=con)
+    parsed = Table(name=table.name, query=f"SELECT * FROM {_PARSED_ONCE}", con=con)
+    return parsed, f"{_PARSED_ONCE} AS {alias}"
 
 
 # --- the SQL implementation -------------------------------------------------
 
 
-def profile(table: Table, *, sample_values: int = SAMPLE_VALUES) -> dict:
-    """A compact, JSON-serializable profile of ``table``, measured in SQL."""
+def profile(
+    table: Table, *, sample_values: int = SAMPLE_VALUES, read_as: str | None = None
+) -> dict:
+    """A compact, JSON-serializable profile of ``table``, measured in SQL.
+
+    ``read_as`` is what the per-column questions read after ``FROM``, for a
+    caller that opened the table itself and can name it (`_source`); anything
+    else is read as `Table.ref`, a subquery that nests whatever the table is.
+    """
     kinds = {col: kind_of(dtype) for col, dtype in table.dtypes.items()}
     dtypes = table.dtypes
     dialect = dialects.of(table.con)
@@ -165,7 +184,7 @@ def profile(table: Table, *, sample_values: int = SAMPLE_VALUES) -> dict:
     stats = table.row(_stat_exprs(kinds, dialect)) if kinds else {"n_rows": table.count()}
     n_rows = int(stats["n_rows"])
 
-    extras = _extras(table, kinds, stats, sample_values)
+    extras = _extras(table, kinds, stats, sample_values, read_as)
     columns = [
         _table_column(col, i, kinds[col], dtypes[col], stats, n_rows, extras[col], dialect)
         for i, col in enumerate(kinds)
@@ -179,7 +198,11 @@ Extras = tuple[list, "tuple[Any, int] | None"]
 
 
 def _extras(
-    table: Table, kinds: dict[str, str], stats: dict, sample_values: int
+    table: Table,
+    kinds: dict[str, str],
+    stats: dict,
+    sample_values: int,
+    read_as: str | None = None,
 ) -> dict[str, Extras]:
     """The two questions per column, asked one at a time or several at once.
 
@@ -208,7 +231,7 @@ def _extras(
     width = backend.parallel_queries(table.con)
     if width == 1 or len(columns) < 2:
         return {
-            col: _column_extras(table, col, kinds[col], non_null[col], sample_values)
+            col: _column_extras(table, col, kinds[col], non_null[col], sample_values, read_as)
             for col in columns
         }
     with ThreadPoolExecutor(max_workers=width, thread_name_prefix="portia-profile") as pool:
@@ -221,6 +244,7 @@ def _extras(
                 kinds[col],
                 non_null[col],
                 sample_values,
+                read_as,
             )
             for col in columns
         }
@@ -233,12 +257,17 @@ def _extras(
 
 
 def _column_extras(
-    table: Table, col: str, kind: str, n_non_null: int, sample_values: int
+    table: Table,
+    col: str,
+    kind: str,
+    n_non_null: int,
+    sample_values: int,
+    read_as: str | None = None,
 ) -> Extras:
     cancel.check()
-    samples = _table_samples(table, col, sample_values, kind)
+    samples = _table_samples(table, col, sample_values, kind, read_as)
     wants_top = bool(n_non_null) and kind not in NUMERIC_KINDS and kind != BOOLEAN
-    return samples, _table_top(table, col, kind) if wants_top else None
+    return samples, _table_top(table, col, kind, read_as) if wants_top else None
 
 
 def _comparable(dialect: Dialect, col: str, kind: str) -> str:
@@ -340,16 +369,20 @@ def _table_column(
     return out
 
 
-def _table_samples(table: Table, col: str, k: int, kind: str = STRING) -> list:
+def _table_samples(
+    table: Table, col: str, k: int, kind: str = STRING, read_as: str | None = None
+) -> list:
     """Example values — distinct and ordered. See :data:`SAMPLE_VALUES` for why."""
     q = _comparable(table.dialect, col, kind)
     rows = table.sql(
-        f"SELECT DISTINCT {q} FROM {table.ref} WHERE {q} IS NOT NULL ORDER BY {q}"
+        f"SELECT DISTINCT {q} FROM {read_as or table.ref} WHERE {q} IS NOT NULL ORDER BY {q}"
     ).rows(k)
     return [to_jsonable(v) for (v,) in rows]
 
 
-def _table_top(table: Table, col: str, kind: str = STRING) -> tuple[Any, int] | None:
+def _table_top(
+    table: Table, col: str, kind: str = STRING, read_as: str | None = None
+) -> tuple[Any, int] | None:
     """The modal value and its count, ties broken by the value itself.
 
     ``ORDER BY count(*) DESC`` alone leaves a tie undefined, and half the fixture
@@ -358,7 +391,7 @@ def _table_top(table: Table, col: str, kind: str = STRING) -> tuple[Any, int] | 
     """
     q = _comparable(table.dialect, col, kind)
     rows = table.sql(
-        f"SELECT {q} AS v, count(*) AS n FROM {table.ref} "
+        f"SELECT {q} AS v, count(*) AS n FROM {read_as or table.ref} "
         f"WHERE {q} IS NOT NULL GROUP BY {q} ORDER BY n DESC, {q} ASC"
     ).rows(1)
     if not rows:

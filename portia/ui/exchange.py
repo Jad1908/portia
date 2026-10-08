@@ -671,13 +671,22 @@ def watch_project() -> None:
     redraws when it ends; a tick in the middle of either would rebuild panes
     under the progress mark for nothing.
 
+    **Nor while it is indexing** *(2026-10-08)*. Each profiled file is a catalog
+    entry, so every tick of a run found the stamp moved and read every entry
+    again on the loop, then rebuilt two panes: on a project with two
+    1,579-column tables that froze the window for two to four seconds a file,
+    and a click on the left pane queued behind it was dropped with the row it
+    was bound to. The run reloads once when it ends and takes the stamp there
+    (`engine._hops`), and its callers redraw what it wrote, so the next tick
+    after it finds nothing to do.
+
     A chart that arrives this way **takes focus**, as one drawn in a chat here
     does (`state.App.show_chart`): somebody just asked for it, in the other
     window.
     """
     from portia.ui import artifacts, workflow
 
-    if APP.live is not None or APP.running:
+    if APP.live is not None or APP.running or APP.indexing_stop is not None:
         return
     if APP.artifact_stamp is None:
         # The first look after a project opens. Everything on screen was just
@@ -743,8 +752,6 @@ def _sync_artifacts() -> bool:
     files those panes draw from; when it has not moved, nothing has, and the
     panes are left exactly as the reader has them.
     """
-    from portia.ui import artifacts, workflow
-
     # The stamp first *(2026-09-07)*. It is a walk of stat calls; the catalog
     # reload under it parses every source's YAML, and it ran on every tool
     # result whether or not anything had been written — 16 ms on six sources,
@@ -755,6 +762,20 @@ def _sync_artifacts() -> bool:
         return False
     APP.artifact_stamp = stamp
     engine.refresh_catalog(APP)
+    redraw_artifacts()
+    return True
+
+
+def redraw_artifacts() -> None:
+    """The left and middle panes, from the project as it is now: `_sync_artifacts`' redraw.
+
+    Public for an indexing run, which reads the catalog itself when it ends
+    (`engine._hops`) and has `watch_project` stand down while it writes: what
+    the watcher used to redraw after it, the run's callers redraw once, here,
+    with no second read of the catalog.
+    """
+    from portia.ui import artifacts, workflow
+
     if APP.spec_path is None:
         specs = engine.specs_in(APP)
         if specs:
@@ -768,4 +789,3 @@ def _sync_artifacts() -> bool:
     # has been deleted but is still being used*. Found once `watch_project` made
     # this run with nobody in a chat.
     workflow.pane.refresh()
-    return True

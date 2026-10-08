@@ -419,3 +419,85 @@ def test_an_entry_without_notes_has_no_notes_key(tmp_path):
     src_file = index_source(csv, portia_dir=d)
     set_interpretation("customers", summary="A read.", portia_dir=d)
     assert "notes" not in yaml.safe_load(src_file.read_text(encoding="utf-8"))
+
+
+# --- reading fast, writing the same bytes (2026-10-08) -------------------------
+
+
+def _realistic_entry(tmp_path) -> Path:
+    """An entry the way a project ends up with one: profiled, read, noted.
+
+    Values chosen for what a YAML emitter can disagree about: text past U+FFFF,
+    a long value holding a tab (which forces double quotes and a fold), prose
+    with typographic punctuation, a date, a decimal, nulls, a column name with
+    a space in it.
+    """
+    import pandas as pd
+
+    n = 30
+    pd.DataFrame(
+        {
+            "booking id": range(n),
+            "city": ["Zürich", "São Paulo", "東京"] * 10,
+            "amount_eur": [round(i * 12.345, 3) for i in range(n)],
+            "stayed_on": pd.date_range("2026-01-01", periods=n).strftime("%Y-%m-%d"),
+            "comment": [
+                f"Guest {i} wrote:\tlate check-in ≈ 23:40 — “fine”, would book again 🙂 "
+                + "and the rest of a long free-text field " * 3
+                if i % 3
+                else None
+                for i in range(n)
+            ],
+        }
+    ).to_csv(tmp_path / "bookings.csv", index=False)
+    d = tmp_path / ".portia"
+    entry_file = index_source(tmp_path / "bookings.csv", portia_dir=d)
+    set_interpretation(
+        "bookings",
+        summary=(
+            "One row per booking from the reservations feed — amounts in euros, "
+            "dates as ISO strings, and a free-text comment that guests write 😀 "
+            "including tabs and quotes ('like this'). Roughly a month of stays."
+        ),
+        roles={"booking id": "key", "amount_eur": "measure"},
+        note="amount_eur excludes the city tax; see the finance note of 2026-09-30.",
+        portia_dir=d,
+    )
+    return entry_file
+
+
+def test_the_catalog_is_read_by_libyaml_and_reads_the_same_values(tmp_path):
+    """The window reads every entry again each time the catalog moves, on its
+    event loop; on two 1,579-column tables that was 1.3 s of pure-Python
+    scanning for eighteen files. libyaml's parser is used where PyYAML has it,
+    and it has to read back exactly what the pure-Python one does."""
+    from portia import catalog
+
+    entry_file = _realistic_entry(tmp_path)
+    text = entry_file.read_text(encoding="utf-8")
+
+    assert catalog._read(entry_file) == yaml.load(text, Loader=yaml.SafeLoader)
+    if yaml.__with_libyaml__:
+        assert catalog._LOADER is yaml.CSafeLoader
+    else:
+        assert catalog._LOADER is yaml.SafeLoader
+
+
+def test_the_catalog_is_written_by_the_pure_python_emitter_byte_for_byte(tmp_path):
+    """The catalog is read as a diff, so writing it must not move a byte that
+    did not change. libyaml's emitter would: it escapes a character past U+FFFF
+    (the 😀 above becomes ``\\U0001F600``) and folds a long double-quoted string
+    at other places. So the writer stays pure Python, and a round trip through
+    `_read` and `_write` is the file it started from."""
+    from portia import catalog
+
+    entry_file = _realistic_entry(tmp_path)
+    written = entry_file.read_bytes()
+    entry = catalog._read(entry_file)
+
+    assert written.decode("utf-8") == yaml.safe_dump(
+        entry, sort_keys=False, default_flow_style=False, allow_unicode=True
+    )
+    assert "😀" in written.decode("utf-8") and "\\U0001F600" not in written.decode("utf-8")
+    catalog._write(entry_file, entry)
+    assert entry_file.read_bytes() == written
