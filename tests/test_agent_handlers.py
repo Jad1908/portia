@@ -688,6 +688,23 @@ def test_profile_source_measures_a_table_an_earlier_step_produced(sales):
     assert name["role"] is None
 
 
+def test_a_step_reference_reaches_a_spec_in_a_layer_folder(sales):
+    """Haiku 5.5 on the inspections bench, 2026-10-08: `profile_source` on
+    `specs/staging/stg_chicago_food_inspections.yaml#…` read its parquet from
+    `specs/data/`, because the project root was taken as the spec's grandparent,
+    which is `specs/` once a layer folder sits between them. Either path names
+    the spec, the one it was recorded under and the one it lives at."""
+    handlers.record_step("specs/orders.yaml", _join_step(), layer="staging", portia_dir=sales)
+
+    for ref in ("specs/staging/orders.yaml", "specs/orders.yaml"):
+        out = handlers.profile_source(f"{ref}#orders_with_customers", sales)
+        assert out["n_rows"] == 10
+        joined = handlers.join_findings(
+            f"{ref}#orders_with_customers", "customers", keys=["customer_id"], portia_dir=sales
+        )
+        assert joined["report"]["left"]["n_rows"] == 10
+
+
 def test_an_unknown_table_name_points_at_the_step_form(sales):
     """Otherwise the message reads 'no such table' when the truth is 'not by that name'."""
     with pytest.raises(ValueError, match="spec path.*#.*step id"):
