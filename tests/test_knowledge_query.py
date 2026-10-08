@@ -418,6 +418,8 @@ def test_the_subgraph_is_tables_until_you_ask_for_columns(filled, pid):
     """
     tables = query.subgraph(filled, project=pid)
     assert {n["kind"] for n in tables["nodes"]} == {"Source", "Model", "Group"}
+    # What the Columns view's count says about tables, when the cap cut some.
+    assert tables["tables"] == {"shown": len(tables["nodes"]), "total": len(tables["nodes"])}
 
     columns = query.subgraph(filled, columns=True, project=pid)
     assert "Column" in {n["kind"] for n in columns["nodes"]}

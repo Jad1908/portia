@@ -123,6 +123,44 @@ def test_a_graph_with_no_project_is_refused(neo4j_session):
         store.write(Graph(), neo4j_session)
 
 
+class _Recording:
+    """A session that takes every statement and answers the measured half's count."""
+
+    def __init__(self, fail_on: int | None = None):
+        self.statements: list[str] = []
+        self.fail_on = fail_on
+
+    def run(self, statement, **params):
+        if self.fail_on is not None and len(self.statements) == self.fail_on:
+            raise RuntimeError("the container stopped")
+        self.statements.append(statement)
+        return [{"written": len(params.get("rows", []))}]
+
+
+def test_every_write_is_counted_once_it_is_over(graph):
+    """What lets the window keep a picture of the graph between renders
+    (`ui/engine.knowledge_subgraph`): it asks again only when this has moved,
+    and every write this process makes comes through here."""
+    before = store.writes()
+    store.write(graph, _Recording())
+    assert store.writes() == before + 1
+    measured = [e for e in graph.edges.values() if e.kind == OVERLAPS]
+    assert store.write_measured(measured, _Recording(), PROJECT_A) == 1
+    assert store.writes() == before + 2
+    # A graph with nothing in it still ran the constraints.
+    store.write(Graph(project=PROJECT_A), _Recording())
+    assert store.writes() == before + 3
+
+
+def test_a_write_that_failed_half_way_is_still_counted(graph):
+    """It may have changed the graph before it stopped, so a picture read before
+    it is no longer the graph."""
+    before = store.writes()
+    with pytest.raises(RuntimeError):
+        store.write(graph, _Recording(fail_on=len(store.constraint_statements()) + 1))
+    assert store.writes() == before + 1
+
+
 def test_a_missing_driver_says_what_to_install(monkeypatch):
     """§6.6 — a stopped container or an uninstalled extra must not read as a bug.
 

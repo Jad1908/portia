@@ -7892,39 +7892,142 @@ def test_the_knowledge_engine_reads_findings_without_reading_the_catalog(tmp_pat
     assert line["kind"] == query.FINDING
 
 
-def test_the_columns_view_says_what_it_left_out_in_a_sentence():
-    """It read *18 Source · 582 Column · 582 edge(s) · 5582 more not drawn* in
-    small grey type, and nobody could say what was missing or why."""
+def _counting_graph(monkeypatch) -> list:
+    """`knowledge_subgraph` with no server behind it, every read of the graph counted."""
+    from contextlib import contextmanager
+
+    from portia.knowledge import query, store
+
+    reads: list = []
+
+    @contextmanager
+    def session():
+        yield None
+
+    def subgraph(*args, **kwargs):
+        reads.append(kwargs.get("columns"))
+        return _picture()
+
+    monkeypatch.setattr(store, "session", session)
+    monkeypatch.setattr(query, "subgraph", subgraph)
+    engine_module.forget_knowledge()
+    return reads
+
+
+class _NoServer:
+    """Somewhere for `store.write` to send its statements."""
+
+    def run(self, *args, **kwargs):
+        return []
+
+
+def test_the_graph_is_read_once_and_kept_until_what_it_shows_moves(tmp_path, monkeypatch):
+    """A reading job's 18 catalog writes each re-rendered the middle pane, and
+    each render was a Neo4j connection and ~250 ms of Cypher on the event loop,
+    to draw the same picture: none of them was a write to the graph."""
+    from portia.knowledge import schema, store
+
+    reads = _counting_graph(monkeypatch)
+    app = App(root=tmp_path)
+    app.catalog = {"sources": {"orders": {"indexed": {"size": 1, "mtime": 1.0}}}}
+    first = engine_module.knowledge_subgraph(app, columns=True)
+    assert engine_module.knowledge_subgraph(app, columns=True) is first
+    app.catalog["sources"]["orders"]["summary"] = "the shop's orders"
+    assert engine_module.knowledge_subgraph(app, columns=True) is first, "a note is not the graph"
+    assert reads == [True]
+    engine_module.knowledge_subgraph(app)
+    assert reads == [True, False], "each view is its own picture"
+
+    # A write this process made: indexing, Refresh, or one of the copilot's tools.
+    store.write(schema.Graph(project=str(tmp_path)), _NoServer())
+    engine_module.knowledge_subgraph(app, columns=True)
+    assert len(reads) == 3
+    # A file indexed again, from a terminal that synced the graph itself.
+    app.catalog["sources"]["orders"]["indexed"] = {"size": 2, "mtime": 2.0}
+    engine_module.knowledge_subgraph(app, columns=True)
+    assert len(reads) == 4
+    # A finding written, which is a line to draw.
+    _finding_file(tmp_path, "pair", ["orders", "regions"])
+    engine_module.knowledge_subgraph(app, columns=True)
+    assert len(reads) == 5
+    engine_module.knowledge_subgraph(app, columns=True)
+    assert len(reads) == 5
+
+
+def test_a_graph_that_could_not_be_reached_is_asked_again(tmp_path, monkeypatch):
+    """Not kept, so a container started since is drawn on the next render."""
+    from contextlib import contextmanager
+
+    from portia.knowledge import store
+
+    tries = []
+
+    @contextmanager
+    def down():
+        tries.append(1)
+        raise store.GraphUnavailable("no Neo4j")
+        yield
+
+    monkeypatch.setattr(store, "session", down)
+    engine_module.forget_knowledge()
+    app = App(root=tmp_path)
+    for _ in range(2):
+        assert engine_module.knowledge_subgraph(app)["unavailable"] == "no Neo4j"
+    assert len(tries) == 2
+
+
+def test_refresh_reads_the_graph_again_whatever_the_key_says(tmp_path, monkeypatch):
+    """The one press that asks the database rather than the window, which is
+    also what reaches a write another process made."""
+    import asyncio
+
     from portia.ui import workflow
 
-    said = workflow._columns_said(_picture())
-    assert said == "", "nothing was chosen, so there is no rule to state"
+    reads = _counting_graph(monkeypatch)
+    app = App(root=tmp_path)
+    monkeypatch.setattr(engine_module, "sync_knowledge", lambda app: "")
+    monkeypatch.setattr(workflow.pane, "refresh", lambda *a, **k: None)
+    with _as_app(workflow, app):
+        engine_module.knowledge_subgraph(app)
+        asyncio.run(workflow._refresh_knowledge())
+        engine_module.knowledge_subgraph(app)
+    assert reads == [False, False]
 
-    said = workflow._columns_said(_picture(shown=274, total=6164))
-    assert said.startswith("Showing 274 of 6,164 columns: every column linked to another")
-    assert "until it shows 15." in said
-    assert "Press +N more" in said
-    assert "—" not in said and " · " not in said, "DESIGN.md → Copy"
 
+def test_the_columns_view_counts_what_it_left_out_and_nothing_else():
+    """It read *18 Source · 582 Column · 582 edge(s) · 5582 more not drawn* in
+    small grey type; then two sentences stating the rule, which the user found
+    "almost invisible and too verbose". Now the count, in the accent."""
+    from portia.ui import workflow
+
+    assert workflow._columns_said(_picture()) == "", "the Tables view has no count"
+    assert workflow._columns_said(_picture(shown=274, total=6164)) == "Showing 274 of 6,164 columns"
+    cut = _picture(shown=600, total=9000, connected=1450, connected_cut=True)
+    assert workflow._columns_said(cut) == "Showing 600 of 9,000 columns"
     assert workflow._columns_said(_picture(shown=6164, total=6164)) == ""
 
 
-def test_the_columns_view_says_when_the_connected_columns_did_not_fit():
+def test_the_columns_view_counts_tables_only_when_the_cap_cut_some():
     from portia.ui import workflow
 
-    said = workflow._columns_said(
-        _picture(
-            shown=600,
-            total=9000,
-            connected=1450,
-            connected_shown=560,
-            connected_cut=True,
-            connected_per_table=40,
-            per_table=5,
-        )
-    )
-    assert "1,450 are linked to another column, too many to draw at once." in said
-    assert "up to 40 of them" in said and "until it shows 5." in said
+    picture = _picture(shown=3000, total=9000)
+    picture["tables"] = {"shown": 4, "total": 4}
+    assert workflow._columns_said(picture) == "Showing 3,000 of 9,000 columns"
+    picture["tables"] = {"shown": 600, "total": 640}
+    assert workflow._columns_said(picture) == "Showing 600 of 640 tables and 3,000 of 9,000 columns"
+
+
+def test_the_columns_count_is_drawn_in_the_accent(monkeypatch):
+    from portia.ui import workflow
+
+    app = App()
+    app.knowledge_columns = True
+    picture = _picture(shown=274, total=6164)
+    monkeypatch.setattr(engine_module, "knowledge_subgraph", lambda *a, **k: picture)
+    with _as_app(workflow, app), ui.element("div") as slot:
+        workflow._knowledge_inspector()
+    [said] = [e for e in slot.descendants() if getattr(e, "text", "").startswith("Showing ")]
+    assert "c-accent" in said.classes and "t-body-strong" in said.classes
 
 
 def test_the_tables_view_keeps_its_counts():
@@ -7995,15 +8098,21 @@ def test_the_more_press_speaks_the_graphs_kinds_and_one_event_name():
     assert 'ui.on("portia:more-columns", _more_columns)' in inspect.getsource(app_module.page)
 
 
-def test_the_knowledge_graph_settles_then_holds_still():
-    """Every node kept moving, about 390px every five seconds, with nothing
-    happening; and a refresh ran the layout again. The layout settles once,
-    physics goes off, and a redraw puts every node it has seen back by id."""
+def test_the_knowledge_graph_floats_and_a_refresh_starts_where_it_was():
+    """Physics went off after the first settling for one round, because six
+    hundred nodes never came to rest; the user wanted the floating back. The options
+    are the ones it shipped with, and a redraw starts every node it has seen
+    where the canvas it replaces had floated it to."""
     js = _knowledge_js()
-    assert 'solver: "forceAtlas2Based"' in js
-    assert "network.setOptions({ physics: false });" in js
+    assert "physics: false" not in js and "forceAtlas2Based" not in js
+    assert "const SETTLE_STEPS = 200;" in js
+    assert "stabilization: fresh ? { iterations: SETTLE_STEPS, fit: !looking } : false" in js
     assert "placed[n.id]" in js and "PLACED[view]" in js
-    assert 'network.on("dragEnd"' in js and 'network.on("zoom"' in js
+    # The canvas a refresh replaced gives up its positions before it goes.
+    sweep = js[js.index("function sweep()") : js.index("function draw(host)")]
+    assert sweep.index("remember(network.__view, network)") < sweep.index("network.destroy()")
+    for event in ("stabilized", "dragEnd", "zoom"):
+        assert f'network.on("{event}"' in js
 
 
 def test_the_knowledge_graph_holds_no_colour_of_its_own():

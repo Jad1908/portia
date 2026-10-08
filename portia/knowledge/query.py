@@ -894,6 +894,8 @@ def subgraph(session: Any, *, project: str, columns: bool = False) -> dict:
         # How many tables the cap left out, so the caption can count them
         # rather than say *truncated* and leave the reader to guess at what.
         "omitted": total - len(nodes),
+        # Both counts, for the Columns view to say when the cap cut tables.
+        "tables": {"shown": len(nodes), "total": total},
     }
     if columns:
         _add_columns(session, picture, project)

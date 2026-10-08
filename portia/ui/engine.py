@@ -2040,6 +2040,11 @@ def _stamp(path: Path) -> tuple:
     return (str(path), facts.st_size, facts.st_mtime)
 
 
+#: The last picture of each view, by whether it draws columns, beside the key it
+#: was read under. Two entries at most; another project's key never matches.
+_PICTURES: dict[bool, tuple[tuple, dict]] = {}
+
+
 def knowledge_subgraph(app: App, *, columns: bool = False) -> dict:
     """The knowledge graph, as nodes and edges for the explorer to draw.
 
@@ -2063,13 +2068,28 @@ def knowledge_subgraph(app: App, *, columns: bool = False) -> dict:
     prose with copied numbers and `docs/FINDINGS.md` §3 keeps it off `OVERLAPS`
     for that reason; read from `findings.py` on each draw, it stays one fact in
     one place (:func:`finding_edges`).
+
+    **Read once, then kept until something it is drawn from moves**
+    *(2026-10-08)*. The pane asks on every render, and during a copilot's
+    reading job the middle pane renders after every tool result that writes: 18
+    in one burst on a project of 6,164 columns, each a Neo4j connection and
+    about 250 ms of Cypher on the event loop, to draw the same picture. None of
+    those writes was to the graph. So the answer is kept per view and handed
+    back while :func:`_picture_key` is unchanged; the pane never changes it.
+    Refresh asks again whatever the key says (:func:`forget_knowledge`).
     """
     from portia.knowledge import query, schema, store
 
+    key = _picture_key(app)
+    kept = _PICTURES.get(columns)
+    if kept is not None and kept[0] == key:
+        return kept[1]
     try:
         with store.session() as session:
             picture = query.subgraph(session, project=schema.project_id(app.root), columns=columns)
     except store.GraphUnavailable as exc:
+        # Not kept: the next render asks again, so a container started since is
+        # drawn without anyone having to press anything.
         return {"nodes": [], "edges": [], "unavailable": str(exc)}
     # Only a finding about two tables or more can draw a line, and staleness is
     # worked out from the catalog the window already holds: read from disk, it
@@ -2077,7 +2097,52 @@ def knowledge_subgraph(app: App, *, columns: bool = False) -> dict:
     records = [f for f in findings.load_all(app.root) if len(findings.tables(f)) > 1]
     stale = findings.stale_marks(records, root=app.root, sources=app.sources) if records else {}
     picture["edges"] += finding_edges(picture["nodes"], records, stale)
+    # A write that landed while this was reading may or may not be in it, so
+    # an answer read across one is drawn and not kept.
+    if _picture_key(app) == key:
+        _PICTURES[columns] = (key, picture)
     return picture
+
+
+def forget_knowledge() -> None:
+    """Drop the kept pictures, so the next render reads the graph again.
+
+    Refresh's half of :func:`knowledge_subgraph`: the one press that asks the
+    database whatever the key says, which is also what reaches a write that
+    another process made and the key cannot see.
+    """
+    _PICTURES.clear()
+
+
+def _picture_key(app: App) -> tuple:
+    """What a picture of the graph is drawn from, short of asking Neo4j.
+
+    - **The writes this process made** (`store.writes`). Every graph write
+      the window can cause goes through `knowledge/store.py`, in this
+      process: indexing, Refresh, and the copilot's `record_step` and
+      `measure_overlaps`.
+    - **Each source's `catalog.STALENESS_FACTS`**, from the catalog the window
+      holds. A finding's stale mark compares them, and they are what moves
+      when a `portia index` in a terminal re-indexes a file and syncs the
+      graph from outside, once `watch_project` has read the catalog again.
+      A note or a role does not move them, which is why a reading job's
+      writes leave the key alone.
+    - **The findings files and the spec files**, by size and mtime: a finding
+      written is a line to draw, and a model's fingerprint is its spec's.
+
+    Stat calls and the catalog in memory; nothing is opened or parsed.
+    """
+    from portia.knowledge import store
+
+    facts = tuple(
+        sorted(
+            (name, *((entry.get("indexed") or {}).get(f) for f in catalog.STALENESS_FACTS))
+            for name, entry in app.sources.items()
+        )
+    )
+    folder = app.root / findings.FINDINGS_DIR
+    files = [*(sorted(folder.glob("*.yaml")) if folder.is_dir() else []), *specs_in(app)]
+    return (str(app.root), store.writes(), facts, tuple(_stamp(path) for path in files))
 
 
 def finding_edges(

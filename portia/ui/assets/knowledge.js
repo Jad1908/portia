@@ -62,17 +62,18 @@ window.portiaKnowledge = (function () {
   // The event a press on a `More` node sends, at page level (`ui/app.py`).
   const MORE_EVENT = "portia:more-columns";
 
-  // **A layout that settles, then holds still.** The force layout runs this
-  // many steps before the picture is shown and then stops for good: nodes that
-  // kept drifting forever (measured at about 390px every five seconds on a
-  // project of 600 nodes, with nothing happening) are a picture you cannot
-  // read, and a drag that drags its neighbours along is a picture you cannot
-  // arrange. ForceAtlas2 because it spreads a table's columns around it rather
-  // than piling every table into the middle. The steps are a ceiling: the
-  // layout stops sooner once nothing is moving. vis-network's improved first
-  // layout is off, because on three hundred nodes it took longer than the
-  // settling it was meant to shorten (1.3 s of a 2.9 s first draw).
-  const SETTLE_STEPS = 1000;
+  // **The layout floats** *(2026-10-08)*. vis-network's own physics, with the
+  // options the graph shipped with: the picture settles for this many steps
+  // before it is shown, then goes on simulating until nothing moves, and a node
+  // dragged pulls its neighbours along. Earlier that day the layout ran once
+  // and then physics went off for good, because six hundred nodes never rested
+  // (about 390px every five seconds, with nothing happening). The user wanted
+  // the floating back and put the drift down to the number of columns, which
+  // `query.choose_columns` now holds to a few hundred. Measured on a project of
+  // 6,164 columns: its picture of 280 nodes comes to rest on its own in about
+  // eight seconds. One of 700, most of them a model's columns each linked to
+  // the column it came from, was still moving 250px a second after thirty.
+  const SETTLE_STEPS = 200;
   // The same project lays out the same way the first time, so a picture drawn
   // twice from nothing is one picture rather than two.
   const SEED = 7;
@@ -245,15 +246,19 @@ window.portiaKnowledge = (function () {
 
   // **Where every node sits is the client's**, like the pan and the zoom
   // (DESIGN.md → Window: they never round-trip). A refresh of the middle pane
-  // replaces the canvas, and the new one is drawn with every node it has seen
-  // before put back where it was, by its id, so nothing moves that the reader
-  // did not move. Only a node it has never seen is placed. Kept per view,
-  // because Tables and Columns are two pictures of one graph.
+  // replaces the canvas, and the new one starts every node it has seen before
+  // where the old one had floated it to, by its id, so a refresh does not throw
+  // the picture into a new shape; the physics carries on from there. Only a
+  // node it has never seen is placed. Kept per view, because Tables and Columns
+  // are two pictures of one graph.
   const PLACED = {};
   const LOOKING = {};
 
+  // Where the nodes are now, and the view while the canvas is on the page: a
+  // canvas taken off it has no width, and its centre would read as its corner.
   function remember(view, network) {
     Object.assign(PLACED[view], network.getPositions());
+    if (!network.body.container.isConnected) return;
     LOOKING[view] = { position: network.getViewPosition(), scale: network.getScale() };
   }
 
@@ -285,6 +290,8 @@ window.portiaKnowledge = (function () {
   function sweep() {
     for (const network of LIVE) {
       if (network.body.container.isConnected) continue;
+      // Where it had floated to, for the canvas that replaced it.
+      remember(network.__view, network);
       network.destroy();
       LIVE.delete(network);
     }
@@ -320,7 +327,8 @@ window.portiaKnowledge = (function () {
         };
         const at = placed[n.id] || seeded[n.id];
         if (at) Object.assign(node, { x: at.x, y: at.y });
-        // What the reader has seen holds still while what is new finds a place.
+        // What the reader has seen holds still while what is new finds a place,
+        // and floats with the rest once it has.
         if (placed[n.id] && fresh) node.fixed = true;
         return node;
       }),
@@ -353,32 +361,33 @@ window.portiaKnowledge = (function () {
       container,
       { nodes, edges },
       {
-        layout: { randomSeed: SEED, improvedLayout: false },
-        physics: fresh
-          ? {
-              solver: "forceAtlas2Based",
-              stabilization: { iterations: SETTLE_STEPS, fit: !looking },
-            }
-          : false,
+        layout: { randomSeed: SEED },
+        // Settling runs before anything is drawn, so it runs only when there
+        // is a node to place. A picture of nodes all seen before is drawn at
+        // once where they were and floats on from there, rather than waiting
+        // on a layout it has already found.
+        physics: {
+          stabilization: fresh ? { iterations: SETTLE_STEPS, fit: !looking } : false,
+        },
         interaction: { hover: true, tooltipDelay: 120 },
         groups: look.groups,
         edges: { ...look.edges, smooth: { type: "continuous" } },
       },
     );
     container.__network = network;
+    network.__view = view;
     LIVE.add(network);
     if (looking) network.moveTo({ position: looking.position, scale: looking.scale });
 
     if (fresh) {
       network.once("stabilizationIterationsDone", () => {
-        network.setOptions({ physics: false });
         nodes.update(data.nodes.map((n) => ({ id: n.id, fixed: false })));
         remember(view, network);
       });
-    } else {
-      remember(view, network);
     }
-    // A node let go of, or the view let go of after a pan, and a zoom.
+    // Come to rest, after the first settling or after a drag; a node let go
+    // of, or the view after a pan; and a zoom.
+    network.on("stabilized", () => remember(view, network));
     network.on("dragEnd", () => remember(view, network));
     network.on("zoom", () => remember(view, network));
 

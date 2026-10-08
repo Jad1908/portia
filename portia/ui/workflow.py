@@ -2077,8 +2077,10 @@ def _knowledge_inspector() -> None:
     **The data is written into the DOM and the client draws it** *(2026-10-08)*.
     It was pushed with a `run_javascript` after every render, which redrew the
     network and re-ran its layout each time this pane refreshed, and during
-    indexing or a chat that is every catalog write. `knowledge.js` puts every
-    node it has drawn before back where it was, so a refresh moves nothing.
+    indexing or a chat that is every catalog write. `knowledge.js` starts every
+    node it has drawn before where the canvas it replaces had floated it to, so
+    a refresh does not throw the picture into a new shape, and the subgraph is
+    read once and kept until something it shows moves.
     """
     show_columns = APP.knowledge_columns
     view = KNOWLEDGE_VIEWS[1] if show_columns else KNOWLEDGE_VIEWS[0]
@@ -2106,7 +2108,7 @@ def _knowledge_inspector() -> None:
         if show_columns:
             said = _columns_said(data)
             if said:
-                c.text(said)
+                c.text(said, style="t-body-strong", color="c-accent")
         else:
             c.caption(_knowledge_counts(data))
         with ui.element("div").classes("p-knowledge-host w-full"):
@@ -2136,6 +2138,10 @@ async def _refresh_knowledge() -> None:
     problem = await asyncio.to_thread(engine.sync_knowledge, APP)
     if problem:
         ui.notify(problem, type="warning")
+    # Read again whatever the sync did: a picture is kept between renders
+    # (`engine.knowledge_subgraph`), and this is the press that asks the
+    # database rather than the window.
+    engine.forget_knowledge()
     pane.refresh()
 
 
@@ -2156,44 +2162,32 @@ def _knowledge_counts(data: dict) -> str:
 
 
 def _columns_said(data: dict) -> str:
-    """What the Columns view left out and how it chose, in plain sentences.
+    """How much of the project the Columns view draws, or nothing if it draws it all.
 
-    **A sentence, not a count** *(2026-10-08)*. The caption here read *18 Source
-    · 582 Column · 582 edge(s) · 5582 more not drawn* in small grey type, and
-    nobody reading it could say which columns were missing or why. This says
-    what is on the picture, the rule that chose it (`query.choose_columns`),
-    and what to press for the rest. Nothing when nothing is left out: a
-    sentence about a rule that cut nothing is noise. Every number in it is the
-    query's; nothing here counts.
+    **A count, not the rule** *(2026-10-08, the user's call)*. The caption read
+    *18 Source · 582 Column · 582 edge(s) · 5582 more not drawn* in small grey
+    type; the two sentences that replaced it the same day stated the rule that
+    chose the columns (`query.choose_columns`) and what to press for the rest,
+    and were "almost invisible and too verbose". What is left is how many of
+    each the picture holds, drawn in the accent so it is read. The rule is in
+    the docstring it came from, and the `+N more` beside a table says the rest.
+
+    Tables are counted only when the cap cut some, which takes a project of
+    more than `query.MAX_GRAPH_NODES` of them. Every number is the query's;
+    nothing here counts.
     """
-    columns = data.get("columns") or {}
-    said = []
-    if columns.get("shown", 0) < columns.get("total", 0):
-        numbers = {
-            "shown": f"{columns['shown']:,}",
-            "total": f"{columns['total']:,}",
-            "connected": f"{columns['connected']:,}",
-            "share": columns.get("connected_per_table"),
-            "n": columns["per_table"],
-        }
-        rule = _COLUMNS_SHOWN_CUT if columns.get("connected_cut") else _COLUMNS_SHOWN
-        said += [rule.format(**numbers), _COLUMNS_REST]
-    if data.get("truncated"):
-        said.append(_TABLES_LEFT_OUT.format(n=f"{data['omitted']:,}"))
-    return " ".join(said)
+    cut = [
+        _KNOWLEDGE_SHOWN_OF.format(
+            shown=f"{part['shown']:,}", total=f"{part['total']:,}", what=what
+        )
+        for what, part in (("tables", data.get("tables")), ("columns", data.get("columns")))
+        if part and part["shown"] < part["total"]
+    ]
+    return _KNOWLEDGE_SHOWING.format(" and ".join(cut)) if cut else ""
 
 
-_COLUMNS_SHOWN = (
-    "Showing {shown} of {total} columns: every column linked to another column, then "
-    "each table's columns in file order until it shows {n}."
-)
-_COLUMNS_SHOWN_CUT = (
-    "Showing {shown} of {total} columns. {connected} are linked to another column, too "
-    "many to draw at once. Each table shows up to {share} of them, then its others in "
-    "file order until it shows {n}."
-)
-_COLUMNS_REST = "Press +N more beside a table to open all of its columns."
-_TABLES_LEFT_OUT = "{n} more tables are not drawn."
+_KNOWLEDGE_SHOWING = "Showing {}"
+_KNOWLEDGE_SHOWN_OF = "{shown} of {total} {what}"
 
 
 #: What a `+N more` node opens, by the kind of table it hangs from: a file's
