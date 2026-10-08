@@ -17,6 +17,15 @@
 //     nothing in ui/ talks to a database.
 //   * swapping the library is this file and nothing else, because the JSON
 //     says `kind` and `properties`, not vis-network's field names.
+//
+// **The JSON is in the DOM, and this file watches for it** (2026-10-08). The
+// server used to push it with a `run_javascript` after every render of the
+// middle pane, which during indexing or a chat is every catalog write, and each
+// push destroyed the network and ran the force layout again. Now
+// `workflow._knowledge_inspector` writes the data beside the canvas and this
+// draws whatever canvas has not been drawn — `chart.js`'s shape, for
+// `chart.js`'s reason: a render that drives the client races the DOM patch
+// NiceGUI is in the middle of applying.
 
 window.portiaKnowledge = (function () {
   // Kind decides the look, and only from `portia.css`'s tokens, read at draw
@@ -36,7 +45,37 @@ window.portiaKnowledge = (function () {
   // The accent appears in one place: what you selected, which is where you
   // are and not a claim about the node (DESIGN.md, `model-card-selected`).
   const KINDS = ["Source", "Model", "Group", "Column"];
-  const EDGE_DASH = { OVERLAPS: [6, 4] };
+
+  // The picture's own kinds, which the graph never holds (`query.MORE`,
+  // `query.FINDING`). A `More` node is the columns of one table the picture
+  // left out, and pressing it opens that table's whole list in the window. A
+  // `FINDING` line joins two tables one finding is about.
+  const MORE = "More";
+  const FINDING = "FINDING";
+
+  // The dash and the arrowhead say which kind an edge is. An overlap and a
+  // finding are each about two things at once and neither points, so neither
+  // has an arrow, and they are told apart by their dash.
+  const EDGE_DASH = { OVERLAPS: [6, 4], [FINDING]: [1, 4] };
+  const UNDIRECTED = ["OVERLAPS", FINDING];
+
+  // The event a press on a `More` node sends, at page level (`ui/app.py`).
+  const MORE_EVENT = "portia:more-columns";
+
+  // **A layout that settles, then holds still.** The force layout runs this
+  // many steps before the picture is shown and then stops for good: nodes that
+  // kept drifting forever (measured at about 390px every five seconds on a
+  // project of 600 nodes, with nothing happening) are a picture you cannot
+  // read, and a drag that drags its neighbours along is a picture you cannot
+  // arrange. ForceAtlas2 because it spreads a table's columns around it rather
+  // than piling every table into the middle. The steps are a ceiling: the
+  // layout stops sooner once nothing is moving. vis-network's improved first
+  // layout is off, because on three hundred nodes it took longer than the
+  // settling it was meant to shorten (1.3 s of a 2.9 s first draw).
+  const SETTLE_STEPS = 1000;
+  // The same project lays out the same way the first time, so a picture drawn
+  // twice from nothing is one picture rather than two.
+  const SEED = 7;
 
   // The tokens live on `body` — `body.body--dark` holds the dark block — so
   // they are read there; `:root` alone would answer in light mode every time.
@@ -65,20 +104,20 @@ window.portiaKnowledge = (function () {
 
   // One style per kind, as vis-network groups. `selected` is the border a node
   // takes when clicked: the accent, at the same width, and never a new fill.
-  function box(p, { fill, edge, text, font, radius }) {
+  function box(p, { fill, edge, text, font, radius, size = 12, dashes = false }) {
     return {
       shape: "box",
       borderWidth: 1,
       borderWidthSelected: 1,
       margin: { top: 6, right: 10, bottom: 6, left: 10 },
-      shapeProperties: { borderRadius: radius },
+      shapeProperties: { borderRadius: radius, borderDashes: dashes },
       color: {
         background: fill,
         border: edge,
         highlight: { background: fill, border: p.accent },
         hover: { background: fill, border: p.mute },
       },
-      font: { face: font, size: 12, color: text },
+      font: { face: font, size, color: text },
     };
   }
 
@@ -100,6 +139,19 @@ window.portiaKnowledge = (function () {
         },
         font: { face: p.mono, size: 11, color: p.mute },
       },
+      // A count, so mono, at a column's size and ink; dashed, because it
+      // stands in for columns that are not on the picture — the ghost card's
+      // *not quite here* (DESIGN.md), and not a colour, so it cannot read as
+      // a severity.
+      [MORE]: box(p, {
+        fill: p.surface,
+        edge: p.strong,
+        text: p.mute,
+        font: p.mono,
+        radius: 12,
+        size: 11,
+        dashes: [3, 3],
+      }),
     };
   }
 
@@ -166,38 +218,202 @@ window.portiaKnowledge = (function () {
     return lines.join("\n");
   }
 
-  function draw(elementId, data) {
-    const container = document.getElementById(elementId);
-    if (!container || typeof vis === "undefined") return;
+  // A `More` node's hover is its name as a control: what pressing it does, in
+  // the words the source inspector's own button uses.
+  function moreTip(node) {
+    const n = Number(node.properties.n_columns || 0).toLocaleString("en-US");
+    return `Show all ${n} columns`;
+  }
 
-    const nodes = data.nodes.map((n) => ({
-      id: n.id,
-      label: label(n),
-      title: tooltip(n),
-      group: KINDS.includes(n.kind) ? n.kind : "Column",
-    }));
-    const edges = data.edges.map((e) => ({
-      from: e.from,
-      to: e.to,
-      title: tooltip(e),
-      label: e.kind === "OVERLAPS" ? String(e.properties.n_measured_pairs || "") : "",
-      dashes: EDGE_DASH[e.kind] || false,
-      arrows: e.kind === "OVERLAPS" ? "" : "to",
-    }));
+  // A finding's hover: the agent's three sentences, whether a table moved since,
+  // and each query with its result as `findings.result_lines` laid it out —
+  // copied from the log, so these are the numbers the finding rests on and not
+  // a summary of them.
+  function findingTip(edge) {
+    const p = edge.properties || {};
+    const lines = [edge.kind];
+    for (const key of ["question", "answer", "so", "stale"]) {
+      if (p[key]) lines.push(`${key}: ${wrap(p[key])}`);
+    }
+    for (const query of p.queries || []) {
+      lines.push(`query: ${wrap(query.question || "")}`);
+      for (const line of query.result || []) lines.push(`    ${wrap(line)}`);
+    }
+    if (p.file) lines.push(`file: ${p.file}`);
+    return lines.join("\n");
+  }
 
-    if (container.__network) container.__network.destroy();
+  // **Where every node sits is the client's**, like the pan and the zoom
+  // (DESIGN.md → Window: they never round-trip). A refresh of the middle pane
+  // replaces the canvas, and the new one is drawn with every node it has seen
+  // before put back where it was, by its id, so nothing moves that the reader
+  // did not move. Only a node it has never seen is placed. Kept per view,
+  // because Tables and Columns are two pictures of one graph.
+  const PLACED = {};
+  const LOOKING = {};
+
+  function remember(view, network) {
+    Object.assign(PLACED[view], network.getPositions());
+    LOOKING[view] = { position: network.getViewPosition(), scale: network.getScale() };
+  }
+
+  // A node the reader has not seen yet starts beside one they have — a new
+  // column beside its table — so the layout it settles into is a local one.
+  // The golden angle fans several around one neighbour rather than stacking
+  // them on one point.
+  function seed(edges, placed) {
+    const at = {};
+    let n = 0;
+    for (const e of edges) {
+      for (const [near, far] of [
+        [e.from, e.to],
+        [e.to, e.from],
+      ]) {
+        if (placed[near] || at[near] || !placed[far]) continue;
+        const angle = n++ * 2.39996;
+        at[near] = { x: placed[far].x + 60 * Math.cos(angle), y: placed[far].y + 60 * Math.sin(angle) };
+      }
+    }
+    return at;
+  }
+
+  // Every network drawn and still on the page. NiceGUI replaces the canvas
+  // rather than patching it, so the one it replaced is destroyed here rather
+  // than left holding its canvas and its listeners.
+  const LIVE = new Set();
+
+  function sweep() {
+    for (const network of LIVE) {
+      if (network.body.container.isConnected) continue;
+      network.destroy();
+      LIVE.delete(network);
+    }
+  }
+
+  function draw(host) {
+    const holder = host.querySelector(".p-knowledge-data");
+    const container = host.querySelector(".p-knowledge");
+    const raw = holder && holder.textContent;
+    if (!container || !raw || typeof vis === "undefined" || container.__drawn === raw) return;
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch (err) {
+      return;
+    }
+    container.__drawn = raw;
+    const view = container.dataset.view || "";
+    const placed = PLACED[view] || (PLACED[view] = {});
+    const looking = LOOKING[view];
+    const byId = {};
+    for (const n of data.nodes) byId[n.id] = n;
+    const fresh = data.nodes.some((n) => !placed[n.id]);
+    const seeded = seed(data.edges, placed);
+
+    const nodes = new vis.DataSet(
+      data.nodes.map((n) => {
+        const node = {
+          id: n.id,
+          label: label(n),
+          title: n.kind === MORE ? moreTip(n) : tooltip(n),
+          group: KINDS.includes(n.kind) || n.kind === MORE ? n.kind : "Column",
+        };
+        const at = placed[n.id] || seeded[n.id];
+        if (at) Object.assign(node, { x: at.x, y: at.y });
+        // What the reader has seen holds still while what is new finds a place.
+        if (placed[n.id] && fresh) node.fixed = true;
+        return node;
+      }),
+    );
+    const between = {};
+    const edges = new vis.DataSet(
+      data.edges.map((e) => {
+        const edge = {
+          from: e.from,
+          to: e.to,
+          title: e.kind === FINDING ? findingTip(e) : tooltip(e),
+          label: e.kind === "OVERLAPS" ? String(e.properties.n_measured_pairs || "") : "",
+          dashes: EDGE_DASH[e.kind] || false,
+          arrows: UNDIRECTED.includes(e.kind) ? "" : "to",
+        };
+        if (e.kind === FINDING) {
+          // Two findings about one pair of tables are two lines, bowed apart so
+          // each can be hovered. The bow is the order they came in and says
+          // nothing else.
+          const pair = [e.from, e.to].sort().join("|");
+          between[pair] = (between[pair] || 0) + 1;
+          edge.smooth = { type: "curvedCW", roundness: 0.15 * between[pair] };
+        }
+        return edge;
+      }),
+    );
+
     const look = styles(palette());
-    container.__network = new vis.Network(
+    const network = new vis.Network(
       container,
-      { nodes: new vis.DataSet(nodes), edges: new vis.DataSet(edges) },
+      { nodes, edges },
       {
-        physics: { stabilization: { iterations: 200 } },
+        layout: { randomSeed: SEED, improvedLayout: false },
+        physics: fresh
+          ? {
+              solver: "forceAtlas2Based",
+              stabilization: { iterations: SETTLE_STEPS, fit: !looking },
+            }
+          : false,
         interaction: { hover: true, tooltipDelay: 120 },
         groups: look.groups,
         edges: { ...look.edges, smooth: { type: "continuous" } },
       },
     );
+    container.__network = network;
+    LIVE.add(network);
+    if (looking) network.moveTo({ position: looking.position, scale: looking.scale });
+
+    if (fresh) {
+      network.once("stabilizationIterationsDone", () => {
+        network.setOptions({ physics: false });
+        nodes.update(data.nodes.map((n) => ({ id: n.id, fixed: false })));
+        remember(view, network);
+      });
+    } else {
+      remember(view, network);
+    }
+    // A node let go of, or the view let go of after a pan, and a zoom.
+    network.on("dragEnd", () => remember(view, network));
+    network.on("zoom", () => remember(view, network));
+
+    network.on("click", (params) => {
+      const node = params.nodes.length === 1 ? byId[params.nodes[0]] : null;
+      if (!node || node.kind !== MORE || typeof emitEvent !== "function") return;
+      emitEvent(MORE_EVENT, { kind: node.properties.table_kind, name: node.properties.table });
+    });
+    // The one node here that is a control says so under the pointer.
+    network.on("hoverNode", (params) => {
+      const node = byId[params.node];
+      container.style.cursor = node && node.kind === MORE ? "pointer" : "";
+    });
+    network.on("blurNode", () => {
+      container.style.cursor = "";
+    });
   }
+
+  function drawAll() {
+    sweep();
+    document.querySelectorAll(".p-knowledge-host").forEach(draw);
+  }
+
+  // One `drawAll()` per frame, not one per mutation — `chart.js`'s rule. The
+  // check per canvas is a string comparison, and a canvas already drawn from
+  // the same data is left alone.
+  let queued = false;
+  const observer = new MutationObserver(() => {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => {
+      queued = false;
+      drawAll();
+    });
+  });
 
   // A theme switch restyles every graph on screen in place: a canvas already
   // painted does not follow a CSS variable, and redrawing from scratch would
@@ -220,7 +436,9 @@ window.portiaKnowledge = (function () {
       attributes: true,
       attributeFilter: ["class"],
     });
+    drawAll();
+    observer.observe(document.body, { childList: true, subtree: true });
   });
 
-  return { draw };
+  return { draw, drawAll };
 })();

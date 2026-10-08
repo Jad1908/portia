@@ -155,6 +155,10 @@ def page() -> None:
     # A click on a spec row, with the gesture already resolved by the client —
     # see `assets/pick.js` for why neither the browser nor Python can do it.
     ui.on("portia:spec", _spec_picked)
+    # A press on a table's `+N more` in the knowledge graph (`assets/knowledge.js`),
+    # naming the table rather than the node: the canvas it was pressed on is
+    # replaced by the press's own refresh.
+    ui.on("portia:more-columns", _more_columns)
     # A click on a gallery row, with one press told from two (`assets/pick.js`).
     ui.on("portia:opens", _row_opened)
     # A figure dragged into a folder, likewise already resolved
@@ -216,6 +220,12 @@ def page() -> None:
 def _edge_clicked(event) -> None:
     """A click on an arrow: open its target card at that input's columns."""
     workflow.open_edge(event.args or "")
+
+
+def _more_columns(event) -> None:
+    """A press on a table's `+N more`: open that table with every column showing."""
+    args = event.args or {}
+    workflow.open_table(str(args.get("kind") or ""), str(args.get("name") or ""))
 
 
 def _card_moved(event) -> None:

@@ -65,6 +65,7 @@ picture drew every project at once.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Any
 
 from portia.knowledge.measure import MEASURED
@@ -78,6 +79,7 @@ from portia.knowledge.schema import (
     KEY_PROPERTY,
     MODEL,
     OVERLAPS,
+    POSITION,
     PROJECT,
     READS,
     SHAPE_FACTS,
@@ -652,6 +654,204 @@ def _render_column(answer: dict) -> str:
 #: neither gets tuned on the other's behalf.
 MAX_GRAPH_NODES = 600
 
+#: The fewest and the most columns the Columns view gives each table before the
+#: rest are one `+N more` node, beyond the columns that connect to something
+#: (:func:`choose_columns`). Between the two, the number is whatever room the cap
+#: leaves, shared evenly. Five is enough to see what kind of table it is; past
+#: fifteen a table's spray of columns says nothing the next five did not, and
+#: the full list is one press away.
+MIN_COLUMNS_SHOWN = 5
+MAX_COLUMNS_SHOWN = 15
+
+#: The kinds a picture is about, and draws whatever the cap does to columns.
+TABLE_KINDS = (SOURCE, MODEL, GROUP)
+
+#: **The picture's own kinds: drawn, never stored.** Nothing writes either to
+#: Neo4j, which is why they are here and not in `schema.py`.
+#:
+#: `MORE` is a table's columns the picture left out, as one node hanging from
+#: the table, labelled with how many; pressing it opens the table's whole list
+#: in the window. `FINDING` is a line between two tables one finding is about,
+#: composed by `ui/engine.knowledge_subgraph` from `findings.py` rather than
+#: copied into the graph, so the finding is still one fact in one place
+#: (`docs/FINDINGS.md` §3 says why it is not an edge in here).
+MORE = "More"
+FINDING = "FINDING"
+
+
+@dataclass(frozen=True)
+class ColumnRow:
+    """One column, as much as choosing it needs and nothing more.
+
+    ``table`` is the id of the table it hangs from, or ``None`` for a column no
+    table lists any more: one a measurement kept alive after its file dropped it
+    (`store.py` — a node goes only when nothing points at it). ``position`` is
+    ``None`` on a graph built before :data:`schema.POSITION` existed.
+    ``connected`` is whether anything besides `HAS_COLUMN` touches it.
+    """
+
+    id: str
+    table: str | None
+    key: str
+    position: int | None = None
+    connected: bool = False
+
+
+@dataclass(frozen=True)
+class ColumnChoice:
+    """Which columns a picture draws, and what its caption needs to say so."""
+
+    #: The columns to draw, a table at a time and in file order within one.
+    ids: list[str]
+    #: How many columns the project has, and how many of them connect to something.
+    total: int
+    connected: int
+    #: ``N``: how many columns a table shows when it has them — its connected
+    #: ones, then others in file order until it shows this many.
+    per_table: int
+    #: How many columns each table holds, and, for a table that lost some, how many.
+    sizes: dict[str, int] = field(default_factory=dict)
+    left_out: dict[str, int] = field(default_factory=dict)
+    #: How many connected columns made it, and the most any one table could
+    #: draw when they did not all fit; ``None`` when they did.
+    connected_shown: int = 0
+    connected_per_table: int | None = None
+
+    @property
+    def connected_cut(self) -> bool:
+        return self.connected_shown < self.connected
+
+
+def choose_columns(
+    tables: list[str], columns: list[ColumnRow], *, cap: int = MAX_GRAPH_NODES
+) -> ColumnChoice:
+    """Which columns the Columns view draws: every connected one, then file order.
+
+    **The rule** *(2026-10-08)*. Every table is drawn. Every column with a
+    relationship besides `HAS_COLUMN` is drawn, because a measured overlap or a
+    lineage edge is what this view exists to show. Then each table's other
+    columns, in file order, until the table shows ``N``: the room the cap
+    leaves after the tables and the connected columns, shared evenly across the
+    tables and held between :data:`MIN_COLUMNS_SHOWN` and
+    :data:`MAX_COLUMNS_SHOWN`. A table with no more than ``N`` columns shows
+    them all.
+
+    **What it replaced.** The cap took columns in key order, and a key starts
+    with its table's path, so the first table alphabetically took the picture.
+    On a project of 18 sources and 6,164 columns one table drew 550, the next
+    26, and sixteen drew none, under a caption reading *5582 more not drawn*.
+
+    **When the connected columns alone do not fit**, they are shared the same
+    way: every table may draw the same number of them, the most that fits, and
+    a table with fewer leaves its spare to the rest. ``connected_per_table``
+    says what that number was, so the caption can say it in words.
+
+    **Nothing here ranks** (§6.1). A table's columns are taken in file order,
+    which is a fact about the table, and never by a number measured on them. A
+    graph built before columns carried a position falls back to the key, which
+    within one table is the column's name.
+
+    ``tables`` is every table node the picture draws, in the order it draws
+    them. Pure, so it is tested without a database: Cypher fetches, this
+    chooses.
+    """
+    by_table: dict[str | None, list[ColumnRow]] = {}
+    for row in columns:
+        by_table.setdefault(row.table, []).append(row)
+    # Tables in drawing order, then the columns no table lists. A column whose
+    # table the cap did not draw has nothing to hang from and is not drawn.
+    groups = [(t, sorted(by_table[t], key=_file_order)) for t in [*tables, None] if t in by_table]
+
+    linked = {table: [row for row in rows if row.connected] for table, rows in groups}
+    n_connected = sum(len(rows) for rows in linked.values())
+    room = cap - len(tables)
+    share = None
+    if n_connected > room:
+        share = max(MIN_COLUMNS_SHOWN, _fair_share([len(r) for r in linked.values()], room))
+    per_table = _clamp((room - n_connected) // len(tables)) if tables else MIN_COLUMNS_SHOWN
+
+    ids: list[str] = []
+    sizes: dict[str, int] = {}
+    left_out: dict[str, int] = {}
+    connected_shown = 0
+    for table, rows in groups:
+        drawn = linked[table] if share is None else linked[table][:share]
+        rest = [row for row in rows if not row.connected][: max(0, per_table - len(drawn))]
+        keep = {row.id for row in (*drawn, *rest)}
+        ids += [row.id for row in rows if row.id in keep]
+        connected_shown += len(drawn)
+        if table is None:
+            continue
+        sizes[table] = len(rows)
+        if len(rows) > len(keep):
+            left_out[table] = len(rows) - len(keep)
+    return ColumnChoice(
+        ids=ids,
+        total=len(columns),
+        connected=n_connected,
+        per_table=per_table,
+        sizes=sizes,
+        left_out=left_out,
+        connected_shown=connected_shown,
+        connected_per_table=share,
+    )
+
+
+def _file_order(row: ColumnRow) -> tuple:
+    """A column's place in its table; the key's order on a graph that has none."""
+    return (row.position is None, row.position or 0, row.key)
+
+
+def _clamp(n: int) -> int:
+    return max(MIN_COLUMNS_SHOWN, min(MAX_COLUMNS_SHOWN, n))
+
+
+def _fair_share(counts: list[int], room: int) -> int:
+    """The most each table may draw so that all of them together fit in ``room``.
+
+    The same number for every table, which is what makes it even; a table with
+    fewer than that draws what it has, and what it did not use is what lets the
+    number be as high as it is.
+    """
+    low, high = 0, max(counts, default=0)
+    while low < high:
+        middle = (low + high + 1) // 2
+        if sum(min(count, middle) for count in counts) <= room:
+            low = middle
+        else:
+            high = middle - 1
+    return low
+
+
+#: How a node comes back for a picture: its kind, what to call it, its id, and
+#: everything it carries.
+_NODE_RETURN = (
+    "RETURN labels(n)[0] AS kind, coalesce(n.name, n.key, n.path) AS label, "
+    "elementId(n) AS id, properties(n) AS properties"
+)
+
+#: What :func:`choose_columns` needs about every column of the project, a table
+#: at a time. Cheap on purpose: six thousand columns come back as eighteen rows
+#: of short lists, and only the few hundred chosen come back with their
+#: properties. Measured on that project: 70 ms collected per table, against 180
+#: ms as a row per column and 1.2 s for the first draft's whole picture. A
+#: column no table lists is collected under a null table.
+_COLUMNS_BY_TABLE = (
+    f"MATCH (n:{COLUMN}) WHERE n.{PROJECT} = $project "
+    f"OPTIONAL MATCH (t)-[:{HAS_COLUMN}]->(n) "
+    "RETURN elementId(t) AS table, collect([elementId(n), n.key, "
+    f"n.{POSITION}, EXISTS {{ MATCH (n)-[r]-() WHERE type(r) <> '{HAS_COLUMN}' }}]) AS columns"
+)
+
+#: Every edge between two nodes the picture draws. Asked by id rather than by
+#: project and filtered afterwards, which sent all six thousand `HAS_COLUMN`
+#: edges to draw two hundred and fifty (250 ms against 15).
+_EDGES_BETWEEN = (
+    "MATCH (a)-[r]->(b) WHERE elementId(a) IN $ids AND elementId(b) IN $ids "
+    "RETURN elementId(a) AS `from`, elementId(b) AS `to`, type(r) AS kind, "
+    "properties(r) AS properties"
+)
+
 
 def subgraph(session: Any, *, project: str, columns: bool = False) -> dict:
     """The whole graph as nodes and edges — for drawing, not for reading.
@@ -664,56 +864,50 @@ def subgraph(session: Any, *, project: str, columns: bool = False) -> dict:
     separate rather than the router being loosened.
 
     ``columns`` off is the legible view: tables, groups, what reads what, and one
-    edge per pair of tables that share a measured overlap. On, it is the full
-    thing including every column and every lineage edge, which at a real project
-    is a hairball and is sometimes exactly what you want to see.
+    edge per pair of tables that share a measured overlap. On, it adds columns
+    and their lineage, chosen by :func:`choose_columns` when they do not all
+    fit, with one :data:`MORE` node per table that lost some and a ``columns``
+    summary saying what was chosen and how.
 
     Nodes and edges come back in portia's own vocabulary — no library's field
     names — so swapping what draws them is a change in one JavaScript file.
     """
-    labels = (SOURCE, MODEL, GROUP, COLUMN) if columns else (SOURCE, MODEL, GROUP)
-    scoped = f"n.{PROJECT} = $project"
-    # **Tables before columns, whatever the cap cuts** *(2026-09-23)*. The
-    # nodes were ordered by kind, and `Column` sorts before `Group`, `Model`
-    # and `Source`, so on a project with more columns than `MAX_GRAPH_NODES`
-    # the cap kept every column and dropped every table. The `HAS_COLUMN`
-    # edges were then filtered out below as pointing at unknown nodes, and the
-    # explorer drew six hundred columns attached to nothing, joined only by the
-    # overlaps measured between them (the user's report, on a warehouse of 39
-    # tables). The kinds a picture is *about* come first, and the columns are
-    # ordered by their key, which starts with the table's, so what the cap
-    # takes is whole tables at the end of the list rather than a scatter of
-    # columns from every table.
-    where = f"WHERE {_any_label('n', labels)} AND {scoped} "
+    # **Tables first, whatever the cap cuts** *(2026-09-23)*. Ordered by kind,
+    # `Column` sorted before `Group`, `Model` and `Source`, so a project with
+    # more columns than `MAX_GRAPH_NODES` kept every column and dropped every
+    # table: the explorer drew six hundred columns attached to nothing (the
+    # user's report, on a warehouse of 39 tables). The tables are their own
+    # query now, and the cap reaches them only on a project with more tables
+    # than a picture can hold.
+    where = f"WHERE {_any_label('n', TABLE_KINDS)} AND n.{PROJECT} = $project "
     nodes = _run(
         session,
-        f"MATCH (n) {where}"
-        "RETURN labels(n)[0] AS kind, coalesce(n.name, n.key, n.path) AS label, "
-        "elementId(n) AS id, properties(n) AS properties "
-        f"ORDER BY n:{COLUMN}, kind, coalesce(n.key, n.name, n.path) LIMIT {MAX_GRAPH_NODES}",
+        f"MATCH (n) {where}{_NODE_RETURN} "
+        f"ORDER BY kind, coalesce(n.key, n.name, n.path) LIMIT {MAX_GRAPH_NODES}",
         project=project,
     )
     total = _run(session, f"MATCH (n) {where}RETURN count(n) AS n", project=project)[0]["n"]
-    known = {n["id"] for n in nodes}
-    edges = [
-        e
-        for e in _run(
-            session,
-            f"MATCH (a)-[r]->(b) WHERE {_any_label('a', labels)} AND {_any_label('b', labels)} "
-            f"AND a.{PROJECT} = $project AND b.{PROJECT} = $project "
-            "RETURN elementId(a) AS `from`, elementId(b) AS `to`, type(r) AS kind, "
-            "properties(r) AS properties",
-            project=project,
-        )
-        if e["from"] in known and e["to"] in known
-    ]
+    picture: dict = {
+        "nodes": nodes,
+        "edges": [],
+        "truncated": total > len(nodes),
+        # How many tables the cap left out, so the caption can count them
+        # rather than say *truncated* and leave the reader to guess at what.
+        "omitted": total - len(nodes),
+    }
+    if columns:
+        _add_columns(session, picture, project)
+
+    drawn = [n["id"] for n in picture["nodes"] if n["kind"] != MORE]
+    picture["edges"] += _run(session, _EDGES_BETWEEN, ids=drawn)
     if not columns:
+        known = set(drawn)
         # Table-to-table overlap, **derived** rather than stored. §4.1 rejected a
         # summary source-to-source edge in the schema because two things would
         # then state one fact and could disagree — and said to derive it in the
         # query instead. This is that query, and it is the only place the graph
         # is redrawn at a coarser grain than it is written.
-        edges += [
+        picture["edges"] += [
             e
             for e in _run(
                 session,
@@ -726,13 +920,61 @@ def subgraph(session: Any, *, project: str, columns: bool = False) -> dict:
             )
             if e["from"] in known and e["to"] in known
         ]
-    return {
-        "nodes": nodes,
-        "edges": edges,
-        "truncated": total > len(nodes),
-        # How many the cap left out, so the caption can count them rather than
-        # say *truncated* and leave the reader to guess at what.
-        "omitted": total - len(nodes),
+    return picture
+
+
+def _add_columns(session: Any, picture: dict, project: str) -> None:
+    """The chosen columns, and a `MORE` node for every table that lost some.
+
+    Two queries, so the properties of six thousand columns are never sent to
+    choose a few hundred: the first fetches what choosing needs, and the second
+    the chosen columns whole.
+    """
+    tables = picture["nodes"]
+    rows = [
+        ColumnRow(column, group["table"], key, position, connected)
+        for group in _run(session, _COLUMNS_BY_TABLE, project=project)
+        for column, key, position, connected in group["columns"]
+    ]
+    choice = choose_columns([t["id"] for t in tables], rows, cap=MAX_GRAPH_NODES)
+    order = {column: n for n, column in enumerate(choice.ids)}
+    drawn = _run(
+        session,
+        f"MATCH (n:{COLUMN}) WHERE n.{PROJECT} = $project AND elementId(n) IN $ids {_NODE_RETURN}",
+        project=project,
+        ids=choice.ids,
+    )
+    picture["nodes"] = [*tables, *sorted(drawn, key=lambda n: order[n["id"]])]
+
+    by_id = {t["id"]: t for t in tables}
+    for table, n in choice.left_out.items():
+        more = f"{MORE}:{table}"
+        picture["nodes"].append(
+            {
+                "id": more,
+                "kind": MORE,
+                "label": f"+{n:,} more",
+                # What a press needs to open the table in the window, which
+                # names a table the way the catalog does, and the two counts
+                # its hover card states.
+                "properties": {
+                    "table": by_id[table]["properties"].get("name"),
+                    "table_kind": by_id[table]["kind"],
+                    "n_more": n,
+                    "n_columns": choice.sizes[table],
+                },
+            }
+        )
+        picture["edges"].append({"from": table, "to": more, "kind": HAS_COLUMN, "properties": {}})
+
+    picture["columns"] = {
+        "total": choice.total,
+        "shown": len(choice.ids),
+        "connected": choice.connected,
+        "connected_shown": choice.connected_shown,
+        "connected_cut": choice.connected_cut,
+        "connected_per_table": choice.connected_per_table,
+        "per_table": choice.per_table,
     }
 
 

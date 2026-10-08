@@ -7779,3 +7779,268 @@ def test_a_theme_switch_restyles_the_graph_in_place():
     assert "getComputedStyle(document.body)" in js
     assert 'attributeFilter: ["class"]' in js
     assert "el.__network.setOptions(look)" in js
+
+
+# --- the knowledge graph on a wide project (2026-10-08) ----------------------
+
+
+def _picture(**columns) -> dict:
+    """What `engine.knowledge_subgraph` hands the pane, with no server behind it."""
+    nodes = [
+        {"id": "s1", "kind": "Source", "label": "orders", "properties": {"name": "orders"}},
+        {"id": "s2", "kind": "Source", "label": "regions", "properties": {"name": "regions"}},
+        {"id": "s3", "kind": "Source", "label": "returns", "properties": {"name": "returns"}},
+        {"id": "m1", "kind": "Model", "label": "mart", "properties": {"name": "mart"}},
+    ]
+    picture: dict = {"nodes": nodes, "edges": [], "truncated": False, "omitted": 0}
+    if columns:
+        picture["columns"] = {
+            "total": 6164,
+            "shown": 274,
+            "connected": 4,
+            "connected_shown": 4,
+            "connected_cut": False,
+            "connected_per_table": None,
+            "per_table": 15,
+            **columns,
+        }
+    return picture
+
+
+def _finding_file(root: Path, name: str, about: list[str], **fields) -> None:
+    """A finding as `findings.record` writes one, written by hand."""
+    import yaml
+
+    doc = {
+        "question": f"what links {' and '.join(about)}?",
+        "answer": "they share a key",
+        "so": "joined on it",
+        "about": about,
+        "spec": None,
+        "at": "2026-10-08T10:00:00+02:00",
+        "fingerprints": {},
+        "queries": [
+            {
+                "chat": "20261008-100000",
+                "n": 1,
+                "question": "how many match?",
+                "sql": "select 1",
+                "result": '{"n_rows":1,"columns":["n"],"rows":[{"n":42}]}',
+            }
+        ],
+        **fields,
+    }
+    (root / "findings").mkdir(exist_ok=True)
+    (root / "findings" / f"{name}.yaml").write_text(
+        yaml.safe_dump(doc, sort_keys=False), encoding="utf-8"
+    )
+
+
+def _finding_lines(root: Path, nodes: list[dict], sources: dict | None = None) -> list[dict]:
+    from portia import findings
+
+    records = findings.load_all(root)
+    stale = findings.stale_marks(records, root=root, sources=sources or {})
+    return engine_module.finding_edges(nodes, records, stale)
+
+
+def test_a_finding_about_two_tables_is_one_line_between_them(tmp_path):
+    """The link a copilot found between two tables had nowhere on the picture to
+    go: it was in `findings/` and the graph held two measured overlaps."""
+    from portia.knowledge import query
+
+    _finding_file(tmp_path, "pair", ["orders.id", "regions.id"])
+    [line] = _finding_lines(tmp_path, _picture()["nodes"])
+    assert (line["from"], line["to"], line["kind"]) == ("s1", "s2", query.FINDING)
+    card = line["properties"]
+    assert card["question"] == "what links orders.id and regions.id?"
+    assert card["so"] == "joined on it" and "stale" not in card
+    # The numbers are the file's, laid out and never retyped.
+    assert card["queries"] == [{"question": "how many match?", "result": ["n_rows 1", "n 42"]}]
+    assert card["file"] == "findings/pair.yaml"
+
+
+def test_a_finding_about_three_tables_is_a_line_per_pair_on_screen(tmp_path):
+    _finding_file(tmp_path, "three", ["orders", "regions.id", "mart.region"])
+    lines = _finding_lines(tmp_path, _picture()["nodes"])
+    assert {(e["from"], e["to"]) for e in lines} == {("s1", "s2"), ("s1", "m1"), ("s2", "m1")}
+
+    # A table the picture does not draw takes its lines with it, and a finding
+    # left with one table on screen has no line to draw.
+    drawn = [n for n in _picture()["nodes"] if n["id"] != "m1"]
+    assert {(e["from"], e["to"]) for e in _finding_lines(tmp_path, drawn)} == {("s1", "s2")}
+    alone = [n for n in drawn if n["id"] != "s2"]
+    assert _finding_lines(tmp_path, alone) == []
+
+
+def test_a_finding_about_one_table_draws_nothing(tmp_path):
+    _finding_file(tmp_path, "one", ["orders.id", "orders.amount"])
+    assert _finding_lines(tmp_path, _picture()["nodes"]) == []
+
+
+def test_a_stale_finding_is_drawn_and_says_which_table_moved(tmp_path):
+    """Marked, never left out (`KNOWLEDGE_GRAPH.md` §4.5): a finding whose data
+    moved is still evidence somebody looked."""
+    _finding_file(
+        tmp_path,
+        "moved",
+        ["orders", "regions"],
+        fingerprints={"orders": "10:1.0", "regions": "20:2.0"},
+    )
+    sources = {
+        "orders": {"indexed": {"size": 11, "mtime": 3.0}},
+        "regions": {"indexed": {"size": 20, "mtime": 2.0}},
+    }
+    [line] = _finding_lines(tmp_path, _picture()["nodes"], sources)
+    assert line["properties"]["stale"] == "measured before orders changed"
+
+
+def test_a_finding_names_a_source_before_a_model_of_the_same_name(tmp_path):
+    """The order `findings.fingerprints` resolves a name in."""
+    nodes = [
+        *_picture()["nodes"],
+        {"id": "m2", "kind": "Model", "label": "orders", "properties": {"name": "orders"}},
+    ]
+    _finding_file(tmp_path, "pair", ["orders", "regions"])
+    [line] = _finding_lines(tmp_path, nodes)
+    assert line["from"] == "s1"
+
+
+def test_the_knowledge_engine_reads_findings_without_reading_the_catalog(tmp_path, monkeypatch):
+    """Reading the catalog was 2.7 s of YAML on a project of 6,164 columns, on
+    every render; the window already holds it, and a project with no finding
+    about two tables asks for nothing."""
+    from contextlib import contextmanager
+
+    from portia.knowledge import query, store
+
+    @contextmanager
+    def session():
+        yield None
+
+    monkeypatch.setattr(store, "session", session)
+    monkeypatch.setattr(query, "subgraph", lambda *a, **k: _picture())
+    monkeypatch.setattr(
+        catalog, "load_catalog", lambda *a, **k: pytest.fail("the catalog was read from disk")
+    )
+    app = App(root=tmp_path)
+    app.catalog = {"sources": {"orders": {}, "regions": {}}}
+    assert engine_module.knowledge_subgraph(app)["edges"] == []
+
+    _finding_file(tmp_path, "pair", ["orders", "regions"])
+    [line] = engine_module.knowledge_subgraph(app)["edges"]
+    assert line["kind"] == query.FINDING
+
+
+def test_the_columns_view_says_what_it_left_out_in_a_sentence():
+    """It read *18 Source · 582 Column · 582 edge(s) · 5582 more not drawn* in
+    small grey type, and nobody could say what was missing or why."""
+    from portia.ui import workflow
+
+    said = workflow._columns_said(_picture())
+    assert said == "", "nothing was chosen, so there is no rule to state"
+
+    said = workflow._columns_said(_picture(shown=274, total=6164))
+    assert said.startswith("Showing 274 of 6,164 columns: every column linked to another")
+    assert "until it shows 15." in said
+    assert "Press +N more" in said
+    assert "—" not in said and " · " not in said, "DESIGN.md → Copy"
+
+    assert workflow._columns_said(_picture(shown=6164, total=6164)) == ""
+
+
+def test_the_columns_view_says_when_the_connected_columns_did_not_fit():
+    from portia.ui import workflow
+
+    said = workflow._columns_said(
+        _picture(
+            shown=600,
+            total=9000,
+            connected=1450,
+            connected_shown=560,
+            connected_cut=True,
+            connected_per_table=40,
+            per_table=5,
+        )
+    )
+    assert "1,450 are linked to another column, too many to draw at once." in said
+    assert "up to 40 of them" in said and "until it shows 5." in said
+
+
+def test_the_tables_view_keeps_its_counts():
+    from portia.ui import workflow
+
+    assert workflow._knowledge_counts(_picture()) == "3 Source · 1 Model · 0 edge(s)"
+
+
+def test_the_knowledge_graph_is_written_into_the_dom_not_pushed(monkeypatch):
+    """A `run_javascript` after every render redrew the network and re-ran its
+    layout whenever the middle pane refreshed — every catalog write while
+    indexing. The data is in the DOM now and `knowledge.js` draws it."""
+    import inspect
+    import json
+
+    from portia.ui import workflow
+
+    source = inspect.getsource(workflow._knowledge_inspector)
+    assert "ui.run_javascript(" not in source and "ui.timer(" not in source
+
+    app = App()
+    app.knowledge_columns = True
+    picture = _picture(shown=274, total=6164)
+    monkeypatch.setattr(engine_module, "knowledge_subgraph", lambda *a, **k: picture)
+    with _as_app(workflow, app), ui.element("div") as slot:
+        workflow._knowledge_inspector()
+    [data] = [e for e in slot.descendants() if "p-knowledge-data" in e.classes]
+    assert json.loads(data.text) == picture
+    [canvas] = [e for e in slot.descendants() if "p-knowledge" in e.classes]
+    assert canvas.props["data-view"] == "Columns"
+
+
+def test_a_more_node_opens_its_tables_whole_column_list(tmp_path, monkeypatch):
+    """The source's own tab, unfolded, because the press asked for the columns
+    the picture left out; a model's is its built table's."""
+    from portia.ui import artifacts, workflow
+
+    app = App(root=tmp_path)
+    app.catalog = {"sources": {"orders": {}}}
+    monkeypatch.setattr(workflow.pane, "refresh", lambda *a, **k: None)
+    monkeypatch.setattr(artifacts, "show_selection", lambda: None)
+    with _as_app(workflow, app):
+        workflow.open_table("Source", "orders")
+        assert (app.selection, app.columns_open) == ((state.SOURCE, "orders"), "orders")
+
+        workflow.open_table("Model", "mart")
+        assert (app.selection, app.columns_open) == ((state.BUILT, "mart"), "mart")
+
+        # A table the catalog no longer has: the picture is a moment behind.
+        workflow.open_table("Source", "gone")
+        assert app.selection == (state.BUILT, "mart")
+
+
+def test_the_more_press_speaks_the_graphs_kinds_and_one_event_name():
+    """Keyed by the graph's own kinds, which reach the browser and come back,
+    and registered once at page level under the name the client sends."""
+    import inspect
+
+    from portia.knowledge import query, schema
+    from portia.ui import app as app_module
+    from portia.ui import workflow
+
+    assert set(workflow._COLUMNS_OF) == {schema.SOURCE, schema.MODEL}
+    js = _knowledge_js()
+    assert 'const MORE_EVENT = "portia:more-columns";' in js
+    assert f'const MORE = "{query.MORE}";' in js
+    assert f'const FINDING = "{query.FINDING}";' in js
+    assert 'ui.on("portia:more-columns", _more_columns)' in inspect.getsource(app_module.page)
+
+
+def test_the_knowledge_graph_settles_then_holds_still():
+    """Every node kept moving, about 390px every five seconds, with nothing
+    happening; and a refresh ran the layout again. The layout settles once,
+    physics goes off, and a redraw puts every node it has seen back by id."""
+    js = _knowledge_js()
+    assert 'solver: "forceAtlas2Based"' in js
+    assert "network.setOptions({ physics: false });" in js
+    assert "placed[n.id]" in js and "PLACED[view]" in js
+    assert 'network.on("dragEnd"' in js and 'network.on("zoom"' in js

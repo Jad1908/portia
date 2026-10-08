@@ -119,6 +119,18 @@ DERIVATION = "derivation"
 DERIVATION_UNKNOWN = "unknown"
 
 
+#: On a Column: its place in its table, from 1, in the order the table holds its
+#: columns — the catalog entry's for a file, the output's for a model. A
+#: structural fact like `HAS_COLUMN`, restated from the same files, and the one
+#: order the Columns picture takes a table's columns in when it cannot draw them
+#: all (`query.choose_columns`): file order is a fact about the table, where any
+#: order by a measured number would be the ranking §6.1 forbids.
+#:
+#: A graph written before this existed has none, and the picture falls back to
+#: the key's order, which is the column's name.
+POSITION = "position"
+
+
 #: The counts every Column node carries, whatever kind of column it is. Facts
 #: the catalog already holds, restated so a graph answer can report a
 #: measurement without a second call to fetch what the two ends look like.

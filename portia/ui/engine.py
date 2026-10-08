@@ -2054,14 +2054,93 @@ def knowledge_subgraph(app: App, *, columns: bool = False) -> dict:
     It takes the app for one reason: the project. One Neo4j server holds every
     project on the machine, so a picture that named none of them drew all of
     them at once (`knowledge/schema.py`'s `PROJECT`).
+
+    **The findings are drawn on it, not stored in it** *(2026-10-08)*. A finding
+    about two tables is the agent's note on how they relate, and the graph had
+    nowhere to show it: on a project with two measured overlaps, the link the
+    copilot actually found between two tables was in `findings/` and nowhere on
+    the picture. It is not written into Neo4j as an edge, because a finding is
+    prose with copied numbers and `docs/FINDINGS.md` §3 keeps it off `OVERLAPS`
+    for that reason; read from `findings.py` on each draw, it stays one fact in
+    one place (:func:`finding_edges`).
     """
     from portia.knowledge import query, schema, store
 
     try:
         with store.session() as session:
-            return query.subgraph(session, project=schema.project_id(app.root), columns=columns)
+            picture = query.subgraph(session, project=schema.project_id(app.root), columns=columns)
     except store.GraphUnavailable as exc:
         return {"nodes": [], "edges": [], "unavailable": str(exc)}
+    # Only a finding about two tables or more can draw a line, and staleness is
+    # worked out from the catalog the window already holds: read from disk, it
+    # was 2.7 s of YAML on every render of a project of 6,164 columns.
+    records = [f for f in findings.load_all(app.root) if len(findings.tables(f)) > 1]
+    stale = findings.stale_marks(records, root=app.root, sources=app.sources) if records else {}
+    picture["edges"] += finding_edges(picture["nodes"], records, stale)
+    return picture
+
+
+def finding_edges(
+    nodes: list[dict], records: list[dict], stale: dict[str, list[str]]
+) -> list[dict]:
+    """A line between every two tables on the picture that one finding is about.
+
+    One per pair, so a finding about three tables is three lines when all three
+    are drawn and one when two are; a table the picture does not have takes
+    none. A finding about one table has no line to draw. ``stale`` is
+    `findings.stale_marks` for ``records``: marked on the line, never a reason
+    to leave it out (`KNOWLEDGE_GRAPH.md` §4.5).
+
+    A finding names a table the way the catalog does, so a node is found by its
+    ``name``, and a source wins over a model of the same name: the order
+    `findings.fingerprints` resolves them in.
+    """
+    from itertools import combinations
+
+    from portia.knowledge import query, schema
+
+    drawn: dict[str, str] = {}
+    for kind in (schema.MODEL, schema.SOURCE):
+        drawn |= {
+            n["properties"]["name"]: n["id"]
+            for n in nodes
+            if n["kind"] == kind and n["properties"].get("name")
+        }
+    edges = []
+    for finding in records:
+        on_screen = [drawn[table] for table in findings.tables(finding) if table in drawn]
+        card = _finding_card(finding, stale.get(finding.get("path", ""), []))
+        edges += [
+            {"from": start, "to": end, "kind": query.FINDING, "properties": card}
+            for start, end in combinations(on_screen, 2)
+        ]
+    return edges
+
+
+def _finding_card(finding: dict, moved: list[str]) -> dict:
+    """What a finding's line says when it is hovered: the prose, and the numbers.
+
+    The three sentences the agent wrote, whether a table moved since, and each
+    query it rests on with its result as `findings.result_lines` lays it out —
+    the numbers copied from the log, never retyped. The file is named because a
+    hover card is a glance and the file is where the rest is.
+    """
+    card: dict[str, Any] = {
+        "question": finding.get("question", ""),
+        "answer": finding.get("answer", ""),
+        "so": finding.get("so", ""),
+    }
+    if moved:
+        card["stale"] = findings.STALE_MARK.format(tables=", ".join(moved))
+    card["queries"] = [
+        {
+            "question": asked.get("question", ""),
+            "result": findings.result_lines(str(asked.get("result") or "")),
+        }
+        for asked in finding.get("queries") or []
+    ]
+    card["file"] = finding.get("path", "")
+    return card
 
 
 def reload_spec(app: App) -> None:

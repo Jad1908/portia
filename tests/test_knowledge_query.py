@@ -424,28 +424,49 @@ def test_the_subgraph_is_tables_until_you_ask_for_columns(filled, pid):
     assert len(columns["nodes"]) > len(tables["nodes"])
 
 
-def test_the_cap_takes_columns_and_never_the_tables_they_hang_from(filled, pid, monkeypatch):
-    """A warehouse of 39 tables drew six hundred columns attached to nothing.
+def test_every_table_keeps_columns_and_a_more_node_counts_the_rest(filled, pid, monkeypatch):
+    """A project of 18 sources drew 550 columns of one table and none of sixteen.
 
-    The nodes were ordered by kind, `Column` sorts first, and the cap kept the
-    columns and cut the tables; every `HAS_COLUMN` edge then pointed at a node
-    the picture did not have and was dropped. Tables and groups come first now,
-    and what the cap takes is columns, whole tables at a time.
+    The cap took columns in key order, and a key starts with its table's path,
+    so the first table alphabetically took the picture. Now every table shows
+    its connected columns and then its first ``N`` in file order, and a table
+    that lost some hangs one `More` node saying how many — with ``N`` squeezed
+    to one here so the fixture's three-column tables have something to lose.
     """
     from portia.knowledge.schema import HAS_COLUMN
 
-    tables = query.subgraph(filled, project=pid)["nodes"]
-    monkeypatch.setattr(query, "MAX_GRAPH_NODES", len(tables) + 2)
-
+    monkeypatch.setattr(query, "MIN_COLUMNS_SHOWN", 1)
+    monkeypatch.setattr(query, "MAX_COLUMNS_SHOWN", 1)
     picture = query.subgraph(filled, columns=True, project=pid)
-    assert {n["id"] for n in tables} <= {n["id"] for n in picture["nodes"]}
-    columns = [n for n in picture["nodes"] if n["kind"] == "Column"]
-    assert len(columns) == 2, "the two slots left over the tables go to columns"
-    assert picture["truncated"] and picture["omitted"] > 0
+    nodes = {n["id"]: n for n in picture["nodes"]}
+    hanging: dict[str, list[dict]] = {}
+    for e in picture["edges"]:
+        if e["kind"] == HAS_COLUMN:
+            hanging.setdefault(nodes[e["from"]]["label"], []).append(nodes[e["to"]])
 
+    # Nothing reads `returns` and nothing was compared to it: one column, the
+    # first in the file — `return_id`, where name order would say `customer_id`.
+    returns = hanging["returns"]
+    assert [n["label"] for n in returns if n["kind"] == "Column"] == ["return_id"]
+    [more] = [n for n in returns if n["kind"] == query.MORE]
+    assert more["label"] == "+2 more"
+    assert more["properties"] == {
+        "table": "returns",
+        "table_kind": "Source",
+        "n_more": 2,
+        "n_columns": 3,
+    }
+
+    # Every column of `orders` feeds `stg_orders`, so every one is connected
+    # and drawn, whatever `N` is, and the table has nothing left to count.
+    assert sorted(n["label"] for n in hanging["orders"]) == ["amount", "customer_id", "order_id"]
+
+    drawn = [n for n in picture["nodes"] if n["kind"] == "Column"]
     attached = {e["to"] for e in picture["edges"] if e["kind"] == HAS_COLUMN}
-    assert {n["id"] for n in columns} <= attached, "every drawn column hangs from its table"
-    assert len({n["properties"]["table"] for n in columns}) == 1, "cut by table, not scattered"
+    assert {n["id"] for n in drawn} <= attached, "every drawn column hangs from its table"
+    assert picture["columns"]["shown"] == len(drawn)
+    assert picture["columns"]["per_table"] == 1
+    assert not picture["columns"]["connected_cut"]
 
 
 def test_the_picture_speaks_portias_vocabulary_and_no_librarys(filled, pid):
@@ -576,3 +597,136 @@ def test_a_trail_that_ends_at_an_unreadable_column_still_reports_that_column(
             "derivation": "unknown",
         }
     ]
+
+
+# --- choosing the picture's columns, without a database ----------------------
+#
+# `choose_columns` is pure on purpose (Cypher fetches, Python chooses), so the
+# rule is pinned here with no server: the cases above that need one are about
+# whether the Cypher feeding it is right.
+
+
+def _table(name: str, n: int, *, connected=(), positions: bool = True) -> list[query.ColumnRow]:
+    """``n`` columns of table ``name``; those numbered in ``connected`` link to something."""
+    return [
+        query.ColumnRow(
+            id=f"{name}:{i}",
+            table=name,
+            key=f"source:{name}::c{i:04d}",
+            position=i if positions else None,
+            connected=i in connected,
+        )
+        for i in range(1, n + 1)
+    ]
+
+
+def _drawn(choice: query.ColumnChoice, table: str) -> list[int]:
+    return [int(i.split(":")[1]) for i in choice.ids if i.startswith(f"{table}:")]
+
+
+def test_a_table_no_wider_than_n_shows_every_column():
+    choice = query.choose_columns(["narrow", "wide"], [*_table("narrow", 3), *_table("wide", 40)])
+    assert choice.per_table == query.MAX_COLUMNS_SHOWN
+    assert _drawn(choice, "narrow") == [1, 2, 3]
+    assert _drawn(choice, "wide") == list(range(1, 16))
+    assert choice.left_out == {"wide": 25}, "a table that lost nothing has no More node"
+    assert choice.sizes == {"narrow": 3, "wide": 40}
+    assert (choice.total, len(choice.ids)) == (43, 18)
+
+
+def test_connected_columns_come_first_and_the_rest_in_file_order():
+    """Two linked columns far down a wide table are drawn, and the table's
+    first columns fill it up to ``N`` around them."""
+    choice = query.choose_columns(["wide"], _table("wide", 40, connected=(30, 35)))
+    assert _drawn(choice, "wide") == [*range(1, 14), 30, 35]
+    assert choice.connected == choice.connected_shown == 2
+    assert choice.left_out == {"wide": 25}
+
+
+def test_a_table_with_more_connected_columns_than_n_shows_all_of_them():
+    choice = query.choose_columns(["linked"], _table("linked", 30, connected=range(1, 21)))
+    assert _drawn(choice, "linked") == list(range(1, 21))
+    assert choice.left_out == {"linked": 10}
+
+
+def test_file_order_is_the_position_and_falls_back_to_the_key():
+    """Never the name when a position exists, and never a measured number at
+    all: a `ColumnRow` carries nothing a ranking could be made of."""
+    backwards = [
+        query.ColumnRow(id=f"t:{i}", table="t", key=f"k{20 - i:02d}", position=i)
+        for i in range(1, 21)
+    ]
+    assert _drawn(query.choose_columns(["t"], backwards), "t") == list(range(1, 16))
+
+    # A graph built before positions existed: the key's order, which within a
+    # table is the column's name.
+    unplaced = [query.ColumnRow(id=f"t:{i}", table="t", key=f"k{20 - i:02d}") for i in range(1, 21)]
+    assert _drawn(query.choose_columns(["t"], unplaced), "t") == list(range(20, 5, -1))
+
+
+@pytest.mark.parametrize(
+    ("cap", "n_plain", "n_connected", "expected"),
+    [
+        (600, 17, 4, 15),  # 18 tables: (600 - 18 - 4) // 18 = 32, held at the most
+        (100, 10, 0, 9),  # 10 tables: (100 - 10) // 10 = 9, between the two
+        (100, 9, 10, 8),  # 10 tables: (100 - 10 - 10) // 10, the linked ones first
+        (30, 10, 0, 5),  # 10 tables: (30 - 10) // 10 = 2, held at the fewest
+    ],
+)
+def test_n_is_the_room_left_shared_evenly_between_five_and_fifteen(
+    cap, n_plain, n_connected, expected
+):
+    """``n_plain`` tables of fifty columns, and one more whose ``n_connected``
+    columns all link to something when there are any."""
+    tables = [f"t{i}" for i in range(n_plain)]
+    rows = [row for name in tables for row in _table(name, 50)]
+    if n_connected:
+        tables.append("linked")
+        rows += _table("linked", n_connected, connected=range(1, n_connected + 1))
+    assert query.choose_columns(tables, rows, cap=cap).per_table == expected
+
+
+def test_connected_columns_that_do_not_fit_are_shared_evenly_and_say_so():
+    """Each table may draw the same number of its connected columns, the most
+    that fits; a table with fewer leaves its spare to the rest."""
+    rows = [
+        *_table("many", 50, connected=range(1, 51)),
+        *_table("few", 3, connected=(1, 2, 3)),
+        *_table("none", 10),
+    ]
+    choice = query.choose_columns(["many", "few", "none"], rows, cap=40)
+    # 37 places after the three tables: `few` takes 3, so `many` may take 34.
+    assert choice.connected_per_table == 34
+    assert _drawn(choice, "many") == list(range(1, 35))
+    assert _drawn(choice, "few") == [1, 2, 3]
+    assert choice.per_table == query.MIN_COLUMNS_SHOWN, "no room is left, so the fewest"
+    assert _drawn(choice, "none") == [1, 2, 3, 4, 5]
+    assert choice.connected_cut and (choice.connected, choice.connected_shown) == (53, 37)
+    assert choice.left_out == {"many": 16, "none": 5}
+
+
+def test_a_column_no_table_lists_is_drawn_and_counts_nothing():
+    """A measurement keeps a column alive after its file dropped it
+    (`store.py`). It is connected by definition, so it is drawn, and it has no
+    table to hang a More node from."""
+    orphan = query.ColumnRow(id="lost", table=None, key="source:gone.csv::id", connected=True)
+    choice = query.choose_columns(["t"], [*_table("t", 3), orphan])
+    assert "lost" in choice.ids
+    assert None not in choice.sizes and None not in choice.left_out
+    assert choice.connected == 1
+
+
+def test_a_column_whose_table_is_not_drawn_is_not_drawn():
+    choice = query.choose_columns(["t"], [*_table("t", 3), *_table("cut", 4)])
+    assert _drawn(choice, "cut") == []
+    assert choice.total == 7
+
+
+def test_the_choice_does_not_depend_on_the_order_rows_arrive_in():
+    import random
+
+    rows = [*_table("a", 30, connected=(7, 22)), *_table("b", 12), *_table("c", 25)]
+    first = query.choose_columns(["a", "b", "c"], rows)
+    shuffled = list(rows)
+    random.Random(4).shuffle(shuffled)
+    assert query.choose_columns(["a", "b", "c"], shuffled) == first
