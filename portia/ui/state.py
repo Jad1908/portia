@@ -757,6 +757,9 @@ class App:
     opened: bool = False
 
     catalog: dict = field(default_factory=dict)
+    #: What each catalog file looked like when `catalog` was read
+    #: (`catalog.reload_catalog`), so a reload reads only the entries that moved.
+    catalog_seen: dict = field(default_factory=dict)
     spec_path: Path | None = None
     spec: dict | None = None
     results: list | None = None  # list[spec.StepResult] once a run has happened

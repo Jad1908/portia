@@ -73,9 +73,16 @@ _LOADING = "loading {model}"
 #: entirely — the write went to disk and the transcript said nothing.
 _OWNED = (events.QUESTION, events.ANSWER, events.APPROVAL)
 
-#: Tool results are where a durable artifact changes on disk, so the panes catch
-#: up there — the graph fills in as steps are recorded, not after the turn.
-_SYNC_ON = (events.TOOL_RESULT, events.RESULT)
+#: How long a tool result waits for the ones behind it before the panes catch up
+#: with all of them at once (`_sync_soon`). Long enough to take in a run of
+#: writes, which land tens of milliseconds apart on small entries and a few
+#: hundred on a 1,579-column one; short beside the call that produced them, so
+#: a step recorded still shows on the canvas as the transcript says it was.
+GATHER_S = 0.5
+
+#: The gathered catch-up while it waits to run, so the results behind the first
+#: ride on it rather than each scheduling their own.
+_GATHERING: list[asyncio.TimerHandle] = []
 
 
 async def start(
@@ -183,7 +190,7 @@ async def start(
         exchange.running = False
         chat.job = None
         _resolve_orphans()
-        _sync_artifacts()
+        _sync_now()
         if not chat.is_job:
             await _read_context(chat)
         transcript.pane.refresh()
@@ -476,8 +483,13 @@ def _record(event: events.Event, chat: Chat) -> None:
         chat.session_id = event.data.get("session_id") or chat.session_id
     chat.rows.append(event)
     _clock(event, chat)
-    if event.kind in _SYNC_ON:
-        _sync_artifacts()
+    # Tool results are where a durable artifact changes on disk, so the panes
+    # catch up there, gathered, and the graph fills in as steps are recorded
+    # rather than after the turn. The reply's end catches up at once.
+    if event.kind == events.TOOL_RESULT:
+        _sync_soon()
+    elif event.kind == events.RESULT:
+        _sync_now()
     # The rows and nothing else. The whole pane refreshed here for a year, and
     # what that cost was the composer: rebuilding it per event destroyed the
     # textarea a few times a second, caret and focus with it, while somebody was
@@ -752,6 +764,15 @@ def _sync_artifacts() -> bool:
     files those panes draw from; when it has not moved, nothing has, and the
     panes are left exactly as the reader has them.
     """
+    if not _stamp_moved():
+        return False
+    engine.refresh_catalog(APP)
+    redraw_artifacts()
+    return True
+
+
+def _stamp_moved() -> bool:
+    """Whether anything the panes draw has changed on disk, taking the new stamp if so."""
     # The stamp first *(2026-09-07)*. It is a walk of stat calls; the catalog
     # reload under it parses every source's YAML, and it ran on every tool
     # result whether or not anything had been written — 16 ms on six sources,
@@ -761,9 +782,61 @@ def _sync_artifacts() -> bool:
     if stamp == APP.artifact_stamp:
         return False
     APP.artifact_stamp = stamp
-    engine.refresh_catalog(APP)
-    redraw_artifacts()
     return True
+
+
+def _sync_soon() -> None:
+    """`_sync_artifacts` for a tool result: shortly, and once for every result meanwhile.
+
+    **A burst of results was a burst of redraws** *(2026-10-08)*. A reading
+    job on a project with two 1,579-column tables wrote its eighteen reads one
+    after another, and each result re-read every entry on the loop and rebuilt
+    the left and the middle pane. Replayed, that held the loop still for 18.6 s
+    of the burst's 43, with presses waiting up to 1.7 s. Now the first result
+    waits `GATHER_S` for the rest, the stamp is walked and the entries that
+    moved are read off the loop (`engine.catch_up_catalog`), and each pane
+    redraws once per gathering.
+
+    Without a loop (a test driving `_record` directly) it is the sync itself.
+    """
+    if _GATHERING:
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        _sync_artifacts()
+        return
+    _GATHERING.append(loop.call_later(GATHER_S, _gathered))
+
+
+def _gathered() -> None:
+    from nicegui import background_tasks
+
+    _GATHERING.clear()
+    background_tasks.create(_catch_up(), name="catch up with the project")
+
+
+async def _catch_up() -> None:
+    """The gathered sync: the stamp and the entries that moved, both off the loop, and one redraw.
+
+    The stamp is taken before the read, as in `_sync_artifacts`, so a sync
+    that runs while this one reads finds nothing to do and leaves the redraw
+    to this one rather than racing it.
+    """
+    stamp = await engine.artifact_stamp_later(APP)
+    if stamp == APP.artifact_stamp:
+        return
+    APP.artifact_stamp = stamp
+    await engine.catch_up_catalog(APP)
+    redraw_artifacts()
+
+
+def _sync_now() -> bool:
+    """`_sync_artifacts` at once, taking in a gathered one still waiting: a reply has ended."""
+    for handle in _GATHERING:
+        handle.cancel()
+    _GATHERING.clear()
+    return _sync_artifacts()
 
 
 def redraw_artifacts() -> None:
@@ -789,3 +862,26 @@ def redraw_artifacts() -> None:
     # has been deleted but is still being used*. Found once `watch_project` made
     # this run with nobody in a chat.
     workflow.pane.refresh()
+
+
+def redraw_indexed(name: str) -> None:
+    """One table's entry has landed mid-run: what shows that table, and nothing else.
+
+    An indexing run's ``on_done`` (`engine._hops`), called once the entry is in
+    `APP.catalog`. The left pane's tree, whose row for the file stops saying
+    *not indexed*, and the Indexing tab's rows, in place (`transcript.sources_moved`).
+    The middle pane only when it is showing this table, and a file selected
+    while it was *not indexed* is selected as the source it now is, as
+    `workflow._index` does for one file: its row in the tree is a source row
+    now, and the inspector beside it would go on offering to index it. The
+    rest of the middle pane is the run's to redraw when it ends.
+    """
+    from portia.ui import artifacts, transcript, workflow
+
+    artifacts.pane.refresh()
+    transcript.sources_moved()
+    recorded = (APP.sources.get(name) or {}).get("source")
+    if recorded and APP.selection == (state.UNINDEXED, recorded):
+        APP.selection = (state.SOURCE, name)
+    if APP.selection == (state.SOURCE, name):
+        workflow.pane.refresh()

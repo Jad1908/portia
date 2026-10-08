@@ -29,6 +29,9 @@ clobbered. Nothing here is schema-locked; it's plain, hand-editable YAML.
 
 from __future__ import annotations
 
+import os
+import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -209,16 +212,34 @@ def source_name(recorded: str, *, portia_dir: str | Path = DEFAULT_DIR) -> str:
     # macOS `ORDERS.yaml` **is** `orders.yaml` — a warehouse table scoped into a
     # project holding `orders.csv` overwrote the file's entry (found driving the
     # window, 2026-09-04).
-    taken = {
-        name.lower(): entry.get("source") for name, entry in load_catalog(d)["sources"].items()
-    }
+    #
+    # **Names off the register, and an entry read only when it holds the name**
+    # *(2026-10-08)*. This read the whole catalog for every source indexed, to
+    # learn each entry's ``source``: on a project with two 1,579-column tables,
+    # half a second of parsing per file by the end of a run, on the worker,
+    # holding the lock the window's loop needs to answer a click. Whether a name
+    # is taken is the register's answer; *whose* it is takes one entry.
+    proj = d / "project.yaml"
+    registered: dict[str, str] = {}
+    for name in (_read(proj).get("sources") or {}) if proj.exists() else ():
+        if (d / "sources" / f"{name}.yaml").exists():
+            registered[name.lower()] = name
     # A built table's name is taken too (2026-09-07): scoping `STAGING.stg_x`
     # as a source used to write `sources/stg_x.yaml` beside `models/stg_x.yaml`,
     # and every lookup by name then found the source half first.
-    taken |= {name.lower(): f"model:{name}" for name in load_models(d) if name.lower() not in taken}
+    models = {path.stem.lower(): path.stem for path in sorted((d / MODELS_DIR).glob("*.yaml"))}
+
+    def holder(candidate: str) -> str | None:
+        """Whose name ``candidate`` is: a source's recorded location, a model, or nobody's."""
+        name = registered.get(candidate.lower())
+        if name is not None:
+            return _read(d / "sources" / f"{name}.yaml").get("source")
+        model = models.get(candidate.lower())
+        return None if model is None else f"model:{model}"
+
     for depth in range(1, len(parts) + 1):
         candidate = NAME_SEP.join(parts[-depth:])
-        if taken.get(candidate.lower()) in (None, recorded):
+        if holder(candidate) in (None, recorded):
             return candidate
     return NAME_SEP.join(parts)
 
@@ -804,7 +825,11 @@ def project_settings(portia_dir: str | Path = DEFAULT_DIR) -> dict:
     know where the project's compute is before a single table is opened.
     """
     d = Path(portia_dir)
-    proj = _read(d / "project.yaml") if (d / "project.yaml").exists() else {}
+    return _settings(_read(d / "project.yaml") if (d / "project.yaml").exists() else {})
+
+
+def _settings(proj: dict) -> dict:
+    """`project_settings` out of a project file already read."""
     return {
         "data_dir": proj.get("data_dir", ""),
         "connection": proj.get("connection") or None,
@@ -816,20 +841,67 @@ def project_settings(portia_dir: str | Path = DEFAULT_DIR) -> dict:
 def load_catalog(portia_dir: str | Path = DEFAULT_DIR) -> dict:
     """Load the whole catalog — project context, groups, and every source entry —
     into one compact dict (the context a downstream task/agent reads)."""
-    d = Path(portia_dir)
-    proj = _read(d / "project.yaml") if (d / "project.yaml").exists() else {}
-    sources = {
-        name: _read(d / "sources" / f"{name}.yaml")
-        for name in (proj.get("sources") or {})
-        if (d / "sources" / f"{name}.yaml").exists()
-    }
+    loaded, _ = reload_catalog({}, {}, portia_dir)
+    return loaded
+
+
+#: What a catalog file looked like when it was read: ``(st_mtime_ns, st_size)``,
+#: by its absolute path. `reload_catalog` reads a file again only when this moved.
+Seen = dict[str, tuple[int, int]]
+
+
+def reload_catalog(
+    loaded: dict, seen: Seen, portia_dir: str | Path = DEFAULT_DIR
+) -> tuple[dict, Seen]:
+    """`load_catalog`, reading again only the entries that changed since ``loaded`` was read.
+
+    ``seen`` is what each file looked like when ``loaded`` was read, as this
+    returned it; ``({}, {})`` reads everything. Returns the catalog as it is
+    now and what its files look like now, for the next call.
+
+    **For a reader that holds the catalog and is told it moved** *(2026-10-08)*:
+    the window, which read every entry again whenever one changed. On a project
+    with two 1,579-column tables one entry is 140 ms to parse even with libyaml,
+    eighteen are half a second, and an indexing run or a reading job writes one
+    at a time: a burst of eighteen ``set_interpretation`` calls was eighteen
+    whole reads on the window's loop. An entry whose file has the same
+    modification time and size as when it was read is the dict already held.
+
+    ``project.yaml`` is read every time. It is the register that names the
+    entries, a few kilobytes, and what a write to the groups or the brief
+    changes. Each file is looked at before it is read, so one written between
+    the two is read again next time rather than missed.
+    """
+    d = Path(portia_dir).absolute()
+    now: Seen = {}
+    proj_file = d / "project.yaml"
+    proj = _read(proj_file) if _look(proj_file, now) else {}
+    held = loaded.get("sources") or {}
+    sources = {}
+    for name in proj.get("sources") or {}:
+        path = d / "sources" / f"{name}.yaml"
+        if not _look(path, now):
+            continue
+        key = str(path)
+        same = name in held and seen.get(key) == now[key]
+        sources[name] = held[name] if same else _read(path)
     return {
         "project": proj.get("project", ""),
         "data_dir": proj.get("data_dir", ""),
         "groups": proj.get("groups", []),
         "sources": sources,
-        **{k: v for k, v in project_settings(d).items() if k in CONNECTION_FIELDS},
-    }
+        **{k: v for k, v in _settings(proj).items() if k in CONNECTION_FIELDS},
+    }, now
+
+
+def _look(path: Path, seen: Seen) -> bool:
+    """Whether ``path`` is there, recording what it looks like in ``seen`` if so."""
+    try:
+        stat = path.stat()
+    except OSError:
+        return False
+    seen[str(path)] = (stat.st_mtime_ns, stat.st_size)
+    return True
 
 
 # --- building an entry ------------------------------------------------------
@@ -1056,7 +1128,42 @@ def _read(path: Path) -> dict:
         return yaml.load(f, Loader=_LOADER) or {}
 
 
+#: How many times, and how far apart, a finished write tries to take the entry's
+#: place while somebody is reading it: Windows refuses to replace a file that is
+#: open, and the window reads entries off its loop while a tool writes them.
+_REPLACE_TRIES = 10
+_REPLACE_WAIT_S = 0.02
+
+
 def _write(path: Path, data: dict) -> None:
+    """Whole or not at all: a reader must never see half an entry.
+
+    **Written beside it and renamed into place** *(2026-10-08)*, as
+    `figures._write` and `ui/prefs` do. The file used to be truncated and
+    written in place, a quarter of a second of dumping for a 1,579-column
+    entry, and once the window read the entries that moved off its loop
+    (`reload_catalog`) it read one that a ``set_interpretation`` was halfway
+    through: a YAML error, in a replay of a reading job. The bytes are
+    PyYAML's emitter's, as before. The temporary file is named per thread and
+    opened as the entry would be, so two writers never share one and the
+    entry keeps the permissions it always had.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        yaml.safe_dump(data, f, sort_keys=False, default_flow_style=False, allow_unicode=True)
+    partial = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.part")
+    try:
+        with open(partial, "w", encoding="utf-8") as f:
+            yaml.safe_dump(data, f, sort_keys=False, default_flow_style=False, allow_unicode=True)
+        _replace(partial, path)
+    finally:
+        partial.unlink(missing_ok=True)
+
+
+def _replace(partial: Path, path: Path) -> None:
+    for attempt in range(_REPLACE_TRIES):
+        try:
+            os.replace(partial, path)
+            return
+        except PermissionError:
+            if attempt == _REPLACE_TRIES - 1:
+                raise
+            time.sleep(_REPLACE_WAIT_S)

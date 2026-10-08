@@ -47,6 +47,7 @@ copilot maintains.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -181,19 +182,45 @@ def build(
     ``data_root`` and a readable suffix that is still the whole repo, which is
     what *anywhere* means; setting the folder is the way out, and a warehouse
     project never pays it.
+
+    **A file the walk found is not looked at again** *(2026-10-08)*. Every
+    known path was checked a folder at a time for a link, then for being a
+    file, and the walk asked each entry whether it was a folder: 108 ``stat``
+    calls a draw for eighteen files. On the loop each one gives up the
+    interpreter's lock and waits to get it back, and while a profile or a
+    reading job's tools were running in threads, a left pane draw that takes
+    20 ms took four seconds. The listing already says which entries are
+    folders and which are links (`_entries`), and a known path among the files
+    it found is reachable and a file for the same reasons the checks would
+    have given.
     """
     root = Path(root)
     suffixes = frozenset(s.lower() for s in readable)
     scope = _scope(data_root)
     files: dict[str, tuple[str, str]] = {}
+    # What the walk found, by path: whether `_reachable` and `is_file` would
+    # both have said yes, so a known file among them is placed without asking.
+    walked: dict[str, bool] = {}
     if suffixes and (scope is None or _reachable(root, scope)):
         start = root / scope if scope else root
-        found = _data_files(start, suffixes) if start.is_dir() else _one_file(start, suffixes)
-        for path in found:
+        if start.is_dir():
+            found = _entries(start, suffixes)
+            # The walk enters no hidden, skipped or linked folder below where it
+            # starts. A known path under it would also have been checked at the
+            # start itself, which the gate above leaves out.
+            clear = scope is None or not (_skipped(start.name) or start.is_symlink())
+        else:
+            found = [(path, True) for path in _one_file(start, suffixes)]
+            clear = True
+        for path, is_file in found:
             rel = path.relative_to(root).as_posix()
             files[rel] = (DATA, rel)
+            walked[rel] = clear and is_file
     for rel, classified in known.items():
-        if _reachable(root, rel) and (root / rel).is_file():
+        placed = walked.get(rel)
+        if placed is None:
+            placed = _reachable(root, rel) and (root / rel).is_file()
+        if placed:
             files[rel] = classified
     return _assemble(files)
 
@@ -351,14 +378,41 @@ def data_files(directory: str | Path, readable: Collection[str]) -> tuple[Path, 
 
 
 def _data_files(directory: Path, readable: frozenset[str]) -> tuple[Path, ...]:
-    found: list[Path] = []
-    for entry in _listdir(directory):
-        if entry.is_dir():
+    return tuple(path for path, _ in _entries(directory, readable))
+
+
+def _entries(directory: Path, readable: frozenset[str]) -> list[tuple[Path, bool]]:
+    """Every readable data file under ``directory``, with whether it is a file.
+
+    The walk `_data_files` always was: alphabetical without case, into every
+    folder that is not hidden, skipped or a link, keeping whatever is not a
+    folder and has a readable suffix, and an unreadable folder is empty. Read
+    off `os.scandir`, whose entries already know whether they are a folder or
+    a link, so a draw costs a listing per folder rather than a ``stat`` per
+    entry (`build`).
+    """
+    try:
+        with os.scandir(directory) as listing:
+            entries = sorted(listing, key=lambda e: e.name.lower())
+    except OSError:
+        return []
+    found: list[tuple[Path, bool]] = []
+    for entry in entries:
+        path = directory / entry.name
+        if _is(entry.is_dir):
             if not (entry.is_symlink() or _skipped(entry.name)):
-                found += _data_files(entry, readable)
-        elif entry.suffix.lower() in readable:
-            found.append(entry)
-    return tuple(found)
+                found += _entries(path, readable)
+        elif path.suffix.lower() in readable:
+            found.append((path, _is(entry.is_file)))
+    return found
+
+
+def _is(question) -> bool:
+    """A `os.DirEntry` question, answered *no* when the disk will not say, as `Path` answers it."""
+    try:
+        return bool(question())
+    except OSError:
+        return False
 
 
 def crumbs(at: str) -> tuple[tuple[str, str], ...]:

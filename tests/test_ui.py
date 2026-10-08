@@ -5911,7 +5911,7 @@ def test_index_on_the_tab_scans_a_ticked_metadata_only_table(tmp_path, monkeypat
     scanned: list[str] = []
     statuses: list[str] = []
 
-    async def fake_profile_tables(app_, names, *, on_progress=None, stop=None):
+    async def fake_profile_tables(app_, names, *, on_progress=None, on_done=None, stop=None):
         for i, name in enumerate(names):
             on_progress(i, len(names), name)
             statuses.append(app_.indexing_status)
@@ -5952,12 +5952,12 @@ def test_adding_warehouse_tables_scans_them_only_when_the_switch_says_so(tmp_pat
     app.interpret = False
     scanned: list[list[str]] = []
 
-    async def fake_scope(app_, names, *, on_progress=None, stop=None):
+    async def fake_scope(app_, names, *, on_progress=None, on_done=None, stop=None):
         return engine_module.Indexed(
             names=[n.split(".")[-1] for n in names], items=list(names), failed=[]
         )
 
-    async def fake_profile_tables(app_, names, *, on_progress=None, stop=None):
+    async def fake_profile_tables(app_, names, *, on_progress=None, on_done=None, stop=None):
         scanned.append(list(names))
         return engine_module.Indexed(names=list(names), items=list(names), failed=[])
 
@@ -7472,7 +7472,7 @@ def test_the_indexing_tab_takes_its_spinner_down_when_the_run_raises(tmp_path, m
     app.index_ticks = frozenset({"orders"})
     refreshed: list[str] = []
 
-    async def fake_profile_tables(app_, names, *, on_progress=None, stop=None):
+    async def fake_profile_tables(app_, names, *, on_progress=None, on_done=None, stop=None):
         raise RuntimeError("the engine itself broke")
 
     monkeypatch.setattr(engine_module, "profile_tables", fake_profile_tables)
@@ -7799,6 +7799,20 @@ def test_a_theme_switch_restyles_the_graph_in_place():
 # --- indexing a wide project without freezing the window (2026-10-08) -------------
 
 
+def _entry_reads(monkeypatch) -> list[str]:
+    """The catalog entries read off disk from here on, by name, in order."""
+    reads: list[str] = []
+    real = catalog._read
+
+    def read(path):
+        if Path(path).parent.name == "sources":
+            reads.append(Path(path).stem)
+        return real(path)
+
+    monkeypatch.setattr(catalog, "_read", read)
+    return reads
+
+
 def _counting(monkeypatch, **targets):
     """Count the calls on each target and do nothing else: a pane's refresh needs
     a page, and what these tests are about is whether it was asked for."""
@@ -7818,7 +7832,8 @@ def test_the_watcher_stands_down_while_indexing_and_finds_nothing_after_it(tmp_p
     with two 1,579-column tables, and a press on the left pane queued behind it
     was lost. It stands down while the window indexes, the run's last reload
     takes the stamp, and so its first look afterwards has nothing to do. What a
-    host writes when nothing of the window's own is running is still found."""
+    host writes when nothing of the window's own is running is still found, and
+    only that entry is read."""
     import asyncio
 
     from portia.core import cancel
@@ -7833,11 +7848,7 @@ def test_the_watcher_stands_down_while_indexing_and_finds_nothing_after_it(tmp_p
     app = App()
     engine_module.open_project(tmp_path, app)
     monkeypatch.setattr(engine_module, "sync_knowledge", lambda app_: "")
-    reads = []
-    real_load = catalog.load_catalog
-    monkeypatch.setattr(
-        catalog, "load_catalog", lambda *a, **k: reads.append(1) or real_load(*a, **k)
-    )
+    reads = _entry_reads(monkeypatch)
     drawn = _counting(
         monkeypatch,
         left=(artifacts.pane, "refresh"),
@@ -7871,7 +7882,7 @@ def test_the_watcher_stands_down_while_indexing_and_finds_nothing_after_it(tmp_p
         catalog.index_source(tmp_path / "data" / "rates.csv", portia_dir=app.portia_dir)
         reads.clear()
         exchange.watch_project()
-    assert len(reads) == 1 and "rates" in app.sources
+    assert reads == ["rates"] and "rates" in app.sources
     assert drawn["left"] == 1 and drawn["middle"] == 1
 
 
@@ -8033,3 +8044,228 @@ def test_finding_a_path_in_the_tree_says_how_deep_it_is_drawn(tmp_path):
     node, depth = tree.find(nodes, "data/raw/orders.csv")
     assert depth == 2 and not node.is_folder
     assert tree.find(nodes, "data/ra") is None and tree.find(nodes, "") is None
+
+
+# --- each file drawn as it lands, a burst drawn once (2026-10-08) --------------------
+
+
+def _data_project(tmp_path, monkeypatch, *names: str) -> App:
+    monkeypatch.chdir(tmp_path)
+    for name in names:
+        path = tmp_path / "data" / f"{name}.csv"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame({"id": [1, 2], "v": [3, 4]}).to_csv(path, index=False)
+    app = App()
+    engine_module.open_project(tmp_path, app)
+    monkeypatch.setattr(engine_module, "sync_knowledge", lambda app_: "")
+    return app
+
+
+def test_each_hop_puts_its_entry_in_the_windows_catalog_and_names_it(tmp_path, monkeypatch):
+    """A local run reloaded the catalog only when it ended, so eighteen files
+    finished with none of them drawn as indexed until the last (the user's
+    report, 2026-10-08); a warehouse run reloaded every entry after every hop.
+    Each hop now reads the one entry it wrote, off the loop, and tells its
+    caller by the catalog's name, which is the file's stem until another source
+    has it. The run's last reload has nothing left to read."""
+    import asyncio
+
+    app = _data_project(tmp_path, monkeypatch, "orders", "raw/orders")
+    reads = _entry_reads(monkeypatch)
+    landed = []
+
+    def on_done(name):
+        landed.append((name, set(app.sources), list(reads)))
+
+    paths = [tmp_path / "data" / "orders.csv", tmp_path / "data" / "raw" / "orders.csv"]
+    ran = asyncio.run(engine_module.index(paths, app, on_done=on_done))
+
+    assert ran.names == ["orders", "raw__orders"]
+    assert landed[0][:2] == ("orders", {"orders"})
+    assert landed[1][:2] == ("raw__orders", {"orders", "raw__orders"})
+    # The second file's name was checked against the first's entry; each hop
+    # then read back its own entry and nothing else, and the end read nothing.
+    assert reads == ["orders", "orders", "raw__orders"]
+
+
+def test_the_indexing_tab_moves_a_rows_state_in_place(tmp_path, monkeypatch):
+    """Redrawing the list per hop would rebuild every checkbox under somebody
+    ticking one (`transcript._tick_source`'s rule). So a row whose source was
+    just indexed redraws what follows its checkbox, and the checkbox is the one
+    that was there. A row that came or went redraws the list."""
+    import asyncio
+
+    from nicegui import core
+
+    from portia.ui import transcript
+
+    app = _data_project(tmp_path, monkeypatch, "orders", "regions")
+    catalog.index_source(tmp_path / "data" / "orders.csv", portia_dir=app.portia_dir)
+    engine_module.refresh_catalog(app)
+    rebuilt = _counting(monkeypatch, list=(transcript._source_states, "refresh"))
+    # The rows other tests drew in slots nothing deletes are not this tab's.
+    monkeypatch.setattr(transcript, "_STATE_ROWS", {})
+
+    def row_of(slot, name):
+        for element in slot.descendants():
+            if "index-row" in element.classes and any(
+                getattr(e, "text", None) == name for e in element.descendants()
+            ):
+                return element
+        raise AssertionError(name)
+
+    def texts(row):
+        return [str(e.text) for e in row.descendants() if getattr(e, "text", None)]
+
+    with _as_app(transcript, app), ui.element("div") as slot:
+        transcript._source_states()
+    row = row_of(slot, "regions")
+    box = next(e for e in row.descendants() if isinstance(e, ui.checkbox))
+    assert "not indexed" in texts(row) and "is-unindexed" in row.classes
+
+    catalog.index_source(tmp_path / "data" / "regions.csv", portia_dir=app.portia_dir)
+    engine_module.refresh_catalog(app)
+
+    async def moved():
+        monkeypatch.setattr(core, "loop", asyncio.get_running_loop())
+        with _as_app(transcript, app):
+            transcript.sources_moved()
+
+    asyncio.run(moved())
+    assert row_of(slot, "regions") is row and not box.is_deleted
+    assert next(e for e in row.descendants() if isinstance(e, ui.checkbox)) is box
+    assert "not read" in texts(row) and "is-unread" in row.classes
+    assert "is-unindexed" not in row.classes
+    assert rebuilt == {"list": 0}
+
+    # A file arrives in the data folder: a row to add, so the list redraws.
+    (tmp_path / "data" / "rates.csv").write_text("id\n1\n", encoding="utf-8")
+    asyncio.run(moved())
+    assert rebuilt == {"list": 1}
+
+
+def test_a_file_selected_while_not_indexed_is_selected_as_the_source_it_became(
+    tmp_path, monkeypatch
+):
+    """Its row in the tree is a source row once the hop lands, and the inspector
+    beside it went on offering to index it until the run ended. The middle pane
+    redraws only when it shows the table that landed."""
+    from portia.ui import artifacts, exchange, transcript, workflow
+
+    app = _data_project(tmp_path, monkeypatch, "orders", "regions")
+    app.selection = (state.UNINDEXED, "data/orders.csv")
+    drawn = _counting(
+        monkeypatch,
+        left=(artifacts.pane, "refresh"),
+        middle=(workflow.pane, "refresh"),
+        rows=(transcript, "sources_moved"),
+    )
+    catalog.index_source(tmp_path / "data" / "orders.csv", portia_dir=app.portia_dir)
+    engine_module.refresh_catalog(app)
+    with _as_app(exchange, app):
+        exchange.redraw_indexed("orders")
+    assert app.selection == (state.SOURCE, "orders")
+    assert drawn == {"left": 1, "middle": 1, "rows": 1}
+
+    catalog.index_source(tmp_path / "data" / "regions.csv", portia_dir=app.portia_dir)
+    engine_module.refresh_catalog(app)
+    with _as_app(exchange, app):
+        exchange.redraw_indexed("regions")
+    assert app.selection == (state.SOURCE, "orders")
+    assert drawn == {"left": 2, "middle": 1, "rows": 2}
+
+
+def test_a_burst_of_tool_results_is_one_catch_up(tmp_path, monkeypatch):
+    """Eighteen ``set_interpretation`` results in a row were eighteen reloads
+    of every entry on the loop and thirty-six pane rebuilds, during which the
+    window answered nothing and the page went down (2026-10-08). Results that
+    arrive within `exchange.GATHER_S` of the first are one catch-up: each entry
+    that moved read once, off the loop, and each pane redrawn once. The end of
+    a reply catches up at once."""
+    import asyncio
+
+    from nicegui import core
+
+    from portia.agent import events
+    from portia.ui import artifacts, exchange, workflow
+
+    names = ("orders", "regions", "rates")
+    app = _data_project(tmp_path, monkeypatch, *names)
+    for name in names:
+        catalog.index_source(tmp_path / "data" / f"{name}.csv", portia_dir=app.portia_dir)
+    engine_module.refresh_catalog(app)
+    chat = app.new_chat(state.INDEXING)
+    monkeypatch.setattr(exchange, "GATHER_S", 0.05)
+    reads = _entry_reads(monkeypatch)
+    drawn = _counting(
+        monkeypatch, left=(artifacts.pane, "refresh"), middle=(workflow.pane, "refresh")
+    )
+
+    def result(ident):
+        return events.Event(events.TOOL_RESULT, {"id": ident, "text": "{}", "is_error": False})
+
+    async def burst():
+        monkeypatch.setattr(core, "loop", asyncio.get_running_loop())
+        with _as_app(exchange, app):
+            app.artifact_stamp = engine_module.artifact_stamp(app)
+            for name in names:
+                catalog.set_interpretation(name, summary=f"The {name}.", portia_dir=app.portia_dir)
+                exchange._record(result(name), chat)
+            reads.clear()  # each write read its own entry
+            assert drawn == {"left": 0, "middle": 0}, "gathered, not drawn per result"
+            for _ in range(200):
+                await asyncio.sleep(0.01)
+                if drawn["left"]:
+                    break
+            assert drawn == {"left": 1, "middle": 1}
+            assert sorted(reads) == sorted(names)
+            assert {app.sources[n]["summary"] for n in names} == {f"The {n}." for n in names}
+
+            catalog.set_interpretation("orders", summary="Read again.", portia_dir=app.portia_dir)
+            reads.clear()
+            exchange._record(events.Event(events.RESULT, {"subtype": "success"}), chat)
+            assert drawn == {"left": 2, "middle": 2} and reads == ["orders"]
+            assert app.sources["orders"]["summary"] == "Read again."
+
+    asyncio.run(burst())
+
+
+def test_a_left_pane_draw_lists_each_folder_and_looks_at_no_file_it_found(tmp_path):
+    """Each ``stat`` on the loop gives up the interpreter's lock and waits to get
+    it back, and while a profile or a reading job's tools ran in threads a left
+    pane draw of 20 ms took four seconds: it was 108 calls for eighteen files.
+    The listing says which entries are folders and links, and a known file the
+    walk found is not checked again. A known file outside the data folder still
+    is, as before."""
+    import os
+
+    from portia.ui import tree
+
+    for rel in ("data/a/one.csv", "data/a/two.csv", "data/b/c/three.csv", "specs/s.yaml"):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text("x\n1\n", encoding="utf-8")
+    known = {
+        "data/a/one.csv": (state.SOURCE, "one"),
+        "data/b/c/three.csv": (state.SOURCE, "three"),
+        "specs/s.yaml": (state.SPEC, "s.yaml"),
+    }
+    calls = []
+    real_stat, real_lstat = os.stat, os.lstat
+    os.stat = lambda *a, **k: calls.append(a[0]) or real_stat(*a, **k)
+    os.lstat = lambda *a, **k: calls.append(a[0]) or real_lstat(*a, **k)
+    try:
+        nodes = tree.build(tmp_path, known, (".csv",), "data")
+    finally:
+        os.stat, os.lstat = real_stat, real_lstat
+    kinds = {}
+
+    def walk(level):
+        for node in level:
+            kinds[node.rel] = node.kind
+            walk(node.children)
+
+    walk(nodes)
+    assert kinds["data/a/one.csv"] == state.SOURCE and kinds["data/a/two.csv"] == tree.DATA
+    assert kinds["data/b/c/three.csv"] == state.SOURCE and kinds["specs/s.yaml"] == state.SPEC
+    # The data folder, then the spec outside it (its folder, then the file).
+    assert len(calls) <= 5, calls

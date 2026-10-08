@@ -50,6 +50,7 @@ browser.
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import os
@@ -81,6 +82,10 @@ RECENTS_KEPT = 8
 #: bytes, and losing where you were in a project you come back to after six
 #: months is worse than a file of 40 KB.
 PROJECTS_KEPT = 50
+#: How many resolved paths `_resolved` remembers: a project's root and catalog
+#: folder and the logs of the chats opened in it, for every project a window
+#: visits in one run.
+RESOLVED_KEPT = 256
 
 #: The one lock every read-modify-write holds. Two browser tabs on one server
 #: are two timers in one process; two processes are `os.replace`'s problem.
@@ -205,7 +210,26 @@ def key(root: Path) -> str:
     slashes are for text that is committed or keyed across machines, and this
     file never leaves the one it was written on.
     """
-    return str(Path(root).expanduser().resolve())
+    return str(_resolved(Path(root).expanduser()))
+
+
+def _resolved(path: Path) -> Path:
+    """`Path.resolve`, asked of the disk once per absolute path in this process.
+
+    **`sync` asks it of the same few paths every second** *(2026-10-08)*: the
+    project's key twice and the open chat's log. Each is an ``lstat`` per
+    folder on the way down, about forty calls a second on the loop, and while
+    a profile or a reading job's tools ran in threads each call waited its turn
+    for the interpreter's lock: the once-a-second snapshot was a one-second
+    stall. A relative path is resolved every time, because what it names moves
+    with the working directory, which opening a project changes.
+    """
+    return _resolved_absolute(str(path)) if path.is_absolute() else path.resolve()
+
+
+@functools.lru_cache(maxsize=RESOLVED_KEPT)
+def _resolved_absolute(path: str) -> Path:
+    return Path(path).resolve()
 
 
 def project(root: Path) -> dict[str, Any]:
@@ -482,7 +506,7 @@ def _chat_of(app: Any) -> str | None:
     if path is None:
         return None
     try:
-        return Path(path).resolve().relative_to(app.catalog_dir.resolve()).as_posix()
+        return _resolved(Path(path)).relative_to(_resolved(app.catalog_dir)).as_posix()
     except ValueError:
         return None
 

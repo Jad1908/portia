@@ -8,6 +8,7 @@ folder, so none of these can touch the real `~/.config/portia`.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -890,3 +891,25 @@ def test_reopening_at_launch_never_records_no_project(tmp_path, launch):
     app_module.restore()
     assert window.opened
     assert prefs.machine()["project"] == prefs.key(project)
+
+
+def test_a_path_is_resolved_off_the_disk_once(tmp_path, monkeypatch):
+    """`sync` runs every second and keyed the project, twice, and the open chat
+    by resolving their paths: an ``lstat`` per folder, about forty calls a
+    second on the loop, each a wait for the interpreter's lock while a profile
+    ran in a thread (2026-10-08). An absolute path is resolved once; a relative
+    one names something else after a project is opened, so it never is."""
+    import os
+
+    root = tmp_path / "a project"
+    root.mkdir()
+    expected = str(root.resolve())
+    resolved = []
+    real = os.path.realpath
+    monkeypatch.setattr(os.path, "realpath", lambda p, **k: resolved.append(p) or real(p, **k))
+    assert prefs.key(root) == prefs.key(root) == expected
+    assert len([p for p in resolved if str(p) == str(root)]) <= 1
+    monkeypatch.chdir(tmp_path)
+    prefs.key(Path("a project"))
+    prefs.key(Path("a project"))
+    assert len([p for p in resolved if str(p) == "a project"]) == 2

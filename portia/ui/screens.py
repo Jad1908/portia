@@ -1410,7 +1410,7 @@ async def _scope_and_interpret(names: list[str], *, in_dialog: bool = False) -> 
     add-data dialog is gone by then and nothing else on screen does.
     """
     from portia.ui import app as app_module
-    from portia.ui import artifacts
+    from portia.ui import artifacts, exchange
 
     if not names:
         return
@@ -1420,13 +1420,12 @@ async def _scope_and_interpret(names: list[str], *, in_dialog: bool = False) -> 
     def say(verb: str):
         def _say(done: int, total: int, name: str) -> None:
             _profiling_moved(job, f"{verb} {name}, {done + 1} of {total}")
-            # Somebody who left for the workspace mid-run sees each table's
-            # profile land as it does (`engine._hops`, ``reload_each``).
-            if APP.left_add_data:
-                artifacts.pane.refresh()
 
         return _say
 
+    # Somebody who left for the workspace mid-run sees each table land as it
+    # does, in the left pane and on the Indexing tab (`engine._hops`).
+    landed = exchange.redraw_indexed
     _profiling_moved(job, f"Scoping {c.count(len(names), 'table')}…")
     stop = APP.indexing_stop = cancel.Scope()
     scoped: list[str] = []
@@ -1434,10 +1433,12 @@ async def _scope_and_interpret(names: list[str], *, in_dialog: bool = False) -> 
     profiled: list[str] = []
     failed: list[str] = []
     try:
-        ran = await engine.scope(APP, names, on_progress=say("Scoping"), stop=stop)
+        ran = await engine.scope(APP, names, on_progress=say("Scoping"), on_done=landed, stop=stop)
         scoped, added, failed = ran.names, ran.items, ran.failed
         if APP.profile_on_add and scoped and not stop.cancelled:
-            ran = await engine.profile_tables(APP, scoped, on_progress=say("Profiling"), stop=stop)
+            ran = await engine.profile_tables(
+                APP, scoped, on_progress=say("Profiling"), on_done=landed, stop=stop
+            )
             profiled, failed = ran.names, [*failed, *ran.failed]
     finally:
         _profiling_moved(job, "")
@@ -2966,7 +2967,7 @@ async def _index_and_interpret(paths: list[Path], *, in_dialog: bool = False) ->
     minute of model time only began when you noticed and clicked.
     """
     from portia.ui import app as app_module
-    from portia.ui import artifacts
+    from portia.ui import artifacts, exchange
 
     if not paths:
         return
@@ -2988,7 +2989,11 @@ async def _index_and_interpret(paths: list[Path], *, in_dialog: bool = False) ->
     done_paths: list[Path] = []
     failed: list[str] = []
     try:
-        ran = await engine.index(paths, APP, on_progress=say, stop=stop)
+        # Each file drawn as indexed the moment it is, wherever the workspace
+        # is open behind this screen (`engine._hops`, `exchange.redraw_indexed`).
+        ran = await engine.index(
+            paths, APP, on_progress=say, on_done=exchange.redraw_indexed, stop=stop
+        )
         names, done_paths, failed = ran.names, ran.items, ran.failed
     finally:
         _profiling_moved(job, "")
