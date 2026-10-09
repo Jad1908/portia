@@ -36,7 +36,9 @@ than a warehouse error. `check_sql` runs on both.
 
 from __future__ import annotations
 
+import contextlib
 import re
+from collections.abc import Iterator
 from typing import Any
 
 from portia.core import backend, cancel
@@ -463,35 +465,9 @@ def apply_sql(inputs: dict[str, Table], sql: str, *, name: str = "sql") -> OpRes
     if first is not None and backend.is_remote(first.con):
         return _apply_remote(inputs, sql, name=name, con=first.con)
 
-    # Read-only by construction: an in-memory database with no external access,
-    # so `COPY … TO`, `read_csv()` and extension installs fail inside DuckDB even
-    # if `check_sql` were fooled into passing them through.
-    sandbox = duckdb.connect(":memory:", config={"enable_external_access": False})
-    # Registered explicitly, because this is the one connection in the engine
-    # that deliberately does not come from `core/io.connect` — and it is where
-    # the agent's own SQL runs, which is the query most worth being able to stop.
-    cancel.watch(sandbox)
-    try:
-        input_rows = {}
-        for input_name, table in inputs.items():
-            read = table.con.execute(table.query)
-            # The types of the rows just read, off the statement that read them.
-            # `table.dtypes` asked the same question by binding the query again,
-            # and on a CSV a bind is the sniff: on a 1,579-column file that was
-            # 11-17 s of a `query_data` whose own query took milliseconds
-            # (2026-10-08). The same type objects either way.
-            dtypes = {str(column[0]): str(column[1]) for column in read.description}
-            frame = read.fetch_df()
-            input_rows[input_name] = int(len(frame))
-            staging = f"__portia_raw_{input_name}"
-            sandbox.register(staging, frame)
-            # The declared input, with the types it actually had. See `_cast`.
-            sandbox.execute(
-                f"CREATE VIEW {quote_ident(input_name)} AS "
-                f"SELECT {_cast(dtypes)} FROM {quote_ident(staging)}"
-            )
+    with sandbox(inputs) as (box, input_rows):
         try:
-            result = sandbox.sql(sql)
+            result = box.sql(sql)
         except duckdb.CatalogException as exc:
             # **A missing table is portia's error, not DuckDB's** (`PIPELINE.md`
             # §8.3). The sandbox holds exactly the declared inputs, so "that
@@ -504,8 +480,6 @@ def apply_sql(inputs: dict[str, Table], sql: str, *, name: str = "sql") -> OpRes
         # The types the *query* produced, captured before the trip back out.
         types = dict(zip(result.columns, (str(t) for t in result.types), strict=True))
         out = result.df()
-    finally:
-        sandbox.close()
 
     con = next(iter(inputs.values())).con if inputs else duckdb.connect(":memory:")
     provenance = {
@@ -524,6 +498,51 @@ def apply_sql(inputs: dict[str, Table], sql: str, *, name: str = "sql") -> OpRes
     # materializes; a file does not), and it is also the one where the compiled
     # text is the agent's own words, captured verbatim. `docs/PIPELINE.md` §3.
     return OpResult(table=table, provenance=provenance, compiled=sql.strip())
+
+
+@contextlib.contextmanager
+def sandbox(inputs: dict[str, Table]) -> Iterator[tuple[Any, dict[str, int]]]:
+    """A locked connection holding exactly ``inputs``, by name, and how many rows each had.
+
+    **The hatch's guarantee, and the one place it is built** (:func:`apply_sql`'s
+    docstring is the argument). An in-memory database with no external access,
+    so `COPY … TO`, `read_csv()` and extension installs fail inside DuckDB even
+    if `check_sql` were fooled into passing them through; each declared input
+    copied in and exposed as a view under its declared name, with the types it
+    had. Shared with what measures an interrupted query
+    (`checks/sql_joins.py`), which runs the agent's own CTEs again and so needs
+    the same walls the query had.
+
+    Registered with the ambient cancel scope, because this is the one connection
+    in the engine that deliberately does not come from `core/io.connect`, and it
+    is where the agent's own SQL runs: the query most worth being able to stop.
+    """
+    import duckdb
+
+    box = duckdb.connect(":memory:", config={"enable_external_access": False})
+    cancel.watch(box)
+    try:
+        input_rows = {}
+        for input_name, table in inputs.items():
+            read = table.con.execute(table.query)
+            # The types of the rows just read, off the statement that read them.
+            # `table.dtypes` asked the same question by binding the query again,
+            # and on a CSV a bind is the sniff: on a 1,579-column file that was
+            # 11-17 s of a `query_data` whose own query took milliseconds
+            # (2026-10-08). The same type objects either way.
+            dtypes = {str(column[0]): str(column[1]) for column in read.description}
+            frame = read.fetch_df()
+            input_rows[input_name] = int(len(frame))
+            staging = f"__portia_raw_{input_name}"
+            box.register(staging, frame)
+            # The declared input, with the types it actually had. See `_cast`.
+            box.execute(
+                f"CREATE VIEW {quote_ident(input_name)} AS "
+                f"SELECT {_cast(dtypes)} FROM {quote_ident(staging)}"
+            )
+        yield box, input_rows
+    finally:
+        box.close()
 
 
 def _cast(types: dict[str, str]) -> str:
