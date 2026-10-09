@@ -793,6 +793,15 @@ async def _evidence(
             text = to_json_compact(receipt(found, len(text)))
     except _Interrupted:
         assert record is not None
+        # **Stop wins, decided here and not on the worker.** The worker sees
+        # the press the moment its query stops, which can be before an
+        # exchange Stop pressed just after it has landed; by the time this
+        # runs on the loop, it has. The rehearsal of this branch merged with
+        # two others found it, as a test that failed one run in a full suite.
+        if record.parent is not None and record.parent.cancelled:
+            if record.interruption is not None:
+                record.interruption.landed = False
+            return _stopped()
         return _interrupted(record)
     except cancel.Cancelled:
         return _stopped()
