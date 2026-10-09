@@ -474,14 +474,21 @@ def apply_sql(inputs: dict[str, Table], sql: str, *, name: str = "sql") -> OpRes
     try:
         input_rows = {}
         for input_name, table in inputs.items():
-            frame = table.con.execute(table.query).fetch_df()
+            read = table.con.execute(table.query)
+            # The types of the rows just read, off the statement that read them.
+            # `table.dtypes` asked the same question by binding the query again,
+            # and on a CSV a bind is the sniff: on a 1,579-column file that was
+            # 11-17 s of a `query_data` whose own query took milliseconds
+            # (2026-10-08). The same type objects either way.
+            dtypes = {str(column[0]): str(column[1]) for column in read.description}
+            frame = read.fetch_df()
             input_rows[input_name] = int(len(frame))
             staging = f"__portia_raw_{input_name}"
             sandbox.register(staging, frame)
             # The declared input, with the types it actually had. See `_cast`.
             sandbox.execute(
                 f"CREATE VIEW {quote_ident(input_name)} AS "
-                f"SELECT {_cast(table.dtypes)} FROM {quote_ident(staging)}"
+                f"SELECT {_cast(dtypes)} FROM {quote_ident(staging)}"
             )
         try:
             result = sandbox.sql(sql)

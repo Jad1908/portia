@@ -68,13 +68,18 @@ def join_report(
     # As each side spells them (`dialect.resolve_columns`): the keys are typed
     # by the agent and the columns are named by the engine, and on a warehouse
     # those disagree about case for every unquoted alias.
-    lkeys = dialects.resolve_columns(lkeys, left.columns)
-    rkeys = dialects.resolve_columns(rkeys, right.columns)
-    _require_columns(left.columns, lkeys, "left")
-    _require_columns(right.columns, rkeys, "right")
+    # Each side's schema once, for the names and for the keys' kinds. `columns`
+    # and `dtypes` each bind the query, and over a CSV a bind is the sniff: asked
+    # three times a side, a `measure_overlaps` of two pairs on 1,579-column files
+    # spent about half of its 237 s sniffing them (2026-10-08).
+    ltypes, rtypes = left.dtypes, right.dtypes
+    lkeys = dialects.resolve_columns(lkeys, ltypes)
+    rkeys = dialects.resolve_columns(rkeys, rtypes)
+    _require_columns(ltypes, lkeys, "left")
+    _require_columns(rtypes, rkeys, "right")
 
-    L = _table_side(left, lkeys)
-    R = _table_side(right, rkeys)
+    L = _table_side(left, lkeys, ltypes)
+    R = _table_side(right, rkeys, rtypes)
     comparable = L["kinds"] == R["kinds"]
 
     exprs = _overlap_exprs(dialects.of(left.con))
@@ -310,7 +315,7 @@ def _key_kind(dtype: str) -> str:
     return "string"
 
 
-def _table_side(table: Table, keys: list[str]) -> dict:
+def _table_side(table: Table, keys: list[str], dtypes: dict[str, str]) -> dict:
     d = table.dialect
     quoted = [d.quote(k) for k in keys]
     not_null = " AND ".join(f"{q} IS NOT NULL" for q in quoted)
@@ -321,7 +326,6 @@ def _table_side(table: Table, keys: list[str]) -> dict:
     n_distinct, n_duplicated, max_mult = table.con.execute(
         f"SELECT count(*), {d.count_where('n > 1')}, coalesce(max(n), 0) FROM {subquery(grouped)}"
     ).fetchone()
-    dtypes = table.dtypes
     return {
         "n_rows": int(n_rows),
         "null_rows": int(null_rows),
@@ -461,13 +465,14 @@ def column_overlap(left: Table, left_column: str, right: Table, right_column: st
     `France` and `FRA` measure zero and are the same thing after a mapping. That
     reading is the agent's, which is why the edge carries the reason it asked.
     """
-    (left_column,) = dialects.resolve_columns([left_column], left.columns)
-    (right_column,) = dialects.resolve_columns([right_column], right.columns)
-    _require_columns(left.columns, [left_column], "left")
-    _require_columns(right.columns, [right_column], "right")
+    ltypes, rtypes = left.dtypes, right.dtypes  # once a side, as `join_report` does
+    (left_column,) = dialects.resolve_columns([left_column], ltypes)
+    (right_column,) = dialects.resolve_columns([right_column], rtypes)
+    _require_columns(ltypes, [left_column], "left")
+    _require_columns(rtypes, [right_column], "right")
 
-    L = _table_side(left, [left_column])
-    R = _table_side(right, [right_column])
+    L = _table_side(left, [left_column], ltypes)
+    R = _table_side(right, [right_column], rtypes)
     comparable = L["kinds"] == R["kinds"]
 
     exprs = _overlap_exprs(dialects.of(left.con))

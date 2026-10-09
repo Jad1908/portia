@@ -627,3 +627,44 @@ def test_naming_a_source_reads_only_the_entry_that_holds_the_name(tmp_path, monk
     assert catalog.source_name("hotels.csv", portia_dir=d) == "hotels"  # its own name
     assert catalog.source_name("raw/hotels.csv", portia_dir=d) == "raw__hotels"
     assert reads == ["hotels", "hotels"]
+
+
+def test_one_entry_is_read_by_the_same_rule_as_the_whole_catalog(tmp_path):
+    """`source_names` and `load_source` answer what `load_catalog` holds, reading less.
+
+    A source registered in ``project.yaml`` whose entry file is gone is not
+    indexed by either reading, and an entry nobody registered is not either:
+    one rule, so the name a tool resolves and the entry it reads agree.
+    """
+    from portia import catalog
+
+    for name in ("a", "b", "c"):
+        messy_customers().to_csv(tmp_path / f"{name}.csv", index=False)
+        index_source(tmp_path / f"{name}.csv", portia_dir=tmp_path / ".portia")
+    d = tmp_path / ".portia"
+    (d / "sources" / "b.yaml").unlink()
+    (d / "sources" / "stray.yaml").write_text("source: stray.csv\n", encoding="utf-8")
+    whole = load_catalog(d)["sources"]
+
+    assert catalog.source_names(d) == list(whole) == ["a", "c"]
+    assert catalog.load_source("a", d) == whole["a"]
+    assert catalog.load_source("b", d) is None
+    assert catalog.load_source("stray", d) is None
+    assert catalog.source_names(tmp_path / "nowhere") == []
+
+
+def test_reading_one_entry_opens_no_other_entry(tmp_path, monkeypatch):
+    """On two 1,579-column tables each entry is 265 kB of YAML, and a tool that
+    names one table used to parse all eighteen, twice (2026-10-08)."""
+    from portia import catalog
+
+    for name in ("a", "b"):
+        messy_customers().to_csv(tmp_path / f"{name}.csv", index=False)
+        index_source(tmp_path / f"{name}.csv", portia_dir=tmp_path / ".portia")
+    opened: list[str] = []
+    read = catalog._read
+    monkeypatch.setattr(catalog, "_read", lambda path: opened.append(Path(path).name) or read(path))
+
+    catalog.load_source("a", tmp_path / ".portia")
+
+    assert opened == ["project.yaml", "a.yaml"]

@@ -88,3 +88,34 @@ def test_rendering_states_numbers_and_never_a_verdict(table):
     assert "50% of left rows" in line
     # No "good", "weak", "candidate" — the check reports and the agent judges.
     assert not any(word in line.lower() for word in ("good", "weak", "best", "likely"))
+
+
+def test_each_side_is_bound_once(tmp_path):
+    """Asking a `Table` for its columns or types binds its query, and over a CSV
+    a bind is the sniff. Three binds a side, on two pairs of 1,579-column files,
+    was about half of a 237 s `measure_overlaps` (2026-10-08)."""
+    import duckdb
+
+    from portia.core.io import load_table
+
+    class CountsBinds:
+        def __init__(self, con):
+            self._con, self.binds = con, 0
+
+        def sql(self, query):
+            self.binds += 1
+            return self._con.sql(query)
+
+        def __getattr__(self, name):
+            return getattr(self._con, name)
+
+    (tmp_path / "a.csv").write_text("id,x\n1,a\n2,b\n", encoding="utf-8")
+    (tmp_path / "b.csv").write_text("id\n2\n3\n", encoding="utf-8")
+    con = CountsBinds(duckdb.connect())
+
+    overlap = column_overlap(
+        load_table(tmp_path / "a.csv", con), "ID", load_table(tmp_path / "b.csv", con), "id"
+    )
+
+    assert con.binds == 2
+    assert overlap["n_shared_values"] == 1 and overlap["left"]["column"] == "id"

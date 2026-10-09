@@ -438,3 +438,42 @@ def test_a_second_transform_compiles_to_a_bracketed_query_that_runs(con):
     done = apply_normalize(t, [{"column": "a", "op": "strip"}, {"column": "b", "op": "to_numeric"}])
     assert "FROM SELECT" not in done.compiled
     assert con.execute(done.compiled).fetchall() == done.table.rows() == [("x", 1.0)]
+
+
+class _CountsBinds:
+    """A connection that counts the relations bound on it, which on a CSV is a sniff each."""
+
+    def __init__(self, con):
+        self._con, self.binds = con, 0
+
+    def sql(self, query):
+        self.binds += 1
+        return self._con.sql(query)
+
+    def __getattr__(self, name):
+        return getattr(self._con, name)
+
+
+def test_an_input_is_read_once_and_keeps_its_types(tmp_path):
+    """The sandbox learns an input's types from the statement that reads it.
+
+    It used to bind the input again for them (`Table.dtypes`), and a bind of a
+    CSV is the sniff: 11-17 s on a 1,579-column file, twice over for a
+    `query_data` with two inputs (2026-10-08). The types still cross the
+    boundary intact, a DATE as a DATE (`DUCKDB_MIGRATION.md` §6.1).
+    """
+    import duckdb
+
+    from portia.core.io import load_table
+
+    path = tmp_path / "stays.csv"
+    path.write_text("stay_date,amount\n2026-06-12,1.5\n2026-06-13,2.25\n", encoding="utf-8")
+    con = _CountsBinds(duckdb.connect())
+    stays = load_table(path, con)
+    types = stays.dtypes
+    con.binds = 0
+
+    result = apply_sql({"stays": stays}, "SELECT stay_date, amount FROM stays", name="copy")
+
+    assert con.binds == 0
+    assert result.table.dtypes == types == {"stay_date": "DATE", "amount": "DOUBLE"}

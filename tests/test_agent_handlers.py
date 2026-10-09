@@ -1594,6 +1594,23 @@ def test_a_role_lands_on_the_column_the_engine_named(project):
     assert next(c for c in entry["columns"] if c["name"] == "customer_id")["role"] == "identifier"
 
 
+def test_naming_a_table_reads_its_entry_and_no_other(sales, monkeypatch):
+    """Every tool that names a table resolves it through `_entry`, and that read
+    the whole catalog twice: on two 1,579-column tables, a second of YAML for a
+    `describe_source` that asks DuckDB nothing (2026-10-08)."""
+    opened: list[str] = []
+    read = catalog._read
+    monkeypatch.setattr(catalog, "_read", lambda path: opened.append(path.name) or read(path))
+
+    handlers.describe_source("orders", sales)
+    handlers.query_data(
+        "SELECT count(*) AS n FROM orders", ["orders"], "how many orders", portia_dir=sales
+    )
+
+    assert opened.count("orders.yaml") == 2
+    assert "customers.yaml" not in opened
+
+
 def test_an_unknown_name_is_told_about_sources_and_models(sales):
     with pytest.raises(ValueError, match="no indexed source or built model") as exc:
         handlers.describe_source("nope", sales)
