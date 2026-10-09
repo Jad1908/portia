@@ -44,6 +44,7 @@ measurements no file can restate (§5.2).
 from __future__ import annotations
 
 import os
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
@@ -308,9 +309,10 @@ def write_measured(edges: list[Edge], session: Any, project: str) -> int:
     rows the write claims is how the caller finds out.
     """
     written = 0
-    for statement, params in measured_writes(edges, project):
-        result = session.run(statement, **params)
-        written += sum(record["written"] for record in result)
+    with _writing():
+        for statement, params in measured_writes(edges, project):
+            result = session.run(statement, **params)
+            written += sum(record["written"] for record in result)
     return written
 
 
@@ -363,6 +365,35 @@ def forget_unscoped_writes() -> list[tuple[str, dict]]:
 
 # --- running them -----------------------------------------------------------
 
+#: How many writes this process has made to the graph. Every write in portia
+#: comes through the three functions below, whoever calls them: indexing in the
+#: window, its Refresh, and the copilot's tools, which run in the same process.
+_WRITES = 0
+_WRITES_LOCK = threading.Lock()
+
+
+def writes() -> int:
+    """How many times this process has written the graph, for a reader that keeps
+    what it read (`ui/engine.knowledge_subgraph`) and needs to know if it still holds.
+
+    A count rather than a question to the database, because asking is what the
+    reader is trying not to do: one connection and one query on every redraw. It
+    cannot see a write from another process, and the reader says what covers that.
+    """
+    return _WRITES
+
+
+@contextmanager
+def _writing() -> Iterator[None]:
+    """Count one write once it is over, whether or not it got all the way: a write
+    that failed half way has still changed the graph."""
+    global _WRITES
+    try:
+        yield
+    finally:
+        with _WRITES_LOCK:
+            _WRITES += 1
+
 
 def write(graph: Graph, session: Any, *, build: str | None = None) -> str:
     """Put a graph into Neo4j, and return the build id that stamped it.
@@ -384,23 +415,25 @@ def write(graph: Graph, session: Any, *, build: str | None = None) -> str:
     build = build or new_build_id()
     if not graph.project:
         raise ValueError("a graph must name its project before it can be stored")
-    for statement in constraint_statements():
-        session.run(statement)
-    if not graph.nodes:
-        return build
-    for statement, params in [
-        *node_writes(graph, build),
-        *edge_writes(graph, build),
-        *prune_writes(build, graph.project),
-    ]:
-        session.run(statement, **params)
+    with _writing():
+        for statement in constraint_statements():
+            session.run(statement)
+        if not graph.nodes:
+            return build
+        for statement, params in [
+            *node_writes(graph, build),
+            *edge_writes(graph, build),
+            *prune_writes(build, graph.project),
+        ]:
+            session.run(statement, **params)
     return build
 
 
 def forget_unscoped(session: Any) -> int:
     """Run the migration, and say how much it removed."""
     removed = 0
-    for statement, params in forget_unscoped_writes():
-        summary = session.run(statement, **params).consume()
-        removed += summary.counters.nodes_deleted + summary.counters.relationships_deleted
+    with _writing():
+        for statement, params in forget_unscoped_writes():
+            summary = session.run(statement, **params).consume()
+            removed += summary.counters.nodes_deleted + summary.counters.relationships_deleted
     return removed

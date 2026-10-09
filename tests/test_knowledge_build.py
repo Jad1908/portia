@@ -26,6 +26,7 @@ from portia.knowledge.schema import (
     HAS_COLUMN,
     IN_GROUP,
     MODEL,
+    POSITION,
     READS,
     SOURCE,
     Ref,
@@ -211,6 +212,44 @@ def test_building_a_model_gives_its_columns_the_facts_a_source_has(project):
     assert amount is not None
     assert amount.properties["n_distinct"] == 3
     assert (amount.properties["min"], amount.properties["max"]) == (5, 20)
+
+
+def test_a_columns_position_is_its_place_in_the_file(project):
+    """The order the Columns picture takes a wide table's columns in.
+
+    A structural fact, read off the catalog's column list the way `HAS_COLUMN`
+    is, and the one order the picture may use: any order by a measured number
+    would be the ranking `KNOWLEDGE_GRAPH.md` §6.1 forbids. File order is not
+    name order — `order_id` comes first in the file and last by name.
+    """
+    graph = build_graph(project).graph
+    placed = {
+        name: graph.node(COLUMN, ORDERS.column(name).key).properties[POSITION]
+        for name in ("order_id", "customer_id", "amount", "note")
+    }
+    assert placed == {"order_id": 1, "customer_id": 2, "amount": 3, "note": 4}
+
+
+def test_a_model_columns_position_is_its_place_in_the_output(project):
+    """A built table's order is its last step's output order, which here is the
+    join's: the left side's columns, then the right side's."""
+    _join_spec(project)
+    graph = build_graph(project).graph
+    model = Ref(MODEL, "mart_orders")
+    produced = [graph.node(COLUMN, e.end.key) for e in graph.edges_of(HAS_COLUMN)]
+    placed = {
+        node.properties["name"]: node.properties[POSITION]
+        for node in produced
+        if node is not None and node.properties["table"] == model.key
+    }
+    assert placed == {
+        "order_id": 1,
+        "customer_id": 2,
+        "amount": 3,
+        "note_x": 4,
+        "name": 5,
+        "note_y": 6,
+    }
 
 
 def test_a_model_reads_the_sources_its_steps_name(project):

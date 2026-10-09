@@ -68,6 +68,7 @@ from portia.knowledge.schema import (
     HAS_COLUMN,
     IN_GROUP,
     MODEL,
+    POSITION,
     READS,
     SOURCE,
     Graph,
@@ -190,8 +191,11 @@ def _add_catalog(graph: Graph, data: dict) -> dict[str, list[str]]:
         )
         paths[name] = path
         columns[path] = [c["name"] for c in entry.get("columns") or []]
-        for col in entry.get("columns") or []:
-            graph.add_edge(HAS_COLUMN, table, _add_column(graph, table, col["name"], col))
+        # The catalog lists a file's columns in the order the file holds them,
+        # so their place in that list is the column's place in the file.
+        for position, col in enumerate(entry.get("columns") or [], start=1):
+            column = _add_column(graph, table, col["name"], col, position=position)
+            graph.add_edge(HAS_COLUMN, table, column)
 
     for group in data.get("groups") or []:
         node = graph.add_node(GROUP, group["name"], context=group.get("context"))
@@ -208,6 +212,7 @@ def _add_column(
     name: str,
     facts: dict | None = None,
     *,
+    position: int | None = None,
     derivation_unknown: bool = False,
 ) -> Ref:
     """One column node. Facts when the catalog has them; a name when it doesn't.
@@ -215,6 +220,8 @@ def _add_column(
     A model's columns arrive with no facts at all, and that is honest — nothing
     has profiled the table portia would build. `role` is judgment the catalog
     holds and the graph restates; it is never invented here.
+
+    ``position`` is its place in its table, from 1 (:data:`schema.POSITION`).
 
     ``derivation_unknown`` is only ever true of a model column, and only when
     nothing could be named underneath it — see :data:`schema.DERIVATION`.
@@ -229,6 +236,7 @@ def _add_column(
         column_key(table.label, table.key, name),
         name=name,
         table=table.key,
+        **{POSITION: position},
         role=facts.get("role"),
         **{fact: facts.get(fact) for fact in COUNT_FACTS},
         **shape_facts(facts),
@@ -326,13 +334,21 @@ def _add_model(
         result.unresolved[node.key] = produced.reason
         return produced
 
-    for name in produced.columns:
+    # In the order the last step outputs them, which is the built table's order.
+    for position, name in enumerate(produced.columns, start=1):
         # Every op but `sql` gives each output column at least one trace, so an
         # empty list means one thing: the parser read the column but could name
         # nothing underneath it. Marking it is what keeps `query.origins` from
         # reporting a computed column as the file the data came from.
         traces = produced.traces.get(name) or []
-        column = _add_column(graph, node, name, measured.get(name), derivation_unknown=not traces)
+        column = _add_column(
+            graph,
+            node,
+            name,
+            measured.get(name),
+            position=position,
+            derivation_unknown=not traces,
+        )
         graph.add_edge(HAS_COLUMN, node, column)
         if not traces:
             result.unresolved[f"{node.key}.{name}"] = _UNKNOWN_ORIGIN

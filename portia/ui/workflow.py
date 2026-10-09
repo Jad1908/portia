@@ -40,11 +40,11 @@ from typing import Any
 
 from nicegui import ui
 
-from portia import catalog
+from portia import catalog, findings
 from portia.checks.outcome import BLOCKING_FLAGS, describe_contribution, describe_grain
 from portia.core import feedback as core_feedback
 from portia.core.present import format_rate
-from portia.core.serialize import to_json
+from portia.core.serialize import to_json, to_json_compact
 from portia.ui import charts, engine, graph, state
 from portia.ui import components as c
 from portia.ui.state import (
@@ -2053,10 +2053,9 @@ async def _index(path: Path) -> None:
     ui.notify(f"Profiled {path.stem}.")
 
 
-#: The explorer's own element id, and its height. A fixed height rather than a
-#: flex fill because vis-network measures its container once, on construction,
-#: and a container that is still growing when it does gets a canvas of zero.
-KNOWLEDGE_CANVAS = "portia-knowledge"
+#: The explorer's height. Fixed rather than a flex fill because vis-network
+#: measures its container once, on construction, and a container that is still
+#: growing when it does gets a canvas of zero.
 KNOWLEDGE_HEIGHT = "calc(100vh - 220px)"
 
 
@@ -2074,19 +2073,24 @@ def _knowledge_inspector() -> None:
     what, and one edge per pair of tables that share a measured overlap. Columns
     are a toggle because at a real project they are several hundred nodes — worth
     seeing, and not worth seeing first.
+
+    **The data is written into the DOM and the client draws it** *(2026-10-08)*.
+    It was pushed with a `run_javascript` after every render, which redrew the
+    network and re-ran its layout each time this pane refreshed, and during
+    indexing or a chat that is every catalog write. `knowledge.js` starts every
+    node it has drawn before where the canvas it replaces had floated it to, so
+    a refresh does not throw the picture into a new shape, and the subgraph is
+    read once and kept until something it shows moves.
     """
     show_columns = APP.knowledge_columns
+    view = KNOWLEDGE_VIEWS[1] if show_columns else KNOWLEDGE_VIEWS[0]
     data = engine.knowledge_subgraph(APP, columns=show_columns)
 
     with ui.element("div").classes("stack-sm p-pad w-full"):
         with ui.element("div").classes("row-between"):
             c.pane_title("Knowledge graph")
             with ui.element("div").classes("row-gap-sm"):
-                c.segmented(
-                    KNOWLEDGE_VIEWS,
-                    KNOWLEDGE_VIEWS[1] if show_columns else KNOWLEDGE_VIEWS[0],
-                    _pick_knowledge_view,
-                )
+                c.segmented(KNOWLEDGE_VIEWS, view, _pick_knowledge_view)
                 # The window must not send anyone to a terminal to see its own
                 # graph (`ui/__init__` — the no-terminal bar). This is the same
                 # `knowledge.sync` that indexing and `record_step` call.
@@ -2101,21 +2105,20 @@ def _knowledge_inspector() -> None:
             c.empty_note(KNOWLEDGE_EMPTY)
             return
 
-        c.caption(_knowledge_counts(data))
-        # The height goes on the div itself, not on NiceGUI's wrapper: vis-network
-        # measures its container once, on construction, and a container with no
-        # height of its own gets a canvas a few pixels tall.
-        ui.html(
-            f'<div id="{KNOWLEDGE_CANVAS}" class="p-knowledge" '
-            f'style="height:{KNOWLEDGE_HEIGHT}"></div>'
-        )
-        ui.timer(
-            0.05,
-            lambda: ui.run_javascript(
-                f"window.portiaKnowledge.draw({KNOWLEDGE_CANVAS!r}, {to_json(data)})"
-            ),
-            once=True,
-        )
+        if show_columns:
+            said = _columns_said(data)
+            if said:
+                c.text(said, style="t-body-strong", color="c-accent")
+        else:
+            c.caption(_knowledge_counts(data))
+        with ui.element("div").classes("p-knowledge-host w-full"):
+            ui.label(to_json_compact(data)).classes("p-knowledge-data")
+            # The height goes on the canvas itself: vis-network measures its
+            # container once, on construction, and a container with no height
+            # of its own gets a canvas a few pixels tall.
+            ui.element("div").classes("p-knowledge").props(f"data-view={view}").style(
+                f"height:{KNOWLEDGE_HEIGHT}"
+            )
 
 
 #: The two views, in the order they are offered. Not a rank: one is fewer nodes,
@@ -2135,6 +2138,10 @@ async def _refresh_knowledge() -> None:
     problem = await asyncio.to_thread(engine.sync_knowledge, APP)
     if problem:
         ui.notify(problem, type="warning")
+    # Read again whatever the sync did: a picture is kept between renders
+    # (`engine.knowledge_subgraph`), and this is the press that asks the
+    # database rather than the window.
+    engine.forget_knowledge()
     pane.refresh()
 
 
@@ -2152,6 +2159,63 @@ def _knowledge_counts(data: dict) -> str:
     edges = f"{len(data['edges'])} edge(s)"
     cut = f"  · {data['omitted']} more not drawn" if data.get("truncated") else ""
     return f"{shown} · {edges}{cut}"
+
+
+def _columns_said(data: dict) -> str:
+    """How much of the project the Columns view draws, or nothing if it draws it all.
+
+    **A count, not the rule** *(2026-10-08, the user's call)*. The caption read
+    *18 Source · 582 Column · 582 edge(s) · 5582 more not drawn* in small grey
+    type; the two sentences that replaced it the same day stated the rule that
+    chose the columns (`query.choose_columns`) and what to press for the rest,
+    and were "almost invisible and too verbose". What is left is how many of
+    each the picture holds, drawn in the accent so it is read. The rule is in
+    the docstring it came from, and the `+N more` beside a table says the rest.
+
+    Tables are counted only when the cap cut some, which takes a project of
+    more than `query.MAX_GRAPH_NODES` of them. Every number is the query's;
+    nothing here counts.
+    """
+    cut = [
+        _KNOWLEDGE_SHOWN_OF.format(
+            shown=f"{part['shown']:,}", total=f"{part['total']:,}", what=what
+        )
+        for what, part in (("tables", data.get("tables")), ("columns", data.get("columns")))
+        if part and part["shown"] < part["total"]
+    ]
+    return _KNOWLEDGE_SHOWING.format(" and ".join(cut)) if cut else ""
+
+
+_KNOWLEDGE_SHOWING = "Showing {}"
+_KNOWLEDGE_SHOWN_OF = "{shown} of {total} {what}"
+
+
+#: What a `+N more` node opens, by the kind of table it hangs from: a file's
+#: catalog entry, or a built table's. Both list every column the table has.
+#: Keyed by the graph's own kinds, which reach the browser and come back in the
+#: press (`knowledge/schema.py`'s `SOURCE` and `MODEL`).
+_COLUMNS_OF = {"Source": SOURCE, "Model": BUILT}
+
+
+def open_table(kind: str, name: str) -> None:
+    """A press on a table's `+N more`, from `assets/knowledge.js`: all of its columns.
+
+    The tab a left-pane row opens for the same table, with its column list
+    unfolded, because what was asked for is the columns the picture left out.
+    A source the catalog no longer has is ignored, as a spec row is in
+    `artifacts.pick_spec`: the picture may be a moment behind the disk.
+    """
+    from portia.ui import artifacts
+
+    selection = _COLUMNS_OF.get(kind)
+    if selection is None or not name or (selection == SOURCE and name not in APP.sources):
+        return
+    APP.select(selection, name)
+    # The preview belongs to looking at a spec, as `artifacts._select` says.
+    APP.previewing = None
+    APP.columns_open = name
+    artifacts.show_selection()
+    pane.refresh()
 
 
 def _brief_inspector() -> None:
@@ -2456,7 +2520,7 @@ _NO_STEPS_YET = "No steps recorded on this spec yet."
 _JOURNAL = "Journal"
 _NO_FINDINGS = "nothing recorded for this table yet"
 _RECORDED_FOR = "recorded for {spec}"
-_STALE_MARK = "measured before {tables} changed"
+_STALE_MARK = findings.STALE_MARK
 #: Findings about the tables this model is built from, not recorded for it.
 _UNTRACED = "no single input column underneath: {cols}"
 _VIA = "recorded at {step}"

@@ -52,6 +52,7 @@ import yaml
 
 from portia import catalog, pipeline, spec
 from portia.core.io import relative
+from portia.core.present import inline
 
 #: Where a project keeps its journal. Root-level and committed — see the module
 #: docstring for the argument, and for the one that was weighed against it.
@@ -311,15 +312,23 @@ def briefs_for_spec(spec_name: str, root: str | Path = ".") -> list[dict]:
 
 
 def fingerprints(
-    tables: list[str], *, root: str | Path = ".", portia_dir: str | Path = catalog.DEFAULT_DIR
+    tables: list[str],
+    *,
+    root: str | Path = ".",
+    portia_dir: str | Path = catalog.DEFAULT_DIR,
+    sources: dict | None = None,
 ) -> dict:
     """What each named table looks like now, as the graph already fingerprints it.
 
     A source is its file's size and mtime (`catalog.STALENESS_FACTS`); a model is
     its spec's fingerprint (`pipeline.fingerprint`). Computed here rather than
     read off the graph so a finding never needs Neo4j to be running.
+
+    ``sources`` is the catalog's source entries, for a caller that already holds
+    them. Reading the catalog is the slow part on a wide project — 2.7 s for one
+    of 6,164 columns, all of it YAML — and the window has it in memory.
     """
-    entries = catalog.load_catalog(portia_dir)["sources"]
+    entries = catalog.load_catalog(portia_dir)["sources"] if sources is None else sources
     specs = spec.discover_specs(Path(root))
     out: dict[str, str | None] = {}
     for table in tables:
@@ -353,17 +362,21 @@ def stale_against(
 
 
 def stale_marks(
-    records: list[dict], *, root: str | Path = ".", portia_dir: str | Path = catalog.DEFAULT_DIR
+    records: list[dict],
+    *,
+    root: str | Path = ".",
+    portia_dir: str | Path = catalog.DEFAULT_DIR,
+    sources: dict | None = None,
 ) -> dict[str, list[str]]:
     """`stale_against` for a whole list at once, keyed by each finding's ``path``.
 
     One catalog read for the list rather than one per finding: the journal
     draws every finding under a model on each render of the report, and
-    `fingerprints` loads the catalog to answer. Same comparison, same rule —
-    marked, never deleted.
+    `fingerprints` loads the catalog to answer — or none, given ``sources``.
+    Same comparison, same rule — marked, never deleted.
     """
     tables = sorted({t for f in records for t in (f.get("fingerprints") or {})})
-    now = fingerprints(tables, root=root, portia_dir=portia_dir)
+    now = fingerprints(tables, root=root, portia_dir=portia_dir, sources=sources)
     return {f.get("path", ""): _moved(f.get("fingerprints") or {}, now) for f in records}
 
 
@@ -372,6 +385,11 @@ def _moved(recorded: dict, now: dict) -> list[str]:
 
 
 # --- the closed vocabulary --------------------------------------------------
+
+
+def tables(finding: dict) -> list[str]:
+    """The tables a finding is about, each once, in the order its ``about`` names them."""
+    return _tables(finding.get("about") or [])
 
 
 def _tables(about: list[str]) -> list[str]:
@@ -395,6 +413,16 @@ def _read(path: Path) -> dict:
 
 # --- rendering --------------------------------------------------------------
 
+#: What a finding whose tables moved since says about it, on every surface that
+#: draws one: named, never a verdict. What changed is a fact; whether the
+#: finding still holds is judgment and belongs to whoever is reading it.
+STALE_MARK = "measured before {tables} changed"
+
+#: Rows of one query's result a glance shows before it says how many more the
+#: file holds. The knowledge graph's hover card is the glance; the journal and
+#: `cli/journal show` print the result whole.
+GLANCE_ROWS = 5
+
 
 def render_finding(finding: dict, *, stale: list[str] | None = None) -> str:
     """One finding for a human. Shared, so the terminal and the app agree."""
@@ -407,10 +435,40 @@ def render_finding(finding: dict, *, stale: list[str] | None = None) -> str:
     if finding.get("spec"):
         lines.append(f"  spec: {finding['spec']}")
     if stale:
-        # Named, never a verdict: what changed is a fact, whether the finding
-        # still holds is judgment and belongs to whoever is reading it.
-        lines.append(f"  ⚑ measured before {', '.join(stale)} changed")
+        lines.append(f"  ⚑ {STALE_MARK.format(tables=', '.join(stale))}")
     return "\n".join(lines)
+
+
+def result_lines(result: str, *, rows: int = GLANCE_ROWS) -> list[str]:
+    """One query's result as short lines: the copied numbers, laid out and never changed.
+
+    A result is the tool's JSON as `record` copied it. Its counts go on the
+    first line and each row on a line of its own, through `core.present.inline`
+    so a row reads ``country FR · n 4`` here as it does everywhere else; the
+    column list is dropped because every row already names its columns. Past
+    ``rows``, a line says how many more the file holds, so a short glance never
+    reads as a short result. Anything that is not that shape is returned as it
+    came: a shape we did not produce is not one to reformat.
+    """
+    import json
+
+    try:
+        payload = json.loads(result)
+    except (TypeError, ValueError):
+        return [result] if result else []
+    if not isinstance(payload, dict):
+        return [result]
+    found = payload.get("rows")
+    counts = {k: v for k, v in payload.items() if k not in ("rows", "columns", "more")}
+    lines = [inline(counts)] if counts else []
+    if isinstance(found, list):
+        lines += [inline(row) for row in found[:rows]]
+        if len(found) > rows:
+            lines.append(_MORE_ROWS.format(n=len(found) - rows))
+    return lines
+
+
+_MORE_ROWS = "{n} more rows in the file"
 
 
 def render_table(grouped: dict) -> str:

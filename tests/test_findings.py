@@ -365,3 +365,59 @@ def test_stale_marks_is_stale_against_for_a_list_with_one_catalog_read(sales, tm
     for f in records:
         assert marks[f["path"]] == findings.stale_against(f, root=tmp_path, portia_dir=sales)
     assert sorted(v for v in marks.values() if v) == [["orders"]]
+
+
+def test_stale_marks_takes_the_catalog_a_caller_already_holds(sales, tmp_path, monkeypatch):
+    """Reading the catalog is the slow part on a wide project (2.7 s of YAML for
+    one of 6,164 columns), and the window has it in memory."""
+    from portia import catalog
+
+    _chat_with_queries(sales, "q1")
+    handlers.record_finding("q1", "a", "b", ["orders"], [1], portia_dir=sales)
+    records = findings.load_all(tmp_path)
+    held = catalog.load_catalog(sales)["sources"]
+
+    monkeypatch.setattr(catalog, "load_catalog", lambda *a, **k: pytest.fail("read from disk"))
+    assert findings.stale_marks(records, root=tmp_path, sources=held) == {records[0]["path"]: []}
+    now = {"orders": {"indexed": {"size": 1, "mtime": 2.0}}}
+    assert findings.stale_marks(records, root=tmp_path, sources=now) == {
+        records[0]["path"]: ["orders"]
+    }
+
+
+# --- a glance at a finding ----------------------------------------------------
+
+
+def test_a_findings_tables_are_its_about_without_columns_or_repeats():
+    finding = {"about": ["orders.id", "regions", "orders.amount"]}
+    assert findings.tables(finding) == ["orders", "regions"]
+    assert findings.tables({}) == []
+
+
+def test_a_result_is_laid_out_a_row_a_line_and_never_changed():
+    """The numbers the knowledge graph's hover card shows are the file's,
+    through `core.present.inline` so a row reads the same as it does anywhere
+    else; past the glance, a line says how many more the file holds."""
+    rows = [{"country": c, "n": i} for i, c in enumerate("ABCDEFG", start=1)]
+    result = json.dumps({"n_rows": 7, "columns": ["country", "n"], "rows": rows})
+    assert findings.result_lines(result, rows=3) == [
+        "n_rows 7",
+        "country A · n 1",
+        "country B · n 2",
+        "country C · n 3",
+        "4 more rows in the file",
+    ]
+    assert findings.result_lines(result) == [
+        "n_rows 7",
+        *(f"country {c} · n {i}" for i, c in enumerate("ABCDE", start=1)),
+        "2 more rows in the file",
+    ]
+
+
+def test_a_result_of_a_shape_we_did_not_produce_comes_back_as_it_came():
+    assert findings.result_lines("Error: no such table") == ["Error: no such table"]
+    assert findings.result_lines("[1, 2]") == ["[1, 2]"]
+    assert findings.result_lines("") == []
+    # A chart's receipt is a dict with no rows: its counts, on one line.
+    receipt = json.dumps({"tab": "rates", "n_rows": 12})
+    assert findings.result_lines(receipt) == ["tab rates · n_rows 12"]
