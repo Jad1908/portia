@@ -727,10 +727,20 @@ async def _hops(
     find. The stamp is taken before the read, in `exchange._sync_artifacts`'
     order, so a file another process writes during the read is still seen. The
     hops have read everything the run wrote, so this one normally reads nothing.
+
+    **What is still to come is on `App.indexing_queue`** *(2026-10-09)*: every
+    item from the start, each taken off when its hop ends, and the rest in the
+    ``finally``, so a Stop gives back what it never reached. A file's inspector
+    reads it and does not offer *Index it* for a file already queued, which
+    started a second run over it. ``on_progress`` comes after the hop before it
+    has left the queue, so a caller's per-hop redraw draws the queue as it is.
     """
     names: list[str] = []
     finished: list = []
     failed: list[str] = []
+    # Added to and taken from, never assigned: a run that started beside
+    # another must not empty the other's queue.
+    app.indexing_queue = app.indexing_queue | frozenset(items)
     try:
         for done, item in enumerate(items):
             if stop is not None and stop.cancelled:
@@ -746,6 +756,8 @@ async def _hops(
                 failed.append(label(item))
                 app.indexing_failed = {**app.indexing_failed, label(item): _sentence(exc)}
                 continue
+            finally:
+                app.indexing_queue = app.indexing_queue - {item}
             names.append(name)
             finished.append(item)
             app.indexing_failed = {k: v for k, v in app.indexing_failed.items() if k != label(item)}
@@ -757,6 +769,7 @@ async def _hops(
             if on_done is not None:
                 on_done(name)
     finally:
+        app.indexing_queue = app.indexing_queue - frozenset(items)
         # A project whose specs cannot be listed stamps nothing, and the watcher
         # reads it again: the stamp must never be what fails a run.
         with contextlib.suppress(OSError, ValueError):

@@ -5357,21 +5357,23 @@ def test_opening_the_workspace_lands_in_the_job_waiting_on_profiling(monkeypatch
 
 def test_a_hop_redraws_every_line_that_draws_profiling(monkeypatch):
     """The add-data screen redrew its own line only, so the sources view stuck
-    on the count it was drawn with until a page reload."""
-    from portia.ui import screens, transcript
+    on the count it was drawn with until a page reload. A file's inspector is
+    one more (2026-10-09): its *Index it* is not offered while a run is going."""
+    from portia.ui import screens, transcript, workflow
     from portia.ui.state import App
 
     drawn: list[str] = []
     monkeypatch.setattr(screens._progress, "refresh", lambda: drawn.append("add-data"))
     monkeypatch.setattr(transcript._index_progress, "refresh", lambda: drawn.append("sources"))
     monkeypatch.setattr(transcript._prelude_view, "refresh", lambda: drawn.append("job"))
-    app = App()
-    with _as_app(screens, app):
+    monkeypatch.setattr(workflow._index_offer, "refresh", lambda: drawn.append("inspector"))
+    app = App(selection=(state.UNINDEXED, "data/orders.csv"))
+    with _as_app(screens, app), _as_app(workflow, app):
         job = screens._waiting_job(1, "file")
         screens._profiling_moved(job, "Profiling orders, 1 of 1")
-    assert drawn == ["add-data", "sources", "job"]
+    assert drawn == ["add-data", "sources", "job", "inspector"]
     assert app.indexing_status == "Profiling orders, 1 of 1" and job.prelude == []
-    with _as_app(screens, app):
+    with _as_app(screens, app), _as_app(workflow, app):
         screens._profiling_moved(job, "")
     assert job.prelude == ["Profiling orders, 1 of 1"] and app.indexing_status == ""
 
@@ -8643,3 +8645,240 @@ def test_a_left_pane_draw_lists_each_folder_and_looks_at_no_file_it_found(tmp_pa
     assert kinds["data/b/c/three.csv"] == state.SOURCE and kinds["specs/s.yaml"] == state.SPEC
     # The data folder, then the spec outside it (its folder, then the file).
     assert len(calls) <= 5, calls
+
+
+# --- Index it is not offered while a run is going (2026-10-09) ---------------------
+
+
+def test_a_run_queues_every_item_and_gives_each_back_when_its_hop_ends(monkeypatch):
+    """`App.indexing_queue` is what a file's inspector reads: every item from
+    the start of the run, each taken off when its hop ends, a failure included,
+    and what a Stop never reached taken off when the run ends. A run that
+    started beside it keeps its own items."""
+    import asyncio
+
+    from portia.core import cancel
+
+    app = App()
+    app.portia_dir = "/nowhere/.portia"
+    beside = Path("/data/other.csv")
+    app.indexing_queue = frozenset({beside})
+    paths = [Path(f"/data/f{i}.csv") for i in range(4)]
+    stop = cancel.Scope()
+
+    def fake_index_one(path, portia_dir, stop=None):
+        if stop is not None and stop.cancelled:
+            raise cancel.Cancelled("stopped")
+        if path.stem == "f1":
+            raise ValueError("unreadable")
+        return path.stem
+
+    async def caught_up(app_):
+        return None
+
+    monkeypatch.setattr(engine_module, "_index_one", fake_index_one)
+    monkeypatch.setattr(engine_module, "catch_up_catalog", caught_up)
+    monkeypatch.setattr(engine_module, "refresh_catalog", lambda app_: None)
+    monkeypatch.setattr(engine_module, "sync_knowledge", lambda app_: None)
+    queued: list[list[str]] = []
+    landed: list[list[str]] = []
+
+    def say(done, total, name):
+        queued.append(sorted(p.stem for p in app.indexing_queue))
+        if done == 2:
+            stop.cancel()
+
+    def on_done(name):
+        landed.append(sorted(p.stem for p in app.indexing_queue))
+
+    try:
+        ran = asyncio.run(
+            engine_module.index(paths, app, on_progress=say, on_done=on_done, stop=stop)
+        )
+    finally:
+        stop.close()
+
+    assert ran.names == ["f0"] and ran.failed == ["f1"]
+    assert queued == [
+        ["f0", "f1", "f2", "f3", "other"],
+        ["f1", "f2", "f3", "other"],
+        ["f2", "f3", "other"],
+    ], "each hop's redraw sees the queue without the hop before it, a failure included"
+    assert landed == [["f1", "f2", "f3", "other"]], "a file has left the queue when it lands"
+    assert app.indexing_queue == frozenset({beside}), "the stop gave back f2 and f3, and only those"
+
+
+def test_index_it_is_not_offered_while_a_run_is_going(tmp_path, monkeypatch):
+    """It was live whatever was running: a file the add-data screen or the
+    Indexing tab had queued could be pressed into a second run over itself,
+    and any other file into a second run beside the first. Disabled either way,
+    with a ? saying which, and offered again once nothing is running."""
+    from portia.core import cancel
+    from portia.ui import workflow
+
+    app = _data_project(tmp_path, monkeypatch, "orders", "regions")
+    rel = "data/orders.csv"
+    app.selection = (state.UNINDEXED, rel)
+    orders, regions = app.root / rel, app.root / "data" / "regions.csv"
+
+    def offer():
+        with _as_app(workflow, app), ui.element("div") as slot:
+            workflow._unindexed_inspector(rel)
+        buttons = [e for e in slot.descendants() if isinstance(e, ui.button)]
+        (button,) = [b for b in buttons if b.text == "Index it"]
+        tips = [str(e.text) for e in slot.descendants() if isinstance(e, ui.tooltip)]
+        return button.enabled, tips
+
+    assert offer() == (True, [])
+    app.indexing_stop = cancel.Scope()
+    try:
+        app.indexing_queue = frozenset({orders, regions})
+        assert offer() == (False, [workflow._INDEX_QUEUED])
+        app.indexing_queue = frozenset({regions})
+        assert offer() == (False, [workflow._INDEX_WAITS])
+    finally:
+        app.indexing_stop.close()
+        app.indexing_stop = None
+    app.indexing_queue = frozenset()
+    app.indexing_pressed = "Index 2 files"  # the add-data press, still copying its import
+    assert offer() == (False, [workflow._INDEX_WAITS])
+    app.indexing_pressed = ""
+    assert offer() == (True, [])
+
+
+def test_index_it_is_a_run_of_one_and_starts_nothing_while_one_is_going(tmp_path, monkeypatch):
+    """It was a bare `engine.index` that nothing on `App` knew about: a second
+    press started a second run over the same file, and the add-data screen's
+    guard could not see it. It holds `indexing_stop` for its run and gives it
+    back however the run ends; a press while any run is going starts nothing;
+    and the file it indexed is selected as its source when it lands."""
+    import asyncio
+
+    from nicegui import context, core
+
+    from portia.ui import artifacts, exchange, transcript, workflow
+
+    app = _data_project(tmp_path, monkeypatch, "orders", "regions")
+    orders, regions = app.root / "data" / "orders.csv", app.root / "data" / "regions.csv"
+    app.selection = (state.UNINDEXED, "data/orders.csv")
+    monkeypatch.setattr(ui, "notify", lambda *a, **k: None)
+    drawn = _counting(
+        monkeypatch,
+        offer=(workflow._index_offer, "refresh"),
+        middle=(workflow.pane, "refresh"),
+        left=(artifacts.pane, "refresh"),
+        rows=(transcript, "sources_moved"),
+    )
+    runs: list[list[str]] = []
+    held: list[bool] = []
+    real_index = engine_module.index
+
+    async def watched_index(paths, app_, **kwargs):
+        runs.append([p.stem for p in paths])
+        held.append(app.indexing_stop is not None)
+        # Two more presses mid-run, on this file and on another: neither runs.
+        await workflow._index(orders)
+        await workflow._index(regions)
+        return await real_index(paths, app_, **kwargs)
+
+    monkeypatch.setattr(engine_module, "index", watched_index)
+    client = context.client
+
+    async def press(path) -> None:
+        monkeypatch.setattr(core, "loop", asyncio.get_running_loop())
+        with client:
+            await workflow._index(path)
+        await asyncio.sleep(0)
+
+    with _as_app(workflow, app), _as_app(exchange, app):
+        asyncio.run(press(orders))
+    assert runs == [["orders"]] and held == [True], "one run, holding the window's stop"
+    assert app.indexing_stop is None and app.indexing_queue == frozenset()
+    assert app.selection == (state.SOURCE, "orders"), "the inspector became the source"
+    assert drawn["offer"] == 1, "at the hop; at the end the pane was already the source"
+    assert drawn["middle"] == 1 and drawn["left"] == 1 and drawn["rows"] == 1
+
+    # A file nothing can read: the run ends all the same, and the button is back.
+    def unreadable(path, portia_dir, stop=None):
+        raise ValueError("unreadable")
+
+    monkeypatch.setattr(engine_module, "_index_one", unreadable)
+    app.selection = (state.UNINDEXED, "data/regions.csv")
+    with _as_app(workflow, app), _as_app(exchange, app):
+        asyncio.run(press(regions))
+    assert runs == [["orders"], ["regions"]]
+    assert app.indexing_stop is None and app.indexing_queue == frozenset()
+    assert app.selection == (state.UNINDEXED, "data/regions.csv")
+    assert "regions" in app.indexing_failed and drawn["offer"] == 3, "the hop, and the end"
+
+
+def test_the_indexing_tab_redraws_the_offer_at_every_hop_and_not_over_a_redrawn_pane(
+    tmp_path, monkeypatch
+):
+    """A run started on the Indexing tab redraws the inspector's offer from
+    each hop, with the queue as it stands. When the file on show lands, the
+    pane is redrawn as its source, and the offer is not redrawn after it: the
+    two refreshes in one tick cleared a container the pane's had deleted
+    (found driving the window, 2026-10-09)."""
+    import asyncio
+
+    from nicegui import core
+
+    from portia.ui import artifacts, exchange, transcript, workflow
+
+    app = _data_project(tmp_path, monkeypatch, "orders", "regions")
+    app.index_ticks = frozenset({"orders", "regions"})
+    app.selection = (state.UNINDEXED, "data/regions.csv")
+    seen: list[list[str]] = []
+    monkeypatch.setattr(
+        workflow._index_offer,
+        "refresh",
+        lambda: seen.append(sorted(p.name for p in app.indexing_queue)),
+    )
+    drawn = _counting(
+        monkeypatch,
+        middle=(workflow.pane, "refresh"),
+        left=(artifacts.pane, "refresh"),
+        rows=(transcript, "sources_moved"),
+        actions=(transcript._index_actions, "refresh"),
+        right=(transcript.pane, "refresh"),
+        line=(transcript, "indexing_moved"),
+    )
+    monkeypatch.setattr(ui, "notify", lambda *a, **k: None)
+
+    async def press() -> None:
+        monkeypatch.setattr(core, "loop", asyncio.get_running_loop())
+        await transcript._index_ticked()
+
+    with _as_app(transcript, app), _as_app(exchange, app), _as_app(workflow, app):
+        asyncio.run(press())
+
+    assert seen == [["orders.csv", "regions.csv"], ["regions.csv"]]
+    assert app.selection == (state.SOURCE, "regions")
+    assert drawn["line"] == 2 and drawn["middle"] == 2, "regions landing, and the run's end"
+    assert app.indexing_queue == frozenset() and app.indexing_stop is None
+
+
+def test_the_indexing_tab_starts_nothing_while_a_run_holds_the_stop(tmp_path, monkeypatch):
+    """A file's *Index it* holds the window's stop and sets no status, so the
+    tab's Index is live while it goes. A second run would take the stop over,
+    lose it when the first ended, and leave itself with no Stop."""
+    import asyncio
+
+    from portia.core import cancel
+    from portia.ui import transcript
+
+    app = _data_project(tmp_path, monkeypatch, "orders")
+    app.index_ticks = frozenset({"orders"})
+    held = app.indexing_stop = cancel.Scope()
+
+    async def second_run(*a, **k):
+        raise AssertionError("a second run beside the first")
+
+    monkeypatch.setattr(engine_module, "index", second_run)
+    try:
+        with _as_app(transcript, app):
+            asyncio.run(transcript._index_ticked())
+    finally:
+        held.close()
+    assert app.indexing_stop is held and app.indexing_status == ""

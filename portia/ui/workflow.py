@@ -38,10 +38,11 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from nicegui import ui
+from nicegui import context, ui
 
 from portia import catalog, findings
 from portia.checks.outcome import BLOCKING_FLAGS, describe_contribution, describe_grain
+from portia.core import cancel
 from portia.core import feedback as core_feedback
 from portia.core.present import format_rate
 from portia.core.serialize import to_json, to_json_compact
@@ -2029,28 +2030,115 @@ def _unindexed_inspector(rel: str) -> None:
             c.empty_note("This file no longer exists.")
             return
         c.text(_UNINDEXED_WHY, color="c-body")
-        c.button("Index it", partial(_index, path), kind="primary", icon=c.INDEX_ICON)
+        _index_offer(path)
         c.caption(_INDEX_SCOPE)
         c.rule()
         _table_preview(engine.file_shape_key(path), engine.read_table(path))
 
 
-async def _index(path: Path) -> None:
-    from portia.ui import artifacts
+@ui.refreshable
+def _index_offer(path: Path) -> None:
+    """*Index it*, or the same button disabled while an indexing run is going.
 
-    ran = await engine.index([path], APP)
-    if ran.failed:
-        # `engine.index` keeps a failure rather than raising it, so *Profiled*
-        # here would be a toast about a file nothing could read.
-        ui.notify(
-            f"Could not index {path.stem}. {APP.indexing_failed.get(path.stem, '')}",
-            type="negative",
+    **Not offered for a file a run is already going to profile** *(2026-10-09)*.
+    It was live whatever was running, so a file the add-data screen or the
+    Indexing tab had queued could be pressed here into a second run over
+    itself. The window indexes one run at a time (`_index`), so the button is
+    disabled for any file while one is going, and a `help_tip` beside it says
+    which case this is: queued in the run, or waiting for a run of other files.
+
+    Its own refreshable, redrawn from every hop of a run wherever it started
+    (`indexing_moved`), rather than the whole inspector and the file's preview
+    under it. When this file lands the pane becomes its source
+    (`exchange.redraw_indexed`); when the run is stopped or ends without it,
+    the button is offered again.
+    """
+    queued = path in APP.indexing_queue
+    with ui.element("div").classes("row-gap-sm"):
+        c.button(
+            "Index it",
+            partial(_index, path),
+            kind="primary",
+            icon=c.INDEX_ICON,
+            enabled=not (queued or _indexing_now()),
         )
+        if queued:
+            c.help_tip(_INDEX_QUEUED)
+        elif _indexing_now():
+            c.help_tip(_INDEX_WAITS)
+
+
+def _indexing_now() -> bool:
+    """Whether an indexing run of the window's is going, from the press that starts it.
+
+    The add-data screen's own test (`screens._index_now`): its press holds
+    ``indexing_pressed`` while it copies an import, and every run holds
+    ``indexing_stop`` while it profiles.
+    """
+    return bool(APP.indexing_pressed) or APP.indexing_stop is not None
+
+
+def indexing_moved() -> None:
+    """An indexing run moved: redraw this pane's offer to index a file, and nothing else.
+
+    Called from every hop of a run, wherever it started: the add-data screen
+    (`screens._redraw_indexing`), the Indexing tab (`transcript._index_ticked`)
+    and this pane (`_index`). A refreshable with no target on screen is a no-op.
+
+    **Only while tab zero is a file nobody has indexed.** The hop that lands
+    the file on show selects its source and redraws the whole pane
+    (`exchange.redraw_indexed`), and the next hop's call comes in the same
+    tick. NiceGUI runs both refreshes after it, so this one cleared a
+    container the pane's had just deleted, which it reports as *an element has
+    been deleted but is still being used* (found driving the window).
+    """
+    kind, _ = APP.selection or (None, "")
+    if kind == UNINDEXED:
+        _index_offer.refresh()
+
+
+async def _index(path: Path) -> None:
+    """Profile the one file this inspector shows: an indexing run of one.
+
+    **A run the window knows about** *(2026-10-09)*. It was a bare
+    `engine.index` with nothing on `App` to say it was running, so a second
+    press started a second run over the same file, Index on the add-data screen
+    started one beside it, and the watcher did not stand down for it. It holds
+    ``indexing_stop`` as every other run does, its button is disabled while any
+    run is going (`_index_offer`), and a press that arrives anyway is dropped.
+    """
+    from portia.ui import exchange
+
+    if _indexing_now() or path in APP.indexing_queue:
         return
-    APP.select(SOURCE, path.stem)
-    artifacts.pane.refresh()
-    pane.refresh()
-    ui.notify(f"Profiled {path.stem}.")
+    # Held before anything is redrawn: the first hop redraws the offer, which
+    # deletes the button this handler is standing in (`screens._index_now`).
+    client = context.client
+    stop = APP.indexing_stop = cancel.Scope()
+    with client:
+        try:
+            # The file drawn as the source it became the moment it lands, here,
+            # in the left pane and on the Indexing tab (`exchange.redraw_indexed`).
+            ran = await engine.index(
+                [path],
+                APP,
+                on_progress=lambda *_: indexing_moved(),
+                on_done=exchange.redraw_indexed,
+                stop=stop,
+            )
+        finally:
+            APP.indexing_stop = None
+            stop.close()
+            indexing_moved()
+        if ran.failed:
+            # `engine.index` keeps a failure rather than raising it, so *Profiled*
+            # here would be a toast about a file nothing could read.
+            ui.notify(
+                f"Could not index {path.stem}. {APP.indexing_failed.get(path.stem, '')}",
+                type="negative",
+            )
+        elif ran.names:
+            ui.notify(f"Profiled {ran.names[0]}.")
 
 
 #: The explorer's height. Fixed rather than a flex fill because vis-network
@@ -2538,6 +2626,9 @@ _UNINDEXED_WHY = (
     "This file is readable but not yet profiled. Indexing measures it and writes a catalog entry."
 )
 _INDEX_SCOPE = "Profiling only, which is free. The copilot reads it on its next exchange."
+#: Why *Index it* is disabled: this file is in the run, or the run is of others.
+_INDEX_QUEUED = "Queued in the indexing run."
+_INDEX_WAITS = "Other files are being indexed. Index this one when they are done."
 _NOT_READ = "The copilot has not read this source yet."
 _NOT_READ_WHY = (
     "The facts below are measured. No one has written what this data means. "

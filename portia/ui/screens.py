@@ -3117,12 +3117,14 @@ def _redraw_indexing() -> None:
     and the waiting job's block (`transcript.indexing_moved`). It used to be
     this screen's alone, so somebody who left for the workspace mid-run saw
     the sources view stuck on the count it was drawn with until they reloaded
-    the page (the user's report, 2026-09-23).
+    the page (the user's report, 2026-09-23). And a file's inspector, whose
+    *Index it* is not offered while a run is going (`workflow.indexing_moved`).
     """
-    from portia.ui import transcript
+    from portia.ui import transcript, workflow
 
     _progress.refresh()
     transcript.indexing_moved()
+    workflow.indexing_moved()
 
 
 def _profiled_note(done: int, failed: int) -> str:

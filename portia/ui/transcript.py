@@ -1009,6 +1009,14 @@ async def _index_ticked() -> None:
     The count in the toast is what finished, not what was ticked, since Stop
     lands between hops (`engine.index`, `engine.profile_tables`).
     """
+    from portia.ui import workflow
+
+    # **One run at a time** *(2026-10-09)*. A file's *Index it* is a run too
+    # and holds the window's stop (`workflow._index`), but sets no status, so
+    # this button is live while it goes. A second run would take the stop
+    # over, lose it when the first ended, and leave itself with no Stop.
+    if APP.indexing_stop is not None:
+        return
     ticked = [s for s in engine.source_states(APP) if s.name in APP.index_ticks]
     files, remote = engine.to_index(ticked)
     if not files and not remote:
@@ -1017,8 +1025,10 @@ async def _index_ticked() -> None:
     def say(verb: str):
         def _say(done: int, total: int, name: str) -> None:
             APP.indexing_status = f"{verb} {name}, {done + 1} of {total}"
-            # The line, not the buttons and the picker around it.
+            # The line, not the buttons and the picker around it, and the
+            # middle pane's offer to index a file this run has queued.
             indexing_moved()
+            workflow.indexing_moved()
 
         return _say
 

@@ -1096,6 +1096,13 @@ class App:
     #: Held rather than toasted because a warehouse profile is minutes and
     #: nobody is looking when the eleventh of thirty fails. In memory only.
     indexing_failed: dict[str, str] = field(default_factory=dict)
+    #: What the indexing run in flight has still to do, each item as it was
+    #: asked: a file's path, a table's qualified name. Written by
+    #: `engine._hops`, which takes an item off when its hop ends, however it
+    #: ended, and the rest when the run does. A file's inspector reads it, so
+    #: *Index it* is not offered for a file a run is already going to profile
+    #: (`workflow._index_offer`, 2026-10-09). In memory only.
+    indexing_queue: frozenset[Path | str] = frozenset()
     #: The Index button's label as it was pressed, held while the press is
     #: being acted on. The counts it was built from empty out during the run
     #: (an import plan is consumed by the copy), and a button that changed

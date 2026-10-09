@@ -871,10 +871,10 @@ def redraw_indexed(name: str) -> None:
     `APP.catalog`. The left pane's tree, whose row for the file stops saying
     *not indexed*, and the Indexing tab's rows, in place (`transcript.sources_moved`).
     The middle pane only when it is showing this table, and a file selected
-    while it was *not indexed* is selected as the source it now is, as
-    `workflow._index` does for one file: its row in the tree is a source row
-    now, and the inspector beside it would go on offering to index it. The
-    rest of the middle pane is the run's to redraw when it ends.
+    while it was *not indexed* is selected as the source it now is: its row in
+    the tree is a source row now, and the inspector beside it would go on
+    offering to index it. The rest of the middle pane is the run's to redraw
+    when it ends. `workflow._index`, a run of one file, draws its file here too.
     """
     from portia.ui import artifacts, transcript, workflow
 
