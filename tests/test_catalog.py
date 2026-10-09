@@ -1,5 +1,6 @@
 """The catalog indexes sources and preserves human judgment across re-index."""
 
+import os
 import time
 from pathlib import Path
 
@@ -419,3 +420,210 @@ def test_an_entry_without_notes_has_no_notes_key(tmp_path):
     src_file = index_source(csv, portia_dir=d)
     set_interpretation("customers", summary="A read.", portia_dir=d)
     assert "notes" not in yaml.safe_load(src_file.read_text(encoding="utf-8"))
+
+
+# --- reading fast, writing the same bytes (2026-10-08) -------------------------
+
+
+def _realistic_entry(tmp_path) -> Path:
+    """An entry the way a project ends up with one: profiled, read, noted.
+
+    Values chosen for what a YAML emitter can disagree about: text past U+FFFF,
+    a long value holding a tab (which forces double quotes and a fold), prose
+    with typographic punctuation, a date, a decimal, nulls, a column name with
+    a space in it.
+    """
+    import pandas as pd
+
+    n = 30
+    pd.DataFrame(
+        {
+            "booking id": range(n),
+            "city": ["Zürich", "São Paulo", "東京"] * 10,
+            "amount_eur": [round(i * 12.345, 3) for i in range(n)],
+            "stayed_on": pd.date_range("2026-01-01", periods=n).strftime("%Y-%m-%d"),
+            "comment": [
+                f"Guest {i} wrote:\tlate check-in ≈ 23:40 — “fine”, would book again 🙂 "
+                + "and the rest of a long free-text field " * 3
+                if i % 3
+                else None
+                for i in range(n)
+            ],
+        }
+    ).to_csv(tmp_path / "bookings.csv", index=False)
+    d = tmp_path / ".portia"
+    entry_file = index_source(tmp_path / "bookings.csv", portia_dir=d)
+    set_interpretation(
+        "bookings",
+        summary=(
+            "One row per booking from the reservations feed — amounts in euros, "
+            "dates as ISO strings, and a free-text comment that guests write 😀 "
+            "including tabs and quotes ('like this'). Roughly a month of stays."
+        ),
+        roles={"booking id": "key", "amount_eur": "measure"},
+        note="amount_eur excludes the city tax; see the finance note of 2026-09-30.",
+        portia_dir=d,
+    )
+    return entry_file
+
+
+def test_the_catalog_is_read_by_libyaml_and_reads_the_same_values(tmp_path):
+    """The window reads every entry again each time the catalog moves, on its
+    event loop; on two 1,579-column tables that was 1.3 s of pure-Python
+    scanning for eighteen files. libyaml's parser is used where PyYAML has it,
+    and it has to read back exactly what the pure-Python one does."""
+    from portia import catalog
+
+    entry_file = _realistic_entry(tmp_path)
+    text = entry_file.read_text(encoding="utf-8")
+
+    assert catalog._read(entry_file) == yaml.load(text, Loader=yaml.SafeLoader)
+    if yaml.__with_libyaml__:
+        assert catalog._LOADER is yaml.CSafeLoader
+    else:
+        assert catalog._LOADER is yaml.SafeLoader
+
+
+def test_the_catalog_is_written_by_the_pure_python_emitter_byte_for_byte(tmp_path):
+    """The catalog is read as a diff, so writing it must not move a byte that
+    did not change. libyaml's emitter would: it escapes a character past U+FFFF
+    (the 😀 above becomes ``\\U0001F600``) and folds a long double-quoted string
+    at other places. So the writer stays pure Python, and a round trip through
+    `_read` and `_write` is the file it started from."""
+    from portia import catalog
+
+    entry_file = _realistic_entry(tmp_path)
+    written = entry_file.read_bytes()
+    entry = catalog._read(entry_file)
+
+    assert written.decode("utf-8") == yaml.safe_dump(
+        entry, sort_keys=False, default_flow_style=False, allow_unicode=True
+    )
+    assert "😀" in written.decode("utf-8") and "\\U0001F600" not in written.decode("utf-8")
+    catalog._write(entry_file, entry)
+    assert entry_file.read_bytes() == written
+
+
+# --- reading only what moved, writing whole (2026-10-08) -----------------------
+
+
+def _three_sources(tmp_path):
+    import pandas as pd
+
+    d = tmp_path / ".portia"
+    init_project("Bookings and the hotels they are for.", portia_dir=d)
+    for name in ("bookings", "hotels", "rates"):
+        pd.DataFrame({"id": [1, 2, 3], name: ["a", "b", "c"]}).to_csv(
+            tmp_path / f"{name}.csv", index=False
+        )
+        index_source(tmp_path / f"{name}.csv", portia_dir=d)
+    return d
+
+
+def _entries_read(monkeypatch) -> list[str]:
+    from portia import catalog
+
+    reads: list[str] = []
+    real = catalog._read
+
+    def read(path):
+        if Path(path).parent.name == "sources":
+            reads.append(Path(path).stem)
+        return real(path)
+
+    monkeypatch.setattr(catalog, "_read", read)
+    return reads
+
+
+def test_a_reload_reads_only_the_entries_that_moved_and_agrees_with_a_whole_read(
+    tmp_path, monkeypatch
+):
+    """The window holds the catalog and reloads it whenever an entry moves; it
+    read every entry each time, which on two 1,579-column tables was half a
+    second per tool result of a reading job that wrote eighteen. An entry whose
+    file looks as it did is the dict already held, and the answer is the one a
+    whole read gives, whatever moved: an entry, the register, the groups."""
+    from portia import catalog
+
+    d = _three_sources(tmp_path)
+    loaded, seen = catalog.reload_catalog({}, {}, d)
+    assert loaded == load_catalog(d)
+    reads = _entries_read(monkeypatch)
+
+    again, seen = catalog.reload_catalog(loaded, seen, d)
+    assert reads == [] and again == loaded
+    assert all(again["sources"][n] is loaded["sources"][n] for n in loaded["sources"])
+
+    set_interpretation("hotels", summary="One row per hotel.", portia_dir=d)
+    set_group("stays", sources=["bookings", "hotels"], context="One feed.", portia_dir=d)
+    reads.clear()  # the write read its own entry
+    moved, seen = catalog.reload_catalog(again, seen, d)
+    assert reads == ["hotels"]
+    assert (
+        moved == load_catalog(d) and moved["sources"]["hotels"]["summary"] == "One row per hotel."
+    )
+    assert moved["sources"]["bookings"] is again["sources"]["bookings"]
+
+    remove_source("rates", portia_dir=d)
+    (tmp_path / "rooms.csv").write_text("id,beds\n1,2\n", encoding="utf-8")
+    index_source(tmp_path / "rooms.csv", portia_dir=d)
+    reads.clear()
+    last, _ = catalog.reload_catalog(moved, seen, d)
+    assert reads == ["rooms"]
+    assert last == load_catalog(d) and set(last["sources"]) == {"bookings", "hotels", "rooms"}
+
+
+def test_an_entry_is_written_whole_or_not_at_all(tmp_path, monkeypatch):
+    """The window reads the entries that moved off its loop now, while a tool
+    may be writing the next one, and a write that truncated the file and dumped
+    into it was a quarter of a second of half an entry: the first replay of a
+    reading job read one and failed on a YAML error. A write that fails leaves
+    the entry as it was, a reader holding the old file reads it whole, and
+    nothing is left beside it."""
+    from portia import catalog
+
+    d = _three_sources(tmp_path)
+    entry_file = d / "sources" / "hotels.yaml"
+    before = entry_file.read_bytes()
+    entry = catalog._read(entry_file)
+
+    def breaks(*a, **k):
+        raise RuntimeError("the emitter fell over halfway")
+
+    monkeypatch.setattr(catalog.yaml, "safe_dump", breaks)
+    with pytest.raises(RuntimeError):
+        catalog._write(entry_file, {**entry, "summary": "Never written."})
+    assert entry_file.read_bytes() == before
+    monkeypatch.undo()
+
+    with open(entry_file, encoding="utf-8") as reading:
+        catalog._write(entry_file, {**entry, "summary": "Written whole."})
+        if os.name != "nt":  # Windows refuses to replace an open file; `_replace` waits
+            assert reading.read() == before.decode("utf-8")
+    assert catalog._read(entry_file)["summary"] == "Written whole."
+    assert sorted(p.name for p in entry_file.parent.iterdir()) == [
+        "bookings.yaml",
+        "hotels.yaml",
+        "rates.yaml",
+    ]
+
+
+def test_naming_a_source_reads_only_the_entry_that_holds_the_name(tmp_path, monkeypatch):
+    """Whether a name is taken is the register's answer; whose it is, one
+    entry's. Naming a source read the whole catalog, every entry, for each
+    file indexed: by the end of a run on two 1,579-column tables, half a
+    second of parsing per file on the worker, holding the interpreter's lock
+    the window's loop needed to answer a click."""
+    from portia import catalog
+
+    d = _three_sources(tmp_path)
+    (tmp_path / "raw").mkdir()
+    (tmp_path / "raw" / "hotels.csv").write_text("id\n1\n", encoding="utf-8")
+    (tmp_path / "rooms.csv").write_text("id\n1\n", encoding="utf-8")
+    reads = _entries_read(monkeypatch)
+
+    assert catalog.source_name("rooms.csv", portia_dir=d) == "rooms"
+    assert reads == []
+    assert catalog.source_name("hotels.csv", portia_dir=d) == "hotels"  # its own name
+    assert catalog.source_name("raw/hotels.csv", portia_dir=d) == "raw__hotels"
+    assert reads == ["hotels", "hotels"]

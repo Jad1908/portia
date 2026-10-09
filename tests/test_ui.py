@@ -4104,16 +4104,31 @@ def test_a_spec_row_carries_its_name_for_the_client_to_read(tmp_path, monkeypatc
     assert picks == {"mart", "stg"}
 
 
-def test_a_spec_row_has_no_server_click_handler(tmp_path, monkeypatch):
-    """One path only. Wiring `on_click` as well would send the light action a
-    second time on the second press of a double click."""
-    import inspect
+def test_no_row_in_the_tree_has_a_server_click_handler(tmp_path, monkeypatch):
+    """One path only, and it is the client's. On a spec, a handler as well
+    would send the light action a second time on the second press of a double
+    click. On a folder or any other file, a handler bound to the row lost the
+    press when a refresh replaced the row while the press waited behind a busy
+    loop (2026-10-08): every tree row carries its identity instead, a spec its
+    name and the rest their path, and exactly one of the two."""
+    from portia.ui import artifacts, tree
 
-    from portia.ui import artifacts
+    monkeypatch.chdir(tmp_path)
+    app = _canvas_project(tmp_path)
+    app.open_folders = frozenset({"specs"})
 
-    source = inspect.getsource(artifacts._file)
-    assert "on_click=None if node.kind == SPEC" in source
-    assert "pick=" in source
+    with _as_app(artifacts, app), ui.element("div") as slot:
+        artifacts.pane()
+
+    rows = [e for e in slot.descendants() if "artifact-row" in e.classes]
+    in_tree = [e for e in rows if {"data-tree", "data-spec"} & set(e.props or {})]
+    assert all(not ({"data-tree", "data-spec"} <= set(e.props)) for e in in_tree)
+    assert not [e for e in in_tree if any(x.type == "click" for x in e._event_listeners.values())]
+    paths = {e.props["data-tree"] for e in in_tree if "data-tree" in e.props}
+    drawn = engine_module.project_tree(app)
+    assert {"data", "specs", "data/orders.csv", "data/regions.csv"} <= paths
+    assert set(tree.folders(drawn)) <= paths
+    assert not {p for p in paths if p.endswith(".yaml")}, "a spec row is the client's other kind"
 
 
 # --- folding a run of tool calls ---------------------------------------------
@@ -5896,7 +5911,7 @@ def test_index_on_the_tab_scans_a_ticked_metadata_only_table(tmp_path, monkeypat
     scanned: list[str] = []
     statuses: list[str] = []
 
-    async def fake_profile_tables(app_, names, *, on_progress=None, stop=None):
+    async def fake_profile_tables(app_, names, *, on_progress=None, on_done=None, stop=None):
         for i, name in enumerate(names):
             on_progress(i, len(names), name)
             statuses.append(app_.indexing_status)
@@ -5937,12 +5952,12 @@ def test_adding_warehouse_tables_scans_them_only_when_the_switch_says_so(tmp_pat
     app.interpret = False
     scanned: list[list[str]] = []
 
-    async def fake_scope(app_, names, *, on_progress=None, stop=None):
+    async def fake_scope(app_, names, *, on_progress=None, on_done=None, stop=None):
         return engine_module.Indexed(
             names=[n.split(".")[-1] for n in names], items=list(names), failed=[]
         )
 
-    async def fake_profile_tables(app_, names, *, on_progress=None, stop=None):
+    async def fake_profile_tables(app_, names, *, on_progress=None, on_done=None, stop=None):
         scanned.append(list(names))
         return engine_module.Indexed(names=list(names), items=list(names), failed=[])
 
@@ -7457,7 +7472,7 @@ def test_the_indexing_tab_takes_its_spinner_down_when_the_run_raises(tmp_path, m
     app.index_ticks = frozenset({"orders"})
     refreshed: list[str] = []
 
-    async def fake_profile_tables(app_, names, *, on_progress=None, stop=None):
+    async def fake_profile_tables(app_, names, *, on_progress=None, on_done=None, stop=None):
         raise RuntimeError("the engine itself broke")
 
     monkeypatch.setattr(engine_module, "profile_tables", fake_profile_tables)
@@ -7779,3 +7794,478 @@ def test_a_theme_switch_restyles_the_graph_in_place():
     assert "getComputedStyle(document.body)" in js
     assert 'attributeFilter: ["class"]' in js
     assert "el.__network.setOptions(look)" in js
+
+
+# --- indexing a wide project without freezing the window (2026-10-08) -------------
+
+
+def _entry_reads(monkeypatch) -> list[str]:
+    """The catalog entries read off disk from here on, by name, in order."""
+    reads: list[str] = []
+    real = catalog._read
+
+    def read(path):
+        if Path(path).parent.name == "sources":
+            reads.append(Path(path).stem)
+        return real(path)
+
+    monkeypatch.setattr(catalog, "_read", read)
+    return reads
+
+
+def _counting(monkeypatch, **targets):
+    """Count the calls on each target and do nothing else: a pane's refresh needs
+    a page, and what these tests are about is whether it was asked for."""
+    calls = {name: 0 for name in targets}
+    for name, (owner, attr) in targets.items():
+
+        def count(*a, _n=name, **k):
+            calls[_n] += 1
+
+        monkeypatch.setattr(owner, attr, count)
+    return calls
+
+
+def test_the_watcher_stands_down_while_indexing_and_finds_nothing_after_it(tmp_path, monkeypatch):
+    """`exchange.watch_project` read the whole catalog again on the loop for
+    every entry an indexing run wrote: two to four seconds a file on a project
+    with two 1,579-column tables, and a press on the left pane queued behind it
+    was lost. It stands down while the window indexes, the run's last reload
+    takes the stamp, and so its first look afterwards has nothing to do. What a
+    host writes when nothing of the window's own is running is still found, and
+    only that entry is read."""
+    import asyncio
+
+    from portia.core import cancel
+    from portia.ui import artifacts, exchange, transcript, workflow
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "data").mkdir()
+    for name in ("orders", "regions", "rates"):
+        pd.DataFrame({"id": [1, 2], name: [3, 4]}).to_csv(
+            tmp_path / "data" / f"{name}.csv", index=False
+        )
+    app = App()
+    engine_module.open_project(tmp_path, app)
+    monkeypatch.setattr(engine_module, "sync_knowledge", lambda app_: "")
+    reads = _entry_reads(monkeypatch)
+    drawn = _counting(
+        monkeypatch,
+        left=(artifacts.pane, "refresh"),
+        middle=(workflow.pane, "refresh"),
+        right=(transcript.pane, "refresh"),
+    )
+
+    with _as_app(exchange, app):
+        exchange.watch_project()  # the first look only takes the stamp
+        app.indexing_stop = cancel.Scope()
+        try:
+            # A profile lands mid-run: the watcher does not go and read it.
+            catalog.index_source(tmp_path / "data" / "orders.csv", portia_dir=app.portia_dir)
+            reads.clear()  # indexing reads the register to name the source
+            exchange.watch_project()
+            assert reads == [] and drawn == {"left": 0, "middle": 0, "right": 0}
+            assert "orders" not in app.sources
+
+            asyncio.run(engine_module.index([tmp_path / "data" / "regions.csv"], app))
+        finally:
+            app.indexing_stop.close()
+            app.indexing_stop = None
+        assert set(app.sources) == {"orders", "regions"}, "the run's own reload saw both"
+        reads.clear()
+
+        exchange.watch_project()
+        assert reads == [], "the run already read what it wrote"
+        assert drawn == {"left": 0, "middle": 0, "right": 0}
+
+        # A host indexes a file while the window is idle: noticed on the next look.
+        catalog.index_source(tmp_path / "data" / "rates.csv", portia_dir=app.portia_dir)
+        reads.clear()
+        exchange.watch_project()
+    assert reads == ["rates"] and "rates" in app.sources
+    assert drawn["left"] == 1 and drawn["middle"] == 1
+
+
+def test_a_run_ends_by_redrawing_what_it_wrote_without_reading_it_again(tmp_path, monkeypatch):
+    """With the watcher standing down, the run's callers are the redraw it used
+    to do afterwards: the left and middle panes, once, from the catalog the
+    run's last hop already read (`exchange.redraw_artifacts`)."""
+    import inspect
+
+    from portia.ui import exchange, screens, transcript
+
+    for fn in (transcript._index_ticked, screens._catch_up_workspace):
+        source = inspect.getsource(fn)
+        assert "exchange_driver.redraw_artifacts()" in source or (
+            "exchange.redraw_artifacts()" in source
+        ), fn.__name__
+        assert "refresh_catalog" not in source
+    assert "redraw_artifacts()" in inspect.getsource(exchange._sync_artifacts)
+    assert "refresh_catalog" not in inspect.getsource(exchange.redraw_artifacts)
+
+
+def test_a_stamp_that_cannot_be_taken_does_not_fail_the_run(tmp_path, monkeypatch):
+    """Two specs with one name make the project unlistable (`spec.discover_specs`
+    refuses it). The run still reloads and returns; the watcher reads again."""
+    import asyncio
+
+    monkeypatch.chdir(tmp_path)
+    pd.DataFrame({"a": [1]}).to_csv(tmp_path / "orders.csv", index=False)
+    app = App()
+    engine_module.open_project(tmp_path, app)
+    monkeypatch.setattr(engine_module, "sync_knowledge", lambda app_: "")
+
+    def unlistable(app_):
+        raise ValueError("two specs are both called 'stg'")
+
+    monkeypatch.setattr(engine_module, "artifact_stamp", unlistable)
+    ran = asyncio.run(engine_module.index([tmp_path / "orders.csv"], app))
+    assert ran.names == ["orders"] and "orders" in app.sources
+
+
+def test_the_indexing_tab_reads_the_windows_catalog_once_per_draw(tmp_path, monkeypatch):
+    """It read every entry off disk twice per draw, `_source_states` and then
+    `_index_actions` asking again: 3.8 s a draw on two 1,579-column tables,
+    after indexing had ended. The rows come from `app.catalog` now, which
+    everything that writes the catalog reloads, and the buttons are handed the
+    rows drawn above them."""
+    import asyncio
+
+    from portia.ui import transcript
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "data").mkdir()
+    for name in ("orders", "regions", "rates"):
+        pd.DataFrame({"id": [1, 2]}).to_csv(tmp_path / "data" / f"{name}.csv", index=False)
+    app = App()
+    engine_module.open_project(tmp_path, app)
+    for name in ("orders", "regions"):
+        catalog.index_source(tmp_path / "data" / f"{name}.csv", portia_dir=app.portia_dir)
+    catalog.set_interpretation("orders", summary="One row per order.", portia_dir=app.portia_dir)
+    engine_module.refresh_catalog(app)
+
+    def from_disk(*a, **k):
+        raise AssertionError("the Indexing tab read the catalog off disk")
+
+    monkeypatch.setattr(catalog, "load_catalog", from_disk)
+    states = {s.name: s.state for s in engine_module.source_states(app)}
+    assert states == {
+        "orders": engine_module.INTERPRETED,
+        "regions": engine_module.UNREAD,
+        "rates": engine_module.UNINDEXED,
+    }
+
+    asked = []
+    real = engine_module.source_states
+    monkeypatch.setattr(
+        transcript.engine, "source_states", lambda app_: asked.append(1) or real(app_)
+    )
+    app.index_ticks = frozenset({"rates", "regions"})
+    with _as_app(transcript, app), ui.element("div") as slot:
+        transcript._source_states()
+    assert len(asked) == 1
+    labels = [str(e.text) for e in slot.descendants() if isinstance(e, ui.button)]
+    assert "Index 1 source" in labels and "Interpret 1 source" in labels
+
+    # A tick redraws the buttons alone, from the rows they were drawn with.
+    async def tick():
+        from nicegui import core
+
+        monkeypatch.setattr(core, "loop", asyncio.get_running_loop())
+        with _as_app(transcript, app):
+            app.index_ticks = frozenset({"rates", "regions", "orders"})
+            await transcript._index_actions.refresh()
+
+    asyncio.run(tick())
+    assert len(asked) == 1
+    labels = [str(e.text) for e in slot.descendants() if isinstance(e, ui.button)]
+    assert "Interpret 2 sources" in labels
+
+
+# --- a press on the left tree is the client's, keyed by path (2026-10-08) ------------
+
+
+def test_a_press_on_the_tree_is_resolved_by_its_path_against_the_tree_as_it_is(
+    tmp_path, monkeypatch
+):
+    """The row sends its path (`assets/pick.js`) and the page-level handler
+    finds it in the tree as last drawn: a folder opens or shuts, a file is
+    selected, and a path the tree does not draw is ignored rather than raising."""
+    from portia.ui import app as app_module
+    from portia.ui import artifacts
+
+    monkeypatch.chdir(tmp_path)
+    app = _canvas_project(tmp_path)
+    assert app.folder_open("data", 0), "the top level is open until it is shut"
+    with _as_app(artifacts, app), ui.element("div"):
+        artifacts.pane()
+
+    with _as_app(artifacts, app), _quiet_refreshes(app):
+        app_module._tree_pressed(SimpleNamespace(args={"tree": "data"}))
+        assert not app.folder_open("data", 0)
+        artifacts.tree_pressed("data")
+        assert app.folder_open("data", 0)
+
+        artifacts.tree_pressed("data/regions.csv")
+        assert app.selection == (state.SOURCE, "regions")
+
+        (tmp_path / "data" / "later.csv").write_text("a\n1\n", encoding="utf-8")
+        artifacts.tree_pressed("data/later.csv")
+        artifacts.tree_pressed("../elsewhere/orders.csv")
+        app_module._tree_pressed(SimpleNamespace(args={}))
+    assert app.selection == (state.SOURCE, "regions"), "not drawn yet, so not pressed"
+
+
+def test_the_tree_is_one_handler_at_page_level_and_sends_at_once():
+    """Registered once with the page, like `portia:spec` and `portia:opens`; and
+    in `pick.js` as the kind with no second press to wait for, so a folder
+    opens on the press rather than after the double-click window."""
+    import inspect
+
+    from portia.ui import app as app_module
+    from portia.ui import theme
+
+    assert 'ui.on("portia:tree", _tree_pressed)' in inspect.getsource(app_module.page)
+    script = theme.PICK_JS.read_text(encoding="utf-8")
+    assert '{ attribute: "data-tree", event: "portia:tree", field: "tree", once: true }' in script
+    assert "if (row.once) {" in script
+    assert script.index("if (row.once) {") < script.index("pending = {")
+    assert theme.PICK_JS in theme.BEHAVIOUR
+
+
+def test_finding_a_path_in_the_tree_says_how_deep_it_is_drawn(tmp_path):
+    from portia.ui import tree
+
+    (tmp_path / "data" / "raw").mkdir(parents=True)
+    (tmp_path / "data" / "raw" / "orders.csv").write_text("a\n1\n", encoding="utf-8")
+    nodes = tree.build(tmp_path, {}, (".csv",))
+    assert tree.find(nodes, "data")[1] == 0
+    assert tree.find(nodes, "data/raw")[1] == 1
+    node, depth = tree.find(nodes, "data/raw/orders.csv")
+    assert depth == 2 and not node.is_folder
+    assert tree.find(nodes, "data/ra") is None and tree.find(nodes, "") is None
+
+
+# --- each file drawn as it lands, a burst drawn once (2026-10-08) --------------------
+
+
+def _data_project(tmp_path, monkeypatch, *names: str) -> App:
+    monkeypatch.chdir(tmp_path)
+    for name in names:
+        path = tmp_path / "data" / f"{name}.csv"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame({"id": [1, 2], "v": [3, 4]}).to_csv(path, index=False)
+    app = App()
+    engine_module.open_project(tmp_path, app)
+    monkeypatch.setattr(engine_module, "sync_knowledge", lambda app_: "")
+    return app
+
+
+def test_each_hop_puts_its_entry_in_the_windows_catalog_and_names_it(tmp_path, monkeypatch):
+    """A local run reloaded the catalog only when it ended, so eighteen files
+    finished with none of them drawn as indexed until the last (the user's
+    report, 2026-10-08); a warehouse run reloaded every entry after every hop.
+    Each hop now reads the one entry it wrote, off the loop, and tells its
+    caller by the catalog's name, which is the file's stem until another source
+    has it. The run's last reload has nothing left to read."""
+    import asyncio
+
+    app = _data_project(tmp_path, monkeypatch, "orders", "raw/orders")
+    reads = _entry_reads(monkeypatch)
+    landed = []
+
+    def on_done(name):
+        landed.append((name, set(app.sources), list(reads)))
+
+    paths = [tmp_path / "data" / "orders.csv", tmp_path / "data" / "raw" / "orders.csv"]
+    ran = asyncio.run(engine_module.index(paths, app, on_done=on_done))
+
+    assert ran.names == ["orders", "raw__orders"]
+    assert landed[0][:2] == ("orders", {"orders"})
+    assert landed[1][:2] == ("raw__orders", {"orders", "raw__orders"})
+    # The second file's name was checked against the first's entry; each hop
+    # then read back its own entry and nothing else, and the end read nothing.
+    assert reads == ["orders", "orders", "raw__orders"]
+
+
+def test_the_indexing_tab_moves_a_rows_state_in_place(tmp_path, monkeypatch):
+    """Redrawing the list per hop would rebuild every checkbox under somebody
+    ticking one (`transcript._tick_source`'s rule). So a row whose source was
+    just indexed redraws what follows its checkbox, and the checkbox is the one
+    that was there. A row that came or went redraws the list."""
+    import asyncio
+
+    from nicegui import core
+
+    from portia.ui import transcript
+
+    app = _data_project(tmp_path, monkeypatch, "orders", "regions")
+    catalog.index_source(tmp_path / "data" / "orders.csv", portia_dir=app.portia_dir)
+    engine_module.refresh_catalog(app)
+    rebuilt = _counting(monkeypatch, list=(transcript._source_states, "refresh"))
+    # The rows other tests drew in slots nothing deletes are not this tab's.
+    monkeypatch.setattr(transcript, "_STATE_ROWS", {})
+
+    def row_of(slot, name):
+        for element in slot.descendants():
+            if "index-row" in element.classes and any(
+                getattr(e, "text", None) == name for e in element.descendants()
+            ):
+                return element
+        raise AssertionError(name)
+
+    def texts(row):
+        return [str(e.text) for e in row.descendants() if getattr(e, "text", None)]
+
+    with _as_app(transcript, app), ui.element("div") as slot:
+        transcript._source_states()
+    row = row_of(slot, "regions")
+    box = next(e for e in row.descendants() if isinstance(e, ui.checkbox))
+    assert "not indexed" in texts(row) and "is-unindexed" in row.classes
+
+    catalog.index_source(tmp_path / "data" / "regions.csv", portia_dir=app.portia_dir)
+    engine_module.refresh_catalog(app)
+
+    async def moved():
+        monkeypatch.setattr(core, "loop", asyncio.get_running_loop())
+        with _as_app(transcript, app):
+            transcript.sources_moved()
+
+    asyncio.run(moved())
+    assert row_of(slot, "regions") is row and not box.is_deleted
+    assert next(e for e in row.descendants() if isinstance(e, ui.checkbox)) is box
+    assert "not read" in texts(row) and "is-unread" in row.classes
+    assert "is-unindexed" not in row.classes
+    assert rebuilt == {"list": 0}
+
+    # A file arrives in the data folder: a row to add, so the list redraws.
+    (tmp_path / "data" / "rates.csv").write_text("id\n1\n", encoding="utf-8")
+    asyncio.run(moved())
+    assert rebuilt == {"list": 1}
+
+
+def test_a_file_selected_while_not_indexed_is_selected_as_the_source_it_became(
+    tmp_path, monkeypatch
+):
+    """Its row in the tree is a source row once the hop lands, and the inspector
+    beside it went on offering to index it until the run ended. The middle pane
+    redraws only when it shows the table that landed."""
+    from portia.ui import artifacts, exchange, transcript, workflow
+
+    app = _data_project(tmp_path, monkeypatch, "orders", "regions")
+    app.selection = (state.UNINDEXED, "data/orders.csv")
+    drawn = _counting(
+        monkeypatch,
+        left=(artifacts.pane, "refresh"),
+        middle=(workflow.pane, "refresh"),
+        rows=(transcript, "sources_moved"),
+    )
+    catalog.index_source(tmp_path / "data" / "orders.csv", portia_dir=app.portia_dir)
+    engine_module.refresh_catalog(app)
+    with _as_app(exchange, app):
+        exchange.redraw_indexed("orders")
+    assert app.selection == (state.SOURCE, "orders")
+    assert drawn == {"left": 1, "middle": 1, "rows": 1}
+
+    catalog.index_source(tmp_path / "data" / "regions.csv", portia_dir=app.portia_dir)
+    engine_module.refresh_catalog(app)
+    with _as_app(exchange, app):
+        exchange.redraw_indexed("regions")
+    assert app.selection == (state.SOURCE, "orders")
+    assert drawn == {"left": 2, "middle": 1, "rows": 2}
+
+
+def test_a_burst_of_tool_results_is_one_catch_up(tmp_path, monkeypatch):
+    """Eighteen ``set_interpretation`` results in a row were eighteen reloads
+    of every entry on the loop and thirty-six pane rebuilds, during which the
+    window answered nothing and the page went down (2026-10-08). Results that
+    arrive within `exchange.GATHER_S` of the first are one catch-up: each entry
+    that moved read once, off the loop, and each pane redrawn once. The end of
+    a reply catches up at once."""
+    import asyncio
+
+    from nicegui import core
+
+    from portia.agent import events
+    from portia.ui import artifacts, exchange, workflow
+
+    names = ("orders", "regions", "rates")
+    app = _data_project(tmp_path, monkeypatch, *names)
+    for name in names:
+        catalog.index_source(tmp_path / "data" / f"{name}.csv", portia_dir=app.portia_dir)
+    engine_module.refresh_catalog(app)
+    chat = app.new_chat(state.INDEXING)
+    monkeypatch.setattr(exchange, "GATHER_S", 0.05)
+    reads = _entry_reads(monkeypatch)
+    drawn = _counting(
+        monkeypatch, left=(artifacts.pane, "refresh"), middle=(workflow.pane, "refresh")
+    )
+
+    def result(ident):
+        return events.Event(events.TOOL_RESULT, {"id": ident, "text": "{}", "is_error": False})
+
+    async def burst():
+        monkeypatch.setattr(core, "loop", asyncio.get_running_loop())
+        with _as_app(exchange, app):
+            app.artifact_stamp = engine_module.artifact_stamp(app)
+            for name in names:
+                catalog.set_interpretation(name, summary=f"The {name}.", portia_dir=app.portia_dir)
+                exchange._record(result(name), chat)
+            reads.clear()  # each write read its own entry
+            assert drawn == {"left": 0, "middle": 0}, "gathered, not drawn per result"
+            for _ in range(200):
+                await asyncio.sleep(0.01)
+                if drawn["left"]:
+                    break
+            assert drawn == {"left": 1, "middle": 1}
+            assert sorted(reads) == sorted(names)
+            assert {app.sources[n]["summary"] for n in names} == {f"The {n}." for n in names}
+
+            catalog.set_interpretation("orders", summary="Read again.", portia_dir=app.portia_dir)
+            reads.clear()
+            exchange._record(events.Event(events.RESULT, {"subtype": "success"}), chat)
+            assert drawn == {"left": 2, "middle": 2} and reads == ["orders"]
+            assert app.sources["orders"]["summary"] == "Read again."
+
+    asyncio.run(burst())
+
+
+def test_a_left_pane_draw_lists_each_folder_and_looks_at_no_file_it_found(tmp_path):
+    """Each ``stat`` on the loop gives up the interpreter's lock and waits to get
+    it back, and while a profile or a reading job's tools ran in threads a left
+    pane draw of 20 ms took four seconds: it was 108 calls for eighteen files.
+    The listing says which entries are folders and links, and a known file the
+    walk found is not checked again. A known file outside the data folder still
+    is, as before."""
+    import os
+
+    from portia.ui import tree
+
+    for rel in ("data/a/one.csv", "data/a/two.csv", "data/b/c/three.csv", "specs/s.yaml"):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text("x\n1\n", encoding="utf-8")
+    known = {
+        "data/a/one.csv": (state.SOURCE, "one"),
+        "data/b/c/three.csv": (state.SOURCE, "three"),
+        "specs/s.yaml": (state.SPEC, "s.yaml"),
+    }
+    calls = []
+    real_stat, real_lstat = os.stat, os.lstat
+    os.stat = lambda *a, **k: calls.append(a[0]) or real_stat(*a, **k)
+    os.lstat = lambda *a, **k: calls.append(a[0]) or real_lstat(*a, **k)
+    try:
+        nodes = tree.build(tmp_path, known, (".csv",), "data")
+    finally:
+        os.stat, os.lstat = real_stat, real_lstat
+    kinds = {}
+
+    def walk(level):
+        for node in level:
+            kinds[node.rel] = node.kind
+            walk(node.children)
+
+    walk(nodes)
+    assert kinds["data/a/one.csv"] == state.SOURCE and kinds["data/a/two.csv"] == tree.DATA
+    assert kinds["data/b/c/three.csv"] == state.SOURCE and kinds["specs/s.yaml"] == state.SPEC
+    # The data folder, then the spec outside it (its folder, then the file).
+    assert len(calls) <= 5, calls

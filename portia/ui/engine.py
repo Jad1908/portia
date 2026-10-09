@@ -46,6 +46,7 @@ Nothing here formats anything for a human — that is the panes' job.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import re
 import shutil
@@ -689,8 +690,8 @@ async def _hops(
     label: Callable[[Any], str],
     where: str,
     on_progress=None,
+    on_done: Callable[[str], Any] | None = None,
     stop: cancel.Scope | None = None,
-    reload_each: bool = False,
 ) -> Indexed:
     """One item per hop off the loop: the shape `index`, `scope` and `profile_tables` share.
 
@@ -708,12 +709,24 @@ async def _hops(
     reloaded in a ``finally``: what reached the disk is what the panes must
     draw, whatever ended the loop.
 
-    ``reload_each`` reloads it after every hop as well, for the one caller
-    whose hop is a scan on a warehouse: thirty of those is most of an hour, and
-    a left pane opened in the middle said *metadata only* about tables whose
-    profile was on disk. Off elsewhere, because a reload reads every entry and a
-    local project indexing two hundred files would spend longer reloading than
-    profiling.
+    **Each hop puts its entry in the catalog the window holds, and says so**
+    *(2026-10-08)*. A warehouse caller reloaded the whole catalog after every
+    hop, because a left pane opened mid-run said *metadata only* about tables
+    whose profile was on disk, and a local run reloaded only at the end, because
+    a whole reload per file was longer than the profiling: the user watched
+    eighteen files finish with none of them drawn as indexed until the last.
+    Now every hop reads the one entry it wrote, off the loop
+    (`catch_up_catalog`), and ``on_done`` is called with its name, on the loop,
+    for the caller to redraw the rows that show it.
+
+    **The last reload takes the stamp** *(2026-10-08)*. `exchange.watch_project`
+    stands down while a run of the window's own is writing (`App.indexing_stop`):
+    it noticed each entry land and read the whole catalog again on the loop, two
+    to four seconds a file on a project with two 1,579-column tables. Every caller
+    redraws when the run ends, so the watcher's next look has nothing left to
+    find. The stamp is taken before the read, in `exchange._sync_artifacts`'
+    order, so a file another process writes during the read is still seen. The
+    hops have read everything the run wrote, so this one normally reads nothing.
     """
     names: list[str] = []
     finished: list = []
@@ -725,7 +738,7 @@ async def _hops(
             if on_progress is not None:
                 on_progress(done, len(items), label(item))
             try:
-                names.append(await asyncio.to_thread(work, item))
+                name = await asyncio.to_thread(work, item)
             except cancel.Cancelled:
                 break
             except Exception as exc:  # noqa: BLE001 — one item's failure is a sentence on its row
@@ -733,11 +746,21 @@ async def _hops(
                 failed.append(label(item))
                 app.indexing_failed = {**app.indexing_failed, label(item): _sentence(exc)}
                 continue
+            names.append(name)
             finished.append(item)
             app.indexing_failed = {k: v for k, v in app.indexing_failed.items() if k != label(item)}
-            if reload_each:
-                refresh_catalog(app)
+            try:
+                await catch_up_catalog(app)
+            except Exception as exc:  # noqa: BLE001 — the profile is written; it is drawn at the end
+                feedback.remember(exc, where)
+                continue
+            if on_done is not None:
+                on_done(name)
     finally:
+        # A project whose specs cannot be listed stamps nothing, and the watcher
+        # reads it again: the stamp must never be what fails a run.
+        with contextlib.suppress(OSError, ValueError):
+            app.artifact_stamp = artifact_stamp(app)
         refresh_catalog(app)
     # The graph is the catalog restated, so a run that stopped or half failed
     # still syncs what it did manage rather than leaving the two disagreeing.
@@ -756,7 +779,12 @@ def _sentence(exc: BaseException) -> str:
 
 
 async def scope(
-    app: App, names: list[str], *, on_progress=None, stop: cancel.Scope | None = None
+    app: App,
+    names: list[str],
+    *,
+    on_progress=None,
+    on_done: Callable[[str], Any] | None = None,
+    stop: cancel.Scope | None = None,
 ) -> Indexed:
     """Bring tables into scope, one hop each, as metadata (`catalog.scope_table`).
 
@@ -771,6 +799,7 @@ async def scope(
         label=str,
         where="scoping a table",
         on_progress=on_progress,
+        on_done=on_done,
         stop=stop,
     )
 
@@ -796,7 +825,12 @@ async def profile_remote(app: App, name: str) -> dict:
 
 
 async def profile_tables(
-    app: App, names: list[str], *, on_progress=None, stop: cancel.Scope | None = None
+    app: App,
+    names: list[str],
+    *,
+    on_progress=None,
+    on_done: Callable[[str], Any] | None = None,
+    stop: cancel.Scope | None = None,
 ) -> Indexed:
     """Profile several warehouse tables, one hop each: `scope`'s shape over `profile_remote`.
 
@@ -815,8 +849,8 @@ async def profile_tables(
         label=str,
         where="profiling a table",
         on_progress=on_progress,
+        on_done=on_done,
         stop=stop,
-        reload_each=True,
     )
 
 
@@ -982,10 +1016,51 @@ def set_context(text: str, app: App) -> None:
 
 
 def refresh_catalog(app: App) -> None:
-    app.catalog = catalog.load_catalog(app.portia_dir)
-    # A schema a build just wrote into is re-listed the next time the picker
-    # looks: the listing is cached per place (`browse_remote`), and a table
-    # created after the cache was filled would otherwise never appear there.
+    """Bring `app.catalog` up to the files, reading only the entries that changed.
+
+    **Only those** *(2026-10-08)*: this read every entry whenever any of them
+    moved, on the loop, and on a project with two 1,579-column tables that was
+    half a second per tool result of a reading job that wrote eighteen of them
+    one after another (`catalog.reload_catalog`).
+    """
+    app.catalog, app.catalog_seen = catalog.reload_catalog(
+        app.catalog, app.catalog_seen, app.catalog_dir
+    )
+    _forget_built_listings(app)
+
+
+async def catch_up_catalog(app: App) -> None:
+    """`refresh_catalog`, with the reading done off the loop.
+
+    For the moments one entry has just been written and the window wants it
+    drawn: each hop of an indexing run, each gathered burst of a reading job's
+    results (`exchange._sync_soon`). One 1,579-column entry is 140 ms to parse,
+    which on the loop is a click that waits.
+
+    The catalog it started from is the one it replaces, and only if nothing
+    replaced it in the meantime: a reload that landed while this one read
+    (a press, a project opened) is newer than the start, and this catches up
+    from it instead, on the loop, where nothing else can land in between.
+    """
+    held, seen = app.catalog, app.catalog_seen
+    fresh, now = await asyncio.to_thread(catalog.reload_catalog, held, seen, app.catalog_dir)
+    if app.catalog is held:
+        app.catalog, app.catalog_seen = fresh, now
+        _forget_built_listings(app)
+    else:
+        refresh_catalog(app)
+
+
+def _forget_built_listings(app: App) -> None:
+    """A schema a build just wrote into is re-listed the next time the picker looks.
+
+    The listing is cached per place (`browse_remote`), and a table created
+    after the cache was filled would otherwise never appear there. Nothing is
+    cached until a warehouse is browsed, so a local project reads no model entry
+    here.
+    """
+    if not app.scope_listing:
+        return
     for entry in catalog.load_models(app.portia_dir).values():
         parts = str(entry.get("table") or "").split(".")
         if len(parts) == 3:
@@ -1049,6 +1124,19 @@ def artifact_stamp(app: App) -> tuple:
             else:
                 add(path)
     return tuple(sorted(stamps))
+
+
+async def artifact_stamp_later(app: App) -> tuple:
+    """`artifact_stamp`, walked off the loop.
+
+    For the catch-up a reading job's results gather into
+    (`exchange._catch_up`), which runs while the job's tools are working in
+    threads. The walk is a ``stat`` per file, fifty on a project of eighteen
+    sources, and on the loop each one waited for the interpreter's lock behind
+    those threads: two seconds, measured, for a walk that takes one
+    millisecond alone.
+    """
+    return await asyncio.to_thread(artifact_stamp, app)
 
 
 # --- the project's data folder ----------------------------------------------
@@ -1178,7 +1266,12 @@ def _copy_all(pairs: list[tuple[Path, Path]]) -> list[Path]:
 
 
 async def index(
-    paths: list[Path], app: App, *, on_progress=None, stop: cancel.Scope | None = None
+    paths: list[Path],
+    app: App,
+    *,
+    on_progress=None,
+    on_done: Callable[[str], Any] | None = None,
+    stop: cancel.Scope | None = None,
 ) -> Indexed:
     """Profile each file into the catalog. Deterministic, free, always happens.
 
@@ -1189,7 +1282,8 @@ async def index(
     whole list to a single thread and come back when it was done, which for twenty
     real extracts is a minute of a window that says nothing. ``on_progress(done,
     total, name)`` is called before each file, on the event loop, so a caller can
-    redraw between them.
+    redraw between them, and ``on_done(name)`` after each, once its entry is in
+    `app.catalog`, so a caller can draw it as indexed (`_hops`).
 
     ``stop`` makes it interruptible, and the per-file hop is what makes that
     cheap: the loop checks between files, so a press always stops the *next* one,
@@ -1209,6 +1303,7 @@ async def index(
         label=lambda path: path.stem,
         where="indexing a file",
         on_progress=on_progress,
+        on_done=on_done,
         stop=stop,
     )
 
@@ -1224,10 +1319,13 @@ def _index_one(path: Path, portia_dir: str, stop: cancel.Scope | None = None) ->
     loop: `catalog.index_source` opens its own connection through
     `core/io.connect`, which registers it, and that is the handle Stop needs to
     reach a profile already running.
+
+    **The name returned is the catalog's**, which is the file's stem unless
+    another source already has it (`catalog.source_name`): what the read is
+    asked about and what a hop redraws are entries, by their names.
     """
     with cancel.scope(stop):
-        catalog.index_source(path, portia_dir=portia_dir)
-    return path.stem
+        return catalog.index_source(path, portia_dir=portia_dir).stem
 
 
 # --- specs, runs, outputs ---------------------------------------------------
@@ -1886,8 +1984,14 @@ def source_states(app: App) -> list[SourceState]:
     of them made "what is left to do here" a question you answered by comparing
     two places. Sorted by name, never by state: which sources need attention is a
     judgment, and ordering by it would be the screen making it (`DESIGN.md`).
+
+    **The sources come from `app.catalog`, never off disk** *(2026-10-08)*. This
+    read every entry again, twice per drawing of the Indexing tab, on the loop:
+    3.8 s a draw on a project with two 1,579-column tables, after indexing had
+    ended. Everything that writes the catalog while the window is open reloads
+    it before the tab can draw (`refresh_catalog`'s callers, `exchange._sync_artifacts`).
     """
-    entries = catalog.load_catalog(app.portia_dir).get("sources") or {}
+    entries = app.sources
     known = {entry.get("source") for entry in entries.values()}
     states = [
         SourceState(

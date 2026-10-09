@@ -158,7 +158,11 @@ class Table:
         break on temp and registered objects, which live in another one.
 
         The alias means column-qualified references (``reservations.hotel_id``) still
-        work, and the subquery costs nothing — DuckDB flattens it.
+        work, and the subquery costs nothing to run — DuckDB flattens it. It does
+        cost binding: the star is every column, so on a 1,579-column table each
+        statement read this way spent about 13 ms planning, which is why
+        profiling's per-column questions name what they read instead
+        (`checks.profiling._source`, 2026-10-08).
         """
         return f"({self.query}) AS {self.dialect.quote(self.name)}"
 

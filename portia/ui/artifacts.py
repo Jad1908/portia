@@ -894,8 +894,14 @@ def opened(kind: str, ident: str, *, reveal: bool) -> None:
 # --- the tree ---------------------------------------------------------------
 
 
+#: The tree as `_tree` last drew it, which a press on one of its rows is
+#: resolved against (`tree_pressed`). Replaced whole on every draw.
+_DRAWN: list[tuple[tree.Node, ...]] = [()]
+
+
 def _tree() -> None:
     nodes = engine.project_tree(APP)
+    _DRAWN[0] = nodes
     if not nodes:
         # On a warehouse project the data is the section below, and *no readable
         # files here* would be true and beside the point.
@@ -922,7 +928,7 @@ def _folder(node: tree.Node, depth: int, stale: set[str]) -> None:
         icon=ICON[tree.FOLDER],
         caret=CARET_OPEN if is_open else CARET_SHUT,
         depth=depth,
-        on_click=lambda rel=node.rel, d=depth: _toggle(rel, d),
+        tree=node.rel,
     )
     if is_open:
         for child in node.children:
@@ -937,10 +943,11 @@ def _file(node: tree.Node, depth: int, stale: set[str]) -> None:
         meta=_meta(node),
         note=_note(node, stale),
         depth=depth,
-        # A spec is driven by `assets/pick.js`, which resolves click-versus-double
-        # before either reaches the server. Wiring `on_click` as well would send
-        # the light action a second time on the second press of a double.
-        on_click=None if node.kind == SPEC else (lambda n=node: _open(n)),
+        # Both through `assets/pick.js`, by identity, and never a handler on the
+        # row (`tree_pressed`). A spec waits to be told click from double click;
+        # any other file opens on the press. One attribute each, or a double
+        # click would send the light action twice.
+        tree=None if node.kind == SPEC else node.rel,
         pick=Path(node.rel).stem if node.kind == SPEC else None,
     )
     # A file the copilot's run just produced — a compiled model, a written
@@ -988,6 +995,31 @@ def _add_data_affordance() -> None:
 
 
 # --- selection --------------------------------------------------------------
+
+
+def tree_pressed(rel: str) -> None:
+    """A press on a folder or a file in the tree, by its path, from `app`'s page-level handler.
+
+    **A handler on the row could lose the press** *(2026-10-08)*. It is bound
+    to the element, and a pane redrawn while the press waited behind a busy
+    loop had replaced that element: NiceGUI dropped the event, twelve presses
+    of fifty-nine on the left pane while a project with two 1,579-column tables
+    was indexing. So the row carries its path (`assets/pick.js`) and the press
+    is resolved here against the tree as last drawn, which is what was pressed
+    and costs no second walk of the data folder. A path no longer in it is
+    ignored, as `pick_spec` ignores a name.
+
+    One press is the whole gesture on these rows, so the client sends it at
+    once; only a spec waits to see whether a second press follows.
+    """
+    found = tree.find(_DRAWN[0], rel)
+    if found is None:
+        return
+    node, depth = found
+    if node.is_folder:
+        _toggle(node.rel, depth)
+    else:
+        _open(node)
 
 
 def _toggle(rel: str, depth: int) -> None:

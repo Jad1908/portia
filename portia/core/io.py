@@ -268,13 +268,24 @@ def read_query(path: str | Path, *, absolute: bool = True) -> str:
     about which tokens mean null would be the exact class of bug `core/present.py`
     exists to prevent.
     """
+    return f"SELECT * FROM {read_relation(path, absolute=absolute)}"
+
+
+def read_relation(path: str | Path, *, absolute: bool = True) -> str:
+    """The reader call `read_query` selects from, ``read_parquet('…')``, to write after ``FROM``.
+
+    For a caller asking one file many small questions (`checks.profiling`):
+    through ``SELECT *`` DuckDB binds every column of the file for each one and
+    prunes back to the one asked about, which on a 1,579-column file was most
+    of what each question cost (2026-10-08).
+    """
     path = Path(path)
     fmt = _format(path)
     # A path that is written to a file is spelled the portable way (`relative`);
     # one that is executed here is this machine's own.
     args = [quote_literal(str(path.resolve()) if absolute else path.as_posix())]
     args += [f"{key}={_sql_value(value)}" for key, value in fmt.sql_options.items()]
-    return f"SELECT * FROM {fmt.sql_reader}({', '.join(args)})"
+    return f"{fmt.sql_reader}({', '.join(args)})"
 
 
 def _sql_value(value: Any) -> str:

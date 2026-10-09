@@ -776,7 +776,7 @@ def _source_states() -> None:
         with ui.element("div").classes("index-list"):
             for source in states:
                 _source_state_row(source)
-    _index_actions()
+    _index_actions(states)
 
 
 def _select_all(states) -> None:
@@ -803,29 +803,78 @@ def _tick_every(names: set[str]) -> None:
     _source_states.refresh()
 
 
+#: Every row the Indexing tab has drawn, by source name, with the state it was
+#: drawn in, so a run can move one row's state without redrawing the list
+#: (`sources_moved`). Every browser tab's rows, pruned as they are deleted.
+_STATE_ROWS: dict[str, list[tuple[ui.element, Any]]] = {}
+
+
 def _source_state_row(source) -> None:
     ticked = source.name in APP.index_ticks
-    with c.enters(ui.element("div").classes(f"index-row is-{source.state}"), f"idx:{source.name}"):
+    row = ui.element("div").classes(f"index-row is-{source.state}")
+    with c.enters(row, f"idx:{source.name}"):
         (
             ui.checkbox(value=ticked)
             .classes("p-check")
             .props("dense")
             .on_value_change(lambda e, n=source.name: _tick_source(n, bool(e.value)))
         )
-        ui.icon(_STATE_ICON[source.state]).classes("index-row-icon")
-        if getattr(source, "kind", state.SOURCE) == state.MODEL:
-            # Kind, never rank: a built table is a different kind of row from
-            # a source, and the glyph says which without moving it in the list.
-            ui.icon(_MODEL_GLYPH).classes("index-row-kind")
-        ui.label(source.name).classes("index-row-name")
-        ui.label(_STATE_LABEL[source.state]).classes("index-row-state")
-        if not source.profiled:
-            # The second axis (`engine.SourceState.profiled`): a warehouse
-            # table nobody has scanned. Same words the left pane and the
-            # inspector use, so three surfaces do not name one state three ways.
-            ui.label(_METADATA_ONLY).classes("index-row-state")
-        if source.stale:
-            ui.label("changed").classes("index-row-stale")
+        _state_facts(source)
+    _STATE_ROWS.setdefault(source.name, []).append((row, source))
+
+
+def sources_moved() -> None:
+    """An indexing run moved some sources' state: each row that changed says so, in place.
+
+    **Not the list** *(2026-10-08)*. A hop of a run lands one entry, and the
+    list was redrawn only when the run ended, so eighteen files finished with
+    every row still saying *not indexed* (the user's report). Redrawing the
+    list per hop would rebuild every checkbox under somebody ticking one
+    (`_tick_source`'s rule), so a row whose state moved redraws what follows
+    its checkbox and keeps the checkbox. The list redraws only when a row has
+    come or gone, which a source renamed on a collision does. The buttons
+    redraw from the rows as they now are.
+    """
+    for name in list(_STATE_ROWS):
+        _STATE_ROWS[name] = [(row, was) for row, was in _STATE_ROWS[name] if not row.is_deleted]
+        if not _STATE_ROWS[name]:
+            del _STATE_ROWS[name]
+    if not _STATE_ROWS:
+        return  # the tab is not on screen anywhere
+    states = engine.source_states(APP)
+    if {s.name for s in states} != set(_STATE_ROWS):
+        _source_states.refresh()
+        return
+    for source in states:
+        drawn = _STATE_ROWS[source.name]
+        for i, (row, was) in enumerate(drawn):
+            if was == source:
+                continue
+            row.classes(remove=f"is-{was.state}", add=f"is-{source.state}")
+            for child in list(row)[1:]:
+                row.remove(child)
+            with row:
+                _state_facts(source)
+            drawn[i] = (row, source)
+    _index_actions.refresh(states)
+
+
+def _state_facts(source) -> None:
+    """Everything on a row after its checkbox: what portia knows about the source."""
+    ui.icon(_STATE_ICON[source.state]).classes("index-row-icon")
+    if getattr(source, "kind", state.SOURCE) == state.MODEL:
+        # Kind, never rank: a built table is a different kind of row from
+        # a source, and the glyph says which without moving it in the list.
+        ui.icon(_MODEL_GLYPH).classes("index-row-kind")
+    ui.label(source.name).classes("index-row-name")
+    ui.label(_STATE_LABEL[source.state]).classes("index-row-state")
+    if not source.profiled:
+        # The second axis (`engine.SourceState.profiled`): a warehouse
+        # table nobody has scanned. Same words the left pane and the
+        # inspector use, so three surfaces do not name one state three ways.
+        ui.label(_METADATA_ONLY).classes("index-row-state")
+    if source.stale:
+        ui.label("changed").classes("index-row-stale")
 
 
 def _tick_source(name: str, on: bool) -> None:
@@ -841,7 +890,7 @@ def _tick_source(name: str, on: bool) -> None:
 
 
 @ui.refreshable
-def _index_actions() -> None:
+def _index_actions(states: list) -> None:
     """Two actions, because they cost different things.
 
     Profiling is deterministic and free; reading costs a model turn. A single
@@ -854,8 +903,13 @@ def _index_actions() -> None:
     rather than a pair of selects for the reason that control exists — three
     hand-rolled copies is how they stop agreeing — and it sits *with* the cost
     caption, the same shape the add-data screen uses.
+
+    **``states`` are the rows drawn above it** *(2026-10-08)*. It asked
+    `engine.source_states` again, so every drawing of the tab read the
+    catalog twice. A redraw of these buttons alone (a tick, a provider) keeps
+    the rows it was last given, which are the rows still on screen.
     """
-    ticked = [s for s in engine.source_states(APP) if s.name in APP.index_ticks]
+    ticked = [s for s in states if s.name in APP.index_ticks]
     files, remote = engine.to_index(ticked)
     to_index = [*files, *remote]
     to_read = [s for s in ticked if s.indexed]
@@ -955,8 +1009,6 @@ async def _index_ticked() -> None:
     The count in the toast is what finished, not what was ticked, since Stop
     lands between hops (`engine.index`, `engine.profile_tables`).
     """
-    from portia.ui import artifacts
-
     ticked = [s for s in engine.source_states(APP) if s.name in APP.index_ticks]
     files, remote = engine.to_index(ticked)
     if not files and not remote:
@@ -967,10 +1019,13 @@ async def _index_ticked() -> None:
             APP.indexing_status = f"{verb} {name}, {done + 1} of {total}"
             # The line, not the buttons and the picker around it.
             indexing_moved()
-            artifacts.pane.refresh()
 
         return _say
 
+    # Each source drawn as indexed the moment it is: its row here and its row
+    # in the left pane (`engine._hops`). The left pane was redrawn before each
+    # hop instead, from a catalog that held nothing new until the run ended.
+    landed = exchange_driver.redraw_indexed
     APP.indexing_status = f"Indexing {c.count(len(files) + len(remote), 'source')}…"
     stop = APP.indexing_stop = cancel.Scope()
     _index_actions.refresh()
@@ -979,11 +1034,15 @@ async def _index_ticked() -> None:
     try:
         if files:
             paths = [APP.root / s.rel for s in files]
-            ran = await engine.index(paths, APP, on_progress=say("Profiling"), stop=stop)
+            ran = await engine.index(
+                paths, APP, on_progress=say("Profiling"), on_done=landed, stop=stop
+            )
             done, failed = ran.names, ran.failed
         if remote and not stop.cancelled:
             names = [s.name for s in remote]
-            ran = await engine.profile_tables(APP, names, on_progress=say("Profiling"), stop=stop)
+            ran = await engine.profile_tables(
+                APP, names, on_progress=say("Profiling"), on_done=landed, stop=stop
+            )
             done, failed = [*done, *ran.names], [*failed, *ran.failed]
     finally:
         APP.indexing_status = ""
@@ -992,7 +1051,9 @@ async def _index_ticked() -> None:
         # In the `finally`, with the status it reads: the spinner this tab drew
         # is taken down by this tab whatever ended the run. It used to follow
         # the `try`, so an error left it turning over a job that had died.
-        artifacts.pane.refresh()
+        # The left and middle panes too, from the catalog the run's last hop
+        # read: the watcher stood down while it wrote (`watch_project`).
+        exchange_driver.redraw_artifacts()
         pane.refresh()
     note = f"Profiled {c.count(len(done), 'source')}."
     if failed:
