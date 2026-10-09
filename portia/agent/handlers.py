@@ -686,7 +686,8 @@ def _known_refs(about: list[str], portia_dir: str, root: Path) -> list[str]:
                 hint = f" — closest: {', '.join(close)}" if close else ""
                 raise ValueError(
                     f"no column {column!r} in {table!r}{hint}. "
-                    f"describe_source lists all {len(names)}."
+                    f"describe_source lists all {len(names)}, "
+                    "or groups them by type if they do not fit."
                 )
         checked.append(f"{table}.{column}" if column else table)
     return checked
@@ -949,7 +950,8 @@ def _requested(profiled: list[dict], columns: list[str] | None, source: str) -> 
         raise ValueError(
             f"no column {missing[0]!r} in {source!r}{suggestion}. "
             f"{len(missing)} of {len(columns)} requested are not there; "
-            f"describe_source lists all {len(profiled)}."
+            f"describe_source lists all {len(profiled)}, "
+            "or groups them by type if they do not fit."
         )
 
     # Deduplicated, because asking twice is a typo rather than a request for two

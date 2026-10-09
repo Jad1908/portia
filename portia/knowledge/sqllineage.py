@@ -35,6 +35,7 @@ is true.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 #: How much of a parser error to keep. The reason string ends up in
 #: `BuildResult.unresolved` and in a CLI line, and sqlglot's messages carry a
@@ -98,16 +99,39 @@ def column_origins(sql: str, inputs: dict[str, list[str]]) -> dict[str, list[Ori
         raise LineageUnreadable("the sql selects '*' from a table whose columns are unknown")
 
     spelling = _spelling(inputs)
+    traced = _trace_all(lineage, sql, schema)
     origins = {}
     for name, written in zip(names, _as_written(as_written, names, spelling), strict=True):
         try:
             # Either case resolves — `lineage` folds the name itself — so the
             # traced name and the reported name can differ without a second parse.
-            root = lineage(name, sql, schema=schema, dialect=_DIALECT)
+            root = traced.get(name) if traced else None
+            if root is None:
+                root = lineage(name, sql, schema=schema, dialect=_DIALECT)
         except Exception as exc:
             raise LineageUnreadable(f"the sql could not be traced: {_short(exc)}") from exc
         origins[written] = _origins(exp, root, inputs, spelling)
     return origins
+
+
+def _trace_all(lineage: Any, sql: str, schema: dict) -> dict | None:
+    """Every output column's lineage from one reading of ``sql``, or ``None``.
+
+    **One call, not one per column** *(2026-10-08)*. Asked a column at a time,
+    sqlglot qualified the whole statement again for each column and trimmed the
+    select list to that column by copying it: a `SELECT *` over a 1,579-column
+    table took 57 s, and the graph syncs after every recorded step. Asked for
+    every column at once with the select list left whole, the same statement
+    takes a fraction of a second and every origin is the same. ``None`` where
+    this sqlglot cannot answer for all columns at once, or where the one call
+    fails: the caller then asks a column at a time, as it always did, and a
+    real failure is raised from there with the column it was about.
+    """
+    try:
+        traced = lineage(None, sql, schema=schema, dialect=_DIALECT, trim_selects=False)
+    except Exception:  # noqa: BLE001 - the per-column path below says what failed
+        return None
+    return traced if isinstance(traced, dict) else None
 
 
 def _spelling(inputs: dict[str, list[str]]) -> dict[tuple[str, str], tuple[str, str]]:

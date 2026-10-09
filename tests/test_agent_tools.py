@@ -15,6 +15,7 @@ import json
 import pytest
 
 from portia.agent import tools
+from portia.core.serialize import to_json_compact
 
 
 def _call(name: str, args: dict) -> dict:
@@ -304,3 +305,299 @@ def test_an_indexing_job_is_offered_every_tool_but_the_build_half():
         "plot_data",
     } <= reads
     assert "record_step" not in tools.descriptions(builds=False)
+
+
+# --- a table too wide to list comes back grouped (2026-10-08) -------------------------
+
+#: A datetime, 2,000 numeric columns, two text columns and three empty ones: the
+#: shape of a wide meter export, where `describe_source` and `profile_source`
+#: both used to be refused and the copilot could only name columns blind.
+_N_WIDE = 2006
+
+
+def _wide(*, profiled: bool) -> dict:
+    """A wide table as `describe_source` (``profiled=False``) or `profile_source` sends it."""
+
+    def column(name: str, inferred: str, flags: list[str], **facts) -> dict:
+        measured = facts if profiled else {}
+        return {"name": name, "role": None, "inferred": inferred, "flags": flags, **measured}
+
+    columns = [column("read_at", "datetime", [], null_rate=0.0, n_distinct=8760, samples=[])]
+    columns += [
+        column(
+            f"meter_{i:04d}",
+            "float",
+            ["high_null"] if i % 25 == 0 else [],
+            null_rate=0.6 if i % 25 == 0 else 0.01,
+            n_distinct=900 + i,
+            min=0.0,
+            max=float(i),
+            mean=1.5,
+            samples=[0.1, 0.2, 0.3],
+        )
+        for i in range(2000)
+    ]
+    columns += [
+        column(f"site_{i}", "categorical", [], null_rate=0.0, n_distinct=4, top="north")
+        for i in (1, 2)
+    ]
+    columns += [column(f"spare_{i}", "empty", ["all_null"], null_rate=1.0) for i in (1, 2, 3)]
+    head = {"source": "data/meters.csv", "summary": "hourly readings"}
+    if profiled:
+        head |= {"n_rows": 8760, "n_cols": len(columns)}
+    return {**head, "columns": columns}
+
+
+def _grouped(result: dict) -> dict:
+    assert "is_error" not in result, _text(result)[:300]
+    assert len(_text(result)) <= tools.RESULT_BUDGET
+    return json.loads(_text(result))
+
+
+def test_a_table_too_wide_to_describe_comes_back_grouped(monkeypatch):
+    payload = _wide(profiled=False)
+    assert len(tools._as_columns(payload)) > tools.RESULT_BUDGET, "the fixture is not wide enough"
+    monkeypatch.setattr(tools.handlers, "describe_source", lambda *a, **k: payload)
+
+    answer = _grouped(_call("describe_source", {"source": "meters"}))
+
+    assert list(answer)[0] == "grouped", "the answer says it is grouped before anything else"
+    assert f"{_N_WIDE:,} columns" in answer["grouped"]
+    assert answer["summary"] == "hourly readings"
+    groups = answer["columns_by_type"]
+    assert sum(g["n_columns"] for g in groups) == _N_WIDE
+    assert [g["inferred"] for g in groups] == ["datetime", "float", "categorical", "empty"]
+
+
+def test_a_grouped_description_carries_no_statistics(monkeypatch):
+    """L2 is the rung of meaning: roles and flags are tallied, nothing is measured."""
+    monkeypatch.setattr(tools.handlers, "describe_source", lambda *a, **k: _wide(profiled=False))
+
+    groups = _grouped(_call("describe_source", {"source": "meters"}))["columns_by_type"]
+    floats = next(g for g in groups if g["inferred"] == "float")
+
+    assert floats["flags"] == {"high_null": 80}
+    assert floats["role"] == {}
+    assert not {"null_rate", "n_distinct", "min", "max"} & set(floats)
+
+
+def test_a_table_too_wide_to_profile_comes_back_grouped_with_its_spreads(monkeypatch):
+    monkeypatch.setattr(tools.handlers, "profile_source", lambda *a, **k: _wide(profiled=True))
+
+    answer = _grouped(_call("profile_source", {"source": "meters"}))
+
+    assert answer["n_cols"] == _N_WIDE
+    groups = answer["columns_by_type"]
+    assert sum(g["n_columns"] for g in groups) == _N_WIDE
+    floats = next(g for g in groups if g["inferred"] == "float")
+    assert floats["null_rate"]["max"] == 0.6 and floats["null_rate"]["median"] == 0.01
+    assert floats["n_distinct"]["min"] == 900 and floats["n_distinct"]["max"] == 2899
+    assert (floats["min"], floats["max"]) == (0.0, 1999.0)
+    assert floats["first"][0] == "meter_0000" and floats["last"][-1] == "meter_1999"
+    # A type with a few columns is listed in the tool's own per-column shape.
+    sites = next(g for g in groups if g["inferred"] == "categorical")
+    assert [c["name"] for c in sites["columns"]] == ["site_1", "site_2"]
+    assert sites["columns"][0]["top"] == "north"
+
+
+def test_named_columns_too_many_to_send_are_refused_not_grouped(monkeypatch):
+    """Naming columns is already the narrower question; past the budget it is
+    refused as it always was."""
+    monkeypatch.setattr(tools.handlers, "profile_source", lambda *a, **k: _wide(profiled=True))
+
+    named = [f"meter_{i:04d}" for i in range(2000)]
+    result = _call("profile_source", {"source": "meters", "columns": named})
+
+    assert result["is_error"] is True
+    assert "NOT sent" in _text(result)
+
+
+def test_a_grouped_answer_still_over_the_budget_is_refused_with_the_full_size():
+    """The grouped form is a coarser answer, not a truncation: if it does not fit
+    either, the refusal is the one there always was."""
+    payload = {**_wide(profiled=False), "summary": "x" * (tools.RESULT_BUDGET + 1)}
+    full = len(tools._as_columns(payload))
+
+    result = _evidence(lambda: payload, encode=tools._as_columns, coarser=tools._described_by_type)
+
+    assert result["is_error"] is True
+    assert f"{full:,} characters" in _text(result)
+
+
+@pytest.fixture
+def meters(tmp_path):
+    """A real indexed table with a type big enough to be summarised when grouped."""
+    import pandas as pd
+
+    from portia.catalog import index_source, init_project
+
+    hours = 24
+    frame = pd.DataFrame({"read_at": pd.date_range("2026-01-01", periods=hours, freq="h")})
+    for i in range(12):
+        frame[f"meter_{i:02d}"] = [float(i * h) if h % (i + 2) else None for h in range(hours)]
+    frame["site"] = ["north", "south", "east"] * (hours // 3)
+    frame["spare"] = None
+    frame.to_csv(tmp_path / "meters.csv", index=False)
+    portia_dir = tmp_path / ".portia"
+    init_project("hourly meter readings", portia_dir=portia_dir)
+    index_source(tmp_path / "meters.csv", portia_dir=portia_dir)
+    return str(portia_dir)
+
+
+def test_a_table_that_fits_is_sent_exactly_as_before(meters):
+    from portia.agent import handlers
+
+    for name, handler in (
+        ("describe_source", handlers.describe_source),
+        ("profile_source", handlers.profile_source),
+    ):
+        result = _call(name, {"source": "meters", "portia_dir": meters})
+        assert _text(result) == tools._as_columns(handler("meters", meters))
+
+
+def test_the_grouped_forms_read_the_fields_the_handlers_send(meters):
+    """The two partials name fields; a renamed field in a handler would leave a
+    group silently without it, so this reads real handler output."""
+    from portia.agent import handlers
+
+    described = tools._described_by_type(handlers.describe_source("meters", meters))
+    profiled = tools._profiled_by_type(handlers.profile_source("meters", meters))
+
+    def floats(answer: dict) -> dict:
+        return next(g for g in answer["columns_by_type"] if g["inferred"] == "float")
+
+    assert {"n_columns", "first", "last", "role", "flags"} == set(floats(described)) - {"inferred"}
+    assert {"null_rate", "n_distinct", "min", "max"} <= set(floats(profiled))
+    assert floats(profiled)["n_columns"] == 12
+    for answer in (described, profiled):
+        assert sum(g["n_columns"] for g in answer["columns_by_type"]) == 15
+
+
+# --- a step over a wide table, shortened, and a write never refused (2026-10-08) ---
+
+
+@pytest.fixture
+def wide_project(tmp_path, monkeypatch):
+    """An indexed source wide enough that a `SELECT *` step's report is over the budget.
+
+    Long names rather than thousands of columns: the report's width is names,
+    and a few hundred long ones cross the budget without a minute of profiling.
+    """
+    import pandas as pd
+
+    from portia.catalog import index_source, init_project
+
+    monkeypatch.chdir(tmp_path)
+    names = [f"meter_reading_at_building_number_{i:04d}_kwh" for i in range(400)]
+    frame = pd.DataFrame(
+        {name: [float(i + h) if h % 3 else None for h in range(6)] for i, name in enumerate(names)}
+    )
+    frame.to_csv("meters.csv", index=False)
+    portia_dir = tmp_path / ".portia"
+    init_project("hourly readings, one column per building", portia_dir=portia_dir)
+    index_source("meters.csv", portia_dir=portia_dir)
+    return str(portia_dir)
+
+
+_WIDE_STEP = {
+    "id": "all_meters",
+    "op": "sql",
+    "inputs": ["meters"],
+    "sql": "SELECT * FROM meters",
+    "rationale": "Every building's readings, unchanged.",
+}
+
+
+def test_a_step_over_a_wide_table_comes_back_shortened_not_refused(wide_project, tmp_path):
+    from portia.agent import handlers
+
+    full = handlers.record_step("specs/wide_a.yaml", dict(_WIDE_STEP), portia_dir=wide_project)
+    assert len(to_json_compact(full)) > tools.RESULT_BUDGET, "the fixture is not wide enough"
+
+    result = _call(
+        "record_step",
+        {"spec_path": "specs/wide.yaml", "step": dict(_WIDE_STEP), "portia_dir": wide_project},
+    )
+
+    assert "is_error" not in result, _text(result)[:300]
+    answer = json.loads(_text(result))
+    assert list(answer)[0] == "shortened"
+    assert answer["step_id"] == "all_meters" and answer["outcome"]["n_cols"] == 400
+    assert answer["outcome"]["null_rates"]["count"] == 400
+    assert (tmp_path / "specs" / "wide.yaml").exists()
+
+
+def test_running_a_wide_spec_comes_back_shortened(wide_project):
+    from portia.agent import handlers
+
+    handlers.record_step("specs/wide.yaml", dict(_WIDE_STEP), portia_dir=wide_project)
+
+    result = _call("run_spec", {"spec_path": "specs/wide.yaml"})
+
+    assert "is_error" not in result, _text(result)[:300]
+    answer = json.loads(_text(result))
+    assert list(answer)[0] == "shortened"
+    (step,) = answer["steps"]
+    assert step["id"] == "all_meters" and step["outcome"]["n_cols"] == 400
+
+
+def test_a_write_whose_report_cannot_fit_is_answered_with_a_receipt(monkeypatch):
+    """Never *you have none of it* after a write that happened: that reads as failure,
+    and a copilot that believes it records the step twice."""
+    written = {
+        "spec": "specs/wide.yaml",
+        "step_id": "all_meters",
+        "n_steps": 1,
+        "outcome": {
+            "n_rows": 24,
+            "n_cols": 400,
+            "flags": [],
+            "note": "x" * (2 * tools.RESULT_BUDGET),
+        },
+    }
+    monkeypatch.setattr(tools.handlers, "record_step", lambda *a, **k: written)
+
+    result = _call("record_step", {"spec_path": "specs/wide.yaml", "step": dict(_WIDE_STEP)})
+
+    assert "is_error" not in result
+    answer = json.loads(_text(result))
+    assert list(answer)[0] == "receipt"
+    assert "WAS recorded" in answer["receipt"] and "specs/wide.yaml#all_meters" in answer["receipt"]
+    assert answer["outcome"] == {"n_rows": 24, "n_cols": 400, "flags": []}
+    assert answer["step_id"] == "all_meters"
+
+
+def test_a_read_too_large_even_shortened_is_still_refused(monkeypatch):
+    """The receipt is for writes; a read past the budget keeps the refusal."""
+    monkeypatch.setattr(
+        tools.handlers,
+        "run_spec",
+        lambda *a, **k: {"spec": "s", "note": "x" * (2 * tools.RESULT_BUDGET)},
+    )
+
+    result = _call("run_spec", {"spec_path": "s"})
+
+    assert result["is_error"] is True and "NOT sent" in _text(result)
+
+
+def test_a_wide_built_table_reads_back_grouped(monkeypatch):
+    columns = [
+        {
+            "name": f"meter_{i:04d}",
+            "inferred": "float",
+            "null_rate": 0.01,
+            "n_distinct": 9,
+            "flags": [],
+        }
+        for i in range(2000)
+    ]
+    payload = {"spec": "specs/wide.yaml", "model": "wide", "measured": {"columns": columns}}
+    monkeypatch.setattr(tools.handlers, "read_spec", lambda *a, **k: payload)
+
+    result = _call("read_spec", {"spec": "wide", "measured": True})
+
+    assert "is_error" not in result, _text(result)[:300]
+    answer = json.loads(_text(result))
+    assert list(answer)[0] == "shortened"
+    (floats,) = answer["measured"]["columns_by_type"]
+    assert floats["n_columns"] == 2000 and floats["first"][0] == "meter_0000"
