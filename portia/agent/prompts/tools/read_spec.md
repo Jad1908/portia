@@ -19,3 +19,7 @@ adds what the last build measured about the table it produces, per column, from 
 
 It is not on the disclosure ladder. The rungs answer questions about the data; this answers what
 we decided to do to it, and nothing in it measures today's data. For that, run it or query it.
+
+With `measured: true` on a very wide table, the columns come back grouped by type, as
+`profile_source` groups a table too wide to send one line per column, and any long list is given as
+its count and its ends. The answer says so first.

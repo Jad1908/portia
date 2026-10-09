@@ -166,3 +166,48 @@ def test_a_quoted_identifier_loses_its_quotes_before_it_is_matched():
 def test_case_folding_does_not_swallow_a_transform():
     got = column_origins("SELECT upper(TITLE) AS t2 FROM ev", {"ev": ["TITLE"]})
     assert got == {"t2": [Origin("ev", "TITLE", True)]}
+
+
+# --- a wide statement is traced in one reading (2026-10-08) -------------------
+
+
+def test_every_column_is_traced_from_one_reading_of_the_statement(monkeypatch):
+    """A `SELECT *` over 1,579 columns took 57 s traced a column at a time, and the
+    graph syncs after every recorded step. One reading answers for all of them."""
+    from portia.knowledge import sqllineage
+
+    exp, lineage, qualify, parse_one = sqllineage._sqlglot()
+    calls = []
+
+    def counted(column, *args, **kwargs):
+        calls.append(column)
+        return lineage(column, *args, **kwargs)
+
+    monkeypatch.setattr(sqllineage, "_sqlglot", lambda: (exp, counted, qualify, parse_one))
+    names = [f"Reading_{i:03d}" for i in range(300)]
+
+    origins = column_origins("SELECT * FROM meters", {"meters": names})
+
+    assert calls == [None]
+    assert list(origins) == names
+    assert origins["Reading_042"] == [Origin("meters", "Reading_042", transformed=False)]
+
+
+def test_one_reading_and_a_column_at_a_time_agree(monkeypatch):
+    """The fallback for a sqlglot that cannot answer for every column at once is the
+    old path; both must say the same thing about a statement with a join, a CTE and
+    a computed column."""
+    from portia.knowledge import sqllineage
+
+    sql = (
+        "WITH o AS (SELECT customer_id, amount * 2 AS doubled FROM orders) "
+        "SELECT o.customer_id, upper(c.name) AS NAME, o.doubled, count(*) AS n "
+        "FROM o JOIN customers c ON c.customer_id = o.customer_id GROUP BY 1, 2, 3"
+    )
+    inputs = {"orders": ["customer_id", "amount"], "customers": ["customer_id", "name"]}
+
+    together = column_origins(sql, inputs)
+    monkeypatch.setattr(sqllineage, "_trace_all", lambda *a: None)
+    apart = column_origins(sql, inputs)
+
+    assert together == apart

@@ -17,3 +17,7 @@ expectation.
 To see what a spec says without running it — its steps, their ids, its sources, what reads it —
 call `read_spec`. Running re-executes every model behind the spec and costs accordingly; it is the
 way to get today's numbers, not the way to find out what a spec holds.
+
+On a very wide table the report can be longer than one answer carries. Then it comes back shortened,
+saying so first: each long list given as its count, its ends and, for numbers, their spread. Every
+step is still there, and every flag.
