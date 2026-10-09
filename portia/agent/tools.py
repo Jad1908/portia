@@ -36,8 +36,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import threading
+import time
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from functools import partial
 from typing import Any
 
@@ -45,7 +48,7 @@ from claude_agent_sdk import ToolAnnotations, create_sdk_mcp_server, tool
 
 from portia import spec
 from portia.agent import ask, chartspec, drawn, handlers, prompts
-from portia.core import cancel, columnar
+from portia.core import cancel, columnar, present
 from portia.core.serialize import to_json_compact
 
 SERVER_NAME = "portia"
@@ -106,32 +109,428 @@ DATA_READERS = 1
 _readers = threading.BoundedSemaphore(DATA_READERS)
 
 
-@contextlib.contextmanager
-def _reading_data() -> Iterator[None]:
-    """Hold one of the `DATA_READERS` places for the call, waiting where Stop can reach it.
+def _wait_turn(scope: cancel.Scope) -> None:
+    """Take one of the `DATA_READERS` places, waiting where a press can reach the wait.
 
     Nothing is running while a call waits, so there is no query to interrupt:
-    the wait checks the scope every `cancel.INTERRUPT_EVERY` instead, and a press
+    the wait checks ``scope`` every `cancel.INTERRUPT_EVERY` instead, and a press
     ends it as a stop rather than leaving a thread queued behind a query that
-    nobody wants any more.
+    nobody wants any more. A press made before the call came is checked
+    first, so a free place is not taken by a call already stopped. The caller
+    releases the place.
     """
+    scope.check()
     while not _readers.acquire(timeout=cancel.INTERRUPT_EVERY):
-        cancel.check()
-    try:
-        yield
-    finally:
-        _readers.release()
+        scope.check()
 
 
 @contextlib.contextmanager
 def stopping(scope: cancel.Scope | None) -> Iterator[None]:
-    """Install ``scope`` as what Stop cancels, for the exchange's duration."""
+    """Install ``scope`` as what Stop cancels, for the exchange's duration.
+
+    A press on a data call's card made before that call reached portia is held
+    until it does (`interrupt_call`), and no longer than the exchange it was
+    made in. What a finished exchange left untaken is the last exchange's.
+    """
     global _stop
     previous, _stop = _stop, scope
+    with _calls_lock:
+        _outcomes.clear()
     try:
         yield
     finally:
         _stop = previous
+        with _calls_lock:
+            _presses.clear()
+
+
+# --- one data call, stopped on its own (2026-10-09, `CONVERSATION.md` §16) ---
+#
+# Stop ends the exchange. *Interrupt query* on a data call's card ends that call
+# and nothing else: the chat, or the job reading the sources, goes on, and the
+# copilot reads why it has no result (`_interrupted`). Each call that reads data
+# runs under a scope of its own, a child of the exchange's, so the exchange's
+# Stop still reaches it (`core/cancel.Scope`). The window names a call by its
+# card, which carries the harness's id for the call; a harness that sends that
+# id with the request (`TOOL_USE_META`) is matched on it, and one that does not
+# is matched on the tool and its arguments, in the order the calls arrived.
+# No time limit and no planner estimate stop anything here: a correct query can
+# run for an hour, and an estimate was measured and found useless for it.
+
+#: Where a data call is, as the window draws it. Kinds, not a ladder.
+WAITING = "waiting"
+RUNNING = "running"
+MEASURING = "measuring"
+
+#: What a press on a card came to (`interrupt_call`).
+INTERRUPTING = "interrupting"
+SKIPPING = "skipping"
+TOO_LATE = "too_late"
+PENDING = "pending"
+
+#: How the measuring after an interrupt ended, as the log records it.
+MEASURED = "measured"
+SKIPPED = "skipped"
+FAILED = "failed"
+NOT_MEASURED = "not_measured"
+
+#: The key the Claude Code binary names a call by in an MCP request's ``_meta``:
+#: the same id its tool-use block carries, which is the id the window's card has.
+TOOL_USE_META = "claudecode/toolUseId"
+
+#: The tool whose interruption is a write that did not happen, and says so.
+WRITES_A_STEP = "record_step"
+
+#: The tools that read data, by name: the calls `_evidence` runs with
+#: ``reads_data``, which take turns among `DATA_READERS` and whose cards carry
+#: *Interrupt query*. Named here so the window can ask without importing a
+#: decorator; `tests/test_query_interrupt.py` holds it to the call sites.
+DATA_TOOLS = frozenset(
+    {
+        "measure_overlaps",
+        "profile_source",
+        "query_data",
+        "plot_data",
+        "join_findings",
+        "record_step",
+        "run_spec",
+    }
+)
+
+
+@dataclass
+class Interruption:
+    """A press on a data call's card: why, when, and what came of it."""
+
+    #: The reason the user picked, as the menu said it, or ``None`` when no
+    #: menu was shown (*Don't ask again*).
+    reason: str | None
+    #: The sentence typed under *Other*, or empty.
+    note: str
+    pressed: float
+    #: Seconds the call had run when it stopped; ``None`` when it never started.
+    ran: float | None = None
+    #: Whether the call stopped because of it. A call can finish first, and a
+    #: step being written refuses (`cancel.Scope.commit`).
+    landed: bool = False
+    #: A second press while the measuring runs, or before it starts.
+    skip: bool = False
+    measure: str = NOT_MEASURED
+    measured: dict | None = None
+    error: str = ""
+
+
+@dataclass
+class DataCall:
+    """One call that reads data, from the moment it reaches portia to its result."""
+
+    tool: str
+    args: dict
+    #: The arguments as one comparable string, for a card matched without an id.
+    key: str
+    #: The harness's id for the call, when it sends one (`TOOL_USE_META`).
+    use_id: str | None
+    scope: cancel.Scope
+    #: The scope this call's is a child of: the exchange's in the window, the
+    #: request's when a host serves the tools (`cli/serve.py`). Its stop is not
+    #: a press on the card.
+    parent: cancel.Scope | None
+    queued: float
+    #: The window's card for it, once one has asked.
+    card: str | None = None
+    #: When it took its `DATA_READERS` place: the running time starts here, and
+    #: time spent waiting in line is not running time.
+    started: float | None = None
+    phase: str = WAITING
+    measuring: cancel.Scope | None = None
+    interruption: Interruption | None = None
+
+
+class _Interrupted(Exception):
+    """The call stopped at its own press; `_evidence` answers with `_interrupted`."""
+
+
+#: Every data call in flight in this process, in the order they arrived.
+_calls: list[DataCall] = []
+#: Presses on a card whose call had not reached portia yet, by card id, with
+#: the tool and arguments to know it by when it does.
+_presses: dict[str, tuple[str, str, Interruption]] = {}
+#: Interruptions whose call has ended, by card id, until the window takes them
+#: for the log (`take_interruption`).
+_outcomes: dict[str, dict[str, Any]] = {}
+#: The loop presses and reads; the workers move a call's phase.
+_calls_lock = threading.Lock()
+
+
+def _args_key(args: dict) -> str:
+    return json.dumps(args, sort_keys=True, default=str)
+
+
+def _use_id() -> str | None:
+    """The harness's id for the call being served, when its request carries one.
+
+    The MCP server sets the request's context for the length of a tool call, and
+    `asyncio.to_thread` copies it. ``None`` outside a request (a test calling a
+    tool directly) and from a harness that sends no such key.
+    """
+    try:
+        from mcp.server.lowlevel.server import request_ctx
+    except ImportError:  # pragma: no cover - the agent extra brings mcp
+        return None
+    try:
+        meta = request_ctx.get().meta
+    except LookupError:
+        return None
+    extra = getattr(meta, "model_extra", None) or {}
+    value = extra.get(TOOL_USE_META)
+    return str(value) if value else None
+
+
+def _register(tool: str, args: dict) -> DataCall:
+    """A data call has reached portia: hold it, and apply a press made before it came."""
+    # The exchange's scope in the window; outside one, whatever scope the
+    # caller installed around the call (a host's request, `cli/serve._stoppable`),
+    # which this call's own must sit inside or the caller's stop reaches nothing.
+    parent = _stop if _stop is not None else cancel.CURRENT.get()
+    record = DataCall(
+        tool=tool,
+        args=args,
+        key=_args_key(args),
+        use_id=_use_id(),
+        scope=cancel.Scope(parent=parent),
+        parent=parent,
+        queued=time.monotonic(),
+    )
+    with _calls_lock:
+        _calls.append(record)
+        early = _claim_press(record)
+    if early is not None:
+        record.scope.interrupt()
+    return record
+
+
+def _claim_press(record: DataCall) -> Interruption | None:
+    """A press already waiting for this call, bound to it. Under `_calls_lock`."""
+    for card, (name, key, interruption) in list(_presses.items()):
+        if card == record.use_id or (name == record.tool and key == record.key):
+            del _presses[card]
+            record.card = card
+            record.interruption = interruption
+            return interruption
+    return None
+
+
+def _bound(card: str, tool: str, args: dict) -> DataCall | None:
+    """The data call a card is about, binding it on first ask. Under `_calls_lock`.
+
+    By the card already bound, then by the harness's id, then by the tool and
+    its arguments among calls no card holds yet, first come first served: two
+    identical calls are told apart by the order they arrived in.
+    """
+    for record in _calls:
+        if record.card == card:
+            return record
+    for record in _calls:
+        if record.card is None and record.use_id == card:
+            record.card = card
+            return record
+    key = _args_key(args)
+    for record in _calls:
+        if record.card is None and record.tool == tool and record.key == key:
+            record.card = card
+            return record
+    return None
+
+
+def data_call(card: str, tool: str, args: dict) -> dict[str, Any] | None:
+    """Where the call behind a card is, for the window: ``None`` once it is not in flight.
+
+    ``waiting`` is how many other data calls are waiting for a place, which is
+    what is lined up behind the one running.
+    """
+    with _calls_lock:
+        record = _bound(card, tool, args)
+        if record is None:
+            return None
+        return {
+            "phase": record.phase,
+            "started": record.started,
+            "interrupted": record.interruption is not None,
+            "waiting": sum(1 for r in _calls if r.phase == WAITING and r is not record),
+        }
+
+
+def interrupt_call(
+    card: str, tool: str, args: dict, *, reason: str | None = None, note: str = ""
+) -> str:
+    """The press on a data call's card. Stops that call and nothing else.
+
+    A first press interrupts it, waiting or running; one made before the call
+    reached portia is held and applied when it does (`PENDING`). A second
+    press, while what portia measures after the interrupt runs, skips the
+    measuring. A step being written refuses (`TOO_LATE`).
+    """
+    pressed = Interruption(reason=reason, note=note.strip(), pressed=time.monotonic())
+    with _calls_lock:
+        record = _bound(card, tool, args)
+        if record is None:
+            _presses[card] = (tool, _args_key(args), pressed)
+            return PENDING
+        earlier = record.interruption
+        if earlier is None:
+            record.interruption = pressed
+        else:
+            earlier.skip = True
+        measuring = record.measuring
+    if earlier is not None:
+        if measuring is not None:
+            measuring.cancel()
+        return SKIPPING
+    return INTERRUPTING if record.scope.interrupt() else TOO_LATE
+
+
+def take_interruption(card: str) -> dict[str, Any] | None:
+    """The interruption of a call that has ended, once, for the window's log."""
+    with _calls_lock:
+        return _outcomes.pop(card, None)
+
+
+def take_interruptions() -> dict[str, dict[str, Any]]:
+    """Every interruption not taken yet: an exchange that ended before its results came."""
+    with _calls_lock:
+        taken = dict(_outcomes)
+        _outcomes.clear()
+        return taken
+
+
+def _retire(record: DataCall) -> None:
+    """The call has answered: let it go, keeping what its press came to for the log."""
+    with _calls_lock:
+        if record in _calls:
+            _calls.remove(record)
+        interruption = record.interruption
+        if interruption is not None and record.card is not None:
+            _outcomes[record.card] = {
+                "id": record.card,
+                "name": record.tool,
+                "reason": interruption.reason,
+                "note": interruption.note or None,
+                "ran": None if interruption.ran is None else round(interruption.ran, 1),
+                "landed": interruption.landed,
+                "measure": interruption.measure,
+                "measured": interruption.measured,
+            }
+    record.scope.close()
+
+
+def _pressed(record: DataCall) -> bool:
+    """Whether a stop came from this call's own press, rather than the exchange's Stop."""
+    return record.interruption is not None and not (
+        record.parent is not None and record.parent.cancelled
+    )
+
+
+def _run_data(record: DataCall, call: Callable[[], Any], measure: Callable[[], dict]) -> Any:
+    """A data call on its worker: its turn, the call, and what is measured if it is interrupted.
+
+    The `DATA_READERS` place is held through the measuring too, because the
+    measuring reads data, and released last.
+    """
+    try:
+        with cancel.scope(record.scope):
+            _wait_turn(record.scope)
+    except cancel.Cancelled:
+        if not _pressed(record):
+            raise
+        assert record.interruption is not None
+        record.interruption.landed = True
+        raise _Interrupted() from None
+    try:
+        with _calls_lock:
+            record.started = time.monotonic()
+            record.phase = RUNNING
+        try:
+            with cancel.scope(record.scope):
+                return call()
+        except cancel.Cancelled:
+            if not _pressed(record):
+                raise
+            assert record.interruption is not None
+            record.interruption.landed = True
+            record.interruption.ran = time.monotonic() - record.started
+            _measure(record, measure)
+            raise _Interrupted() from None
+    finally:
+        _readers.release()
+
+
+def _measure(record: DataCall, measure: Callable[[], dict]) -> None:
+    """What portia measures once the call has stopped, unless a second press skips it.
+
+    Under a scope of its own, so the second press stops the measuring and not
+    the exchange; a child of the exchange's, so Stop still stops it.
+    """
+    interruption = record.interruption
+    assert interruption is not None
+    with _calls_lock:
+        if interruption.skip:
+            interruption.measure = SKIPPED
+            return
+        record.phase = MEASURING
+        record.measuring = cancel.Scope(parent=record.parent)
+    try:
+        with cancel.scope(record.measuring):
+            interruption.measured = measure()
+        interruption.measure = MEASURED
+    except cancel.Cancelled:
+        if record.parent is not None and record.parent.cancelled:
+            raise
+        interruption.measure = SKIPPED
+    except Exception as exc:  # noqa: BLE001 - told to the copilot, not swallowed
+        interruption.measure = FAILED
+        interruption.error = f"{type(exc).__name__}: {exc}"
+    finally:
+        record.measuring.close()
+
+
+def _interrupted(record: DataCall) -> dict[str, Any]:
+    """What the model reads in place of a result its user interrupted.
+
+    Not `_stopped`, whose text tells the copilot to stop and wait: the exchange
+    goes on, and what it is told is that the user stopped this call, why if
+    they said, how long it had run, that it has no result and may use no
+    number from it, whether a step was written, and what portia measured after.
+    """
+    interruption = record.interruption
+    assert interruption is not None
+    parts = [prompts.error("interrupted", tool=record.tool)]
+    if interruption.reason:
+        parts.append(prompts.error("interrupted_reason", reason=interruption.reason))
+        if interruption.note:
+            parts.append(prompts.error("interrupted_note", note=interruption.note))
+    else:
+        parts.append(prompts.error("interrupted_no_reason"))
+    if interruption.ran is None:
+        parts.append(prompts.error("interrupted_never_started"))
+    else:
+        parts.append(prompts.error("interrupted_ran", ran=present.duration(interruption.ran)))
+    if record.tool == WRITES_A_STEP:
+        parts.append(prompts.error("interrupted_nothing_written"))
+    if interruption.ran is not None:
+        parts.append(_measurement(interruption))
+    return {"content": [{"type": "text", "text": "\n\n".join(parts)}], "is_error": True}
+
+
+def _measurement(interruption: Interruption) -> str:
+    """The measuring's part of `_interrupted`: the facts, or why there are none."""
+    measured = interruption.measured or {}
+    if interruption.measure == MEASURED and measured.get("scanned") is False:
+        return prompts.error("interrupted_not_scanned", facts=to_json_compact(measured))
+    if interruption.measure == MEASURED:
+        return prompts.error("interrupted_measured", facts=to_json_compact(measured))
+    if interruption.measure == FAILED:
+        return prompts.error("interrupted_measure_failed", error=interruption.error)
+    return prompts.error("interrupted_measure_skipped")
 
 
 def _stopped() -> dict[str, Any]:
@@ -317,6 +716,7 @@ async def _evidence(
     coarser: Callable[[Any], Any] | None = None,
     receipt: Callable[[Any, int], Any] | None = None,
     reads_data: bool = False,
+    called: tuple[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Run one handler off the event loop and hand back what it found.
 
@@ -359,11 +759,26 @@ async def _evidence(
     ``reads_data`` is set by the tools whose handler opens a connection, and
     such a call waits its turn among `DATA_READERS` before it starts, inside
     the scope, so a press reaches it there too.
+
+    **A data call can be stopped on its own** *(2026-10-09)*: it runs under a
+    scope of its own, a child of the exchange's (`DataCall`), which a press on
+    its card cancels (`interrupt_call`). What the model reads then is
+    `_interrupted`, with what portia measured after the press, and the
+    exchange goes on. ``called`` is the tool's name and its arguments, which
+    are how the window's card finds the call and what the measuring reads.
     """
+    tool_name, arguments = called or ("", {})
+    record = _register(tool_name, arguments) if reads_data else None
 
     def stoppable() -> Any:
-        with cancel.scope(_stop), _reading_data() if reads_data else contextlib.nullcontext():
-            return call()
+        if record is None:
+            with cancel.scope(_stop):
+                return call()
+        return _run_data(
+            record,
+            call,
+            lambda: handlers.interrupted_facts(tool_name, arguments, **_dir(arguments)),
+        )
 
     try:
         found = await asyncio.to_thread(stoppable)
@@ -376,10 +791,16 @@ async def _evidence(
                 text = to_json_compact(receipt(found, len(coarse)))
         elif len(text) > RESULT_BUDGET and receipt is not None:
             text = to_json_compact(receipt(found, len(text)))
+    except _Interrupted:
+        assert record is not None
+        return _interrupted(record)
     except cancel.Cancelled:
         return _stopped()
     except Exception as exc:  # noqa: BLE001 - surfaced to the agent, not swallowed
         return _failed(exc)
+    finally:
+        if record is not None:
+            _retire(record)
     return _ok(text) if len(text) <= RESULT_BUDGET else _too_large(len(text))
 
 
@@ -474,7 +895,9 @@ async def graph_lookup(args: dict[str, Any]) -> dict[str, Any]:
 )
 async def measure_overlaps(args: dict[str, Any]) -> dict[str, Any]:
     return await _evidence(
-        lambda: handlers.measure_overlaps(args["pairs"], **_dir(args)), reads_data=True
+        lambda: handlers.measure_overlaps(args["pairs"], **_dir(args)),
+        reads_data=True,
+        called=("measure_overlaps", args),
     )
 
 
@@ -504,6 +927,7 @@ async def profile_source(args: dict[str, Any]) -> dict[str, Any]:
         # refused, as it always was.
         coarser=_profiled_by_type if args.get("columns") is None else None,
         reads_data=True,
+        called=("profile_source", args),
     )
 
 
@@ -545,6 +969,7 @@ async def query_data(args: dict[str, Any]) -> dict[str, Any]:
             **_dir(args),
         ),
         reads_data=True,
+        called=("query_data", args),
     )
 
 
@@ -595,7 +1020,7 @@ async def plot_data(args: dict[str, Any]) -> dict[str, Any]:
     The rows are published before the receipt is built, so a chart is on screen
     by the time the agent is told about it.
     """
-    return await _evidence(lambda: _draw(args), reads_data=True)
+    return await _evidence(lambda: _draw(args), reads_data=True, called=("plot_data", args))
 
 
 def _draw(args: dict[str, Any]) -> dict:
@@ -971,6 +1396,7 @@ async def join_findings(args: dict[str, Any]) -> dict[str, Any]:
             **_dir(args),
         ),
         reads_data=True,
+        called=("join_findings", args),
     )
 
 
@@ -1013,6 +1439,7 @@ async def record_step(args: dict[str, Any]) -> dict[str, Any]:
         coarser=_shortened,
         receipt=_step_receipt,
         reads_data=True,
+        called=("record_step", args),
     )
 
 
@@ -1057,7 +1484,10 @@ async def read_spec(args: dict[str, Any]) -> dict[str, Any]:
 )
 async def run_spec(args: dict[str, Any]) -> dict[str, Any]:
     return await _evidence(
-        lambda: handlers.run_spec(args["spec_path"]), coarser=_shortened, reads_data=True
+        lambda: handlers.run_spec(args["spec_path"]),
+        coarser=_shortened,
+        reads_data=True,
+        called=("run_spec", args),
     )
 
 

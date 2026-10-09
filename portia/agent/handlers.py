@@ -29,12 +29,12 @@ from typing import Any
 
 from portia import catalog, findings, knowledge, pipeline, spec
 from portia.agent import chartspec, context, drawn, prompts
-from portia.checks import profiling
+from portia.checks import profiling, sql_joins
 from portia.checks.join import column_overlap
 from portia.checks.join import join_findings as _join_findings
 from portia.checks.outcome import BLOCKING_FLAGS, REPORT_KEYS
 from portia.checks.profiling import profile_path
-from portia.core import backend
+from portia.core import backend, cancel
 from portia.core import dialect as dialects
 from portia.core.io import connect, relative, source_table
 from portia.core.serialize import to_json, to_jsonable
@@ -297,6 +297,121 @@ def _select(sql: str, inputs: list[str], portia_dir: str) -> Table:
             )
         tables[key] = _table(name, portia_dir, con)
     return sql_op.apply_sql(tables, sql_op.rename_tables(sql, renames), name="query").table
+
+
+def interrupted_facts(tool: str, args: dict, portia_dir: str = catalog.DEFAULT_DIR) -> dict:
+    """What portia measures about a data call the user interrupted, **after** the interrupt.
+
+    `docs/CONVERSATION.md` §16. The copilot reads this in place of the result
+    it will never have: how big each input is, and for each equality join the
+    SQL makes between two named sides, how often the key repeats on each side
+    and exactly how many rows the join produces (`checks/sql_joins.py`). The
+    query that asked for it unpivoted two 1,579-column tables and joined them
+    on the meter name alone; ran to completion, it was some 430 billion rows,
+    and nothing on screen said so.
+
+    A size is the catalog's where the catalog already holds one, which is a
+    warehouse table's row count, and counted otherwise. **On a warehouse
+    nothing is counted**: what the catalog holds is all there is, and a join is
+    not measured, because measuring it would be the scan on someone's meter
+    that the interrupt was pressed to stop. A join this cannot read is listed
+    with why, and the copilot is told those are the general facts only.
+
+    The joins are counted in `ops/sql.sandbox`, the walls the query had: the
+    statement's own CTEs run again there, and they are the agent's SQL.
+    """
+    names, sql = _what_it_read(tool, args)
+    con = connect()
+    if backend.is_remote(con):
+        return {"scanned": False, "inputs": {name: _known_rows(name, portia_dir) for name in names}}
+    # Each input on its own, so one that no longer resolves costs its own size
+    # and not the whole answer. Under the name the query reads it by.
+    tables: dict[str, Any] = {}
+    keys: dict[str, str] = {}
+    for name in names:
+        key = name.partition(STEP_REF)[2] if STEP_REF in name else name
+        try:
+            tables[key] = _table(name, portia_dir, con)
+        except ValueError:
+            continue
+        keys[name] = key
+    bound = sql_op.rename_tables(sql, {n: k for n, k in keys.items() if n != k}) if sql else ""
+    joins, unread = sql_joins.read(bound, tables) if bound else ([], [])
+    facts: dict[str, Any] = {"inputs": {}}
+    counted: dict[str, int] = {}
+    if joins:
+        with sql_op.sandbox(tables) as (box, counted):
+            facts["joins"] = sql_joins.measure(box, bound, joins)
+    for name in names:
+        known = _known_rows(name, portia_dir)
+        if known["rows"] is not None:
+            facts["inputs"][name] = known
+        elif name not in keys:
+            facts["inputs"][name] = {"rows": None, "from": UNRESOLVED}
+        elif keys[name] in counted:
+            facts["inputs"][name] = {"rows": counted[keys[name]], "from": COUNTED}
+        else:
+            facts["inputs"][name] = {"rows": tables[keys[name]].count(), "from": COUNTED}
+    if unread:
+        facts["not_read"] = unread
+    return facts
+
+
+#: Where an input's size in `interrupted_facts` came from. Codes the copilot
+#: reads, each said in words by `prompts/errors/interrupted_measured.md`.
+FROM_CATALOG = "catalog"
+COUNTED = "counted"
+UNKNOWN = "unknown"
+UNRESOLVED = "unresolved"
+
+
+def _what_it_read(tool: str, args: dict) -> tuple[list[str], str | None]:
+    """The tables a data call declared, and its SQL if it had one, off its arguments."""
+    if tool in ("query_data", "plot_data"):
+        return [str(n) for n in args.get("inputs") or []], str(args.get("sql") or "") or None
+    if tool == "record_step":
+        raw = args.get("step")
+        step: dict = raw if isinstance(raw, dict) else {}
+        names = [str(ref) for ref in spec.step_inputs(step) if ref]
+        sql = str(step.get("sql") or "") if step.get("op") == "sql" else ""
+        return list(dict.fromkeys(names)), sql or None
+    if tool == "profile_source":
+        return [str(args.get("source") or "")], None
+    if tool == "join_findings":
+        return [str(args.get("left") or ""), str(args.get("right") or "")], None
+    if tool == "measure_overlaps":
+        named = [
+            str(pair.get(side) or "")
+            for pair in args.get("pairs") or []
+            if isinstance(pair, dict)
+            for side in ("left", "right")
+        ]
+        return list(dict.fromkeys(n for n in named if n)), None
+    return [], None
+
+
+def _known_rows(name: str, portia_dir: str) -> dict:
+    """An input's row count as the catalog already holds it, without asking the data.
+
+    A warehouse table's entry carries the count its metadata gave for nothing
+    (`catalog.scope_table`), PostgreSQL's as the planner's estimate
+    (`catalog.rows_estimated`). A file's entry holds no count, and neither does
+    an earlier step, so either says ``None`` here.
+    """
+    if STEP_REF in name:
+        return {"rows": None, "from": UNKNOWN}
+    try:
+        entry = _entry(name, portia_dir)
+    except ValueError:
+        return {"rows": None, "from": UNKNOWN}
+    indexed = entry.get("indexed") or {}
+    rows = indexed.get("rows")
+    if not isinstance(rows, int) or isinstance(rows, bool):
+        return {"rows": None, "from": UNKNOWN}
+    known: dict[str, Any] = {"rows": rows, "from": FROM_CATALOG}
+    if catalog.rows_estimated(indexed):
+        known["approximate"] = True
+    return known
 
 
 def query_data(
@@ -1181,6 +1296,13 @@ def record_step(
             )
         )
 
+    # **Past here a press on this call's card no longer stops it**
+    # (`core/cancel.Scope.commit`, `docs/CONVERSATION.md` §16). Up to here an
+    # interrupt leaves nothing written, which is what the copilot is told; from
+    # here the spec is being written, and a step stopped halfway through its
+    # own recording would be a spec nobody decided. A press that already landed
+    # stops it here instead. The exchange's Stop still reaches it, as it did.
+    cancel.commit()
     doc["steps"] = candidate
     steps = candidate
     path.parent.mkdir(parents=True, exist_ok=True)
