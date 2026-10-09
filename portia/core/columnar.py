@@ -39,12 +39,21 @@ exists to surface. And a null is `\\N`, never blank, because a blank cell and an
 empty string are different facts (`present.py` settled the same point for the
 human surfaces). Escaping the backslash first is what keeps a value that is
 literally ``\\N`` distinguishable from a null.
+
+**A table too wide for one line per column is grouped instead** (:func:`by_type`,
+2026-10-08). A line per column is still a line per column: a 1,579-column table
+was 56,289 characters described and 211,563 profiled, and both were refused, so
+the copilot could read that table only by naming columns it had never been shown.
+The grouped form is the same records at a coarser grain, every one of them
+counted, rather than the first few that fit.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+import statistics
+from collections import Counter
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 from portia.core.serialize import to_jsonable
@@ -124,3 +133,103 @@ def render(payload: Mapping[str, Any], *, records: str) -> str:
             + "\n".join([DELIMITER.join(fields), *(_row(r, fields) for r in group)])
         )
     return "\n".join(blocks)
+
+
+#: A type with this many columns or fewer is listed record by record in the
+#: grouped form, because a summary of three columns is longer than the three.
+LISTED_GROUP = 10
+
+#: Names shown from each end of a group too big to list, in the table's own
+#: order. The first and the last rather than any chosen few: which columns are
+#: worth a look is the reader's call, and file order is the one order that
+#: makes none.
+GROUP_EXAMPLES = 5
+
+#: A measured number's spread across a group, named as the profile names its own
+#: quartiles so the two read the same.
+SPREAD = ("min", "q25", "median", "q75", "max")
+
+
+def by_type(
+    payload: Mapping[str, Any],
+    *,
+    records: str,
+    typed_by: Sequence[str],
+    tallied: Sequence[str] = (),
+    spread: Sequence[str] = (),
+    lowest: Sequence[str] = (),
+    highest: Sequence[str] = (),
+) -> dict[str, Any]:
+    """One evidence dict with its records grouped by type, for when a line each does not fit.
+
+    The head is kept whole, as :func:`render` keeps it. The records become one
+    group per type, in the order each type first appears, under
+    ``<records>_by_type``; a record's type is the first of ``typed_by`` it
+    carries, so a warehouse table nobody has profiled groups on its ``dtype``.
+    Every record lands in exactly one group, so the counts add up to the table.
+
+    A group of :data:`LISTED_GROUP` or fewer carries its records as they are. A
+    bigger one carries its count, the first and last :data:`GROUP_EXAMPLES`
+    names, and each named field across its records: ``tallied`` as how many
+    carry each value, ``spread`` as :data:`SPREAD`, ``lowest`` and ``highest``
+    as the extreme value any of them holds. **Which fields, and in which form,
+    is the caller's**, for the reason :func:`render` derives its blocks: this
+    module would otherwise have to know which rung measures what.
+
+    Nothing is ordered by a measurement. Groups follow the table, the names are
+    its ends, and a tally keeps the order its values first appear in.
+    """
+    head = {key: value for key, value in payload.items() if key != records}
+    types: dict[tuple[str, Any], list[Mapping[str, Any]]] = {}
+    for record in payload.get(records) or []:
+        field = next((f for f in typed_by if f in record), typed_by[0])
+        types.setdefault((field, record.get(field)), []).append(record)
+
+    groups = []
+    for (field, kind), members in types.items():
+        group: dict[str, Any] = {field: kind, f"n_{records}": len(members)}
+        if len(members) <= LISTED_GROUP:
+            groups.append({**group, records: list(members)})
+            continue
+        names = [member["name"] for member in members]
+        group["first"] = names[:GROUP_EXAMPLES]
+        group["last"] = names[-GROUP_EXAMPLES:]
+        for name in tallied:
+            group[name] = dict(Counter(_items(member.get(name) for member in members)))
+        for name in spread:
+            if values := _numbers(member.get(name) for member in members):
+                group[name] = _spread(values)
+        for name in lowest:
+            if values := _numbers(member.get(name) for member in members):
+                group[name] = min(values)
+        for name in highest:
+            if values := _numbers(member.get(name) for member in members):
+                group[name] = max(values)
+        groups.append(group)
+    return {**head, f"{records}_by_type": groups}
+
+
+def _items(values: Iterable[Any]) -> Iterable[Any]:
+    """Every value worth a tally: a list's items one by one, and no nulls."""
+    for value in values:
+        for item in value if isinstance(value, list | tuple) else [value]:
+            if item is not None:
+                yield item
+
+
+def _numbers(values: Iterable[Any]) -> list[int | float]:
+    return [v for v in values if isinstance(v, int | float) and not isinstance(v, bool)]
+
+
+def _spread(values: list[int | float]) -> dict[str, Any]:
+    """Min, quartiles and max, interpolated the way the profiler's own are.
+
+    ``inclusive`` is linear interpolation between the values, which is what
+    ``quantile_cont`` computes for a profile's ``q25``/``median``/``q75``, so a
+    spread of null rates and a column's quartiles mean the same thing.
+    """
+    ordered = sorted(values)
+    quartiles = (
+        statistics.quantiles(ordered, n=4, method="inclusive") if len(ordered) > 1 else ordered * 3
+    )
+    return dict(zip(SPREAD, map(to_jsonable, [ordered[0], *quartiles, ordered[-1]]), strict=True))
