@@ -164,3 +164,81 @@ def test_a_real_failure_during_an_uncancelled_scope_is_left_alone(scope):
     with pytest.raises(ValueError, match="the join failed"):
         with cancel.scope(scope):
             raise ValueError("the join failed")
+
+
+# --- a scope inside a scope: one call stopped, or the whole exchange (2026-10-09) ---
+
+
+def test_stopping_the_exchange_stops_every_call_inside_it():
+    """The exchange's Stop still ends everything it started, as before calls had scopes."""
+    exchange = cancel.Scope()
+    one, two = cancel.Scope(parent=exchange), cancel.Scope(parent=exchange)
+    try:
+        exchange.cancel()
+        assert one.cancelled and two.cancelled
+    finally:
+        for s in (exchange, one, two):
+            s.close()
+
+
+def test_a_press_on_one_call_stops_that_call_and_nothing_else():
+    exchange = cancel.Scope()
+    one, two = cancel.Scope(parent=exchange), cancel.Scope(parent=exchange)
+    try:
+        assert one.interrupt() is True
+        assert one.cancelled
+        assert not two.cancelled and not exchange.cancelled
+    finally:
+        for s in (exchange, one, two):
+            s.close()
+
+
+def test_a_call_that_starts_after_the_exchange_was_stopped_is_stopped():
+    exchange = cancel.Scope()
+    try:
+        exchange.cancel()
+        late = cancel.Scope(parent=exchange)
+        assert late.cancelled
+        late.close()
+    finally:
+        exchange.close()
+
+
+def test_a_committed_call_refuses_its_own_press_and_not_the_exchanges_stop():
+    """A step whose spec is being written is not stopped halfway by a press on its card."""
+    exchange = cancel.Scope()
+    call = cancel.Scope(parent=exchange)
+    try:
+        call.commit()
+        assert call.interrupt() is False
+        assert not call.cancelled
+        exchange.cancel()
+        assert call.cancelled
+    finally:
+        call.close()
+        exchange.close()
+
+
+def test_a_press_that_landed_first_stops_the_work_at_its_commit():
+    call = cancel.Scope()
+    try:
+        call.interrupt()
+        with pytest.raises(cancel.Cancelled), cancel.scope(call):
+            cancel.commit()
+    finally:
+        call.close()
+
+
+def test_a_press_on_a_call_interrupts_its_running_query():
+    exchange = cancel.Scope()
+    call = cancel.Scope(parent=exchange)
+    con = duckdb.connect(":memory:")
+    call.watch(con)
+    threading.Thread(target=lambda: (time.sleep(0.3), call.interrupt()), daemon=True).start()
+    try:
+        with pytest.raises(duckdb.InterruptException):
+            con.execute(_SLOW).fetchall()
+        assert not exchange.cancelled
+    finally:
+        call.close()
+        exchange.close()

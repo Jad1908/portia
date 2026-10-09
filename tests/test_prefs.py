@@ -913,3 +913,35 @@ def test_a_path_is_resolved_off_the_disk_once(tmp_path, monkeypatch):
     prefs.key(Path("a project"))
     prefs.key(Path("a project"))
     assert len([p for p in resolved if str(p) == "a project"]) == 2
+
+
+# --- *Interrupt query*: how a press is asked about (2026-10-09) ---------------------
+
+
+def test_dont_ask_again_and_the_long_query_note_come_back_on_the_next_launch():
+    """`CONVERSATION.md` §16: the choice is remembered, and Settings undoes it."""
+    prefs.restore_machine(_app())
+    prefs.sync(_app(ask_before_interrupt=False, long_query_minutes=12.5))
+
+    after = _app()
+    prefs.restore_machine(after)
+    assert after.ask_before_interrupt is False
+    assert after.long_query_minutes == 12.5
+
+    # Turned back on in Settings, it is remembered on.
+    after.ask_before_interrupt = True
+    prefs.sync(after)
+    again = _app()
+    prefs.restore_machine(again)
+    assert again.ask_before_interrupt is True
+
+
+def test_a_long_query_note_that_makes_no_sense_leaves_the_default():
+    from portia.ui.state import LONG_QUERY_MINUTES
+
+    for value in (0, -3, "five", True, None):
+        prefs.update_machine({"long_query_minutes": value, "interrupt_ask": "yes"})
+        app = _app()
+        prefs.restore_machine(app)
+        assert app.long_query_minutes == LONG_QUERY_MINUTES, value
+        assert app.ask_before_interrupt is True, value

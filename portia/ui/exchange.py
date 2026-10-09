@@ -189,6 +189,10 @@ async def start(
     finally:
         exchange.running = False
         chat.job = None
+        # An interrupted call whose result never came (the exchange was
+        # stopped, or failed, first) is still on the record.
+        for outcome in engine.take_interruptions().values():
+            _keep_interruption(chat, outcome)
         _resolve_orphans()
         _sync_now()
         if not chat.is_job:
@@ -370,6 +374,84 @@ async def interrupt() -> None:
         await handle.interrupt()
 
 
+def running_call(card: str) -> dict | None:
+    """The data call a card in the live exchange is about, while it has no result.
+
+    ``None`` for a card whose call has answered, one not in the live chat, or one
+    that does not read data: a press that arrives late, from a card drawn one
+    refresh ago, is an ordinary race and does nothing.
+    """
+    live = APP.live
+    if live is None or not card:
+        return None
+    call = None
+    for row in live.rows:
+        if not isinstance(row, events.Event) or str(row.data.get("id") or "") != card:
+            continue
+        if row.kind == events.TOOL_RESULT:
+            return None
+        if row.kind == events.TOOL_CALL:
+            call = row.data
+    if call is None or not engine.reads_data(events.tool_label(str(call.get("name") or ""))):
+        return None
+    return call
+
+
+#: What `interrupt_call` answers when a step being written refuses the press
+#: (`agent/tools.TOO_LATE`, spelled again because this module imports no tool).
+TOO_LATE = "too_late"
+
+
+def is_interrupted(card: str) -> bool:
+    """Whether the call behind ``card`` has been pressed already, so a press now skips."""
+    call = running_call(card)
+    if call is None:
+        return False
+    now = engine.data_call(
+        card, events.tool_label(str(call.get("name") or "")), dict(call.get("input") or {})
+    )
+    return bool(now and now.get("interrupted"))
+
+
+def interrupt_call(card: str, *, reason: str | None = None, note: str = "") -> str:
+    """Interrupt one data call from its card; the exchange goes on (`CONVERSATION.md` §16).
+
+    Not `interrupt`, which ends the exchange. This stops the call behind
+    ``card`` and nothing else, or, pressed again while portia measures what the
+    copilot will be told, skips the measuring. Returns what the press came to
+    (`agent/tools.interrupt_call`), or ``""`` for a press on a call that is no
+    longer running.
+    """
+    call = running_call(card)
+    if call is None:
+        return ""
+    return engine.interrupt_call(
+        card,
+        events.tool_label(str(call.get("name") or "")),
+        dict(call.get("input") or {}),
+        reason=reason,
+        note=note,
+    )
+
+
+def _note_interruption(chat: Chat, card: str) -> None:
+    """Log what a press on ``card`` came to, just before its call's result.
+
+    Teed here, at the edge, like everything `runlog` holds; and put in the rows
+    as the same record, so the transcript draws the card as interrupted from
+    the one thing a replay of the log will also have.
+    """
+    outcome = engine.take_interruption(card) if card else None
+    if outcome is not None:
+        _keep_interruption(chat, outcome)
+
+
+def _keep_interruption(chat: Chat, outcome: dict) -> None:
+    if chat.log is not None:
+        chat.log.write(runlog.INTERRUPTED, outcome)
+    chat.rows.append(events.Event(runlog.INTERRUPTED, outcome))
+
+
 def open_from_disk(path: Path) -> Chat:
     """Put a logged chat on screen, reading it once (`CHAT_SESSIONS.md` §3.3).
 
@@ -458,6 +540,10 @@ def _owned(event: events.Event) -> bool:
 def _record(event: events.Event, chat: Chat) -> None:
     from portia.ui import transcript
 
+    # A call the user interrupted is said so before its result, in the log and
+    # in the rows (`_note_interruption`).
+    if event.kind == events.TOOL_RESULT:
+        _note_interruption(chat, str(event.data.get("id") or ""))
     # Logged before the panel's own bookkeeping: the events the transcript drops
     # are ones it has *already rendered* from inside the callback that produced
     # them, and a log missing every question and every write confirmation would

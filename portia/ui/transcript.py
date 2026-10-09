@@ -38,6 +38,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -1452,6 +1453,11 @@ DONE = "done"
 ERRORED = "errored"
 #: The exchange ended with no result under this call — an interrupt, usually.
 DROPPED = "dropped"
+#: The user interrupted this one call from its card (`CONVERSATION.md` §16).
+#: Its result is the message the copilot read instead, and it is drawn greyed
+#: and said to be the user's doing, never as a red error: stopping is not
+#: failing.
+INTERRUPTED = "interrupted"
 
 
 def _rows(
@@ -1527,8 +1533,10 @@ def _rows(
 
 def _drawn_elsewhere(row: Any, answers: dict[str, dict]) -> bool:
     """A row that is part of another row's card rather than a row of its own."""
-    return (_is(row, events.TOOL_RESULT) and str(row.data.get("id") or "") in answers) or _is(
-        row, events.APPROVAL_RESULT
+    return (
+        (_is(row, events.TOOL_RESULT) and str(row.data.get("id") or "") in answers)
+        or _is(row, events.APPROVAL_RESULT)
+        or _is(row, runlog.INTERRUPTED)
     )
 
 
@@ -1632,8 +1640,8 @@ def _tool_run_end(rows: list[Any], start: int, answers: dict[str, dict]) -> int:
     end = start
     while end < len(rows):
         row = rows[end]
-        if _is(row, events.TOOL_CALL):
-            pass
+        if _is(row, events.TOOL_CALL) or _is(row, runlog.INTERRUPTED):
+            pass  # an interruption is drawn on the card of the call it stopped
         elif not (_is(row, events.TOOL_RESULT) and str(row.data.get("id") or "") in answers):
             break
         end += 1
@@ -1776,6 +1784,8 @@ def _writes_end(rows: list[Any], start: int, answers: dict[str, dict]) -> int:
             pass  # drawn with the request it resolves
         elif _is(row, events.TOOL_RESULT) and str(row.data.get("id") or "") in answers:
             pass  # drawn with its call
+        elif _is(row, runlog.INTERRUPTED):
+            pass  # drawn on the card of the call it stopped
         else:
             break
         end += 1
@@ -1810,7 +1820,7 @@ def _write_run(rows: list[Any], start: int, answers: dict[str, dict]) -> int:
         elif row.kind == events.TOOL_RESULT:
             if str(row.data.get("id") or "") not in answers:
                 break  # an orphan result draws on its own, so it is a row
-        elif row.kind != events.APPROVAL_RESULT:
+        elif row.kind not in (events.APPROVAL_RESULT, runlog.INTERRUPTED):
             break
         end += 1
     if len(writes) < GROUP_MIN or not foldable:
@@ -1891,7 +1901,13 @@ def _call_states(rows: list[Any], answers: dict[str, dict], *, busy: bool) -> di
         call_id = str(row.data.get("id") or "")
         result = answers.get(call_id)
         if result is not None:
-            states[call_id] = ERRORED if result.get("is_error") else DONE
+            states[call_id] = (
+                INTERRUPTED
+                if (result.get(runlog.INTERRUPTED) or {}).get("landed")
+                else ERRORED
+                if result.get("is_error")
+                else DONE
+            )
         elif not busy:
             # Nothing is coming: the exchange is over and this call never
             # answered. Saying "running" about it would be a spinner that spins
@@ -1957,13 +1973,23 @@ def _is(row: Any, kind: str) -> bool:
 
 
 def _results_by_call(rows: list[Any]) -> dict[str, dict]:
-    """Tool results keyed by the id of the call each one answers."""
+    """Tool results keyed by the id of the call each one answers.
+
+    A call the user interrupted carries what the press came to under
+    `runlog.INTERRUPTED` beside its result, off the record the window logged
+    just before it (`exchange._note_interruption`), so a live card and a
+    replayed one are drawn from the same thing.
+    """
     called = {str(r.data.get("id") or "") for r in rows if _is(r, events.TOOL_CALL)} - {""}
-    return {
-        str(r.data["id"]): r.data
-        for r in rows
-        if _is(r, events.TOOL_RESULT) and str(r.data.get("id") or "") in called
-    }
+    pressed = {str(r.data.get("id") or ""): r.data for r in rows if _is(r, runlog.INTERRUPTED)}
+    results = {}
+    for r in rows:
+        call_id = str(r.data.get("id") or "") if _is(r, events.TOOL_RESULT) else ""
+        if call_id in called:
+            results[call_id] = (
+                {**r.data, runlog.INTERRUPTED: pressed[call_id]} if call_id in pressed else r.data
+            )
+    return results
 
 
 def _row(row: Any, *, job: bool = False) -> None:
@@ -2166,7 +2192,10 @@ def _tool_card(
             ui.label(subject).classes("tool-card-subject")
         if rest:
             ui.label(_summarize(rest)).classes("tool-card-args")
-        _tool_state(state_name, result, timing)
+        if state_name in (RUNNING, QUEUED) and engine.reads_data(name):
+            _live_state(call, name, state_name, timing)
+        else:
+            _tool_state(state_name, result, timing)
 
     def body() -> None:
         with ui.element("div").classes("tool-card-body"):
@@ -2208,10 +2237,126 @@ def _tool_state(state_name: str, result: dict | None, timing: state.Timing | Non
             _took(timing)
     elif state_name == DROPPED:
         ui.label(_NO_RESULT).classes("tool-state")
+    elif state_name == INTERRUPTED:
+        # The user's doing, said in the card's quiet type: greyed and never
+        # red, because stopping is not failing. The reason is theirs, verbatim.
+        # The time is how long it ran, off the record, and not the window's
+        # clock, which counts the wait for its turn as well.
+        pressed = (result or {}).get(runlog.INTERRUPTED) or {}
+        with ui.element("div").classes("tool-state tool-state--interrupted"):
+            ui.icon(_INTERRUPTED_ICON).classes("tool-state-icon")
+            ui.label(_BY_YOU)
+            if pressed.get("reason"):
+                ui.label(str(pressed["reason"])).classes("tool-state-reason")
+            ran = pressed.get("ran")
+            ui.label(_NEVER_STARTED if ran is None else present.duration(ran)).classes("tool-clock")
     elif result is not None:
         with ui.element("div").classes("tool-state"):
             ui.label(_volume(str(result.get("text") or "")))
             _took(timing)
+
+
+@dataclass
+class _Live:
+    """One running data call's state, as one tab drew it, with what it said."""
+
+    element: ui.element
+    card: str
+    tool: str
+    args: dict
+    #: The transcript's own state for the call, drawn while `agent/tools` has
+    #: no record of it (before its request arrives, after its result).
+    fallback: str
+    timing: state.Timing | None
+    said: tuple = ()
+
+
+#: The running data calls' state cells as drawn, by tab: `tick_clocks` redraws a
+#: cell only when what it says has moved, so the control in it is not replaced
+#: under a pointer every second.
+_LIVE: dict[str, list[_Live]] = {}
+
+
+def _live_state(call: dict, tool: str, state_name: str, timing: state.Timing | None) -> None:
+    """A data call's state, where `agent/tools` has it, and the control that interrupts it.
+
+    **Where the call is, not where the transcript guesses**: one call reads data
+    at a time (`tools.DATA_READERS`) and the others wait, and which one holds
+    the place is the engine's to say. So *running*, its clock and *queued* come
+    from `engine.data_call`, and the clock counts from when the call took its
+    turn. Past `App.long_query_minutes` a note says so, with how many data
+    calls wait behind it. The control is *Interrupt query* from the first
+    second, and *Skip measuring* once pressed (`CONVERSATION.md` §16).
+    """
+    cell = ui.element("div").classes("tool-state-live")
+    live = _Live(
+        cell, str(call.get("id") or ""), tool, dict(call.get("input") or {}), state_name, timing
+    )
+    with cell:
+        live.said = _draw_live(live, engine.data_call(live.card, live.tool, live.args) or {})
+    _LIVE.setdefault(cell.client.id, []).append(live)
+
+
+def _draw_live(live: _Live, now: dict) -> tuple:
+    """Draw one live cell from where its call is now; return what it said (`_said`)."""
+    said = _said(live, now)
+    phase, pressed, long, behind, _ = said
+    started = now.get("started")
+    with ui.element("div").classes("tool-state-row"):
+        if pressed:
+            with ui.element("div").classes("tool-state tool-state--running"):
+                c.pulse()
+                ui.label(_MEASURING if phase == state.CALL_MEASURING else _INTERRUPTING)
+        elif phase == state.CALL_RUNNING and started is not None:
+            with ui.element("div").classes("tool-state tool-state--running"):
+                c.pulse()
+                ui.label(RUNNING)
+                tool_clock(state.Timing(started=float(started)))
+        elif phase == state.CALL_WAITING:
+            _tool_state(QUEUED, None)
+        else:
+            _tool_state(live.fallback, None, live.timing)
+        control = ui.button(_SKIP_MEASURING if pressed else _INTERRUPT_QUERY, color=None)
+        control.props(f"unelevated no-caps dense data-interrupt={c.prop_value(live.card)}")
+        control.classes("btn btn-tertiary btn-micro interrupt-control")
+    if long:
+        note = _LONG_RUN.format(minutes=f"{APP.long_query_minutes:g}")
+        if behind:
+            note += " " + (_BEHIND_ONE if behind == 1 else _BEHIND.format(n=behind))
+        ui.label(note).classes("tool-note")
+    return said
+
+
+def _tick_live() -> None:
+    """Redraw this tab's live cells whose state moved; forget the ones no longer drawn."""
+    client_id = context.client.id
+    kept = [live for live in _LIVE.get(client_id, []) if not live.element.is_deleted]
+    _LIVE[client_id] = kept
+    for live in kept:
+        now = engine.data_call(live.card, live.tool, live.args) or {}
+        if _said(live, now) == live.said:
+            continue
+        live.element.clear()
+        with live.element:
+            live.said = _draw_live(live, now)
+
+
+def call_moved() -> None:
+    """A press moved a data call: this tab's cells say so now, not at the next tick."""
+    _tick_live()
+
+
+def _said(live: _Live, now: dict) -> tuple:
+    """What a live cell says: its phase, whether it was pressed, whether it is past
+    `App.long_query_minutes` and how many wait behind it then, and its fallback."""
+    phase = now.get("phase")
+    pressed = bool(now.get("interrupted"))
+    long = (
+        phase == state.CALL_RUNNING
+        and not pressed
+        and state.long_running(now.get("started"), APP.long_query_minutes)
+    )
+    return (phase, pressed, long, int(now.get("waiting") or 0) if long else 0, live.fallback)
 
 
 def _took(timing: state.Timing | None) -> None:
@@ -2234,9 +2379,15 @@ def tool_clock(timing: state.Timing) -> None:
 
 
 def tick_clocks() -> None:
-    """Move every running call's clock on. Registered once per page (`app.page`)."""
+    """Move every running call's clock on. Registered once per page (`app.page`).
+
+    And this tab's running data calls along with them: a call taking its turn,
+    passing `App.long_query_minutes`, or being interrupted redraws its own state
+    cell and nothing else (`_tick_live`).
+    """
     if APP.busy:
         tool_clock.refresh()
+        _tick_live()
 
 
 def _tool_result(result: dict | None, state_name: str) -> None:
@@ -2741,6 +2892,8 @@ def replay(run: Any) -> None:
         index = at + 1
         if event.kind == events.TOOL_RESULT and str(event.data.get("id") or "") in answers:
             continue  # drawn with the call it answers
+        if event.kind == runlog.INTERRUPTED:
+            continue  # drawn on the card of the call it stopped
         if event.kind == events.QUESTION:
             if _answered_after(run.events, at):
                 continue  # the ANSWER draws it, exactly as the live panel does
@@ -2906,6 +3059,20 @@ _NOTHING_SAID = "Pick an option or type an answer."
 #: finished card says how much came back and nothing about whether that is good.
 _NO_RESULT_YET = "…"
 _NO_RESULT = "no result"
+#: A data call's control and what its state says once pressed
+#: (`docs/CONVERSATION.md` §16).
+_INTERRUPT_QUERY = "Interrupt query"
+_SKIP_MEASURING = "Skip measuring"
+_INTERRUPTING = "interrupting"
+_MEASURING = "measuring"
+_BY_YOU = "interrupted by you"
+_NEVER_STARTED = "never started"
+_INTERRUPTED_ICON = "pan_tool"
+#: The note on a data call past `App.long_query_minutes`. Waiting in line is
+#: not counted; the clock beside it says by how much it is over.
+_LONG_RUN = "Running for over {minutes} min."
+_BEHIND_ONE = "1 data call waits behind it."
+_BEHIND = "{n} data calls wait behind it."
 _ERROR = "error"
 _WORKING = "working"
 _ASKED = "asked"

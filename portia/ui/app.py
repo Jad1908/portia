@@ -30,6 +30,7 @@ from portia.ui import (
     artifacts,
     engine,
     feedback,
+    interrupt,
     prefs,
     screens,
     settings,
@@ -143,6 +144,10 @@ def page() -> None:
     screens.build_server_dialog()
     settings.build_dialog()
     feedback.build_dialog()
+    # The menu *Interrupt query* opens, once per tab, for the dialogs' reason:
+    # the card it asks about is redrawn by every streamed event
+    # (`ui/interrupt.py`, `docs/CONVERSATION.md` §16).
+    interrupt.build_menu()
     # `DESIGN.md` → Width behaviour, which cannot be done in CSS once the panes
     # are inside splitters: a splitter sets an inline pixel width on its panel, so
     # restyling the pane inside changes nothing about the space reserved beside it.
@@ -165,6 +170,11 @@ def page() -> None:
     # script. Here and not on the row: a refresh that replaced the row while the
     # press was queued took a row's own handler with it (`artifacts.tree_pressed`).
     ui.on("portia:tree", _tree_pressed)
+    # *Interrupt query* on a data call's card, and its menu shut without a pick,
+    # by the card's id (`assets/interrupt.js`). At page level: the card is
+    # rebuilt by the events that arrive while the pointer is on its way.
+    ui.on("portia:interrupt", _interrupt_pressed)
+    ui.on("portia:interrupt-close", _interrupt_closed)
     # A figure dragged into a folder, likewise already resolved
     # (`assets/gallery.js`). At page level for the same reason as the rest.
     ui.on("portia:figure-move", _figure_moved)
@@ -201,6 +211,8 @@ def page() -> None:
     # The same second, for the clock beside a running tool call
     # (`transcript.tool_clock`). One predicate a second when nothing runs.
     ui.timer(TICK_SECONDS, transcript.tick_clocks)
+    # And the interrupt menu, shut if its call answered while it was open.
+    ui.timer(TICK_SECONDS, interrupt.tick)
     # The copilot's charts, which do not arrive through the event stream: their
     # rows never reach the model, so they never reach the transcript either
     # (`docs/VISUALIZATION.md` §2.3). At page level for the reason the timer is —
@@ -219,6 +231,16 @@ def page() -> None:
     # has the list the moment someone switches to it (`docs/PROVIDERS.md` §5).
     ui.timer(0.3, transcript.list_models_in_background, once=True)
     shell()
+
+
+def _interrupt_pressed(event) -> None:
+    """A press on a running data call's *Interrupt query*, named by its card."""
+    interrupt.pressed(str((event.args or {}).get("call") or ""))
+
+
+def _interrupt_closed(event) -> None:
+    """The interrupt menu shut without a pick: the press is undone."""
+    interrupt.closed(str((event.args or {}).get("call") or ""))
 
 
 def _edge_clicked(event) -> None:

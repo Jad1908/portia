@@ -7250,7 +7250,7 @@ def test_no_press_inside_a_floating_card_redraws_the_card():
     redraw instead is the part it changed."""
     import inspect
 
-    from portia.ui import feedback, screens, settings, transcript, workflow
+    from portia.ui import feedback, interrupt, screens, settings, transcript, workflow
 
     def body(fn) -> str:
         fn = getattr(fn, "func", fn)
@@ -7290,6 +7290,14 @@ def test_no_press_inside_a_floating_card_redraws_the_card():
             screens._redraw_pickers,
             workflow._toggle_visible,
             workflow._select_all,
+            # *Interrupt query*'s menu (`CONVERSATION.md` §16): a press shows,
+            # hides or clears its own parts and moves only the card's state.
+            interrupt.pressed,
+            interrupt.closed,
+            interrupt._other,
+            interrupt._send_other,
+            interrupt._picked,
+            interrupt._act,
         ),
     }
     for call, handlers in never.items():
@@ -7304,6 +7312,8 @@ def test_no_press_inside_a_floating_card_redraws_the_card():
     # Settings' copy of the composer's controls follows without a redraw of either.
     assert "transcript.show_mode()" in body(settings._mode_changed)
     assert "settings.show_mode()" in body(transcript._mode_changed)
+    assert "transcript.call_moved()" in body(interrupt._act)
+    assert ".refresh()" not in body(transcript.call_moved) + body(transcript._tick_live)
 
 
 def test_starting_is_on_screen_before_the_load_and_the_panel_stays_open_after():

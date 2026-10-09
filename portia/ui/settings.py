@@ -77,6 +77,21 @@ MODE_WHAT = "Writes"
 #: 2026-09-23).
 CUSTOMIZE = "Customize"
 CONFIRM_WHAT = "Catalog writes that stop for you"
+#: *Interrupt query* on a running data call's card (`docs/CONVERSATION.md` §16):
+#: whether it asks why, which the menu's *Don't ask again* turns off and this
+#: turns back on, and when a running call's card says how long it has run.
+INTERRUPT_WHAT = "Interrupting a query"
+INTERRUPT_ASK_LABEL = "Ask why before interrupting"
+INTERRUPT_HELP = (
+    "Off, Interrupt query stops the call at once and the copilot is told no reason. "
+    "Don't ask again in the menu turns this off."
+)
+LONG_QUERY_WHAT = "Long-running queries"
+MINUTES_SUFFIX = "min"
+LONG_QUERY_HELP = (
+    "A running data call's card says so past this, with how many calls wait behind it. "
+    "Time waiting for its turn does not count. Nothing is stopped."
+)
 DATA_TITLE = "Data"
 DATA_HELP = (
     "A project reads from one place: the files in its folder, or one database connection, "
@@ -297,6 +312,39 @@ def _copilot() -> None:
                 switch.on_value_change(lambda e, name=tool: _set_confirm(name, bool(e.value)))
         folded.set_visibility(_CUSTOMIZING)
         _CUSTOMIZE["folded"] = folded
+    _interrupting()
+
+
+def _interrupting() -> None:
+    """How *Interrupt query* asks, and when a running call says it has run long.
+
+    Both bound to the field the transcript reads at the moment of a press or a
+    tick, so this is a second place to change them and never a second setting.
+    The switch is where *Don't ask again* is undone.
+    """
+    with c.setting(INTERRUPT_WHAT, help=INTERRUPT_HELP):
+        ui.switch(INTERRUPT_ASK_LABEL).classes("p-toggle").bind_value(APP, "ask_before_interrupt")
+    with c.setting(LONG_QUERY_WHAT, help=LONG_QUERY_HELP):
+        box = ui.number(min=MIN_LONG_QUERY_MINUTES, step=1, format="%g")
+        box.classes("p-field p-input settings-minutes")
+        box.props(f"dense borderless hide-bottom-space suffix={c.prop_value(MINUTES_SUFFIX)}")
+        # An emptied or zeroed box keeps the last value: a note after no time
+        # at all would sit on every card that runs.
+        box.bind_value(APP, "long_query_minutes", forward=_minutes)
+
+
+#: The shortest wait a note can be set to, in minutes: six seconds.
+MIN_LONG_QUERY_MINUTES = 0.1
+
+
+def _minutes(value: Any) -> float:
+    if (
+        isinstance(value, int | float)
+        and not isinstance(value, bool)
+        and value >= MIN_LONG_QUERY_MINUTES
+    ):
+        return float(value)
+    return APP.long_query_minutes
 
 
 @ui.refreshable

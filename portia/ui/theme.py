@@ -118,6 +118,10 @@ MODELPICK_JS = ASSETS / "modelpick.js"
 #: A closed pane dragged back open from its rail. `tabs.js`'s reason: the rail
 #: can be rebuilt between the press and the release.
 RAIL_JS = ASSETS / "rail.js"
+#: *Interrupt query* on a running data call's card, and the menu it opens:
+#: pressed by the card's id and placed by it, because the card is rebuilt by
+#: the events that arrive while the pointer is on its way (`ui/interrupt.py`).
+INTERRUPT_JS = ASSETS / "interrupt.js"
 BEHAVIOUR = (
     CANVAS_JS,
     VIEWPORT_JS,
@@ -130,6 +134,7 @@ BEHAVIOUR = (
     MOTION_JS,
     MODELPICK_JS,
     RAIL_JS,
+    INTERRUPT_JS,
 )
 
 #: The graph explorer's renderer — the one third-party script the window loads.

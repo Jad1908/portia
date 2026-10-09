@@ -135,6 +135,20 @@ PROMPTS = "prompts"
 #: refused is as often portia's palette as it is the copilot's spec.
 CHART_FAILED = "chart_failed"
 
+#: A data call the user interrupted from its card (`docs/CONVERSATION.md` §16):
+#: the call's id and tool, the reason they picked or none, the note typed under
+#: *Other*, how long it had run (``None`` when it never started), whether it
+#: stopped because of the press (``landed``; a call can finish first), and what
+#: portia measured after it, with how that ended (``measure``). Written by the
+#: window just before the call's result, which the transcript draws it with.
+#:
+#: Like :data:`CHART_FAILED`, not an `events` kind: the SDK did not say it.
+#: Counted by :func:`summary`, never scored: how often a reason is picked says
+#: what people stop and why, not whether the copilot did well.
+INTERRUPTED = "call_interrupted"
+#: What :func:`summary` tallies an interruption under when nobody was asked why.
+NO_REASON = "no reason"
+
 #: A chat picked up by a later process (`docs/CHAT_SESSIONS.md` §3.9). Written
 #: where the resume happened, before the exchange it opens, and like
 #: :data:`HEADER` deliberately not an `events` kind: nothing in the engine
@@ -840,6 +854,7 @@ def summary(run: Transcript) -> dict[str, Any]:
     questions_answered = _of(run, events.ANSWER)
     results = _of(run, events.RESULT)
     last = results[-1] if results else None
+    interrupted = _of(run, INTERRUPTED)
 
     return {
         "name": run.name,
@@ -888,6 +903,11 @@ def summary(run: Transcript) -> dict[str, Any]:
         # ten charts is neither good nor bad without knowing what they were for.
         "charts": len(_charts(called)),
         "tool_errors": sum(1 for e in _of(run, events.TOOL_RESULT) if e.data.get("is_error")),
+        # Data calls the user interrupted from their cards, and the reasons
+        # they gave, by how often each was picked. Counts, never a verdict on
+        # the copilot or on the person.
+        "interrupted": len(interrupted),
+        "interrupt_reasons": _tally([str(e.data.get("reason") or NO_REASON) for e in interrupted]),
         # How often it asked, and about how much. A question event can carry
         # several questions, and "asked once" reads very differently if that
         # once was a form of four.

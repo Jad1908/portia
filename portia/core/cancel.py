@@ -27,6 +27,15 @@ visible to everything the worker calls.
 
 Nothing here is a timeout and nothing polls. A scope does something only when a
 human presses Stop.
+
+**A scope can hold others** *(2026-10-09, `docs/CONVERSATION.md` §16)*. An
+exchange's Stop ends everything the exchange started; *Interrupt query* on one
+tool call's card ends that call and nothing else. So a data call runs under a
+child of the exchange's scope: cancelling the child interrupts the call's
+connections, and cancelling the parent reaches every child as well. A child is
+stopped by its own press through :meth:`Scope.interrupt`, which refuses once
+the work has passed the point where stopping it would leave it half done
+(:meth:`Scope.commit`); the exchange's Stop is not refused, as it never was.
 """
 
 from __future__ import annotations
@@ -78,15 +87,22 @@ class Scope:
     for longer than one interval, whenever it starts.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, parent: Scope | None = None) -> None:
         self._cancelled = False
+        #: Past the point where this work's own press may stop it (`commit`).
+        self._committed = False
         self._connections: list[Any] = []
+        #: Scopes inside this one, cancelled with it (`cancel`).
+        self._children: list[Scope] = []
         # Held across `cancel` and `watch` both: the presser is on the event loop
         # and the registrar is on the worker, so this list genuinely has two
         # threads on it.
         self._lock = threading.Lock()
         self._closed = threading.Event()
         self._watchdog: threading.Thread | None = None
+        self.parent = parent
+        if parent is not None:
+            parent._adopt(self)
 
     @property
     def cancelled(self) -> bool:
@@ -99,16 +115,64 @@ class Scope:
         Pressing Stop on a run that has already finished is an ordinary race —
         the button is drawn from state that is one refresh old — so it has to be
         harmless rather than an error.
+
+        Every scope inside this one is cancelled too, committed or not: the
+        exchange's Stop ends everything it started, as it did before scopes
+        could hold others.
         """
         with self._lock:
             already = self._cancelled
             self._cancelled = True
+        self._stop_now(already)
+
+    def interrupt(self) -> bool:
+        """Stop this one piece of work at its own press. Returns whether it took.
+
+        `cancel`, unless the work has committed (`commit`): a step whose spec is
+        being written is not stopped halfway by a press on its card. Stop on
+        the whole exchange still reaches it, through `cancel`. The check and
+        the mark are one step under the lock, so a commit cannot land between
+        them.
+        """
+        with self._lock:
+            if self._committed:
+                return False
+            already = self._cancelled
+            self._cancelled = True
+        self._stop_now(already)
+        return True
+
+    def _stop_now(self, already: bool) -> None:
+        """What a cancel does once it is marked: interrupt, keep interrupting, reach the children."""
         self._interrupt_all()
         if not already and not self._closed.is_set():
             self._watchdog = threading.Thread(
                 target=self._keep_interrupting, name="portia-cancel", daemon=True
             )
             self._watchdog.start()
+        with self._lock:
+            children = list(self._children)
+        for child in children:
+            child.cancel()
+
+    def commit(self) -> None:
+        """Say the work is past the point a press on it may stop it.
+
+        Raises `Cancelled` if a press already landed, so the work stops here
+        rather than starting what it was about to make durable.
+        """
+        with self._lock:
+            if self._cancelled:
+                raise Cancelled("stopped")
+            self._committed = True
+
+    def _adopt(self, child: Scope) -> None:
+        """Hold ``child``, so cancelling this cancels it; already cancelled, at once."""
+        with self._lock:
+            self._children.append(child)
+            already = self._cancelled
+        if already:
+            child.cancel()
 
     def close(self) -> None:
         """The work is over — stop interrupting.
@@ -206,3 +270,10 @@ def check() -> None:
     active = CURRENT.get()
     if active is not None:
         active.check()
+
+
+def commit() -> None:
+    """Commit the ambient scope, if there is one (`Scope.commit`)."""
+    active = CURRENT.get()
+    if active is not None:
+        active.commit()

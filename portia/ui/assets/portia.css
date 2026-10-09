@@ -6295,3 +6295,111 @@ body.tab-dragging .tab-drop {
   background: var(--accent-soft);
   color: var(--accent-text);
 }
+
+/* *Interrupt query* (`ui/interrupt.py`, `docs/CONVERSATION.md` §16; DESIGN.md →
+ * `interrupt-control`, `interrupt-menu`). A running data call's state, drawn
+ * where `agent/tools` has it, with the control beside it; the note after
+ * `long_query_minutes` takes a line of its own under them, so the head's one
+ * line is not pushed out of the card. Kind, never rank: the note is the body's
+ * ink in the state's size, never a warning colour, because a long query is not
+ * a wrong one. */
+.tool-state-live {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  row-gap: 2px;
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-left: auto;
+  padding-left: var(--sp-sm);
+}
+.tool-state-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  flex: 0 0 auto;
+}
+.tool-state-live .tool-state {
+  margin-left: 0;
+  padding-left: 0;
+}
+.btn.q-btn.interrupt-control {
+  min-height: 20px;
+  padding: 0 var(--sp-sm);
+}
+.btn.q-btn.interrupt-control .q-btn__content {
+  font-size: 11px;
+}
+.tool-note {
+  flex: 1 0 100%;
+  text-align: right;
+  font-size: 11px;
+  color: var(--body);
+  white-space: normal;
+}
+
+/* An interrupted call: the user's doing, greyed and never red (stopping is not
+ * failing). The head steps back; opened, the body is read at full ink, because
+ * what the copilot was told in place of the result is worth reading. */
+.tool-card--interrupted > .q-expansion-item__container > .q-item {
+  opacity: 0.55;
+}
+.tool-state--interrupted {
+  color: var(--mute);
+}
+.tool-state .tool-state-reason {
+  color: var(--mute);
+}
+.tool-state .tool-state-reason::before {
+  content: "· ";
+  color: var(--stone);
+}
+
+/* The menu a press opens: a `choice-menu` that floats over the transcript,
+ * placed under its card's control by `assets/interrupt.js` and hidden until
+ * then, so it never shows in a corner first. Built once per tab. */
+.interrupt-menu {
+  position: fixed;
+  z-index: 6000;
+  visibility: hidden;
+  width: 260px;
+  max-width: calc(100vw - 16px);
+  background: var(--surface);
+  color: var(--body);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  padding: var(--sp-xs);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+}
+.interrupt-other {
+  margin: var(--sp-xs) var(--sp-sm);
+}
+/* Built hidden, so `autogrow` measured it at no height; one line from the
+ * start, or the placeholder is not seen until something is typed. */
+.interrupt-other .answer-field textarea {
+  min-height: 28px;
+}
+.interrupt-dont-ask {
+  margin-top: var(--sp-xs);
+  padding-top: var(--sp-xs);
+  border-top: 1px solid var(--hairline-soft);
+  font-size: 12px;
+  color: var(--mute);
+}
+.interrupt-dont-ask .q-checkbox__label {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--mute);
+}
+/* Settings → Copilot: how long before a running data call's card says so. A
+ * number of minutes, the box no wider than one. */
+.settings-minutes {
+  width: 96px;
+}
+.settings-minutes .q-field__suffix {
+  align-self: center;
+  padding: 0 0 0 var(--sp-xs);
+  font-size: 13px;
+  color: var(--mute);
+}
