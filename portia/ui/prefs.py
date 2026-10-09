@@ -334,6 +334,10 @@ def machine_of(app: Any) -> dict[str, Any]:
         "files_width": app.files_width,
         "transcript_width": app.transcript_width,
         "reopen": app.reopen_last,
+        # How a press on *Interrupt query* is asked about, and when a running
+        # data call's card says how long it has run (`CONVERSATION.md` §16).
+        "interrupt_ask": app.ask_before_interrupt,
+        "long_query_minutes": app.long_query_minutes,
         # The project on screen, or none: a window closed on the picker opens
         # on the picker.
         "project": key(app.root) if app.opened else None,
@@ -362,6 +366,11 @@ def restore_machine(app: Any) -> Path | None:
         app.interpret = saved["interpret"]
     if isinstance(saved.get("reopen"), bool):
         app.reopen_last = saved["reopen"]
+    if isinstance(saved.get("interrupt_ask"), bool):
+        app.ask_before_interrupt = saved["interrupt_ask"]
+    minutes = saved.get("long_query_minutes")
+    if isinstance(minutes, int | float) and not isinstance(minutes, bool) and minutes > 0:
+        app.long_query_minutes = float(minutes)
     panes = saved.get("panes")
     if isinstance(panes, dict):
         app.pane_choices = {

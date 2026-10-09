@@ -26,6 +26,9 @@ What the app is allowed to call, and why each is on the list:
   the same plan `import_data` shows because it *is* the same plan, not because
   two surfaces were written to agree about one
 - ``agent.session.run`` — an exchange, driven with the app's own answer/confirm
+- ``agent.tools.interrupt_call`` / ``data_call`` / ``take_interruption`` — one data
+  call stopped from its card while the exchange goes on, where that call is, and
+  what the press came to for the log (`docs/CONVERSATION.md` §16)
 - ``runlog.logs_in`` / ``read`` / ``read_header`` / ``summary`` — past chats and
   indexing jobs for their two sections and the replay. The summary in particular: those
   counts are the engine's, so the window and `cli.history` cannot end up quoting
@@ -2461,3 +2464,52 @@ def chart_queries(app: App, chart: State.Chart) -> list[dict]:
     reviewed = findings.review(app.portia_dir, root=app.root)
     mine = [q for q in reviewed if q.get("tab") == chart.name]
     return mine[-1:]
+
+
+# --- one data call, interrupted from its card (`docs/CONVERSATION.md` §16) ---
+#
+# The window names a call by its card's id and never holds the call: these ask
+# `agent/tools.py`, which matches the card to the call it is about. Without the
+# `agent` extra there is no exchange to have a call in, so each says nothing.
+
+
+def _tools() -> Any:
+    try:
+        from portia.agent import tools
+    except ImportError:  # the `agent` extra is not installed
+        return None
+    return tools
+
+
+def reads_data(tool: str) -> bool:
+    """Whether a tool card is for a call that reads data, and so can be interrupted."""
+    tools = _tools()
+    return tools is not None and tool in tools.DATA_TOOLS
+
+
+def data_call(card: str, tool: str, args: dict) -> dict | None:
+    """Where the call behind ``card`` is (waiting, running, measuring), or ``None``."""
+    tools = _tools()
+    return None if tools is None else tools.data_call(card, tool, args)
+
+
+def interrupt_call(
+    card: str, tool: str, args: dict, *, reason: str | None = None, note: str = ""
+) -> str:
+    """Interrupt the call behind ``card`` and nothing else; a second press skips the measuring."""
+    tools = _tools()
+    if tools is None:
+        return ""
+    return str(tools.interrupt_call(card, tool, args, reason=reason, note=note))
+
+
+def take_interruption(card: str) -> dict | None:
+    """What the press on ``card`` came to, once its call has answered, for the log."""
+    tools = _tools()
+    return None if tools is None else tools.take_interruption(card)
+
+
+def take_interruptions() -> dict[str, dict]:
+    """Every interruption whose result never came: the exchange ended first."""
+    tools = _tools()
+    return {} if tools is None else tools.take_interruptions()

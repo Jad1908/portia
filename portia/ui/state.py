@@ -592,6 +592,31 @@ ASK = "ask"
 AUTOPILOT = "autopilot"
 MODES = (ASK, AUTOPILOT)
 
+#: The default for `App.long_query_minutes`: five, the user's number.
+LONG_QUERY_MINUTES = 5.0
+
+#: Where a data call is, as `agent/tools` reports it through `engine.data_call`.
+#: The same three words as `tools.WAITING`, `RUNNING` and `MEASURING`, written
+#: again because this module imports no engine; `tests/test_ui.py` holds the
+#: two spellings together.
+CALL_WAITING = "waiting"
+CALL_RUNNING = "running"
+CALL_MEASURING = "measuring"
+
+SECONDS_PER_MINUTE = 60
+
+
+def long_running(started: float | None, minutes: float) -> bool:
+    """Whether a call has run for at least ``minutes``.
+
+    ``started`` is when it took its turn (`time.monotonic`), so the time it
+    waited in line is not counted. The window's clock, like `Timing`: it says
+    the threshold was passed, and the clock beside it says by how much.
+    """
+    if started is None:
+        return False
+    return time.monotonic() - started >= max(minutes, 0.0) * SECONDS_PER_MINUTE
+
 
 @dataclass
 class Chart:
@@ -1304,6 +1329,19 @@ class App:
     #: dataclass is not: a mode that survived a restart is one you can be in
     #: without having chosen to be.
     autopilot: bool = False
+
+    #: Whether *Interrupt query* on a data call's card asks why before it
+    #: interrupts (`docs/CONVERSATION.md` §16). On by default; the menu's
+    #: *Don't ask again* turns it off, and Settings turns it back on.
+    #: **Remembered** between launches (`ui/prefs.py`), unlike the approval
+    #: modes: it changes how a press is asked about, never what the copilot may
+    #: do, so being in it without having chosen it this session costs nothing.
+    ask_before_interrupt: bool = True
+    #: After how many minutes of running a data call's card says how long it has
+    #: run, and how many data calls wait behind it. Time spent waiting for its
+    #: turn does not count. A note and never a limit: nothing is stopped by it,
+    #: because a correct query can run for an hour.
+    long_query_minutes: float = LONG_QUERY_MINUTES
 
     @property
     def mode(self) -> str:
