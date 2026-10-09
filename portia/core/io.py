@@ -34,10 +34,24 @@ database that reads the repo's files. Since `docs/CONNECTOR.md` there is a secon
 kind, a warehouse session, and :func:`connect` asks `core/backend.py` which one
 the project is on. A spec's ``sources:`` entry can name a **table** as well as a
 file (:func:`source_table`), and that is the whole of what the seam needed.
+
+**A CSV's layout is guessed once per process, and the guess is replayed**
+*(2026-10-09)*. Before every statement that names a CSV, DuckDB sniffs it: the
+dialect and every column's type, from a sample. On a 1,579-column file that was
+7 s on one core, against 0.28 s to scan all 166 MB once the layout is known
+(`docs/DUCKDB_MIGRATION.md` §17), and portia names a file many times per tool
+call. So the first statement that reads a file asks DuckDB for its guess
+(``sniff_csv``), and every later one passes it back with ``auto_detect=false``:
+the same names, types and values, and no second guess. Only the guess is kept,
+never the data, only in memory, and only while the file is the one it was made
+from. A table's query still names the plain reader; the guess is put in by the
+connection, as each statement is sent (:func:`connect`).
 """
 
 from __future__ import annotations
 
+import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -98,6 +112,12 @@ class Format:
     per-column read is nearly free on Parquet and a full parse on CSV — see
     :func:`portia.checks.profiling.profile_path`, which is where that difference
     was costing two orders of magnitude.
+
+    ``sniffer`` is the table function that makes the reader's own guess about a
+    file, for a reader that guesses: ``read_csv`` works out the dialect and every
+    column's type before each statement, and ``sniff_csv`` is that same guess
+    asked as a query. Set, the guess is made once per file and spelled into every
+    later read of it (:func:`connect`). Parquet carries its schema and has none.
     """
 
     read_frame: Callable[..., pd.DataFrame]
@@ -105,6 +125,7 @@ class Format:
     sql_options: dict[str, Any] = field(default_factory=dict)
     copy_options: str = ""
     rescans: bool = False
+    sniffer: str = ""
 
 
 def write_table(table: Table, path: str | Path) -> Path:
@@ -157,8 +178,19 @@ def connect() -> Any:
     the one way a connection is made, so it is the one place that has to
     remember, and Stop can then reach a query nobody kept a handle on
     (`core/cancel.py`). Outside a scope it costs a `ContextVar.get`.
+
+    **A local connection reads each CSV with DuckDB's guess about it**
+    *(2026-10-09)*: every statement is sent with each CSV reader in it replaced
+    by the same reader with the guess spelled out (:class:`_Replaying`). Here
+    rather than in the query a `Table` holds, because a table outlives the
+    moment it was built — the window keeps a run's step results for *Write
+    outputs* — and a guess must be checked against the file when it is read,
+    not when the query was written. A warehouse session never reads a file and
+    is handed back as it was opened.
     """
     con = backend.active().open()
+    if not backend.is_remote(con):
+        con = _Replaying(con)
     cancel.watch(con)
     return con
 
@@ -278,6 +310,12 @@ def read_relation(path: str | Path, *, absolute: bool = True) -> str:
     through ``SELECT *`` DuckDB binds every column of the file for each one and
     prunes back to the one asked about, which on a 1,579-column file was most
     of what each question cost (2026-10-08).
+
+    Always the plain reader, which leaves DuckDB to guess a CSV's layout. A
+    reader for this machine (``absolute``) is also remembered, so that a local
+    connection can recognise it in a statement and send it with the guess
+    instead (:func:`connect`); a reader written to a file never carries one, and
+    reads the file as it is on the day it runs.
     """
     path = Path(path)
     fmt = _format(path)
@@ -285,7 +323,249 @@ def read_relation(path: str | Path, *, absolute: bool = True) -> str:
     # one that is executed here is this machine's own.
     args = [quote_literal(str(path.resolve()) if absolute else path.as_posix())]
     args += [f"{key}={_sql_value(value)}" for key, value in fmt.sql_options.items()]
-    return f"{fmt.sql_reader}({', '.join(args)})"
+    reader = f"{fmt.sql_reader}({', '.join(args)})"
+    if absolute and fmt.sniffer:
+        with _LOCK:
+            _READERS[reader] = (path.resolve(), fmt)
+    return reader
+
+
+# --- a CSV's guess: made once, replayed ------------------------------------------
+
+#: How long a file must have been left alone before a guess about it is kept, in
+#: seconds. A file system stamps a write with a clock that ticks: APFS and NTFS
+#: in nanoseconds or near it, ext4 every few milliseconds, HFS+ every second, FAT
+#: every two. A guess made within one tick of the last write could be followed by
+#: a rewrite of the same size inside that same tick, and no stamp would move. Kept
+#: only once the file is older than the coarsest of those ticks, any later write
+#: lands on a later stamp. Git calls the same hole *racily clean* and closes it the
+#: same way. A file younger than this is guessed on every read, as it always was.
+SETTLE_SECONDS = 2.0
+
+_NS_PER_SECOND = 1_000_000_000
+
+
+@dataclass(frozen=True)
+class _Guess:
+    """What DuckDB guessed about one version of a file."""
+
+    #: The file as it was when guessed (:func:`_identity`).
+    identity: tuple[int, ...]
+    #: The reader call that replays the guess, or ``None`` when DuckDB could not
+    #: guess this version — read it the plain way, without asking again.
+    reader: str | None
+
+
+#: One guess per file, by resolved path. Memory only, never written anywhere: a
+#: restart or a new DuckDB guesses again.
+_GUESSES: dict[str, _Guess] = {}
+#: One lock per file, so two threads reading a file for the first time make one
+#: guess between them. Guarded by `_LOCK`, as `_GUESSES` is.
+_GUESSING: dict[str, threading.Lock] = {}
+#: Every plain reader :func:`read_relation` has written for this machine, and the
+#: file and format it reads: what a local connection looks for in a statement.
+#: One entry per file, since the text is the same every time it is written.
+_READERS: dict[str, tuple[Path, Format]] = {}
+_LOCK = threading.Lock()
+
+
+class _Replaying:
+    """A local DuckDB connection that sends each CSV reader with the file's guess.
+
+    Every statement passes through :func:`_replayed` on its way in, so the guess
+    is checked against the file as it is at that statement, whenever the query
+    was written. Everything else is the DuckDB connection's own: a result, a
+    relation and ``description`` come straight back from it, and ``cursor``
+    gives a thread its own handle that does the same.
+    """
+
+    __slots__ = ("_con",)
+
+    def __init__(self, con: Any) -> None:
+        self._con = con
+
+    def execute(self, query: Any, *args: Any, **kwargs: Any) -> Any:
+        return self._con.execute(_replayed(query), *args, **kwargs)
+
+    def sql(self, query: Any, *args: Any, **kwargs: Any) -> Any:
+        return self._con.sql(_replayed(query), *args, **kwargs)
+
+    def cursor(self) -> _Replaying:
+        return _Replaying(self._con.cursor())
+
+    def __enter__(self) -> _Replaying:
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self._con.close()
+
+    def __getattr__(self, name: str) -> Any:
+        if name == "_con":  # not set yet, as when copied: never recurse looking for it
+            raise AttributeError(name)
+        return getattr(self._con, name)
+
+
+def _replayed(query: Any) -> Any:
+    """``query`` with each plain CSV reader in it carrying the file's guess, as it is now.
+
+    A reader whose file has no guess to give — missing, unguessable, or written a
+    moment ago — is left as it is, and DuckDB guesses at bind as it always did.
+    A statement that names no reader costs one substring test per format.
+    """
+    if not isinstance(query, str) or not any(call in query for call in _READER_CALLS):
+        return query
+    with _LOCK:
+        known = list(_READERS.items())
+    for plain, (path, fmt) in known:
+        if plain in query:
+            guessed = _guessed(path, fmt)
+            if guessed is not None:
+                query = query.replace(plain, guessed)
+    return query
+
+
+def _identity(path: Path) -> tuple[Any, tuple[int, ...]] | None:
+    """``(stat, identity)`` of ``path`` now, or ``None`` when it cannot be stat'ed.
+
+    The identity is everything cheap one ``stat`` says about which file this is
+    and whether it was written: the device and inode (another file moved into
+    its place), the size and modification time (`catalog.STALENESS_FACTS`, at
+    nanosecond precision), and the change time, which nothing but the kernel
+    sets, so a tool that restores a modification time after writing still moves
+    it.
+    """
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return st, (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+
+
+def _kept(key: str, identity: tuple[int, ...]) -> _Guess | None:
+    with _LOCK:
+        kept = _GUESSES.get(key)
+    return kept if kept is not None and kept.identity == identity else None
+
+
+def _guessed(path: Path, fmt: Format) -> str | None:
+    """The reader that replays DuckDB's guess about ``path`` as it is now, or ``None``.
+
+    **A kept guess is only ever handed back for the file it was made from.** It is
+    stored with the file's identity and used only while one ``stat`` taken now
+    matches it exactly; any difference, and the file is guessed again. A guess is
+    made between two ``stat`` calls and thrown away when they differ, because it
+    then describes neither version; and it is kept only for a file that had been
+    still for `SETTLE_SECONDS` when the guess began, so no later write can share
+    its stamps. ``None`` means the plain reader: DuckDB guesses at bind, as before.
+    """
+    key = str(path)
+    seen = _identity(path)
+    if seen is None:
+        return None  # DuckDB says what is wrong with it, when the read runs
+    kept = _kept(key, seen[1])
+    if kept is not None:
+        return kept.reader
+    with _LOCK:
+        lock = _GUESSING.setdefault(key, threading.Lock())
+    with lock:
+        started = time.time_ns()
+        seen = _identity(path)  # again: it may have changed while another thread guessed
+        if seen is None:
+            return None
+        stat, identity = seen
+        kept = _kept(key, identity)
+        if kept is not None:
+            return kept.reader
+        reader = _sniff(path, fmt)
+        after = _identity(path)
+        if after is None or after[1] != identity:
+            return None
+        last_written = max(stat.st_mtime_ns, stat.st_ctime_ns)
+        if started - last_written > SETTLE_SECONDS * _NS_PER_SECOND:
+            with _LOCK:
+                _GUESSES[key] = _Guess(identity=identity, reader=reader)
+        return reader
+
+
+def _sniff(path: Path, fmt: Format) -> str | None:
+    """Ask DuckDB once what it would guess about ``path``, as a reader call that replays it.
+
+    The guess is asked with the format's own options (``nullstr``), because which
+    strings mean missing changes what type a column looks like. ``None`` when
+    DuckDB cannot guess the file, or the replay does not bind to exactly the
+    names and types it guessed: the plain reader then fails, or reads, as it did.
+
+    On its own connection, watched by the ambient cancel scope like every other:
+    Stop interrupts a guess, and an interrupted guess is not a failed one, so it
+    is raised rather than remembered.
+    """
+    import duckdb
+
+    con = backend.LOCAL.open()
+    cancel.watch(con)
+    try:
+        options = "".join(f", {key}={_sql_value(v)}" for key, v in fmt.sql_options.items())
+        cursor = con.execute(f"SELECT * FROM {fmt.sniffer}({quote_literal(str(path))}{options})")
+        names = [d[0] for d in cursor.description]
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        sniffed = dict(zip(names, row, strict=True))
+        reader = _replay(str(path), fmt, sniffed)
+        if reader is None or not _binds_as_sniffed(con, reader, sniffed["Columns"]):
+            return None
+        return reader
+    except duckdb.InterruptException:
+        raise
+    except duckdb.Error:
+        return None
+    finally:
+        con.close()
+
+
+def _replay(path: str, fmt: Format, sniffed: dict[str, Any]) -> str | None:
+    """DuckDB's own replay of its guess (``Prompt``), with what it took from the file quoted.
+
+    ``sniff_csv`` hands back the ``read_csv`` call that reads the file the way it
+    guessed, every sniffed option fixed, but it writes the path and each column
+    name into that call raw: a folder named ``o'brien`` or a header holding an
+    apostrophe gives a call that does not parse. So the path and the names are
+    put back quoted, the options DuckDB chose are kept as it wrote them, and the
+    format's own options are spelled as the plain reader spells them. Anything
+    not where this expects it is not replayed: ``None``, and DuckDB guesses again.
+    """
+    prompt = str(sniffed.get("Prompt") or "").strip()
+    columns = sniffed.get("Columns") or []
+    head = f"FROM {fmt.sql_reader}('{path}', "
+    tail = ");"
+    if not prompt.startswith(head) or not prompt.endswith(tail):
+        return None
+    raw = "columns={" + ", ".join(f"'{c['name']}': '{c['type']}'" for c in columns) + "}"
+    options = prompt[len(head) : -len(tail)]
+    if options.count(raw) != 1:
+        return None
+    before, after = options.split(raw)
+    echoed = str(sniffed.get("UserArguments") or "")
+    if echoed:
+        if not after.endswith(f", {echoed}"):
+            return None
+        after = after[: -len(f", {echoed}")]
+    quoted = ", ".join(f"{quote_literal(c['name'])}: {quote_literal(c['type'])}" for c in columns)
+    own = "".join(f", {key}={_sql_value(value)}" for key, value in fmt.sql_options.items())
+    return f"{fmt.sql_reader}({quote_literal(path)}, {before}columns={{{quoted}}}{after}{own})"
+
+
+def _binds_as_sniffed(con: Any, reader: str, columns: list[dict[str, Any]]) -> bool:
+    """Does the replay parse, and bind to exactly the names and types DuckDB guessed?
+
+    One bind, which with the columns given reads nothing to guess: about 30 ms
+    on 1,579 columns. What it protects against is this module spelling the
+    replay wrong, which would otherwise surface as every later read failing.
+    """
+    bound = con.sql(f"SELECT * FROM {reader}")
+    return list(bound.columns) == [c["name"] for c in columns] and [
+        str(t) for t in bound.types
+    ] == [c["type"] for c in columns]
 
 
 def _sql_value(value: Any) -> str:
@@ -388,6 +668,9 @@ _FORMATS: dict[str, Format] = {
         # Text: answering a question about one column means parsing every column
         # of every row again.
         rescans=True,
+        # And guessing the dialect and every type before it, which is asked once
+        # and replayed (`connect`).
+        sniffer="sniff_csv",
     ),
     # Parquet needs no null tokens and no sniffing: it carries its own schema.
     # That is most of why it is worth converting to — the CSV reader's guesses
@@ -402,3 +685,7 @@ _FORMATS: dict[str, Format] = {
         copy_options="FORMAT PARQUET, COMPRESSION ZSTD",
     ),
 }
+
+#: How a statement that reads a guessing format begins, for :func:`_replayed`'s
+#: first look: most statements read a parsed copy or a table, and name no file.
+_READER_CALLS = tuple(f"{fmt.sql_reader}(" for fmt in _FORMATS.values() if fmt.sniffer)
