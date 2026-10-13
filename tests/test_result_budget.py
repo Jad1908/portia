@@ -342,3 +342,87 @@ def test_a_step_that_keeps_two_of_800_columns(deep):
     }
     with _inside(deep):
         _assert_fits(_call("record_step", {"spec_path": "specs/two.yaml", "step": step}))
+
+
+# --- source cards: every cut says how to get the rest (2026-10-13) ----------
+#
+# The cases above ask whether an answer fits. A card that fits by leaving
+# columns out without saying so would pass them, and it is the failure the
+# revamp exists to stop: a short answer that reads as a whole one. So these read
+# the answers back and hold every cut to a ``more``.
+
+
+def _answer(result: dict) -> dict:
+    _assert_fits(result)
+    assert not result.get("is_error"), result["content"][0]["text"][:300]
+    return json.loads(result["content"][0]["text"])
+
+
+def _unannounced(value: object, where: str = "answer") -> list[str]:
+    """Every place in an answer that shows less than it has and says nothing about the rest."""
+    found: list[str] = []
+    if isinstance(value, dict):
+        listed = {"n", "shown", "fields", "rows"} <= set(value)
+        if listed and len(value["rows"]) < value["n"] and not value.get("more"):
+            found.append(where)
+        if value.get("listed") is False and not value.get("more"):
+            found.append(where)
+        for key, item in value.items():
+            found += _unannounced(item, f"{where}.{key}")
+    elif isinstance(value, list):
+        for i, item in enumerate(value):
+            found += _unannounced(item, f"{where}[{i}]")
+    return found
+
+
+def _says_how_to_get_the_rest(answer: dict) -> None:
+    assert not _unannounced(answer), _unannounced(answer)
+    examples = [t for t in (answer.get("types") or {}).values() if "examples" in t]
+    if examples:
+        assert answer.get("more"), "a type given by examples needs the card's more"
+
+
+def test_the_card_of_a_very_sparse_table_names_every_flagged_column(deep):
+    with _inside(deep):
+        answer = _answer(_call("describe_source", {"source": "sparse"}))
+    _says_how_to_get_the_rest(answer)
+    assert answer["summary"] is None, "an auto-drafted summary is never sent"
+    assert sum(t["n"] for t in answer["types"].values()) == answer["n_columns"] == 800
+    for flag, named in answer["flagged"].items():
+        assert "columns" in named or "all_but" in named or named.get("more"), flag
+
+
+def test_a_filter_wider_than_its_cap_says_how_many_more(deep):
+    with _inside(deep):
+        described = _answer(
+            _call("describe_source", {"source": "sparse", "match": "*_attribute_*"})
+        )
+        profiled = _answer(_call("profile_source", {"source": "sparse", "flag": "high_null"}))
+    for answer in (described, profiled):
+        _says_how_to_get_the_rest(answer)
+        assert answer["columns"]["more"] and len(answer["columns"]["rows"]) < answer["columns"]["n"]
+
+
+def test_a_profile_of_a_very_sparse_table_with_no_filter_is_its_card(deep):
+    with _inside(deep):
+        answer = _answer(_call("profile_source", {"source": "sparse"}))
+    _says_how_to_get_the_rest(answer)
+    assert answer["facts"] == "stored" and "columns" not in answer and answer["more"]
+
+
+def test_a_card_with_140_notes_carries_the_latest_and_counts_them_all(remembered):
+    with _inside(remembered):
+        answer = _answer(_call("describe_source", {"source": "hub"}))
+    _says_how_to_get_the_rest(answer)
+    assert answer["notes"]["n"] == 140 and answer["notes"]["more"]
+    assert answer["notes"]["rows"][-1][1].startswith("Note 139:")
+
+
+def test_the_index_of_sixty_tables_lists_them_all_or_says_how_many_more(estate):
+    with _inside(estate):
+        whole = _answer(_call("get_context", {}))
+        narrowed = _answer(_call("get_context", {"match": "t00*"}))
+    for answer in (whole, narrowed):
+        _says_how_to_get_the_rest(answer)
+    assert whole["n_sources"] == 60 == whole["sources"]["n"]
+    assert [row[0] for row in narrowed["sources"]["rows"]] == [f"t00{i}" for i in range(10)]
