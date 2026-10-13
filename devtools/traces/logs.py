@@ -33,7 +33,6 @@ from portia import runlog
 from portia.agent import events
 from portia.agent.providers import anthropic
 from portia.catalog import DEFAULT_DIR
-from portia.core import columnar
 from portia.core.present import duration
 
 #: The repository this checkout is. A log's key is its path from here when it
@@ -646,17 +645,22 @@ def tool_step(
     return step
 
 
-#: A block heading in `core.columnar.render`'s output: ``## 48 of 191 columns``.
+#: A block heading in the tab-separated answer `describe_source` and
+#: `profile_source` sent until 2026-10-13 (`core/columnar`'s ``render``, retired
+#: with the cards): ``## 48 of 191 columns``. Its cell separator and its null.
 _BLOCK = re.compile(r"\n## (\d+ of \d+ \S+)\n")
+_DELIMITER = "\t"
+_NULL = "\\N"
 _UNESCAPE = re.compile(r"\\([\\tnr])")
 _UNESCAPED = {"\\": "\\", "t": "\t", "n": "\n", "r": "\r"}
 
 
 def decode_columnar(text: str) -> tuple[dict[str, Any], list[dict[str, Any]]] | None:
-    """Read `core.columnar.render`'s output back: its JSON head, then one table per block.
+    """Read the old tab-separated answer back: its JSON head, then one table per block.
 
-    That is the shape `describe_source` and `profile_source` hand the model. It
-    is not JSON as a whole, so without this a profile reads as one long string.
+    That is the shape `describe_source` and `profile_source` handed the model
+    until 2026-10-13, and the logs written before keep it. It is not JSON as a
+    whole, so without this a profile reads as one long string.
     """
     try:
         head, end = json.JSONDecoder().raw_decode(text)
@@ -670,14 +674,14 @@ def decode_columnar(text: str) -> tuple[dict[str, Any], list[dict[str, Any]]] | 
     tables = []
     for heading, body in zip(parts[1::2], parts[2::2], strict=True):
         lines = body.rstrip("\n").split("\n")
-        columns = lines[0].split(columnar.DELIMITER)
-        rows = [[_columnar_cell(c) for c in line.split(columnar.DELIMITER)] for line in lines[1:]]
+        columns = lines[0].split(_DELIMITER)
+        rows = [[_columnar_cell(c) for c in line.split(_DELIMITER)] for line in lines[1:]]
         tables.append({"key": heading, "columns": columns, "rows": rows})
     return head, tables
 
 
 def _columnar_cell(cell: str) -> Any:
-    if cell == columnar.NULL:
+    if cell == _NULL:
         return None
     text = _UNESCAPE.sub(lambda m: _UNESCAPED[m.group(1)], cell)
     for kind in (int, float):

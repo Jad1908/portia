@@ -19,7 +19,6 @@ import pytest
 from devtools.traces import logs
 from devtools.traces.notes import Notes
 from devtools.traces.server import Viewer, serve
-from portia.core import columnar
 
 STAMP = "2026-09-24T14-02-00"
 
@@ -263,11 +262,10 @@ def test_the_prompts_fingerprint_ignores_the_project_brief():
 
 
 def test_a_columnar_result_reads_back_as_tables():
-    """`describe_source` and `profile_source` send JSON, then tab-separated blocks."""
-    text = columnar.render(
-        {"source": "x", "columns": [{"name": "a\tb", "n_null": None}, {"name": "c", "n_null": 2}]},
-        records="columns",
-    )
+    """`describe_source` and `profile_source` sent JSON, then tab-separated blocks,
+    until 2026-10-13, and the logs written before keep that shape. A tab inside a
+    value was escaped, and a null was ``\\N``."""
+    text = '{"source": "x"}\n\n## 2 of 2 columns\nname\tn_null\na\\tb\t\\N\nc\t2'
     step = logs.tool_step("profile_source", {"source": "x"}, result=text, error=False, seconds=1.0)
 
     assert step["result"] == {"source": "x"}
