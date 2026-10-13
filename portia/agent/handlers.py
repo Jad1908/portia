@@ -310,8 +310,10 @@ def interrupted_facts(tool: str, args: dict, portia_dir: str = catalog.DEFAULT_D
     on the meter name alone; ran to completion, it was some 430 billion rows,
     and nothing on screen said so.
 
-    A size is the catalog's where the catalog already holds one, which is a
-    warehouse table's row count, and counted otherwise. **On a warehouse
+    A size is the catalog's on a warehouse and counted locally. **Locally the
+    catalog's count is not used** *(2026-10-13, when every entry began to
+    record one)*: a count is exact there and on nobody's meter, and a file may
+    have changed since it was indexed. **On a warehouse
     nothing is counted**: what the catalog holds is all there is, and a join is
     not measured, because measuring it would be the scan on someone's meter
     that the interrupt was pressed to stop. A join this cannot read is listed
@@ -343,10 +345,7 @@ def interrupted_facts(tool: str, args: dict, portia_dir: str = catalog.DEFAULT_D
         with sql_op.sandbox(tables) as (box, counted):
             facts["joins"] = sql_joins.measure(box, bound, joins)
     for name in names:
-        known = _known_rows(name, portia_dir)
-        if known["rows"] is not None:
-            facts["inputs"][name] = known
-        elif name not in keys:
+        if name not in keys:
             facts["inputs"][name] = {"rows": None, "from": UNRESOLVED}
         elif keys[name] in counted:
             facts["inputs"][name] = {"rows": counted[keys[name]], "from": COUNTED}
@@ -395,8 +394,9 @@ def _known_rows(name: str, portia_dir: str) -> dict:
 
     A warehouse table's entry carries the count its metadata gave for nothing
     (`catalog.scope_table`), PostgreSQL's as the planner's estimate
-    (`catalog.rows_estimated`). A file's entry holds no count, and neither does
-    an earlier step, so either says ``None`` here.
+    (`catalog.rows_estimated`), or the count its last profile made; an entry
+    indexed before counts were kept, and an earlier step, have none, and say
+    ``None`` here (`catalog.row_count`).
     """
     if STEP_REF in name:
         return {"rows": None, "from": UNKNOWN}
@@ -404,14 +404,32 @@ def _known_rows(name: str, portia_dir: str) -> dict:
         entry = _entry(name, portia_dir)
     except ValueError:
         return {"rows": None, "from": UNKNOWN}
-    indexed = entry.get("indexed") or {}
-    rows = indexed.get("rows")
-    if not isinstance(rows, int) or isinstance(rows, bool):
+    rows = catalog.row_count(entry)
+    if rows is None:
         return {"rows": None, "from": UNKNOWN}
     known: dict[str, Any] = {"rows": rows, "from": FROM_CATALOG}
-    if catalog.rows_estimated(indexed):
+    if catalog.rows_estimated(entry.get("indexed")):
         known["approximate"] = True
     return known
+
+
+def row_facts(entry: dict) -> dict:
+    """A table's row count as an answer states it: the number, or why there is none.
+
+    ``{"n_rows": n}``, with ``approximate: ["n_rows"]`` when it is the
+    warehouse's estimate. When the entry holds no count the answer says so as
+    a field rather than leaving a ``null`` to be read as zero or as unknown
+    (`SQL_LINEAGE.md` §9): ``n_rows_note`` is why, in prompt text, and the
+    two causes are told apart because their remedies differ. The drafted
+    summary is never parsed for a count (`catalog.row_count`).
+    """
+    rows = catalog.row_count(entry)
+    if rows is not None:
+        estimated = catalog.rows_estimated(entry.get("indexed"))
+        return {"n_rows": rows, **({"approximate": ["n_rows"]} if estimated else {})}
+    if catalog.rows_recorded(entry):
+        return {"n_rows": None, "n_rows_note": prompts.notice("rows_not_counted")}
+    return {"n_rows": None, "n_rows_note": prompts.notice("rows_not_recorded")}
 
 
 def query_data(

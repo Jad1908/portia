@@ -190,6 +190,39 @@ def test_a_remote_entry_is_never_stale_on_a_render_and_changed_on_request(projec
     assert catalog.remote_changed(entry, warehouse) is True
 
 
+def test_a_profile_replaces_the_warehouse_estimate_with_its_count(project, warehouse, monkeypatch):
+    """PostgreSQL's free count is the planner's estimate; a profile counted every row."""
+    from portia.agent import handlers
+
+    facts_of = warehouse.table_facts
+    monkeypatch.setattr(
+        warehouse, "table_facts", lambda q: {**facts_of(q), "rows": 99, "approximate": ["rows"]}
+    )
+    catalog.scope_table("memory.sales.orders", warehouse, portia_dir=project)
+    scoped = catalog.load_catalog(project)["sources"]["orders"]
+    assert handlers.row_facts(scoped) == {"n_rows": 99, "approximate": ["n_rows"]}
+
+    catalog.profile_remote("orders", warehouse, portia_dir=project)
+    profiled = catalog.load_catalog(project)["sources"]["orders"]
+    assert handlers.row_facts(profiled) == {"n_rows": 3}
+    assert "approximate" not in profiled["indexed"]
+
+
+def test_a_view_with_no_count_says_why_rather_than_reading_as_zero(project, warehouse, monkeypatch):
+    from portia.agent import handlers, prompts
+
+    facts_of = warehouse.table_facts
+    monkeypatch.setattr(
+        warehouse, "table_facts", lambda q: {**facts_of(q), "rows": None, "kind": "view"}
+    )
+    catalog.scope_table("memory.sales.orders", warehouse, portia_dir=project)
+    entry = catalog.load_catalog(project)["sources"]["orders"]
+    assert handlers.row_facts(entry) == {
+        "n_rows": None,
+        "n_rows_note": prompts.notice("rows_not_counted"),
+    }
+
+
 # --- names collide (§2.12) --------------------------------------------------------
 
 

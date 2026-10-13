@@ -1637,7 +1637,9 @@ def test_a_local_build_profiles_the_model_and_the_entry_says_so(sales):
     )
     entry = catalog.load_models(sales)["per_customer"]
     assert entry["profiled"]["at"] and catalog.is_profiled(entry)
-    assert "indexed" not in entry, "nothing was written anywhere, so no warehouse facts"
+    # Nothing was written anywhere, so no warehouse facts: only the count the
+    # build measured (2026-10-13).
+    assert entry["indexed"] == {"rows": 6} and "table" not in entry
     described = handlers.describe_source("per_customer", portia_dir=sales)
     assert "profiled" not in described and described["columns"][0]["inferred"]
     # An entry written before the field existed still reads as profiled.

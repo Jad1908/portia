@@ -185,7 +185,8 @@ def index_source(data_path: str | Path, *, portia_dir: str | Path = DEFAULT_DIR)
 
     src_file = d / "sources" / f"{name}.yaml"
     existing = _read(src_file) if src_file.exists() else None
-    _write(src_file, _source_entry(recorded, profile, existing, file_facts(data_path)))
+    indexed = _counted(file_facts(data_path), profile["n_rows"])
+    _write(src_file, _source_entry(recorded, profile, existing, indexed))
     _register(d, name)
     return src_file
 
@@ -354,7 +355,7 @@ def profile_remote(name: str, con: Any, *, portia_dir: str | Path = DEFAULT_DIR)
 
     qualified = str(existing["source"])
     profile = profiling.profile(source_table({"table": qualified}, con, name=name))
-    facts = con.table_facts(qualified)
+    facts = _counted(con.table_facts(qualified), profile["n_rows"])
     kind = facts.pop("kind", None)
     entry = _source_entry(qualified, profile, existing, facts)
     entry[REMOTE] = {**existing[REMOTE], **({"kind": kind} if kind else {})}
@@ -388,7 +389,7 @@ def _profile_model(name: str, con: Any, *, portia_dir: Path) -> dict:
             "target, or turn on agent_writes, and it can be profiled where it lands"
         )
     profile = profiling.profile(source_table({"table": written}, con, name=name))
-    facts = con.table_facts(written)
+    facts = _counted(con.table_facts(written), profile["n_rows"])
     facts.pop("kind", None)
     entry = _model_entry(name, profile, existing)
     _write(path, _placed_model(entry, existing, indexed=facts, profiled={"at": facts["at"]}))
@@ -402,7 +403,8 @@ def _placed_model(entry: dict, existing: dict, *, indexed: dict | None, profiled
     ``built`` is when the spec last ran and is kept from ``existing`` when the
     entry is rewritten by a profile rather than a build; ``indexed`` is what the
     warehouse says about the written table for nothing (`STALENESS_FACTS`'
-    keys, plus the row count `describe_source` states); ``profiled`` is the
+    keys, plus the row count `describe_source` states), and locally, where
+    nothing was written, the row count the build measured (`ROWS`); ``profiled`` is the
     state the facts are in, a field rather than a silence. ``table`` and
     ``fingerprint`` say where the build wrote and which spec it was.
     """
@@ -454,7 +456,60 @@ def rows_estimated(indexed: dict | None) -> bool:
     here once, so every surface that shows the number says the same thing
     about it.
     """
-    return "rows" in ((indexed or {}).get("approximate") or [])
+    return ROWS in ((indexed or {}).get(APPROXIMATE) or [])
+
+
+#: Where an entry keeps its table's row count: under ``indexed``, beside the
+#: facts that say when the table was looked at. **On every entry since
+#: 2026-10-13.** A warehouse table always had it, from the information schema
+#: for nothing (`scope_table`); a file's count was measured by every profile and
+#: only ever written into the drafted summary's first sentence, where no tool
+#: could read it as a number; a built table's was measured by every build and
+#: kept nowhere. Now indexing records it on all three, and a profile that
+#: counted replaces an estimate with its count (:func:`_counted`).
+ROWS = "rows"
+
+#: The facts' list of which numbers are estimates (`rows_estimated`).
+APPROXIMATE = "approximate"
+
+
+def row_count(entry: dict) -> int | None:
+    """The row count indexing recorded for this entry, or ``None``.
+
+    ``None`` means one of two things and :func:`rows_recorded` says which: the
+    entry was indexed before portia recorded counts, or the warehouse gave none
+    (a view, a PostgreSQL table never analyzed). Never parsed out of the
+    drafted summary: that sentence is prose, and the count it restates may be
+    a different indexing's.
+    """
+    rows = (entry.get("indexed") or {}).get(ROWS)
+    return rows if isinstance(rows, int) and not isinstance(rows, bool) else None
+
+
+def rows_recorded(entry: dict) -> bool:
+    """Whether this entry was indexed by a portia that records a row count.
+
+    The key's presence, not its value: a warehouse view's count is recorded
+    as ``None`` because there is none to give, which is a different fact from
+    an entry written before the count was kept.
+    """
+    return ROWS in (entry.get("indexed") or {})
+
+
+def _counted(facts: dict, n_rows: int) -> dict:
+    """``facts`` with the row count a profile measured, no longer called an estimate.
+
+    A profile counts every row it reads, so after one the count is exact
+    whatever the information schema said; PostgreSQL's planner estimate is
+    replaced and ``approximate`` stops naming it.
+    """
+    out = {**facts, ROWS: int(n_rows)}
+    estimated = [k for k in out.get(APPROXIMATE) or [] if k != ROWS]
+    if estimated:
+        out[APPROXIMATE] = estimated
+    else:
+        out.pop(APPROXIMATE, None)
+    return out
 
 
 def _metadata_summary(facts: dict, n_columns: int) -> str:
@@ -573,13 +628,18 @@ def index_model(
         # meter, per recorded step (`docs/CONNECTOR.md` §2.6). The columns and
         # types are free from a describe; the facts wait for a profile that was
         # asked for (:func:`profile_remote`, which takes a model's name too).
-        entry = _model_entry(name, _shape_only(table), existing)
+        profile = _shape_only(table)
+        entry = _model_entry(name, profile, existing)
         profiled = None
     else:
-        entry = _model_entry(name, profiling.profile(table), existing)
+        profile = profiling.profile(table)
+        entry = _model_entry(name, profile, existing)
         profiled = {"at": entry["built"]["at"]}
+    indexed = _written_facts(table, written_to)
+    if profile["n_rows"] is not None:
+        indexed = _counted(indexed or {}, profile["n_rows"])
     # A build: the ``built`` stamp is this run's, so nothing is kept from before.
-    placed = _placed_model(entry, {}, indexed=_written_facts(table, written_to), profiled=profiled)
+    placed = _placed_model(entry, {}, indexed=indexed, profiled=profiled)
     if written_to:
         placed["table"] = written_to
         placed["fingerprint"] = fingerprint
@@ -951,9 +1011,10 @@ def _source_entry(
     return {
         "source": source,
         # What the file looked like when it was indexed, so a file edited
-        # afterwards is detectable rather than silently stale. A fact, so
-        # re-indexing refreshes it. The path is not repeated here; `source`
-        # above is the one place a location is written down.
+        # afterwards is detectable rather than silently stale, and how many
+        # rows it held (`ROWS`). A fact, so re-indexing refreshes it. The path
+        # is not repeated here; `source` above is the one place a location is
+        # written down.
         "indexed": indexed or existing.get("indexed"),
         # Layer 1 — prose read. Preserved across re-index (judgment, not fact).
         "summary": existing.get("summary") or _auto_summary(profile),
