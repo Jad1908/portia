@@ -153,18 +153,23 @@ CONTEXT_ROWS = 100
 DESCRIBE_FIELDS = ("name", "type", "role", "flags")
 
 #: What `profile_source` says about each column: the facts indexing stores
-#: (`catalog._SHAPE`), so a stored answer and a measured one read the same.
+#: (`catalog._SHAPE`, `catalog.LATER_FACTS`), so a stored answer and a measured
+#: one read the same.
 PROFILE_FIELDS = (
     "name",
     "type",
     "null_rate",
     "n_distinct",
     "min",
+    "q25",
     "median",
+    "q75",
     "max",
+    "mean",
     "std",
     "top",
     "top_freq",
+    "samples",
     "flags",
 )
 
@@ -1364,9 +1369,9 @@ def profile_source(
 ) -> dict:
     """L3 — the measured facts about a table's columns: what indexing stored, filtered and capped.
 
-    Per column, its type, null rate, distinct count, min, median, max and
-    standard deviation, its commonest value and how often it occurs, and its
-    flags (`PROFILE_FIELDS`), `PROFILE_CAP` columns at a time. The filters are
+    Per column, its type, null rate, distinct count, min, quartiles, max, mean
+    and standard deviation, its commonest value and how often it occurs, three
+    sample values and its flags (`PROFILE_FIELDS`), `PROFILE_CAP` columns at a time. The filters are
     `describe_source`'s: ``columns`` (exact names, in the order named),
     ``match``, ``type_`` and ``flag``. A table no wider than `PROFILE_CAP`
     comes back whole without one; a wider one, asked without a filter, comes
@@ -1381,11 +1386,12 @@ def profile_source(
     median and a standard deviation; min and max have been stored since, and
     a scan per call is what the copilot paid for a fact indexing had already
     measured: on a warehouse every `profile_source` was a full scan on
-    someone's meter. So the answer is the catalog's slice (`catalog._SHAPE`).
-    **What it no longer carries is the mean, the quartiles and the sample
-    values**, which indexing measures and does not store; a question that
-    needs them is a `query_data`, measured like any other. ``facts`` says which
-    kind of answer this is: ``stored``, or ``measured now`` where nothing was
+    someone's meter. So the answer is the catalog's slice (`catalog._SHAPE`),
+    which keeps the mean, the quartiles and the sample values too
+    (`catalog.LATER_FACTS`): they were the reason for the old argument, and
+    storing them answers it. An entry indexed before they were stored says so,
+    as ``not_stored`` and a note, rather than measuring again or leaving a null
+    to be read as *no mean*. ``facts`` says which kind of answer this is: ``stored``, or ``measured now`` where nothing was
     stored to read: a ``<spec>#<step id>``, a spec nobody has recorded a step
     through, a warehouse table or model nobody has profiled. The warehouse's
     are written back (`catalog.profile_remote`), so the next call reads them.
@@ -1424,6 +1430,11 @@ def profile_source(
     if estimated:
         # Beside a row count the warehouse estimated, when `row_facts` said so.
         answer["approximate"] = [*answer.get("approximate", []), *estimated]
+    if any("inferred" in col and "samples" not in col for col in shown):
+        # An entry indexed before these were stored: their nulls are not the
+        # null of a text column's mean, and the copilot must not fill them in.
+        answer["not_stored"] = list(catalog.LATER_FACTS)
+        answer["not_stored_note"] = prompts.notice("facts_not_stored")
     return answer
 
 

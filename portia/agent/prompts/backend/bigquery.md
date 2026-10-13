@@ -19,9 +19,9 @@ decided, not to see what happens.
 profiled says `profiled: false` and gives a row count and a byte count from the table's own
 metadata; the byte count is what a full scan of it would bill. The column facts arrive when you or
 the user call `profile_source`, which scans the table once and is then remembered. Say what it
-will cost before you do it on a large table. A profile's median is **approximate** here
-(`APPROX_QUANTILES`) and the answer says so under `approximate`; repeat it as an estimate, never
-as an exact value.
+will cost before you do it on a large table. A profile's three quartiles are **approximate**
+here (`APPROX_QUANTILES`) and the answer says so under `approximate`; repeat them as estimates,
+never as exact values.
 
 **The credentials are the boundary, and the scope is the study.** Your SQL runs as the account the
 connection signed in with, over the projects it can read. A refusal from BigQuery that names

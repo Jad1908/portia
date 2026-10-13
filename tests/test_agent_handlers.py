@@ -93,12 +93,13 @@ def test_profile_source_returns_facts_unranked(project):
 
 
 def test_profile_source_answers_from_the_stored_facts_and_says_so(project, monkeypatch):
-    """Reversed 2026-10-13: the stored slice, not a fresh profile per call.
+    """The stored slice, not a fresh profile per call (2026-10-13), and still everything.
 
-    The old regression was the model *deriving* a min-max range from a median
-    and a standard deviation; min and max have been stored since, and a scan
-    per call paid for facts indexing already had. What the catalog does not keep
-    (mean, quartiles, samples) is a `query_data`, and the description says so.
+    The old regression was the model *deriving* a min-max range it had never
+    been given, from a median and a standard deviation. Anything it can't
+    measure it will estimate, so the fix stays more evidence: the catalog keeps
+    the mean, the quartiles and the samples now, and a profile serves them
+    without scanning again.
     """
 
     def no_scan(*a, **k):
@@ -108,10 +109,30 @@ def test_profile_source_answers_from_the_stored_facts_and_says_so(project, monke
     answer = handlers.profile_source("customers", project)
     key = _by_name(answer["columns"])["customer_id"]
 
-    for fact in ("min", "max", "median", "std", "null_rate", "n_distinct"):
+    for fact in ("min", "max", "q25", "median", "q75", "mean", "std", "samples"):
         assert key[fact] is not None, f"{fact} missing — the agent would have to guess it"
-    assert not {"q25", "q75", "mean", "samples"} & set(key)
+    assert len(key["samples"]) == 3
     assert answer["n_rows"] == 40 and answer["facts"] == handlers.STORED
+    assert "not_stored" not in answer
+
+
+def test_an_entry_indexed_before_means_were_stored_says_so(project):
+    """Old entries have no mean, quartiles or samples: said as a field, never guessed."""
+    from pathlib import Path
+
+    path = Path(project) / "sources" / "customers.yaml"
+    entry = yaml.safe_load(path.read_text(encoding="utf-8"))
+    for col in entry["columns"]:
+        for fact in catalog.LATER_FACTS:
+            col.pop(fact, None)
+    path.write_text(yaml.safe_dump(entry), encoding="utf-8")
+
+    answer = handlers.profile_source("customers", project, columns=["customer_id"])
+    key = _by_name(answer["columns"])["customer_id"]
+    assert key["mean"] is None and key["samples"] is None and key["median"] is not None
+    assert answer["not_stored"] == list(catalog.LATER_FACTS)
+    assert "re-index" in answer["not_stored_note"].lower()
+    assert answer["facts"] == handlers.STORED, "nothing was measured to fill them in"
 
 
 def test_profile_source_names_what_is_available_when_missing(project):
@@ -1732,16 +1753,16 @@ def test_an_estimated_median_says_so_when_read_back(project):
     entry = yaml.safe_load(path.read_text(encoding="utf-8"))
     measured = {**entry["columns"][0], "approximate": ["q25", "median", "q75"]}
     kept = catalog._column_facts(measured)
-    assert kept["approximate"] == ["median"]
+    assert kept["approximate"] == ["q25", "median", "q75"]
     entry["columns"][0] = {"name": measured["name"], "role": None, **kept}
     path.write_text(yaml.safe_dump(entry), encoding="utf-8")
 
     answer = handlers.profile_source("customers", project, columns=["customer_id"])
-    assert answer["approximate"] == ["median"]
+    assert answer["approximate"] == ["q25", "median", "q75"]
     assert "approximate" not in handlers.profile_source("customers", project, columns=["name"])
 
     # Beside a row count that is itself an estimate, both are named.
     entry["indexed"]["approximate"] = ["rows"]
     path.write_text(yaml.safe_dump(entry), encoding="utf-8")
     answer = handlers.profile_source("customers", project, columns=["customer_id"])
-    assert answer["approximate"] == ["n_rows", "median"]
+    assert answer["approximate"] == ["n_rows", "q25", "median", "q75"]

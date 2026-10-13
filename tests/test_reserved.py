@@ -261,3 +261,14 @@ def test_portia_tables_holds_every_note_a_card_leaves_out(shop):
     card = handlers.describe_source("orders", shop)
     assert card["notes"]["n"] == handlers.CARD_NOTES + 2
     assert card["notes"]["shown"] == f"3-{handlers.CARD_NOTES + 2}" and card["notes"]["more"]
+
+
+def test_portia_columns_holds_the_mean_and_the_quartiles(shop):
+    """Stored at indexing since 2026-10-13 (`catalog.LATER_FACTS`), and a column here."""
+    con = reserved.connection()
+    (table,) = reserved.tables(["portia_columns"], shop, con).values()
+    ((q25, median, q75, mean),) = table.sql(
+        f"SELECT q25, median, q75, mean FROM {table.ref} "
+        "WHERE table_name = 'orders' AND name = 'amount'"
+    ).rows(1)
+    assert (q25, median, q75, mean) == (2.0, 2.5, 3.25, 2.6667), "rounded as the profile rounds"

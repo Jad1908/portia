@@ -1,6 +1,7 @@
 <!-- placeholders: {profile_cap}. Filled from agent/handlers.card_vocabulary. -->
 Measured facts about a table's columns: per column, its type, null rate, distinct count, min,
-median, max, standard deviation, commonest value and how often it occurs, and quality flags.
+quartiles, max, mean, standard deviation, commonest value and how often it occurs, three sample
+values, and quality flags.
 
 The rung for numbers. Call it when you need them: interpreting a source, judging whether a key is
 usable, quantifying a problem you are about to raise. It reads the facts indexing measured and
@@ -26,10 +27,9 @@ Narrow with the filters `describe_source` takes: 'columns' (exact names, in the 
 says how many were left out; name the next ones with 'columns'. A column name that does not exist
 is refused, not skipped. A list with no 'more' is whole.
 
-Not here: the mean, the quartiles and example values. Indexing measures them and does not keep
-them. When a decision turns on one, such as mean against median for a fill, ask `query_data` for
-it. Never derive one from the facts here. 'approximate' names a field that is the engine's
-estimate, not an exact value.
+A table indexed before means, quartiles and samples were stored has them null, and says so in
+'not_stored' with a note. Never derive one from the other facts. 'approximate' names a field
+that is the engine's estimate, not an exact value.
 
 How to read what comes back:
 
@@ -37,8 +37,10 @@ How to read what comes back:
   That is a fact, not a schema constraint, and a table whose real grain is two columns shows no
   unique column at all. When you believe you know the grain, declare it on the step; the engine
   checks it.
-- A median close to the min with a max far above it is a skewed column. Measure the mean and the
-  quartiles before you choose mean or median for any fill or aggregate on it.
+- Quartiles against the mean say whether a column is skewed, which decides mean against median
+  for every fill and every aggregate on it.
+- Samples are distinct values in sorted order, not the first rows. A value with leading spaces
+  sorts first, which is where a sample earns its keep.
 - A column with one distinct value, or min and max both zero, passed every gate and is still
   broken. Look for it on every model you build.
 - A question across many columns or tables, such as which columns anywhere are mostly null, is

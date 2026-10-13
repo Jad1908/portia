@@ -1360,7 +1360,20 @@ def file_facts(path: str | Path) -> dict:
 #: were kept, so the profiler measured the range on every index and the catalog
 #: threw it away — leaving the graph with no way to say what a numeric column
 #: even looks like.
+#:
+#: **The mean, the quartiles and the samples are kept too** *(2026-10-13)*, as
+#: `LATER_FACTS`, since `profile_source` answers from this slice rather than
+#: from a fresh profile: the copilot prepares data for a model, and mean against
+#: median, quartiles against the mean, is how it chooses a fill or an aggregate.
+#: The profiler measured them on every index already; storing them costs a few
+#: numbers and three values per column, and that size was accepted.
 _SHAPE = ("min", "max", "median", "std", "top", "top_freq")
+
+#: The facts stored since 2026-10-13. A measured column of an entry indexed
+#: before has none of them, and ``samples`` is the one every measured column
+#: carries, so its absence is how an answer tells an old entry from a column
+#: that has no mean because it is text (`agent/handlers.profile_source`).
+LATER_FACTS = ("mean", "q25", "q75", "samples")
 
 
 def _column_facts(col: dict) -> dict:
@@ -1374,7 +1387,7 @@ def _column_facts(col: dict) -> dict:
         "n_distinct": col["n_distinct"],
         "flags": col["flags"],
     }
-    for k in _SHAPE:  # the richer describe-stats, if present
+    for k in (*_SHAPE, *LATER_FACTS):  # the richer describe-stats, if present
         if k in col:
             facts[k] = col[k]
     # Which of those an engine estimated (BigQuery's median is a sketch). Kept
