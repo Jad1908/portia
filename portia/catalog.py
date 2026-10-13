@@ -1377,6 +1377,12 @@ def _column_facts(col: dict) -> dict:
     for k in _SHAPE:  # the richer describe-stats, if present
         if k in col:
             facts[k] = col[k]
+    # Which of those an engine estimated (BigQuery's median is a sketch). Kept
+    # since `profile_source` answers from these facts (2026-10-13): a median
+    # read back without it reads as exact.
+    estimated = [k for k in col.get(APPROXIMATE) or [] if k in facts]
+    if estimated:
+        facts[APPROXIMATE] = estimated
     return facts
 
 

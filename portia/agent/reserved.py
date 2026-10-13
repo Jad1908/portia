@@ -204,6 +204,8 @@ TABLE_FIELDS: tuple[tuple[str, str], ...] = (
     ("n_columns", "INTEGER"),
     ("read", "BOOLEAN"),
     ("summary", "VARCHAR"),
+    # Every note, oldest first: a card carries the latest few (`handlers.CARD_NOTES`).
+    ("notes", 'STRUCT("at" VARCHAR, "text" VARCHAR)[]'),
     ("groups", "VARCHAR[]"),
     ("stale", "BOOLEAN"),
     ("indexed_at", "VARCHAR"),
@@ -303,6 +305,10 @@ def _table_rows(request: Request) -> list[dict]:
                 "n_columns": len(entry.get("columns") or []),
                 "read": written is not None,
                 "summary": written,
+                "notes": [
+                    {"at": _text(note.get("at")), "text": _text(note.get("text"))}
+                    for note in entry.get(catalog.NOTES) or []
+                ],
                 "groups": groups.get(name, []),
                 "stale": request.stale.get(name),
                 "indexed_at": _text(

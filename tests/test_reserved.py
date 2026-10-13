@@ -246,3 +246,14 @@ def test_an_interrupted_query_counts_a_reserved_input_too(shop):
         "query_data", {"sql": "SELECT * FROM portia_tables", "inputs": ["portia_tables"]}, shop
     )
     assert facts["inputs"] == {"portia_tables": {"rows": 3, "from": handlers.COUNTED}}
+
+
+def test_portia_tables_holds_every_note_oldest_first(shop):
+    for i in range(12):
+        catalog.set_interpretation("orders", note=f"note {i}", portia_dir=shop)
+    con = reserved.connection()
+    (table,) = reserved.tables(["portia_tables"], shop, con).values()
+    ((texts,),) = table.sql(
+        f"SELECT list_transform(notes, n -> n.text) FROM {table.ref} WHERE name = 'orders'"
+    ).rows(1)
+    assert texts == [f"note {i}" for i in range(12)]
