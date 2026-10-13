@@ -1739,3 +1739,9 @@ def test_an_estimated_median_says_so_when_read_back(project):
     answer = handlers.profile_source("customers", project, columns=["customer_id"])
     assert answer["approximate"] == ["median"]
     assert "approximate" not in handlers.profile_source("customers", project, columns=["name"])
+
+    # Beside a row count that is itself an estimate, both are named.
+    entry["indexed"]["approximate"] = ["rows"]
+    path.write_text(yaml.safe_dump(entry), encoding="utf-8")
+    answer = handlers.profile_source("customers", project, columns=["customer_id"])
+    assert answer["approximate"] == ["n_rows", "median"]

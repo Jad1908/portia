@@ -1422,7 +1422,8 @@ def profile_source(
     }
     estimated = [f for f in PROFILE_FIELDS if any(f in (c.get("approximate") or []) for c in shown)]
     if estimated:
-        answer["approximate"] = estimated
+        # Beside a row count the warehouse estimated, when `row_facts` said so.
+        answer["approximate"] = [*answer.get("approximate", []), *estimated]
     return answer
 
 
