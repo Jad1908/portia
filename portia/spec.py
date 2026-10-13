@@ -270,11 +270,12 @@ def sources_read(models: dict[str, Path], *, base_dir: str | Path = ".") -> dict
     catalog's name for it when `record_step` wrote the block. The model's own
     come first, then each model it reads, nearest first, each name once.
 
-    **What a built table is as fresh as** *(2026-10-13)*. A model built
-    locally keeps no change marker of its own (`catalog.freshness`): what it
-    holds is a function of its spec and the files underneath, and a file that
-    changed after the build is what makes the model's catalog facts old. The
-    answer that names a model says which of those changed.
+    **What a built table is as fresh as** *(2026-10-13)*. What a model built
+    locally holds is a function of its spec and the files underneath. Its
+    entry keeps the spec's fingerprint (`catalog.freshness`); a file that
+    changed after the build is the other thing that makes the model's catalog
+    facts old, and this is where those files are found. The answer that names
+    a model says which of those changed.
     """
     docs = {name: load_spec(Path(base_dir) / path) for name, path in models.items()}
     reads = _model_reads(docs)

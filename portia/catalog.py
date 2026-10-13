@@ -584,6 +584,14 @@ def add_scope(names: list[str], *, portia_dir: str | Path = DEFAULT_DIR) -> list
 #: question to ask of it.
 MODELS_DIR = "models"
 
+#: The key under a model entry's ``built`` that holds the fingerprint of the
+#: spec its facts were measured from (`pipeline.fingerprint`), written by every
+#: build and every recorded step (:func:`index_model`). **Not the top-level
+#: ``fingerprint``**, which says which spec the warehouse table was written
+#: from and is there only beside ``table``: this one is there for a model built
+#: locally too, where it is the only marker the entry has (*2026-10-13*).
+BUILT_FROM = "spec"
+
 
 def index_model(
     name: str,
@@ -642,6 +650,10 @@ def index_model(
         indexed = _counted(indexed or {}, profile["n_rows"])
     # A build: the ``built`` stamp is this run's, so nothing is kept from before.
     placed = _placed_model(entry, {}, indexed=indexed, profiled=profiled)
+    if fingerprint:
+        # What these facts were measured from, so a spec edited afterwards
+        # makes them stale (:func:`freshness`). On every model, written or not.
+        placed["built"] = {**placed["built"], BUILT_FROM: fingerprint}
     if written_to:
         placed["table"] = written_to
         placed["fingerprint"] = fingerprint
@@ -1191,6 +1203,8 @@ FILE_CHANGED = "file_changed"
 FILE_GONE = "file_gone"
 TABLE_CHANGED = "table_changed"
 TABLE_GONE = "table_gone"
+#: A model built locally whose spec changed since its facts were stored.
+SPEC_CHANGED = "spec_changed"
 
 #: Why :func:`freshness` cannot tell. ``no_marker``: nothing was recorded that
 #: could contradict the entry, which is a warehouse view (no size, no change
@@ -1221,15 +1235,17 @@ def freshness(
     :func:`remote_changed`'s, one metadata query on ``con``, believed for
     `WAREHOUSE_FACTS_S`; without ``con`` only a remembered answer is used. A
     view has nothing to compare and says so. A model a build wrote to the
-    warehouse is its written table; **a model built locally is ``None`` here**,
-    because it keeps no marker of its own: it is as fresh as the sources it
-    reads, which the caller checks (`spec.sources_read`).
+    warehouse is its written table. **A model built locally is its spec**
+    *(2026-10-13)*: its facts are stale when the spec's fingerprint is not the
+    one they were measured from (:func:`_spec_freshness`), and otherwise it is
+    as fresh as the sources it reads, which the caller checks
+    (`spec.sources_read`).
     """
     indexed = entry.get("indexed") or {}
     at = indexed.get("at")
     if "model" in entry and "source" not in entry:
         if not entry.get("table"):
-            return None
+            return _spec_freshness(name, entry, portia_dir)
         return _table_freshness(name, str(entry["table"]), indexed, con, kind="table")
     if entry.get(REMOTE):
         kind = (entry.get(REMOTE) or {}).get("kind") or "table"
@@ -1250,6 +1266,53 @@ def freshness(
         "indexed": at,
         "was": {k: indexed.get(k) for k in STALENESS_FACTS},
         "now": {k: now[k] for k in STALENESS_FACTS},
+    }
+
+
+def _spec_freshness(name: str, entry: dict, portia_dir: str | Path) -> dict | None:
+    """:func:`freshness` for a model built locally: did its spec change since its facts?
+
+    **It used to be ``None`` whatever happened to the spec.** A model keeps no
+    file of its own, so it was taken to be as fresh as its sources; but a spec
+    edited by hand after the last build or recorded step leaves the entry
+    describing a table the spec no longer builds, and `profile_source` reads
+    that entry since it stopped re-running the spec on every call. The
+    fingerprint the facts were measured from is on the entry (`BUILT_FROM`) and
+    `pipeline.fingerprint` is the one `pipeline.is_stale` compares a compiled
+    file against, so this compares the same thing.
+
+    ``None`` for an entry written before the fingerprint was kept (nothing to
+    compare, and saying *unknown* about every old model would be noise), for a
+    model whose spec is gone, and when two specs share its name (`cli/build`'s
+    to report). A spec that no longer reads is a spec that changed.
+    """
+    built = entry.get("built") or {}
+    was = built.get(BUILT_FROM)
+    if not was:
+        return None
+    # Below both in the import order: `pipeline` and `spec` import this module.
+    from portia import pipeline, spec
+
+    root = project_root(portia_dir)
+    try:
+        path = spec.discover_specs(root).get(name)
+    except ValueError:
+        return None
+    if path is None:
+        return None
+    try:
+        now = pipeline.fingerprint(spec.load_spec(root / path))
+    except cancel.Cancelled:
+        raise
+    except Exception:  # noqa: BLE001 - a spec that does not parse is not the one built
+        now = None
+    if now == was:
+        return None
+    return {
+        "source": name,
+        "changed": SPEC_CHANGED,
+        "spec": Path(path).as_posix(),
+        "indexed": built.get("at"),
     }
 
 
@@ -1288,7 +1351,7 @@ def _table_freshness(
 
 
 #: What :func:`freshness` reads off an entry, kept by :func:`_read_entry`.
-_MARKED = ("source", REMOTE, "indexed", "model", "table")
+_MARKED = ("source", REMOTE, "indexed", "model", "table", "built")
 
 #: The marked part of each entry file read, by path, with the file's
 #: ``(st_mtime_ns, st_size)`` when it was read.
