@@ -1513,8 +1513,13 @@ _MART = {
 }
 
 
-def test_read_spec_returns_the_record_verbatim_with_its_neighbours(sales, tmp_path):
-    """The spec is a record; a summary of a decision is a second author."""
+def _rows(listed: dict) -> list[dict]:
+    """A `core.listing` list as one dict per row."""
+    return [dict(zip(listed["fields"], row, strict=True)) for row in listed["rows"]]
+
+
+def test_read_spec_is_a_card_of_the_spec_and_its_neighbours(sales, tmp_path):
+    """What the spec is, a row per step, and nothing that needs a run."""
     _write_spec(tmp_path, "specs/staging/stg_orders.yaml", _STG)
     _write_spec(tmp_path, "specs/mart/order_totals.yaml", _MART)
 
@@ -1522,23 +1527,34 @@ def test_read_spec_returns_the_record_verbatim_with_its_neighbours(sales, tmp_pa
     json.dumps(out)
 
     assert out["spec"] == "specs/staging/stg_orders.yaml"
-    assert out["model"] == "stg_orders" and out["layer"] == "staging"
-    assert out["sources"] == {"orders": "orders.csv"}
-    assert out["steps"] == _STG["steps"]
+    assert out["model"] == "stg_orders" and out["layer"] == "staging" and out["target"] is None
+    assert _rows(out["sources"]) == [{"name": "orders", "ref": "orders.csv"}]
     assert out["n_steps"] == 1
-    assert out["reads"] == [] and out["read_by"] == ["order_totals"]
+    (row,) = _rows(out["steps"])
+    assert row == {
+        "id": "clean",
+        "op": "sql",
+        "inputs": ["orders"],
+        "n_rows": None,
+        "n_cols": None,
+        "flags": None,
+        "drift": None,
+    }
+    assert "sql" not in row, "a step's body is read with step="
+    assert out["reads"]["n"] == 0 and _names(out["read_by"]) == ["order_totals"]
     # never compiled: not stale, and no file to point at
     assert out["compiled"] is None and out["compiled_stale"] is False
-    # nobody has built it and nothing has been asked about it — stated, not absent
-    assert out["built"] is None and out["n_findings"] == 0
-    assert "journal" not in out and "measured" not in out
+    # nobody has built it and nothing has been asked about it: stated, not absent
+    assert out["built"] is None and out["findings"]["n"] == 0
+    assert out["steps_measured"] is None and out["steps_note"]
+    assert "measured" not in out and "step=" not in out["more"] and "step" in out["more"]
 
 
 def test_read_spec_takes_a_path_as_well_as_a_name(sales, tmp_path):
     _write_spec(tmp_path, "specs/staging/stg_orders.yaml", _STG)
     _write_spec(tmp_path, "specs/mart/order_totals.yaml", _MART)
     out = handlers.read_spec("specs/mart/order_totals.yaml", portia_dir=sales)
-    assert out["model"] == "order_totals" and out["reads"] == ["stg_orders"]
+    assert out["model"] == "order_totals" and _names(out["reads"]) == ["stg_orders"]
 
 
 def test_read_spec_names_the_known_specs_on_an_unknown_name(sales, tmp_path):
@@ -1547,10 +1563,8 @@ def test_read_spec_names_the_known_specs_on_an_unknown_name(sales, tmp_path):
         handlers.read_spec("ghost", portia_dir=sales)
 
 
-def test_read_spec_carries_the_journal_and_the_last_build_on_request(sales, tmp_path):
-    """Counts always; the things themselves only when asked (`KNOWLEDGE_GRAPH.md` §4.4)."""
-    from portia import findings
-
+def _two_steps(sales) -> None:
+    """A join, then a SQL step reading it, recorded so their shapes are kept."""
     handlers.record_step(
         "specs/orders.yaml",
         {
@@ -1560,30 +1574,177 @@ def test_read_spec_carries_the_journal_and_the_last_build_on_request(sales, tmp_
             "right": "customers",
             "keys": ["customer_id"],
             "how": "left",
+            "expect": {"result_rows": 1},
             "rationale": "keep every order",
         },
         portia_dir=sales,
     )
-    findings.record(
+    handlers.record_step(
+        "specs/orders.yaml",
+        {
+            "id": "amounts",
+            "op": "sql",
+            "inputs": ["j"],
+            "sql": "SELECT order_id, amount FROM j",
+            "rationale": "the two columns the mart needs",
+        },
+        portia_dir=sales,
+    )
+
+
+def test_read_spec_lists_each_steps_shape_as_the_last_recording_measured_it(sales):
+    _two_steps(sales)
+
+    out = handlers.read_spec("orders", portia_dir=sales)
+
+    steps = {row["id"]: row for row in _rows(out["steps"])}
+    assert steps["j"]["inputs"] == ["orders", "customers"]
+    assert steps["amounts"]["inputs"] == ["j"]
+    assert steps["amounts"]["n_cols"] == 2 and steps["amounts"]["n_rows"] == steps["j"]["n_rows"]
+    assert steps["j"]["drift"]["result_rows"]["expected"] == 1, "the prediction that missed"
+    assert steps["amounts"]["drift"] == {} and steps["amounts"]["flags"] == []
+    assert out["steps_measured"] == out["built"] and "steps_note" not in out
+
+
+def test_a_hand_edit_since_the_last_run_withholds_every_steps_shape(sales, tmp_path):
+    """A shape measured on another version of the spec is not this spec's: say so."""
+    _two_steps(sales)
+    path = tmp_path / "specs" / "orders.yaml"
+    doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    doc["steps"][1]["sql"] = "SELECT order_id FROM j"
+    path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
+
+    out = handlers.read_spec("orders", portia_dir=sales)
+
+    assert all(row["n_rows"] is None for row in _rows(out["steps"]))
+    assert out["steps_measured"] is None and out["built"] in out["steps_note"]
+
+
+def test_one_step_is_read_verbatim_with_what_reads_it(sales):
+    _two_steps(sales)
+
+    out = handlers.read_spec("orders", step="J", portia_dir=sales)
+    json.dumps(out)
+
+    assert out["step"]["id"] == "j" and out["step"]["rationale"] == "keep every order"
+    assert out["position"] == 1 and out["n_steps"] == 2
+    assert out["read_by_steps"] == ["amounts"]
+    assert out["n_cols"] and out["steps_measured"]
+    assert "#j'" in out["more"]
+
+
+def test_an_unknown_step_is_refused_with_the_closest_ids(sales):
+    _two_steps(sales)
+    with pytest.raises(ValueError, match="amounts") as refused:
+        handlers.read_spec("orders", step="amount", portia_dir=sales)
+    assert "2 steps" in str(refused.value)
+
+
+def test_match_narrows_the_steps_and_answers_them_alone(sales):
+    _two_steps(sales)
+
+    out = handlers.read_spec("orders", match="AM*", portia_dir=sales)
+
+    assert _names(out["steps"]) == ["amounts"] and out["n_steps"] == 2
+    assert "sources" not in out and "findings" not in out
+
+
+def test_a_spec_longer_than_a_card_says_how_to_reach_the_rest(sales, monkeypatch):
+    _two_steps(sales)
+    monkeypatch.setattr(handlers, "SPEC_STEPS", 1)
+
+    out = handlers.read_spec("orders", portia_dir=sales)
+
+    assert out["steps"]["n"] == 2 and len(out["steps"]["rows"]) == 1
+    assert "match" in out["steps"]["more"]
+
+
+def _finding(tmp_path, sales, **extra) -> str:
+    from portia import findings
+
+    path = findings.record(
         question="are the unmatched orders real?",
         answer="two reference customers missing from the dimension",
         so="kept a left join",
         about=["orders", "customers"],
-        queries=[],
+        queries=extra.pop("queries", []),
         spec_name="orders",
         root=tmp_path,
         portia_dir=sales,
     )
+    return path.relative_to(tmp_path).as_posix()
+
+
+def test_the_card_lists_its_findings_by_question_and_reads_one_whole(sales, tmp_path):
+    _two_steps(sales)
+    query = {
+        "chat": "2026-10-13T09-00-00",
+        "n": 3,
+        "question": "how many orders have no customer?",
+        "sql": "SELECT count(*) FROM orders",
+        "result": '{"rows":[[2]]}',
+    }
+    where = _finding(tmp_path, sales, queries=[query])
+
+    card = handlers.read_spec("orders", portia_dir=sales)
+    (listed,) = _rows(card["findings"])
+    assert listed["path"] == where and listed["question"] == "are the unmatched orders real?"
+
+    whole = handlers.read_spec("orders", finding=where, portia_dir=sales)
+    json.dumps(whole)
+    assert whole["finding"] == where and whole["so"] == "kept a left join"
+    assert whole["about"] == ["orders", "customers"] and whole["changed_since"] == []
+    (q,) = _rows(whole["queries"])
+    assert q["sql"] == query["sql"] and q["result_chars"] == len(q["result"])
+    assert "cut" not in whole
+    # The name alone works as well as the path the card lists.
+    assert (
+        handlers.read_spec(
+            "orders", finding=where.rsplit("/", 1)[-1].removesuffix(".yaml"), portia_dir=sales
+        )
+        == whole
+    )
+
+
+def test_a_long_finding_result_is_cut_and_says_so_first(sales, tmp_path):
+    _two_steps(sales)
+    long = '{"rows":' + "[" + ",".join(["[1]"] * 3000) + "]}"
+    query = {"chat": "c", "n": 1, "question": "q", "sql": "SELECT 1", "result": long}
+    where = _finding(tmp_path, sales, queries=[query])
+
+    whole = handlers.read_spec("orders", finding=where, portia_dir=sales)
+
+    assert list(whole)[0] == "cut"
+    (q,) = _rows(whole["queries"])
+    assert len(q["result"]) == handlers.FINDING_RESULT_CHARS and q["result_chars"] == len(long)
+
+
+def test_a_finding_is_found_by_its_name_only_never_by_a_path_elsewhere(sales, tmp_path):
+    _two_steps(sales)
+    (tmp_path / "secret.yaml").write_text("question: not a finding\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="No finding"):
+        handlers.read_spec("orders", finding="../secret.yaml", portia_dir=sales)
+
+
+def test_measured_gives_the_built_tables_shape_and_points_at_the_rungs(sales):
+    """Not the model's catalog entry: the model is an indexed table (2026-10-13)."""
+    _two_steps(sales)
 
     base = handlers.read_spec("orders", portia_dir=sales)
-    assert base["n_findings"] == 1 and base["built"]
-    assert "journal" not in base and "measured" not in base
-
-    full = handlers.read_spec("orders", journal=True, measured=True, portia_dir=sales)
+    full = handlers.read_spec("orders", measured=True, portia_dir=sales)
     json.dumps(full)
-    assert full["journal"][0]["so"] == "kept a left join"
-    assert full["journal"][0]["at"]
-    assert "customer_id" in {c["name"] for c in full["measured"]["columns"]}
+
+    assert "measured" not in base
+    measured = full["measured"]
+    assert measured["n_columns"] == 2 and measured["n_rows"] and "columns" not in measured
+    assert sum(t["n"] for t in measured["types"].values()) == 2
+    assert "describe_source" in measured["more"] and "profile_source" in measured["more"]
+
+
+def test_measured_on_a_spec_nobody_built_is_null(sales, tmp_path):
+    _write_spec(tmp_path, "specs/staging/stg_orders.yaml", _STG)
+    assert handlers.read_spec("stg_orders", measured=True, portia_dir=sales)["measured"] is None
 
 
 def test_get_context_lists_the_models_beside_the_sources(sales, tmp_path):

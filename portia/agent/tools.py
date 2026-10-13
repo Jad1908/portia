@@ -625,24 +625,11 @@ def _too_large(size: int) -> dict[str, Any]:
     }
 
 
-#: How a measured table's columns are grouped in `read_spec`'s shortened answer
-#: (:func:`_spec_shortened`): roles and flags tallied, the spread of the two
-#: numbers every column has, and the range of the values a numeric group holds.
-#: A built table nobody profiled groups on its ``dtype``.
-_MEASURED_GROUPS: dict[str, Any] = {
-    "typed_by": ("inferred", "dtype"),
-    "tallied": ("role", "flags"),
-    "spread": ("null_rate", "n_distinct"),
-    "lowest": ("min",),
-    "highest": ("max",),
-}
-
-
 def _shortened(payload: dict) -> dict:
     """A report too long to send whole, every long run in it given as its count and ends.
 
     **For the tools whose answer is a report about a table, not its columns**
-    *(2026-10-08)*: `record_step`, `run_spec` and `read_spec`. A step over a
+    *(2026-10-08)*: `record_step` and `run_spec`. A step over a
     1,579-column table came back at 80,633 characters, most of it the outcome
     naming every column with a null rate and every column each input put into
     the output; it was refused, and the refusal told the copilot it had none of
@@ -654,19 +641,6 @@ def _shortened(payload: dict) -> dict:
         "result_shortened", listed=columnar.LISTED_GROUP, examples=columnar.GROUP_EXAMPLES
     )
     return {"shortened": notice, **columnar.shorten(payload)}
-
-
-def _spec_shortened(payload: dict) -> dict:
-    """`read_spec` shortened, a built table's columns grouped by type.
-
-    ``measured`` is the model's catalog entry, a record per column, so it is
-    grouped by type rather than cut into runs; everything else is a report.
-    """
-    measured = payload.get("measured")
-    if isinstance(measured, dict) and isinstance(measured.get("columns"), list):
-        grouped = columnar.by_type(measured, records="columns", **_MEASURED_GROUPS)
-        payload = {**payload, "measured": grouped}
-    return _shortened(payload)
 
 
 #: The fields of `record_step`'s answer a receipt keeps: where it was written,
@@ -1599,18 +1573,23 @@ async def record_step(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     "read_spec",
-    prompts.tool("read_spec"),
+    prompts.tool("read_spec", **handlers.spec_vocabulary()),
     {
         "type": "object",
         "properties": {
             "spec": {"type": "string", "description": "Model name, or its spec path"},
-            "journal": {
-                "type": "boolean",
-                "description": "Include what was asked on the way to this table",
+            "step": {"type": "string", "description": "One step's id, to read that step in full"},
+            "finding": {
+                "type": "string",
+                "description": "One finding's path, as the card lists it, to read it in full",
+            },
+            "match": {
+                **_MATCH,
+                "description": "Only steps whose id matches, * and ? as in a shell",
             },
             "measured": {
                 "type": "boolean",
-                "description": "Include what the last build measured about its table",
+                "description": "Add the built table's shape and its flagged columns",
             },
             "portia_dir": {"type": "string"},
         },
@@ -1622,11 +1601,12 @@ async def read_spec(args: dict[str, Any]) -> dict[str, Any]:
     return await _evidence(
         lambda: handlers.read_spec(
             args["spec"],
-            journal=bool(args.get("journal")),
+            step=args.get("step"),
+            finding=args.get("finding"),
+            match=args.get("match"),
             measured=bool(args.get("measured")),
             **_dir(args),
         ),
-        coarser=_spec_shortened,
         args=args,
     )
 

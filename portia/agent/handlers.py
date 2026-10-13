@@ -2702,14 +2702,70 @@ def _sync_graph(root: Path, portia_dir: str) -> str:
     return "updated"
 
 
+# --- the spec cards (2026-10-13, the tool revamp) ----------------------------------
+#
+# `read_spec` and `record_step` answer with a card whose size does not grow
+# with the spec or the table, as the source cards do (`describe_source`): every
+# list is cut at a fixed length and says how to ask a narrower question, every
+# flagged column is named by the flag rule (`core/listing.flagged`), and a
+# table's columns are the business of the rungs that read tables. The forms
+# they replaced sent every step verbatim and, on request, the built table's
+# whole catalog entry, or the outcome report naming every column with a null
+# rate; past `tools.RESULT_BUDGET` each was shortened to counts and ends.
+
+#: Steps one spec card lists before it says how many more there are. **A
+#: placeholder**: fifty rows of short ids and one or two inputs each are about
+#: 4,000 characters, and a spec is the working-out of one table, so a longer
+#: one is rare enough that ``match`` is the way to the rest.
+SPEC_STEPS = 50
+
+#: Names one list on a spec card gives: the sources it declares, the models it
+#: reads, the models that read it. **A placeholder.**
+SPEC_NAMES = 50
+
+#: Findings a spec card lists: the latest this many, counted against all of
+#: them, as `describe_source` does with notes. **A placeholder.**
+SPEC_FINDINGS = 30
+
+#: Queries one finding read lists, and the characters of each one's result it
+#: shows. A finding copies its results verbatim from the log, and one written
+#: before the revamp holds a whole query answer, up to `tools.RESULT_BUDGET`.
+#: **Placeholders.**
+FINDING_QUERIES = 10
+FINDING_RESULT_CHARS = 2_000
+
+#: What a spec card says about each step: what it is, and its shape as the last
+#: run measured it (`spec.step_shapes`), so no field needs a run.
+STEP_FIELDS = ("id", "op", "inputs", "n_rows", "n_cols", "flags", "drift")
+SOURCE_FIELDS = ("name", "ref")
+NAME_FIELDS = ("name",)
+FINDING_FIELDS = ("path", "at", "question")
+QUERY_FIELDS = ("n", "chat", "question", "sql", "result", "result_chars")
+
+#: The fields of a step's kept shape a card gives beside the step, in this order.
+_SHAPE = ("n_rows", "n_cols", "flags", "drift")
+
+
+def spec_vocabulary() -> dict[str, str]:
+    """The caps the spec tools' descriptions state, from the code (`card_vocabulary`'s reason)."""
+    return {
+        "spec_steps": str(SPEC_STEPS),
+        "spec_findings": str(SPEC_FINDINGS),
+        "finding_queries": str(FINDING_QUERIES),
+        "finding_chars": f"{FINDING_RESULT_CHARS:,}",
+    }
+
+
 def read_spec(
     spec_ref: str,
     *,
-    journal: bool = False,
+    step: str | None = None,
+    finding: str | None = None,
+    match: str | None = None,
     measured: bool = False,
     portia_dir: str = catalog.DEFAULT_DIR,
 ) -> dict:
-    """Open one spec as it is recorded, without running it.
+    """Open one spec as it is recorded, without running it: the spec card.
 
     **The decision record was the one durable artifact the agent wrote and
     could not read** *(2026-09-04, `docs/PIPELINE.md` §9)*. `run_spec`
@@ -2719,14 +2775,27 @@ def read_spec(
     specs existed. Asked about one, a Haiku session said it needed the spec's
     name and could only run it.
 
-    The steps come back **verbatim**. The spec is a record, and a summary of a
-    decision is a second author. Around them: what the spec reads and what
-    reads it (`spec.dependencies`, the same DAG `build_project` walks), whether
-    its compiled ``.sql`` is current, when its table was last built and how
-    many findings sit under it. Those last two are counts rather than the
-    things themselves so that an absence reads as a number and never as
-    nothing (`KNOWLEDGE_GRAPH.md` §4.4); ``journal`` and ``measured`` add the
-    things on request.
+    **A card, and one step at a time in full** *(2026-10-13, the tool revamp)*.
+    This sent every step verbatim, which is the right way to read one step and
+    made twenty-odd of them a payload. The card is what the spec is: its name,
+    layer and target, the sources it declares, the models it reads and that
+    read it, whether its compiled ``.sql`` is current and when its table was
+    built, and a row per step (`STEP_FIELDS`): id, op and inputs, and the
+    rows, columns, flags and drift the last run measured, kept on the model's
+    entry (`spec.step_shapes`) and given only while the spec is the one that
+    run executed. ``step`` reads one step **verbatim**, because a summary of a
+    decision is a second author; ``finding`` reads one finding of the journal
+    whole. The findings recorded for this spec are listed by question and every
+    one is counted, so an absence reads as a number and never as nothing
+    (`KNOWLEDGE_GRAPH.md` §4.4). ``match`` narrows the steps to ids matching a
+    shell-style pattern, which is how a spec longer than `SPEC_STEPS` is read.
+
+    ``measured`` adds the built table's shape and its flagged columns, named by
+    the flag rule, and points at `describe_source` and `profile_source` on the
+    model for the rest. It used to add the model's whole catalog entry, a
+    record per column, which a 1,579-column model could send in no form but
+    grouped; the model is an indexed table, and the rungs that read tables
+    read it.
 
     ``spec_ref`` is a model name or a spec path. Both resolve through
     `discover_specs`, so the answer is about the file the project would build.
@@ -2734,33 +2803,217 @@ def read_spec(
     root = _project_root(portia_dir)
     models = spec.discover_specs(root)
     name, path = _resolve_spec(spec_ref, models, root)
+    if finding:
+        return _finding_card(finding, root=root, portia_dir=portia_dir)
     doc = spec.load_spec(path)
     steps = list(doc.get("steps") or [])
+    shown_path = relative(path, root) if path.is_relative_to(root) else str(path)
+    entry = catalog.load_models(portia_dir).get(name)
+    shapes, note = _last_shapes(entry, doc)
+    head = {"spec": shown_path, "model": name}
+    if step:
+        return {**head, **_step_card(steps, step, shapes, note, spec_ref=shown_path, model=name)}
+    picked = [s for s in steps if _matches(str(s.get("id")), match)] if match else steps
+    listed = picked[:SPEC_STEPS]
+    step_list = {
+        "n_steps": len(steps),
+        "steps": listing.listing(
+            STEP_FIELDS,
+            [_step_row(s, shapes) for s in listed],
+            n=len(picked),
+            more=prompts.more("spec_steps", left=len(picked) - len(listed)),
+        ),
+        **note,
+    }
+    if match:
+        return {**head, **step_list}
     layer = doc.get("layer")
     deps = spec.dependencies(models, base_dir=root) if name in models else {}
     compiled = pipeline.model_path(path, layer=layer, root=root)
-    entry = catalog.load_models(portia_dir).get(name)
-    briefs = findings.briefs_for_spec(name, root=root)
-    out: dict[str, Any] = {
-        "spec": relative(path, root) if path.is_relative_to(root) else str(path),
-        "model": name,
+    sources = dict(doc.get("sources") or {})
+    read_by = [n for n, reads in sorted(deps.items()) if name in reads]
+    card: dict[str, Any] = {
+        **head,
         "layer": layer,
-        "sources": dict(doc.get("sources") or {}),
-        "n_steps": len(steps),
-        "steps": steps,
-        "reads": sorted(deps.get(name, ())),
-        "read_by": sorted(n for n, reads in deps.items() if name in reads),
+        "target": doc.get("target"),
+        "sources": _tables(SOURCE_FIELDS, [[k, v] for k, v in sources.items()], name),
+        "reads": _tables(NAME_FIELDS, [[n] for n in sorted(deps.get(name, ()))], name),
+        "read_by": _tables(NAME_FIELDS, [[n] for n in read_by], name),
         "compiled": relative(compiled, root) if compiled.exists() else None,
         "compiled_stale": pipeline.is_stale(path, doc, layer=layer, root=root),
         "built": ((entry or {}).get("built") or {}).get("at"),
-        "n_findings": len(briefs),
+        **step_list,
+        "findings": _findings_list(name, root),
     }
-    if journal:
-        out["journal"] = briefs
     if measured:
-        # ``None`` when nobody has built it — a fact, stated, not an empty list.
-        out["measured"] = entry
-    return out
+        # ``None`` when nobody has built it: a fact, stated, not an empty block.
+        card["measured"] = None if entry is None else _built_shape(name, entry)
+    card["more"] = prompts.more("spec_card", model=name)
+    return card
+
+
+def _last_shapes(entry: dict | None, doc: dict) -> tuple[dict[str, dict], dict]:
+    """Each step's kept shape by id, and the ``steps_measured`` field saying from when.
+
+    The shapes are given only when the run that kept them ran this spec: a
+    hand edit since moves the fingerprint, and a shape measured before it is
+    the shape of a step that may no longer be what it was. Then
+    ``steps_measured`` is ``null`` with a sentence beside it saying why
+    (`notices/`), as `row_facts` does for a row count nobody recorded.
+    """
+    built = (entry or {}).get("built") or {}
+    kept = built.get("steps")
+    if kept is not None and built.get("fingerprint") == pipeline.fingerprint(doc):
+        return {str(s.get("id")): s for s in kept}, {"steps_measured": built.get("at")}
+    if kept is not None:
+        why = prompts.notice("steps_changed", at=built.get("at"))
+    else:
+        why = prompts.notice("steps_not_measured")
+    return {}, {"steps_measured": None, "steps_note": why}
+
+
+def _step_row(step: dict, shapes: dict[str, dict]) -> list:
+    """One step as the card lists it: `STEP_FIELDS`, its shape ``null`` where none was kept."""
+    shape = shapes.get(str(step.get("id"))) or {}
+    return [
+        step.get("id"),
+        step.get("op"),
+        spec.step_inputs(step),
+        *(shape.get(key) for key in _SHAPE),
+    ]
+
+
+def _tables(fields: tuple[str, ...], rows: list[list], model: str) -> dict:
+    """A list of tables on a spec card, cut at `SPEC_NAMES` and saying where the rest are."""
+    shown = rows[:SPEC_NAMES]
+    left = len(rows) - len(shown)
+    return listing.listing(
+        fields, shown, n=len(rows), more=prompts.more("spec_tables", left=left, model=model)
+    )
+
+
+def _findings_list(name: str, root: Path) -> dict:
+    """The findings recorded for this spec, oldest first: the latest `SPEC_FINDINGS`, all counted."""
+    briefs = findings.briefs_for_spec(name, root=root)
+    latest = briefs[-SPEC_FINDINGS:]
+    return listing.listing(
+        FINDING_FIELDS,
+        [[b.get("path"), b.get("at"), b.get("question")] for b in latest],
+        n=len(briefs),
+        start=len(briefs) - len(latest),
+        more=prompts.more("spec_findings", left=len(briefs) - len(latest)),
+    )
+
+
+def _built_shape(name: str, entry: dict) -> dict:
+    """The built table's shape and flagged columns, and where to read the rest of it.
+
+    `describe_source`'s overview of a wide table (:func:`_overview`) at any
+    width: counts by type, every flagged column named by the flag rule, and a
+    ``more`` naming the two rungs that read the model like any table.
+    """
+    cols = list(entry.get("columns") or [])
+    return {
+        "built": (entry.get("built") or {}).get("at"),
+        **row_facts(entry),
+        "n_columns": len(cols),
+        **_overview(
+            cols,
+            name,
+            measured=catalog.is_profiled(entry),
+            more=prompts.more("spec_measured", model=name),
+        ),
+    }
+
+
+def _step_card(
+    steps: list[dict],
+    wanted: str,
+    shapes: dict[str, dict],
+    note: dict,
+    *,
+    spec_ref: str,
+    model: str,
+) -> dict:
+    """One step verbatim, where it sits, which steps read it, and its kept shape.
+
+    An id is matched as a name is (`dialect.resolve_columns`): exactly, else
+    the one id that differs only in case. One that is not there is refused with
+    the closest ids rather than all of them, `_requested`'s reason.
+    """
+    ids = [str(s.get("id")) for s in steps]
+    (found,) = dialects.resolve_columns([wanted], ids)
+    if found not in ids:
+        raise ValueError(
+            prompts.error(
+                "unknown_step",
+                step=wanted,
+                model=model,
+                n=len(ids),
+                closest=", ".join(get_close_matches(wanted, ids, n=3)) or "(none close)",
+            )
+        )
+    at = ids.index(found)
+    shape = shapes.get(found) or {}
+    readers = [ids[i] for i in range(at + 1, len(steps)) if found in spec.step_inputs(steps[i])]
+    return {
+        "position": at + 1,
+        "n_steps": len(steps),
+        "step": steps[at],
+        "read_by_steps": readers,
+        **{key: shape.get(key) for key in _SHAPE},
+        **note,
+        "more": prompts.more("spec_step", ref=f"{spec_ref}{STEP_REF}{found}", model=model),
+    }
+
+
+def _finding_card(ref: str, *, root: Path, portia_dir: str) -> dict:
+    """One finding whole: its prose, the tables it is about, which moved since, and its queries.
+
+    Found by its file name alone, in the project's ``findings/``: the path a
+    card lists, or just the name. Only the name is read off what the agent
+    typed, so no path it sends reaches anywhere else on the disk. Each query's
+    result is shown up to `FINDING_RESULT_CHARS` with its whole length beside
+    it, and a ``cut`` notice comes first when any was cut: a finding written
+    before the revamp carries a query's whole answer.
+    """
+    stem = Path(ref).name.removesuffix(".yaml")
+    path = root / findings.FINDINGS_DIR / f"{stem}.yaml"
+    if not stem or not path.is_file():
+        known = sorted(p.stem for p in (root / findings.FINDINGS_DIR).glob("*.yaml"))
+        raise ValueError(
+            prompts.error(
+                "unknown_finding",
+                finding=ref,
+                n=len(known),
+                closest=", ".join(get_close_matches(stem, known, n=3)) or "(none close)",
+            )
+        )
+    where = relative(path, root)
+    record = next((f for f in findings.load_all(root) if f.get("path") == where), {})
+    queries = list(record.get("queries") or [])
+    shown = queries[:FINDING_QUERIES]
+    results = [str(q.get("result") or "") for q in shown]
+    rows = [
+        [q.get("n"), q.get("chat"), q.get("question"), q.get("sql"), text[:FINDING_RESULT_CHARS]]
+        + [len(text)]
+        for q, text in zip(shown, results, strict=True)
+    ]
+    out: dict[str, Any] = {}
+    if any(len(text) > FINDING_RESULT_CHARS for text in results):
+        out["cut"] = prompts.notice("finding_result_cut", chars=f"{FINDING_RESULT_CHARS:,}")
+    return {
+        **out,
+        "finding": where,
+        **{key: record.get(key) for key in ("question", "answer", "so", "about", "spec", "at")},
+        "changed_since": findings.stale_against(record, root=root, portia_dir=portia_dir),
+        "queries": listing.listing(
+            QUERY_FIELDS,
+            rows,
+            n=len(queries),
+            more=prompts.more("finding_queries", left=len(queries) - len(shown)),
+        ),
+    }
 
 
 def _resolve_spec(ref: str, models: dict[str, Path], root: Path) -> tuple[str, Path]:
