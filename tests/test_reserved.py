@@ -248,12 +248,16 @@ def test_an_interrupted_query_counts_a_reserved_input_too(shop):
     assert facts["inputs"] == {"portia_tables": {"rows": 3, "from": handlers.COUNTED}}
 
 
-def test_portia_tables_holds_every_note_oldest_first(shop):
-    for i in range(12):
+def test_portia_tables_holds_every_note_a_card_leaves_out(shop):
+    """A card carries the latest notes (`handlers.CARD_NOTES`); the rest are here (2026-10-13)."""
+    for i in range(handlers.CARD_NOTES + 2):
         catalog.set_interpretation("orders", note=f"note {i}", portia_dir=shop)
     con = reserved.connection()
     (table,) = reserved.tables(["portia_tables"], shop, con).values()
     ((texts,),) = table.sql(
         f"SELECT list_transform(notes, n -> n.text) FROM {table.ref} WHERE name = 'orders'"
     ).rows(1)
-    assert texts == [f"note {i}" for i in range(12)]
+    assert texts == [f"note {i}" for i in range(handlers.CARD_NOTES + 2)], "oldest first"
+    card = handlers.describe_source("orders", shop)
+    assert card["notes"]["n"] == handlers.CARD_NOTES + 2
+    assert card["notes"]["shown"] == f"3-{handlers.CARD_NOTES + 2}" and card["notes"]["more"]

@@ -1,10 +1,10 @@
 """The in-process MCP server — the only place the SDK meets the engine.
 
 Every tool here is a thin wrapper: validate nothing, decide nothing, just call
-the matching function in ``handlers.py`` and hand back its evidence as text.
-Compact JSON for most of it, and `core/columnar.py`'s table where the evidence
-is one record per column (:func:`_evidence`'s ``encode``), grouped by type when
-a table is too wide for that (``coarser``).
+the matching function in ``handlers.py`` and hand back its evidence as text, as
+compact JSON. A list in it is a header once and a row each
+(`core/listing.py`, 2026-10-13); the tab-separated table the two column rungs
+used to send (`core/columnar.render`) went with their cards.
 Keeping the wrappers this thin is the point — the logic lives in `handlers`
 where it can be tested without the SDK, and this file stays a translation layer
 we can swap if the harness ever changes.
@@ -41,7 +41,6 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from functools import partial
 from typing import Any
 
 from claude_agent_sdk import ToolAnnotations, create_sdk_mcp_server, tool
@@ -69,8 +68,9 @@ SERVER_NAME = "portia"
 #: known-good end, because the limit is on tokens and characters are only a
 #: proxy for them — the same length of denser text may not fit.
 #:
-#: Past it a result is refused (`_too_large`), except a whole table's columns,
-#: which come back grouped by type when that fits (`_by_type`).
+#: Past it a result is refused (`_too_large`), unless the tool has a coarser
+#: answer that fits (`_evidence`'s ``coarser``). Since 2026-10-13 an answer is
+#: bounded by its own shape (`core/listing.py`) and this is the last resort.
 RESULT_BUDGET = 30_000
 
 _READ_ONLY = ToolAnnotations(readOnlyHint=True)
@@ -625,58 +625,10 @@ def _too_large(size: int) -> dict[str, Any]:
     }
 
 
-#: Per-column evidence as a header and one line per column, not as JSON — the
-#: two rungs whose payload *is* a list of columns (`core/columnar.py`).
-#:
-#: `profile_source` is the one that failed loudly: the AQN build run could not
-#: return 83,079 characters and the copilot built its whole table without that
-#: source's numbers. It is 28,086 here.
-#:
-#: **`describe_source` is the one that was quietly larger**, and it took counting
-#: a whole session to see, because no single call was ever refused: 31 calls,
-#: 101,601 characters, **40% of every tool result in that run** and more than
-#: `profile_source` and `measure_overlaps` together. It is 42,353 here. Worth
-#: remembering which of the two the sprint went looking for.
-#:
-#: Only the encoding moved — `handlers` still returns a plain dict, so the
-#: "testable without the SDK" seam holds and every number is unchanged.
-_as_columns = partial(columnar.render, records="columns")
-
-
-def _by_type(payload: dict, **fields: Any) -> dict:
-    """A column-shaped answer grouped by type, saying so before anything else.
-
-    **What the two column rungs send instead of a refusal** when one line per
-    column is over `RESULT_BUDGET` (2026-10-08). A table of 1,579 columns was
-    56,289 characters described and 211,563 profiled, so both were refused and
-    the copilot could read it only by naming columns it had never seen. A
-    refusal is right where a narrower question exists to point at; for a whole
-    table's columns there is none short of names the copilot has not been
-    shown. So the answer comes at a coarser grain, built from the dict the
-    handler already returned: no second scan, and every column counted in
-    exactly one group (`core/columnar.by_type`). A grouped answer that is itself
-    over the budget is refused as before.
-
-    The notice comes first because a grouped answer read as a complete list is
-    the failure the budget exists to stop.
-    """
-    notice = prompts.error(
-        "result_grouped",
-        n_columns=f"{len(payload['columns']):,}",
-        listed=columnar.LISTED_GROUP,
-        examples=columnar.GROUP_EXAMPLES,
-    )
-    return {"grouped": notice, **columnar.by_type(payload, records="columns", **fields)}
-
-
-#: `describe_source` grouped: roles and flags tallied, and nothing measured,
-#: because L2 is the rung of meaning and statistics belong to L3. An unprofiled
-#: warehouse table carries a ``dtype`` and no ``inferred``, and groups on that.
-_described_by_type = partial(_by_type, typed_by=("inferred", "dtype"), tallied=("role", "flags"))
-
-#: How a measured table's columns are grouped: roles and flags tallied, the
-#: spread of the two numbers every column has, and the range of the values a
-#: numeric group holds. A built table nobody profiled groups on its ``dtype``.
+#: How a measured table's columns are grouped in `read_spec`'s shortened answer
+#: (:func:`_spec_shortened`): roles and flags tallied, the spread of the two
+#: numbers every column has, and the range of the values a numeric group holds.
+#: A built table nobody profiled groups on its ``dtype``.
 _MEASURED_GROUPS: dict[str, Any] = {
     "typed_by": ("inferred", "dtype"),
     "tallied": ("role", "flags"),
@@ -684,9 +636,6 @@ _MEASURED_GROUPS: dict[str, Any] = {
     "lowest": ("min",),
     "highest": ("max",),
 }
-
-#: `profile_source` grouped: what `describe_source` tallies, plus the numbers.
-_profiled_by_type = partial(_by_type, **_MEASURED_GROUPS)
 
 
 def _shortened(payload: dict) -> dict:
@@ -699,7 +648,7 @@ def _shortened(payload: dict) -> dict:
     the output; it was refused, and the refusal told the copilot it had none of
     an answer to a write that had already happened. Shortened by
     `core/columnar.shorten`, the same report is a few kilobytes and every run
-    in it is still counted. The notice comes first, as `_by_type`'s does.
+    in it is still counted. The notice comes first, as every notice does.
     """
     notice = prompts.error(
         "result_shortened", listed=columnar.LISTED_GROUP, examples=columnar.GROUP_EXAMPLES
@@ -708,7 +657,7 @@ def _shortened(payload: dict) -> dict:
 
 
 def _spec_shortened(payload: dict) -> dict:
-    """`read_spec` shortened, a built table's columns grouped as `profile_source` groups them.
+    """`read_spec` shortened, a built table's columns grouped by type.
 
     ``measured`` is the model's catalog entry, a record per column, so it is
     grouped by type rather than cut into runs; everything else is a report.
@@ -776,13 +725,14 @@ async def _evidence(
     **The size guard is here for the same reason the encoding is**: it is the one
     place every tool's payload becomes text, so one check covers all ten and no
     handler learns that a token limit exists. It measures the encoded string
-    rather than estimating from the dict, because the encoders differ —
-    `core/columnar.py` and compact JSON do not cost the same per record.
+    rather than estimating from the dict, because two encodings of one dict do
+    not cost the same.
 
-    ``coarser`` is the same evidence at a coarser grain, for a tool whose whole
-    answer has no narrower question behind it (:func:`_by_type`). It is tried
-    only past the budget and sent only within it; otherwise the refusal is the
-    one there always was, with the full answer's size.
+    ``coarser`` is the same evidence at a coarser grain: a card whose column
+    list does not fit, as its overview (`handlers.overview_of`), or a report
+    with its long runs counted (:func:`_shortened`). It is tried only past the
+    budget and sent only within it; otherwise the refusal is the one there
+    always was, with the full answer's size.
 
     ``receipt`` is for a tool that writes: past the budget even coarsened, it
     is sent in the refusal's place, given the size that did not fit, because a
@@ -915,27 +865,76 @@ async def _awaited(
     return _ok(text) if len(text) <= RESULT_BUDGET else _too_large(len(text))
 
 
+#: A shell-style name pattern, as `get_context`, `describe_source` and
+#: `profile_source` take it.
+_MATCH = {
+    "type": "string",
+    "description": "A name pattern, * and ? as in a shell, without case: meter_* or *office*",
+}
+
+#: The four ways `describe_source` and `profile_source` narrow a table's
+#: columns, together an *and* (`handlers._matching`).
+_COLUMN_FILTERS: dict[str, Any] = {
+    "columns": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "Exact column names, in the order you want them",
+    },
+    "match": _MATCH,
+    "type": {"type": "string", "description": "Only columns of this type, as the card names it"},
+    "flag": {"type": "string", "description": "Only columns carrying this flag"},
+}
+
+
+def _filters(args: dict[str, Any]) -> dict[str, Any]:
+    """The column filters a call gave, as the handlers take them, with its ``portia_dir``."""
+    return {
+        "columns": args.get("columns"),
+        "match": args.get("match"),
+        "type_": args.get("type"),
+        "flag": args.get("flag"),
+        **_dir(args),
+    }
+
+
 @tool(
     "get_context",
-    prompts.tool("get_context"),
-    {},
+    prompts.tool("get_context", **handlers.card_vocabulary()),
+    {
+        "type": "object",
+        "properties": {
+            "match": _MATCH,
+            "group": {"type": "string", "description": "Only the tables in this group"},
+            "portia_dir": {"type": "string"},
+        },
+        "required": [],
+    },
     annotations=_READ_ONLY,
 )
 async def get_context(args: dict[str, Any]) -> dict[str, Any]:
-    return await _evidence(lambda: handlers.get_context(**_dir(args)))
+    return await _evidence(
+        lambda: handlers.get_context(match=args.get("match"), group=args.get("group"), **_dir(args))
+    )
 
 
 @tool(
     "describe_source",
-    prompts.tool("describe_source"),
-    {"source": str},
+    prompts.tool("describe_source", **handlers.card_vocabulary()),
+    {
+        "type": "object",
+        "properties": {
+            "source": {"type": "string", "description": "Source name, or model name"},
+            **_COLUMN_FILTERS,
+            "portia_dir": {"type": "string"},
+        },
+        "required": ["source"],
+    },
     annotations=_READ_ONLY,
 )
 async def describe_source(args: dict[str, Any]) -> dict[str, Any]:
     return await _evidence(
-        lambda: handlers.describe_source(args["source"], **_dir(args)),
-        encode=_as_columns,
-        coarser=_described_by_type,
+        lambda: handlers.describe_source(args["source"], **_filters(args)),
+        coarser=handlers.overview_of,
         args=args,
     )
 
@@ -999,16 +998,15 @@ async def measure_overlaps(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     "profile_source",
-    prompts.tool("profile_source"),
+    prompts.tool("profile_source", **handlers.card_vocabulary()),
     {
         "type": "object",
         "properties": {
-            "source": {"type": "string", "description": "Source name, or <spec>#<step id>"},
-            "columns": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Column names to return; omit for every column",
+            "source": {
+                "type": "string",
+                "description": "Source name, model name, or <spec>#<step id>",
             },
+            **_COLUMN_FILTERS,
             "portia_dir": {"type": "string"},
         },
         "required": ["source"],
@@ -1017,11 +1015,7 @@ async def measure_overlaps(args: dict[str, Any]) -> dict[str, Any]:
 )
 async def profile_source(args: dict[str, Any]) -> dict[str, Any]:
     return await _evidence(
-        lambda: handlers.profile_source(args["source"], columns=args.get("columns"), **_dir(args)),
-        encode=_as_columns,
-        # Named columns are already the narrower question; too many of them is
-        # refused, as it always was.
-        coarser=_profiled_by_type if args.get("columns") is None else None,
+        lambda: handlers.profile_source(args["source"], **_filters(args)),
         reads_data=True,
         called=("profile_source", args),
     )

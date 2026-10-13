@@ -241,27 +241,23 @@ def test_the_look_back_after_thirty_questions(deep, chat):
         _assert_fits(_call("review_queries", {}))
 
 
-@KNOWN
 def test_the_source_index_of_sixty_tables(estate):
     with _inside(estate):
         _assert_fits(_call("get_context", {}))
 
 
-@KNOWN
 def test_the_source_index_with_one_very_sparse_table(deep):
     """The auto-drafted summary names every mostly-null column, and it rides in the index."""
     with _inside(deep):
         _assert_fits(_call("get_context", {}))
 
 
-@KNOWN
 def test_describing_a_very_sparse_table(deep):
     """Grouped by type, and still over: the summary is the bulk, not the columns."""
     with _inside(deep):
         _assert_fits(_call("describe_source", {"source": "sparse"}))
 
 
-@KNOWN
 def test_profiling_ten_named_columns_of_a_very_sparse_table(deep):
     """Ten columns asked for by name, and the summary comes with them."""
     names = [c["name"] for c in _source(deep, "sparse")["columns"]][2:12]
@@ -269,7 +265,6 @@ def test_profiling_ten_named_columns_of_a_very_sparse_table(deep):
         _assert_fits(_call("profile_source", {"source": "sparse", "columns": names}))
 
 
-@KNOWN
 def test_describing_a_table_with_forty_findings_and_140_notes(remembered):
     with _inside(remembered):
         _assert_fits(_call("describe_source", {"source": "hub"}))

@@ -313,20 +313,25 @@ def test_an_answer_about_fresh_tables_carries_no_stale_key(shop):
 
 
 def test_a_coarsened_answer_still_starts_with_stale(shop, monkeypatch):
+    """A card whose column list is over the budget is sent as its overview (2026-10-13)."""
+    from portia.core import listing
+
     _touch("orders.csv", "4,9.0\n")
+    rows = [[f"c{i:04d}_{'x' * 80}", "integer", "r" * 60, ["constant"]] for i in range(200)]
     wide = {
         "source": "orders",
-        "columns": [
-            {"name": f"c{i:04d}", "role": None, "inferred": "integer", "flags": ["constant"]}
-            for i in range(2000)
-        ],
+        "path": "orders.csv",
+        "summary": None,
+        "n_rows": 3,
+        "n_columns": 200,
+        "columns": listing.listing(("name", "type", "role", "flags"), rows, n=200),
     }
     monkeypatch.setattr(tools.handlers, "describe_source", lambda *a, **k: wide)
     result = _call("describe_source", {"source": "orders", "portia_dir": shop})
     text = result["content"][0]["text"]
     assert "is_error" not in result
     assert text.startswith('{"stale":[{"source":"orders"')
-    assert '"grouped"' in text
+    assert '"types"' in text and '"columns":{' not in text
 
 
 def test_a_check_that_fails_says_so_rather_than_failing_the_answer(shop, monkeypatch):
