@@ -7,10 +7,10 @@ machine: every check, every `query_data` and every `sql` step is a query on the 
 connection names, and only capped results come back. Three things follow.
 
 **Every question spends credits.** The warehouse is someone's meter. Ask what you need and no more:
-prefer `describe_source` (free, it reads the catalog) over `profile_source` (a scan of the whole
-table), and one `query_data` that answers the question over three that circle it. Do not re-run a
-query to check a number you already have. Recording a step re-runs the whole spec to measure it,
-so record when you have decided, not to see what happens.
+prefer `describe_source` (free, it reads the catalog) over `profile_source` on a table nobody has
+profiled (a scan of the whole table), and one `query_data` that answers the question over three
+that circle it. Do not re-run a query to check a number you already have. Recording a step re-runs
+the whole spec to measure it, so record when you have decided, not to see what happens.
 
 **A scoped table indexes as metadata, not as a profile.** `describe_source` on a table nobody has
 profiled says `profiled: false` and gives a row count from the information schema. The column

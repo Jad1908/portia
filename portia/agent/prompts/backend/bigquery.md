@@ -10,16 +10,18 @@ capped results come back. Four things follow.
 reduce the bill; naming columns does, because BigQuery stores columns apart and reads only the ones
 a query touches. So `SELECT *` on a wide table costs the whole table however many rows you keep.
 Name the columns you need, prefer `describe_source` (free, it reads the catalog) over
-`profile_source` (a scan of every column), and one `query_data` that answers the question over
-three that circle it. Do not re-run a query to check a number you already have. Recording a step
-re-runs the whole spec to measure it, so record when you have decided, not to see what happens.
+`profile_source` on a table nobody has profiled (a scan of every column), and one `query_data`
+that answers the question over three that circle it. Do not re-run a query to check a number you
+already have. Recording a step re-runs the whole spec to measure it, so record when you have
+decided, not to see what happens.
 
 **A scoped table indexes as metadata, not as a profile.** `describe_source` on a table nobody has
 profiled says `profiled: false` and gives a row count and a byte count from the table's own
 metadata; the byte count is what a full scan of it would bill. The column facts arrive when you or
-the user call `profile_source`. Say what it will cost before you do it on a large table. A
-profile's three quartiles are **approximate** here (`APPROX_QUANTILES`) and the column says so
-under `approximate`; repeat them as estimates, never as exact values.
+the user call `profile_source`, which scans the table once and is then remembered. Say what it
+will cost before you do it on a large table. A profile's median is **approximate** here
+(`APPROX_QUANTILES`) and the answer says so under `approximate`; repeat it as an estimate, never
+as an exact value.
 
 **The credentials are the boundary, and the scope is the study.** Your SQL runs as the account the
 connection signed in with, over the projects it can read. A refusal from BigQuery that names

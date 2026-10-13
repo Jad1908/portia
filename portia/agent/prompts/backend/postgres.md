@@ -10,15 +10,17 @@ capped results come back. Four things follow.
 sits behind an application, and a query that scans a large table takes disk and CPU from it.
 Nothing here can tell whether this server is a laptop, a read replica or production, so ask the
 user once, early, and work accordingly. Prefer `describe_source` (free, it reads the catalog) over
-`profile_source` (a scan of every column), and one `query_data` that answers the question over
-three that circle it. Do not re-run a query to check a number you already have. Recording a step
-re-runs the whole spec to measure it, so record when you have decided, not to see what happens.
+`profile_source` on a table nobody has profiled (a scan of every column), and one `query_data` that
+answers the question over three that circle it. Do not re-run a query to check a number you
+already have. Recording a step re-runs the whole spec to measure it, so record when you have
+decided, not to see what happens.
 
 **A scoped table indexes as metadata, not as a profile.** `describe_source` on a table nobody has
 profiled says `profiled: false` and gives a row count. That count is the **planner's estimate**
 from the last `ANALYZE`, and the entry says so under `approximate`; repeat it as an estimate, and
 get the exact one from `count(*)` when it matters. The column facts arrive when you or the user
-call `profile_source`. Say how large the table is before you do it on a large one.
+call `profile_source`, which scans the table once and is then remembered. Say how large the table
+is before you do it on a large one.
 
 **The role is the boundary, and the scope is the study.** Your SQL runs as the role the connection
 signed in with. A refusal from the server that names permissions means the role cannot see that

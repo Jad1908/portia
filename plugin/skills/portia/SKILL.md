@@ -204,6 +204,11 @@ you asked about when the one that changed is underneath it. The catalog's facts
 about that table describe it as it was. Say so before you build on them. An entry
 marked `unknown` is a table portia cannot check, such as a warehouse view.
 
+**A list cut short ends with `more`.** It says how many were left out and how to
+ask a narrower question. A list with no `more` is whole. Never read the rows you
+were shown as all there are. What portia knows about every column and every table
+is also two tables, `portia_columns` and `portia_tables`, which `query_data` reads.
+
 ## The four moves
 
 Work is four moves, and they interleave. A question in the middle of a build drops
