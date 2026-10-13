@@ -119,7 +119,7 @@ reads them instead of re-deriving. The user reviews them in a diff.
   builds. "Outcome is a grade, not pass/fail." "License 0 is 102 businesses."
   Write a note the moment you know the sentence.
 - **The journal** says what we *asked* the data and what it said. A finding names
-  the `query_data` calls it rests on, and the numbers are copied from the log.
+  the `query_data` calls it rests on by number, and their rows are copied in for you.
   Written from `review_queries` before a reply.
 - **The spec** says what we *did* to the data: steps, each with an `expect` block, a
   `rationale`, and a `grain` where the table has one. Written with `record_step`,

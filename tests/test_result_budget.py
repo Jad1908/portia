@@ -457,3 +457,84 @@ def test_a_card_with_findings_from_a_hundred_tables_names_them_all(crowded):
     assert set(pair) == {"source", "findings"}
     assert pair["findings"]["with_table"] == "partner_050"
     assert pair["findings"]["findings"]["n"] == 3 and len(pair["findings"]["findings"]["rows"]) == 3
+
+
+# --- kept results (branch D, `feat/query-results`, 2026-10-13) --------------
+#
+# The same sizes, with a chat attached so every answer is kept beside its log
+# (`portia/results.py`): the look-back that reads kept results, the answers it
+# reads in full, a wide result paged across its columns from the kept copy,
+# and values long enough that one row would otherwise fill the answer.
+
+
+@pytest.fixture(scope="module")
+def kept_chat(deep: Path) -> str:
+    """Thirty questions asked through the tool with a chat attached, logged as the app logs them."""
+    from portia import results, runlog
+    from portia.agent import events
+
+    hub = [c["name"] for c in _source(deep, "hub")["columns"]]
+    with _inside(deep):
+        log = runlog.start(".portia", kind=runlog.CHAT)
+        previous = results.attach(log.path)
+        try:
+            for i in range(30):
+                column = hub[2 + i]
+                args = {
+                    "question": f"How is {column} filled across regions?",
+                    "sql": f"SELECT region_code, count(*) n, count({column}) filled, "
+                    f"min({column}) lo, max({column}) hi, avg({column}) mean "
+                    "FROM hub GROUP BY 1 ORDER BY 1",
+                    "inputs": ["hub"],
+                }
+                result = _call("query_data", args)
+                call = {"name": tools.qualified("query_data"), "input": args, "id": f"k{i}"}
+                log.event(events.Event(events.TOOL_CALL, call))
+                text = result["content"][0]["text"]
+                log.event(events.Event(events.TOOL_RESULT, {"id": f"k{i}", "text": text}))
+        finally:
+            results.attach(previous)
+    return log.path.stem
+
+
+def test_the_look_back_over_thirty_kept_results(deep, kept_chat):
+    with _inside(deep):
+        _assert_fits(_call("review_queries", {"chat": kept_chat}))
+
+
+def test_thirty_answers_read_back_in_full(deep, kept_chat):
+    with _inside(deep):
+        _assert_fits(_call("review_queries", {"chat": kept_chat, "queries": list(range(1, 31))}))
+
+
+def test_thirty_logged_answers_read_back_in_full(deep, chat):
+    """The chat fixture's answers were not kept, so these come from the log."""
+    with _inside(deep):
+        _assert_fits(_call("review_queries", {"chat": chat.stem, "queries": list(range(1, 31))}))
+
+
+def test_twenty_rows_of_an_800_column_table_paged_across_its_columns(deep):
+    from portia import results, runlog
+
+    with _inside(deep):
+        log = runlog.start(".portia", kind=runlog.CHAT)
+        previous = results.attach(log.path)
+        try:
+            args = {"question": "q", "sql": "SELECT * FROM sparse", "inputs": ["sparse"]}
+            first = _call("query_data", args)
+            _assert_fits(first)
+            assert json.loads(first["content"][0]["text"])["result"], "kept"
+            _assert_fits(_call("query_data", {**args, "column_offset": 750, "limit": 40}))
+        finally:
+            results.attach(previous)
+
+
+def test_fifty_columns_of_two_thousand_character_values(deep):
+    values = ", ".join(f"repeat('x', 2000) AS v{k:02d}" for k in range(50))
+    with _inside(deep):
+        _assert_fits(
+            _call(
+                "query_data",
+                {"question": "q", "sql": f"SELECT {values} FROM hub", "inputs": ["hub"]},
+            )
+        )

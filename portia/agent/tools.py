@@ -1333,6 +1333,11 @@ async def view_chart(args: dict[str, Any]) -> dict[str, Any]:
                 "type": "string",
                 "description": "An older chat to curate; omit for this one",
             },
+            "queries": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "description": "Question numbers whose answers you want in full",
+            },
             "portia_dir": {"type": "string"},
         },
         "required": [],
@@ -1340,7 +1345,9 @@ async def view_chart(args: dict[str, Any]) -> dict[str, Any]:
     annotations=_READ_ONLY,
 )
 async def review_queries(args: dict[str, Any]) -> dict[str, Any]:
-    return await _evidence(lambda: handlers.review_queries(args.get("chat"), **_dir(args)))
+    return await _evidence(
+        lambda: handlers.review_queries(args.get("chat"), queries=args.get("queries"), **_dir(args))
+    )
 
 
 @tool(

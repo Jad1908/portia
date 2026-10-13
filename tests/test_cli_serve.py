@@ -193,12 +193,14 @@ def test_a_review_reads_this_sessions_log_and_not_the_newest(sales, tmp_path):
                 },
             )
         )
-        assert findings.review(sales, root=tmp_path)[0]["question"] == "not ours"
+        assert runlog.logs_in(sales, kind=runlog.CHAT)[0] == other.path, "the newest is theirs"
         reviewed = await client.call_tool("review_queries", {})
         return json.loads(reviewed.content[0].text), session.log.path
 
     reviewed, path = drive(sales, ask_then_review)
-    assert [q["question"] for q in reviewed["queries"]] == ["how many orders are there?"]
+    listed = reviewed["queries"]
+    questions = [row[listed["fields"].index("question")] for row in listed["rows"]]
+    assert questions == ["how many orders are there?"]
     assert reviewed["chat"] == path.stem
 
 
@@ -225,6 +227,7 @@ def test_a_finding_rests_on_a_query_out_of_the_hosted_log(sales, tmp_path):
     assert finding["queries"][0]["sql"] == "SELECT count(*) AS n FROM orders"
     copied = json.loads(finding["queries"][0]["result"])
     assert copied["fields"] == ["n"] and copied["rows"] == [[len(sales_orders())]]
+    assert finding["queries"][0]["stored"], "the result this session kept, by its handle"
 
 
 CHART = {

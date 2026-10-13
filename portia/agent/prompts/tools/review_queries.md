@@ -1,4 +1,4 @@
-Every question you asked the data this chat with `query_data`, numbered, with what came back.
+Every question you asked the data this chat, numbered, one line each with what it found.
 
 CALL THIS BEFORE EVERY REPLY IN WHICH YOU ASKED THE DATA ANYTHING. Not once at the end: a
 conversation has no reliable end and nothing warns you which message is the last. A reply has
@@ -7,6 +7,25 @@ you learned doing it.
 
 Each query says whether it has been `kept` already, so calling this every turn is safe —
 you only judge what is new, nothing is written twice, and there is nothing left pending.
+
+## What comes back
+
+    {"chat": "2026-10-09T13-33-56", "n_new": 2,
+     "queries": {"n": 14, "shown": "1-14",
+       "fields": ["n", "question", "chart", "result", "n_rows", "n_columns",
+                  "answer", "failed", "kept"],
+       "rows": [[1, "do orders reference unknown customers?", null,
+                 "portia_result_kxbt", 1, 1, {"n": 4}, null, false], ...]}}
+
+One row per question, in the order you asked them. 'n' is the number you cite. 'answer'
+is the answer itself when it is one short row; otherwise read 'n_rows' and ask for it in
+full. 'failed' is the first line of the error when the query failed. 'chart' is the tab
+when the question was a `plot_data` call. 'result' is the name the whole result was kept
+under, or null when it was too big to keep.
+
+To read answers in full, name them: `{"queries": [7, 9]}`. Each comes from the kept result
+when there is one, else from the log, cut to fit beside the others and saying so. A long
+chat lists the latest questions that fit, and 'more' says how many earlier ones it left out.
 
 ## What to keep
 
@@ -34,5 +53,5 @@ queries can make one finding — a tolerance sweep is three questions and one th
 ## Curating an older chat
 
 Pass `chat` to read a different one back. The numbers in it are still exact, because they come
-out of the log rather than out of anyone's memory, so a chat from three weeks ago can be
-curated today.
+out of the log and the results that chat kept rather than out of anyone's memory, so a chat
+from three weeks ago can be curated today.

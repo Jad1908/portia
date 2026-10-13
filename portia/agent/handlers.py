@@ -1385,8 +1385,45 @@ def view_chart(tab: str) -> dict:
     }
 
 
-def review_queries(chat: str | None = None, portia_dir: str = catalog.DEFAULT_DIR) -> dict:
-    """Every question you asked this chat with `query_data`, numbered, with its answer.
+#: How many characters `review_queries`' list may take, encoded. Past it the
+#: list holds the latest questions that fit and says how many earlier ones it
+#: left out. **A placeholder** *(2026-10-13)*: an entry is a few hundred
+#: characters, so this is some fifty questions, where fourteen used to be
+#: refused because every answer was resent whole.
+REVIEW_CHARS = 20_000
+
+#: The longest one-row answer the list shows inline, as ``{column: value}``. A
+#: count or a rate is a few dozen characters; a row of eighty columns is not an
+#: answer to glance at, and ``queries=[n]`` returns it.
+REVIEW_ANSWER_CHARS = 500
+
+#: The longest first line of an error the list shows; ``queries=[n]`` has the rest.
+FAILED_CHARS = 200
+
+#: What one question is in the list, in order (`core/listing.listing`).
+REVIEW_FIELDS = (
+    "n",
+    "question",
+    "chart",
+    "result",
+    "n_rows",
+    "n_columns",
+    "answer",
+    "failed",
+    "kept",
+)
+
+#: Keys a logged `query_data` answer carried before 2026-10-13 that its
+#: caller already holds: the call's own arguments, sent back.
+_ECHOED = ("question", "sql", "inputs")
+
+
+def review_queries(
+    chat: str | None = None,
+    portia_dir: str = catalog.DEFAULT_DIR,
+    queries: list[int] | None = None,
+) -> dict:
+    """Every question you asked this chat with `query_data`, numbered, with what it found.
 
     **The curation read, run before each reply rather than at the end of a
     chat.** The first version asked for it once, when the work was done, and the
@@ -1408,26 +1445,248 @@ def review_queries(chat: str | None = None, portia_dir: str = catalog.DEFAULT_DI
     Defaults to this chat. Name an older one to curate it late — the numbers are
     still exact, because they come out of the log rather than out of anyone's
     memory.
+
+    **One line per question, not every answer again** *(2026-10-13)*. A chat
+    of fourteen questions was refused at 30,741 characters because this sent
+    each logged answer back whole. Now each question is its number, its
+    sentence, the handle of the result the chat kept (`portia/results.py`),
+    its size, the answer itself only when it is one short row, and the first
+    line of its error if it failed. ``queries`` names the ones to read in full:
+    from the kept copy when there is one, else from the log.
     """
-    reviewed = findings.review(portia_dir, chat=chat, root=_project_root(portia_dir))
+    root = _project_root(portia_dir)
+    reviewed = findings.review(portia_dir, chat=chat, root=root)
+    name = reviewed[0]["chat"] if reviewed else None
+    here = {k.handle: k for k in results.kept_in(reviewed[0]["log"])} if reviewed else {}
+    if queries:
+        return {"chat": name, **_in_full(reviewed, [int(n) for n in queries], here)}
+    entries = [_review_row(q, here.get(q.get("stored") or "")) for q in reviewed]
+    # The latest that fit, because the newest questions are the ones not yet
+    # judged; the earlier ones are counted and reachable by number.
+    shown: list[list[Any]] = []
+    used = 0
+    for entry in reversed(entries):
+        size = len(to_json_compact(entry)) + 1
+        if shown and used + size > REVIEW_CHARS:
+            break
+        shown.append(entry)
+        used += size
+    shown.reverse()
+    start = len(entries) - len(shown)
     return {
-        "chat": reviewed[0]["chat"] if reviewed else None,
-        "n_queries": len(reviewed),
+        "chat": name,
         "n_new": sum(1 for q in reviewed if not q["kept"]),
-        # The SQL is deliberately not here. This list exists to be *read*, and
-        # thirty queries' worth of SQL is the payload problem again — the
-        # question is the handle, which is why `query_data` requires one.
-        "queries": [
-            {
-                "n": q["n"],
-                "question": q["question"],
-                "result": q["result"],
-                "failed": q["failed"],
-                "kept": q["kept"],
-            }
-            for q in reviewed
-        ],
+        "queries": listing.listing(
+            REVIEW_FIELDS,
+            shown,
+            n=len(entries),
+            start=start,
+            more=prompts.more("review_queries", left=start),
+        ),
     }
+
+
+def _review_row(query: dict, kept: results.Kept | None) -> list[Any]:
+    """One question as the list shows it, in `REVIEW_FIELDS` order."""
+    payload = _parsed(query.get("result", ""))
+    n_rows: int | None = None
+    n_columns: int | None = None
+    if kept is not None:
+        n_rows, n_columns = kept.n_rows, kept.n_columns
+    else:
+        # Off the logged answer: `n_columns` since 2026-10-13, the column list
+        # before it, and a chart's receipt has the list too.
+        if isinstance(payload.get("n_rows"), int):
+            n_rows = payload["n_rows"]
+        if isinstance(payload.get("n_columns"), int):
+            n_columns = payload["n_columns"]
+        elif isinstance(payload.get("columns"), list):
+            n_columns = len(payload["columns"])
+    failed = None
+    if query.get("failed"):
+        first = str(query.get("result") or "").strip().splitlines()
+        line = first[0] if first else ""
+        failed = line if len(line) <= FAILED_CHARS else line[:FAILED_CHARS] + CUT_MARK
+    return [
+        query["n"],
+        query.get("question", ""),
+        query.get("tab") or None,
+        kept.handle if kept is not None else None,
+        n_rows,
+        n_columns,
+        None if failed else _one_row(query, payload, kept),
+        failed,
+        bool(query.get("kept")),
+    ]
+
+
+def _parsed(text: str) -> dict:
+    """A logged answer as the dict it was, or empty when it was not one (an error, prose)."""
+    import json
+
+    try:
+        payload = json.loads(text)
+    except (TypeError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _one_row(query: dict, payload: dict, kept: results.Kept | None) -> dict | None:
+    """The answer as ``{column: value}`` when it is one row short enough to show, else ``None``.
+
+    Read off the logged answer when that holds the whole row, which costs
+    nothing; from the kept copy when the answer showed only part of it (its
+    columns cut, or a value cut short) or was a chart's receipt. The two say
+    the same: both are the query's row through `core.serialize`.
+    """
+    if payload.get("n_rows") != 1 and (kept is None or kept.n_rows != 1):
+        return None
+    row: dict | None = None
+    fields, rows = payload.get("fields"), payload.get("rows")
+    whole = "columns_shown" not in payload and "cut" not in payload
+    if query.get("tool") == findings.QUERY_TOOL and isinstance(rows, list) and len(rows) == 1:
+        if isinstance(fields, list) and isinstance(rows[0], list) and whole:
+            row = dict(zip(fields, rows[0], strict=False))
+        elif isinstance(rows[0], dict):
+            row = rows[0]  # a log written before answers were lists
+    if row is None and kept is not None and kept.n_rows == 1:
+        values = results.table(kept).rows(1)[0]
+        row = {c: to_jsonable_nested(v) for c, v in zip(kept.columns, values, strict=True)}
+    if row is None or len(to_json_compact(row)) > REVIEW_ANSWER_CHARS:
+        return None
+    return row
+
+
+def _in_full(reviewed: list[dict], numbers: list[int], here: dict[str, results.Kept]) -> dict:
+    """The answers ``numbers`` name, each as far as it fits beside the others.
+
+    From the kept copy when there is one, paged as `query_data` pages it;
+    else the logged answer without the arguments it echoed. They share
+    :data:`REVIEW_CHARS` equally, and an answer that does not fit beside
+    those before it is left out and named, to ask for on its own.
+    """
+    by_n = {q["n"]: q for q in reviewed}
+    asked = list(dict.fromkeys(numbers))
+    _unknown_queries(asked, by_n)
+    share = REVIEW_CHARS // len(asked)
+    answers: list[dict] = []
+    left: list[int] = []
+    used = 0
+    for n in asked:
+        query = by_n[n]
+        answer = _answer(query, here.get(query.get("stored") or ""), share)
+        size = len(to_json_compact(answer))
+        if answers and used + size > REVIEW_CHARS:
+            left.append(n)
+            continue
+        answers.append(answer)
+        used += size
+    out: dict[str, Any] = {"answers": answers}
+    if left:
+        out["more"] = prompts.more(
+            "review_answers", left=", ".join(f"#{n}" for n in left), first=left[0]
+        )
+    return out
+
+
+def _answer(query: dict, kept: results.Kept | None, budget: int) -> dict:
+    """One question's answer in full, within ``budget`` characters of rows."""
+    head: dict[str, Any] = {"n": query["n"], "question": query.get("question", "")}
+    if query.get("tab"):
+        head["chart"] = query["tab"]
+    text = str(query.get("result") or "")
+    if query.get("failed"):
+        return {**head, "failed": _within(text, budget)}
+    if kept is None:
+        return {**head, "result": None, "logged": _logged(text, budget)}
+    handle = kept.handle
+
+    def more_rows(shown: str, next_offset: int) -> str:
+        return prompts.more(
+            "answer_rows",
+            shown=shown,
+            n_rows=f"{kept.n_rows:,}",
+            next_offset=next_offset,
+            result=handle,
+        )
+
+    def more_columns(shown: str, next_column: int) -> str:
+        return prompts.more(
+            "answer_columns",
+            shown=shown,
+            n_columns=f"{kept.n_columns:,}",
+            next_column=next_column,
+            result=handle,
+        )
+
+    page = _page(
+        results.table(kept),
+        kept.columns,
+        n_rows=kept.n_rows,
+        start=0,
+        want=kept.n_rows,
+        first_column=0,
+        budget=budget,
+        more_rows=more_rows,
+        more_columns=more_columns,
+    )
+    cut = {"cut": page.pop("cut")} if "cut" in page else {}
+    return {
+        **head,
+        **cut,
+        "result": handle,
+        "n_rows": kept.n_rows,
+        "n_columns": kept.n_columns,
+        **page,
+    }
+
+
+def _logged(text: str, budget: int) -> Any:
+    """A logged answer as it came back, minus what it echoed, cut to ``budget`` and saying so."""
+    payload = _parsed(text)
+    if not payload:
+        return _within(text, budget)
+    payload = {k: v for k, v in payload.items() if k not in _ECHOED}
+    if len(to_json_compact(payload)) <= budget:
+        return payload
+    rows = payload.get("rows")
+    if not isinstance(rows, list):
+        return _within(to_json_compact(payload), budget)
+    base = len(to_json_compact({**payload, "rows": []})) + CUT_NOTICE_CHARS
+    taken: list[Any] = []
+    for row in rows:
+        base += len(to_json_compact(row)) + 1
+        if taken and base > budget:
+            break
+        taken.append(row)
+    notice = prompts.notice("logged_rows_cut", shown=len(taken), logged=len(rows))
+    return {"cut": notice, **payload, "rows": taken}
+
+
+#: Room left for the notice a cut logged answer carries, so it still fits.
+CUT_NOTICE_CHARS = 300
+
+
+def _within(text: str, budget: int) -> str:
+    """``text`` whole when it fits ``budget``, else its start and a sentence saying how much was left."""
+    if len(text) <= budget:
+        return text
+    notice = prompts.notice("logged_text_cut", shown=f"{budget:,}", size=f"{len(text):,}")
+    return f"{notice}\n\n{text[: max(0, budget - len(notice) - 2)]}{CUT_MARK}"
+
+
+def _unknown_queries(numbers: list[int], reviewed: dict[int, dict]) -> None:
+    """Refuse numbers that are not questions in this chat, naming the ones that are."""
+    missing = [n for n in numbers if n not in reviewed]
+    if missing:
+        available = f"#1-#{max(reviewed)}" if reviewed else "(none)"
+        raise ValueError(
+            prompts.error(
+                "no_such_query",
+                missing=", ".join(f"#{n}" for n in missing),
+                available=available,
+            )
+        )
 
 
 def record_finding(
@@ -1459,7 +1718,7 @@ def record_finding(
     named = _finding_prose({"question": question, "answer": answer, "so": so})
     refs = _known_refs(about, portia_dir, root)
     reviewed = {q["n"]: q for q in findings.review(portia_dir, chat=chat, root=root)}
-    queries = _cited(from_queries, reviewed)
+    queries = [_with_kept_rows(q) for q in _cited(from_queries, reviewed)]
 
     path = findings.record(
         question=named["question"],
@@ -1530,14 +1789,53 @@ def _cited(numbers: list[int], reviewed: dict[int, dict]) -> list[dict]:
     """The queries this finding came from, by their `review_queries` number."""
     if not numbers:
         raise ValueError(prompts.error("finding_needs_a_query"))
-    missing = [n for n in numbers if n not in reviewed]
-    if missing:
-        available = ", ".join(f"#{n}" for n in sorted(reviewed)) or "(none)"
-        raise ValueError(
-            f"no quer{'y' if len(missing) == 1 else 'ies'} "
-            f"{', '.join(f'#{n}' for n in missing)} in this chat. Available: {available}"
-        )
+    _unknown_queries(numbers, reviewed)
     return [reviewed[n] for n in numbers]
+
+
+#: The most rows of a kept result a finding copies, and the most values: a
+#: finding is read in a diff, so a wide result keeps fewer rows, never fewer
+#: columns, and every row it keeps is whole. **Placeholders** *(2026-10-13)*.
+FINDING_ROWS = 50
+FINDING_CELLS = 5_000
+
+
+def _with_kept_rows(query: dict) -> dict:
+    """``query`` with its result copied from the kept copy, when the chat kept one.
+
+    **The rows a finding rests on, exactly**, rather than the answer the
+    agent happened to be shown: the first :data:`FINDING_ROWS` of the kept
+    result, every column, each value as `core.serialize` gives it, and a
+    sentence saying how many more the kept copy holds and under which handle.
+    Copied, not referenced: the finding is committed and the chat's folder is
+    not, and the finding must keep its numbers when the chat is deleted.
+
+    A chart keeps its receipt, as it always has (`docs/VISUALIZATION.md` §6):
+    its rows went to the browser, and the query that produced them is the
+    evidence. The handle rides with it either way, so a later chat can read
+    the whole result while the chat that kept it exists. A query whose result
+    was not kept copies its logged answer, as before.
+    """
+    kept = results.find(query.get("log"), query.get("stored") or "")
+    if kept is None or query.get("tool") != findings.QUERY_TOOL:
+        return query
+    take = min(kept.n_rows, FINDING_ROWS, max(1, FINDING_CELLS // max(1, kept.n_columns)))
+    rows = results.table(kept).rows(take) if take else []
+    listed = listing.listing(
+        kept.columns,
+        rows,
+        n=kept.n_rows,
+        more=prompts.more(
+            "finding_rows",
+            kept=len(rows),
+            n_rows=f"{kept.n_rows:,}",
+            result=kept.handle,
+            chat=query.get("chat") or "",
+        ),
+    )
+    body = {"n_rows": kept.n_rows, "n_columns": kept.n_columns}
+    body.update({key: value for key, value in listed.items() if key != "n"})
+    return {**query, "result": to_json_compact(body)}
 
 
 def _kept_result(name: str, request: reserved.Request) -> Table:

@@ -25,6 +25,8 @@ one with the wrong 'about' is one nobody will ever see. Name BOTH SIDES when it 
 relationship. Names are checked against the catalog and an unknown one is refused.
 
 'from' names the `query_data` calls it rests on, by the number `review_queries` gave them.
+Numbers, not result names: `portia_result_kxbt` is where a result is kept, and #7 is the
+question you cite.
 
 'spec_name' is the model this was in service of, and the finding joins that model's journal —
 the one a person reads under the spec to see why it looks the way it does. If this chat recorded
@@ -33,8 +35,10 @@ anything.
 
 ## YOU DO NOT WRITE THE NUMBERS
 
-The SQL and the result are copied out of the chat log verbatim, from the queries you named in
-'from'. That is deliberate and it is not bookkeeping. By the time you are curating, a query may
+The SQL and the rows it returned are copied in for you, from the queries you named in 'from':
+the first rows of the result this chat kept, every column, or the logged answer when the
+result was not kept. A chart keeps its receipt. That is deliberate and it is not bookkeeping.
+The finding keeps them after this chat is gone. By the time you are curating, a query may
 be forty calls back; a measurement you restate from memory is a measurement you authored, and
 that is the one thing you may never do. Your sentence and the measured numbers end up side by
 side, where they can be read against each other.
