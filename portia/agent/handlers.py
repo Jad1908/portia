@@ -1283,8 +1283,8 @@ def _known_refs(about: list[str], portia_dir: str, root: Path) -> list[str]:
                 hint = f" — closest: {', '.join(close)}" if close else ""
                 raise ValueError(
                     f"no column {column!r} in {table!r}{hint}. "
-                    f"describe_source lists all {len(names)}, "
-                    "or groups them by type if they do not fit."
+                    f"describe_source lists its {len(names)} columns, "
+                    "and finds one by part of its name with match."
                 )
         checked.append(f"{table}.{column}" if column else table)
     return checked
