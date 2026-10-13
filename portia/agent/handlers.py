@@ -38,7 +38,7 @@ from portia.checks.outcome import BLOCKING_FLAGS, REPORT_KEYS
 from portia.core import backend, cancel, listing, present
 from portia.core import dialect as dialects
 from portia.core.io import connect, relative, source_table
-from portia.core.serialize import to_json, to_json_compact, to_jsonable_nested
+from portia.core.serialize import to_json_compact, to_jsonable_nested
 from portia.core.table import Table, subquery
 from portia.knowledge import measure, query, store
 from portia.knowledge import schema as knowledge_schema
@@ -2462,6 +2462,16 @@ def record_step(
     will sometimes skip, and the run that shipped a table missing an entire
     source skipped exactly that (docs/EVALUATION.md).
 
+    **It answers with the step card** *(2026-10-13, the tool revamp)*: where
+    the step was written, and the outcome's shape, flags and grain with its
+    exceptions named (:func:`_outcome_card`), never a column-by-column
+    report, because the table is indexed once the step is recorded and the
+    rungs that read tables read it; ``more`` says by which name. The step
+    itself is not sent back: the agent has just written it, it is in the
+    spec, and `read_spec` reads it with ``step``. Nor is the op's report,
+    which for SQL repeats the query and lists every output column; what a
+    prediction is held to comes back as ``drift``.
+
     A step that hits a zero-condition is **not written**. Overriding is possible
     and deliberate: `acknowledge: [<flag>]` on the step, which lands in the YAML
     for the user to read in a diff.
@@ -2562,12 +2572,16 @@ def record_step(
         raise ValueError(prompts.error("expect_shape", problems="\n".join(problems)))
 
     if result.blocking:
+        # The same bounded facts a recorded step's card carries, compact as
+        # every answer the model reads: the report itself named every column,
+        # indented, and on a wide table was cut in the middle past
+        # `tools.ERROR_BUDGET`, which is where its facts were.
         raise ValueError(
             prompts.error(
                 "blocked_step",
                 step_id=repr(step["id"]),
                 flags=", ".join(result.blocking),
-                facts=to_json(result.outcome),
+                facts=to_json_compact(_outcome_card(result.outcome, result.table, read_at=None)),
             )
         )
 
@@ -2584,6 +2598,18 @@ def record_step(
     spec.save_spec(doc, path)
     # Written before it is indexed, so the entry can say where the table is.
     written_to = _write_model(path.stem, results, target=doc.get("target"))
+    indexed = _index_model(
+        path.stem,
+        results,
+        portia_dir,
+        written_to=written_to,
+        fingerprint=pipeline.fingerprint(doc),
+    )
+    # **Where the table this step made is read** *(2026-10-13)*: the model, an
+    # indexed table, when this is its last step and the catalog took it;
+    # otherwise the step itself, by reference, which `profile_source` runs.
+    last = at is None or at == len(steps) - 1
+    read_at = path.stem if last and indexed == UPDATED else f"{path}{STEP_REF}{step['id']}"
     return {
         "spec": str(path),
         "step_id": step["id"],
@@ -2591,18 +2617,18 @@ def record_step(
         "n_steps": len(steps),
         "layer": doc.get("layer"),
         "target": doc.get("target"),
-        "outcome": result.outcome,
+        "model": path.stem,
+        "written_to": written_to,
+        "catalog": indexed,
+        "graph": _sync_graph(root, portia_dir),
+        "outcome": _outcome_card(result.outcome, result.table, read_at=read_at),
         "drift": result.drift,
         "acknowledged": result.acknowledged,
-        "model": _index_model(
-            path.stem,
-            results,
-            portia_dir,
-            written_to=written_to,
-            fingerprint=pipeline.fingerprint(doc),
+        "more": (
+            prompts.more("step_model", model=read_at)
+            if read_at == path.stem
+            else prompts.more("step_inner", ref=read_at, model=path.stem)
         ),
-        "written_to": written_to,
-        "graph": _sync_graph(root, portia_dir),
     }
 
 
@@ -2676,7 +2702,7 @@ def _index_model(
         )
     except Exception as exc:  # noqa: BLE001 - a description must not fail a step
         return f"not updated — {exc}"
-    return "updated"
+    return UPDATED
 
 
 def _sync_graph(root: Path, portia_dir: str) -> str:
@@ -2699,7 +2725,7 @@ def _sync_graph(root: Path, portia_dir: str) -> str:
         knowledge.sync(root, portia_dir=portia_dir)
     except store.GraphUnavailable as exc:
         return f"not updated — {exc}"
-    return "updated"
+    return UPDATED
 
 
 # --- the spec cards (2026-10-13, the tool revamp) ----------------------------------
@@ -2745,6 +2771,29 @@ QUERY_FIELDS = ("n", "chat", "question", "sql", "result", "result_chars")
 #: The fields of a step's kept shape a card gives beside the step, in this order.
 _SHAPE = ("n_rows", "n_cols", "flags", "drift")
 
+#: Column names a step card gives for the columns one input lost on the way to
+#: the output; past it, their count alone. **A placeholder** for "a few": a join
+#: that leaves a column or two behind has a few, and a projection keeping two of
+#: 800 columns has 798, which no card should list.
+DROPPED_NAMES = 10
+
+#: What a step card says about each input the step read (`checks.outcome`'s
+#: contribution report): how many of its columns reached the output, whether
+#: any of them holds a value there, and the ones that did not reach it.
+INPUT_FIELDS = ("input", "n_columns", "contributed", "n_dropped", "dropped")
+
+#: The flags a step card names the output's columns by, in this order. Two are
+#: the profiler's own words at its own line (`profiling.HIGH_NULL_RATE`), so a
+#: step card and the built table's card agree; ``newly_all_null`` is the
+#: outcome's zero, a column that went in with values and came out with none.
+ALL_NULL = "all_null"
+NEWLY_ALL_NULL = "newly_all_null"
+HIGH_NULL = "high_null"
+STEP_COLUMN_FLAGS = (ALL_NULL, NEWLY_ALL_NULL, HIGH_NULL)
+
+#: What `_index_model` and `_sync_graph` answer when their write went through.
+UPDATED = "updated"
+
 
 def spec_vocabulary() -> dict[str, str]:
     """The caps the spec tools' descriptions state, from the code (`card_vocabulary`'s reason)."""
@@ -2753,6 +2802,8 @@ def spec_vocabulary() -> dict[str, str]:
         "spec_findings": str(SPEC_FINDINGS),
         "finding_queries": str(FINDING_QUERIES),
         "finding_chars": f"{FINDING_RESULT_CHARS:,}",
+        "dropped": str(DROPPED_NAMES),
+        "high_null": f"{profiling.HIGH_NULL_RATE:.0%}",
     }
 
 
@@ -3014,6 +3065,103 @@ def _finding_card(ref: str, *, root: Path, portia_dir: str) -> dict:
             more=prompts.more("finding_queries", left=len(queries) - len(shown)),
         ),
     }
+
+
+def _outcome_card(outcome: dict, table: Table | None, *, read_at: str | None) -> dict:
+    """The outcome report as a step card carries it: its shape and its exceptions, never a dump.
+
+    **The report names every column twice on a wide table** *(2026-10-13)*:
+    a null rate for each one with any nulls, and each input's columns in the
+    output. A step keeping 1,579 columns was 80,633 characters, sent
+    shortened to counts and ends, or as a receipt. The card keeps what the
+    report measured and names what is exceptional: the shape and the flags,
+    the grain claim as measured, the output's columns by `STEP_COLUMN_FLAGS`
+    under the flag rule (`core/listing.flagged`, each flag's rarer side,
+    counted past a cap), and a row per input (`INPUT_FIELDS`) with its
+    dropped columns named while they are `DROPPED_NAMES` or fewer. A column's
+    null rate is the built table's to give, which is an indexed table once
+    the step is recorded; ``read_at`` is the name it is read by, or ``None``
+    for a step that was refused and has no table to read.
+    """
+    names = list(table.columns) if table is not None else []
+    empty = set(outcome.get("all_null_columns") or [])
+    newly = set(outcome.get("newly_all_null_columns") or [])
+    rates = outcome.get("null_rates") or {}
+    columns = [
+        {
+            "name": name,
+            "flags": [
+                flag
+                for flag, carries in (
+                    (ALL_NULL, name in empty),
+                    (NEWLY_ALL_NULL, name in newly),
+                    (
+                        HIGH_NULL,
+                        name not in empty and (rates.get(name) or 0) >= profiling.HIGH_NULL_RATE,
+                    ),
+                )
+                if carries
+            ],
+        }
+        for name in names
+    ]
+    flagged = listing.flagged(columns, order=STEP_COLUMN_FLAGS)
+    for flag, named in flagged.items():
+        if named.get(listing.LISTED) is False:
+            named["more"] = _flag_unlisted(flag, read_at)
+    inputs = [_input_row(name, made) for name, made in (outcome.get("contribution") or {}).items()]
+    card: dict[str, Any] = {
+        "n_rows": outcome.get("n_rows"),
+        "n_cols": outcome.get("n_cols"),
+        "flags": list(outcome.get("flags") or []),
+        "grain": _grain_facts(outcome.get("grain"), names),
+        "flagged": flagged,
+        "unflagged": sum(1 for col in columns if not col["flags"]),
+        "inputs": listing.listing(INPUT_FIELDS, inputs, n=len(inputs)),
+    }
+    if any(row[3] is not None and row[4] is None for row in inputs):
+        card["more"] = (
+            prompts.more("step_dropped", dropped=DROPPED_NAMES, table=read_at)
+            if read_at
+            else prompts.more("step_not_recorded")
+        )
+    return card
+
+
+def _input_row(name: str, made: dict) -> list:
+    """One input as a step card lists it; ``null`` dropped columns where nothing reached the output.
+
+    `checks.outcome` leaves ``columns_dropped`` out when none of an input's
+    columns reached the output by name, which is a rename or an aggregate as
+    often as a loss, and declines to judge it; so does this.
+    """
+    dropped = made.get("columns_dropped")
+    if dropped is None:
+        return [name, made.get("n_columns"), made.get("contributed"), None, None]
+    named = list(dropped) if len(dropped) <= DROPPED_NAMES else None
+    return [name, made.get("n_columns"), made.get("contributed"), len(dropped), named]
+
+
+def _grain_facts(grain: dict | None, names: list[str]) -> dict | None:
+    """The grain report, with the closest output names to a claimed column that is not there.
+
+    The report used to sit beside every output column's name, so a claim that
+    named a missing one could be checked against the list. The card has no
+    such list, so each missing column carries the nearest names instead.
+    """
+    if not grain or grain.get("measurable", True):
+        return grain
+    missing = list(grain.get("missing_columns") or [])
+    return {**grain, "closest": {col: get_close_matches(col, names, n=3) for col in missing}}
+
+
+def _flag_unlisted(flag: str, read_at: str | None) -> str:
+    """How to list the columns of a flag a step card gives as a count."""
+    if read_at is None:
+        return prompts.more("step_not_recorded")
+    if flag == NEWLY_ALL_NULL:
+        return prompts.more("step_newly_null_unlisted", table=read_at)
+    return prompts.more("step_flag_unlisted", flag=flag, table=read_at)
 
 
 def _resolve_spec(ref: str, models: dict[str, Path], root: Path) -> tuple[str, Path]:

@@ -629,13 +629,14 @@ def _shortened(payload: dict) -> dict:
     """A report too long to send whole, every long run in it given as its count and ends.
 
     **For the tools whose answer is a report about a table, not its columns**
-    *(2026-10-08)*: `record_step` and `run_spec`. A step over a
-    1,579-column table came back at 80,633 characters, most of it the outcome
-    naming every column with a null rate and every column each input put into
-    the output; it was refused, and the refusal told the copilot it had none of
-    an answer to a write that had already happened. Shortened by
-    `core/columnar.shorten`, the same report is a few kilobytes and every run
-    in it is still counted. The notice comes first, as every notice does.
+    *(2026-10-08)*: `run_spec` today, and `record_step` and `read_spec` until
+    they became cards (2026-10-13). A step over a 1,579-column table came back
+    at 80,633 characters, most of it the outcome naming every column with a
+    null rate and every column each input put into the output; it was refused,
+    and the refusal told the copilot it had none of an answer to a write that
+    had already happened. Shortened by `core/columnar.shorten`, the same report
+    is a few kilobytes and every run in it is still counted. The notice comes
+    first, as every notice does.
     """
     notice = prompts.error(
         "result_shortened", listed=columnar.LISTED_GROUP, examples=columnar.GROUP_EXAMPLES
@@ -646,12 +647,26 @@ def _shortened(payload: dict) -> dict:
 #: The fields of `record_step`'s answer a receipt keeps: where it was written,
 #: what it is called, and the outcome's shape and flags, which is what the
 #: copilot needs to know the write happened and whether anything is wrong.
-_RECEIPT_FIELDS = ("spec", "step_id", "superseded", "n_steps", "layer", "target", "written_to")
+_RECEIPT_FIELDS = (
+    "spec",
+    "step_id",
+    "superseded",
+    "n_steps",
+    "layer",
+    "target",
+    "model",
+    "written_to",
+)
 _RECEIPT_OUTCOME = ("n_rows", "n_cols", "flags")
 
 
 def _step_receipt(payload: dict, size: int) -> dict:
-    """What `record_step` did, when even its shortened report does not fit.
+    """What `record_step` did, when even its card does not fit.
+
+    **The last resort, kept on purpose** *(2026-10-13)*. The step card does
+    not grow with the table (`handlers._outcome_card`), so nothing measured
+    reaches this; a step reading thousands of inputs would. It stays because
+    the rule it keeps is about writes, not sizes.
 
     **A write is never answered with a refusal** *(2026-10-08)*. `_too_large`
     says *you have none of it, do not call this again*, which after a read is
@@ -703,10 +718,10 @@ async def _evidence(
     not cost the same.
 
     ``coarser`` is the same evidence at a coarser grain: a card whose column
-    list does not fit, as its overview (`handlers.overview_of`), or a report
-    with its long runs counted (:func:`_shortened`). It is tried only past the
-    budget and sent only within it; otherwise the refusal is the one there
-    always was, with the full answer's size.
+    list does not fit, as its overview (`handlers.overview_of`), or
+    `run_spec`'s report with its long runs counted (:func:`_shortened`). It is
+    tried only past the budget and sent only within it; otherwise the refusal
+    is the one there always was, with the full answer's size.
 
     ``receipt`` is for a tool that writes: past the budget even coarsened, it
     is sent in the refusal's place, given the size that did not fit, because a
@@ -1530,7 +1545,7 @@ async def join_findings(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     "record_step",
-    prompts.tool("record_step", **handlers.step_vocabulary()),
+    prompts.tool("record_step", **handlers.step_vocabulary(), **handlers.spec_vocabulary()),
     {
         "type": "object",
         "properties": {
@@ -1564,7 +1579,6 @@ async def record_step(args: dict[str, Any]) -> dict[str, Any]:
             target=args.get("target"),
             **_dir(args),
         ),
-        coarser=_shortened,
         receipt=_step_receipt,
         reads_data=True,
         called=("record_step", args),

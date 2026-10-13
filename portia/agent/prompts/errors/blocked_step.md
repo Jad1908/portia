@@ -39,7 +39,8 @@ nothing, a grain claim that is not unique — none of those is an answer to anyt
 
 'grain_columns_missing' means the output has no column of that name. Case is never the reason:
 a claim is matched the way the engine folds identifiers, so 'establishment_id' finds
-ESTABLISHMENT_ID. Read the column list in the facts above and name one that is there.
+ESTABLISHMENT_ID. Under grain, the facts above give the output's closest names to each missing
+one.
 
 Do not restate the zero as acceptable, and do not describe it as nominal, expected, or a limitation
 of the tooling. Either fix the step — the keys, the 'how', a normalize the other side also needs,

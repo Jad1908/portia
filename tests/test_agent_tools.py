@@ -519,22 +519,20 @@ _WIDE_STEP = {
 }
 
 
-def test_a_step_over_a_wide_table_comes_back_shortened_not_refused(wide_project, tmp_path):
-    from portia.agent import handlers
-
-    full = handlers.record_step("specs/wide_a.yaml", dict(_WIDE_STEP), portia_dir=wide_project)
-    assert len(to_json_compact(full)) > tools.RESULT_BUDGET, "the fixture is not wide enough"
-
+def test_a_step_over_a_wide_table_comes_back_as_a_card_not_shortened(wide_project, tmp_path):
+    """The outcome named every column twice; the card names the exceptions (2026-10-13)."""
     result = _call(
         "record_step",
         {"spec_path": "specs/wide.yaml", "step": dict(_WIDE_STEP), "portia_dir": wide_project},
     )
 
     assert "is_error" not in result, _text(result)[:300]
+    assert len(_text(result)) < tools.RESULT_BUDGET // 10
     answer = json.loads(_text(result))
-    assert list(answer)[0] == "shortened"
+    assert "shortened" not in answer and "receipt" not in answer
     assert answer["step_id"] == "all_meters" and answer["outcome"]["n_cols"] == 400
-    assert answer["outcome"]["null_rates"]["count"] == 400
+    (meters,) = answer["outcome"]["inputs"]["rows"]
+    assert meters[:4] == ["meters", 400, True, 0]
     assert (tmp_path / "specs" / "wide.yaml").exists()
 
 

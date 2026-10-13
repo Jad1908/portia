@@ -963,9 +963,37 @@ def test_the_refusal_hands_back_the_measurements_not_just_a_verdict(orphans):
         handlers.record_step("specs/x.yaml", _unmatched_join(), portia_dir=orphans)
 
     message = str(exc.value)
-    assert '"contributed": false' in message
-    assert "name" in message  # the column that came out empty
+    facts = _refused_facts(message)
+    inputs = _by_name(facts["inputs"])
+    assert inputs["strangers"]["contributed"] is False
+    assert facts["flagged"]["newly_all_null"]["columns"] == [
+        "name"
+    ]  # the column that came out empty
     assert "acknowledge" in message  # and the way out, if it's deliberate
+
+
+def _refused_facts(message: str) -> dict:
+    """The facts `blocked_step.md` carries: the step card's outcome, as compact JSON."""
+    (line,) = [ln for ln in message.splitlines() if ln.startswith('{"n_rows"')]
+    return json.loads(line)
+
+
+def test_a_refused_steps_facts_name_the_closest_columns_to_a_missing_grain(sales):
+    """The facts no longer list every output column, so a missing grain column names its neighbours."""
+    with pytest.raises(ValueError) as exc:
+        handlers.record_step(
+            "specs/orders.yaml",
+            {
+                "id": "j",
+                "op": "sql",
+                "inputs": ["orders"],
+                "sql": "SELECT order_id, amount FROM orders",
+                "grain": ["order_ids"],
+            },
+            portia_dir=sales,
+        )
+    grain = _refused_facts(str(exc.value))["grain"]
+    assert grain["measurable"] is False and grain["closest"] == {"order_ids": ["order_id"]}
 
 
 def test_a_correct_prediction_does_not_rescue_a_broken_join(orphans):
@@ -1032,7 +1060,60 @@ def test_recording_returns_what_the_table_looks_like_not_just_that_it_saved(sale
     )
     json.dumps(out)
     assert out["outcome"]["n_rows"] == 10
-    assert out["outcome"]["contribution"]["customers"]["contributed"] is True
+    assert _by_name(out["outcome"]["inputs"])["customers"]["contributed"] is True
+
+
+def test_a_step_card_names_its_exceptions_and_never_lists_every_column(orphans):
+    """An acknowledged zero is recorded, and the card names the column it emptied."""
+    out = handlers.record_step(
+        "specs/x.yaml",
+        _unmatched_join(acknowledge=["all_null_column", "source_did_not_contribute"]),
+        portia_dir=orphans,
+    )
+    json.dumps(out)
+
+    outcome = out["outcome"]
+    assert outcome["flagged"]["all_null"]["columns"] == ["name"]
+    assert outcome["flagged"]["newly_all_null"]["columns"] == ["name"]
+    assert outcome["unflagged"] == outcome["n_cols"] - 1
+    inputs = _by_name(outcome["inputs"])
+    assert inputs["strangers"]["contributed"] is False
+    assert inputs["orders"]["n_dropped"] == 0 and inputs["orders"]["dropped"] == []
+    assert "null_rates" not in outcome and "contribution" not in outcome
+    assert "sql" not in out and "step" not in out, "the agent's own step is not sent back"
+    assert out["model"] == "x" and "'x'" in out["more"] and "describe_source" in out["more"]
+
+
+def test_an_inputs_dropped_columns_are_counted_past_a_few(sales, monkeypatch):
+    monkeypatch.setattr(handlers, "DROPPED_NAMES", 1)
+
+    out = handlers.record_step(
+        "specs/ids.yaml",
+        {"id": "ids", "op": "sql", "inputs": ["orders"], "sql": "SELECT order_id FROM orders"},
+        portia_dir=sales,
+    )
+
+    row = _by_name(out["outcome"]["inputs"])["orders"]
+    assert row["n_dropped"] > 1 and row["dropped"] is None
+    assert "portia_columns" in out["outcome"]["more"]
+
+
+def test_a_superseded_middle_step_is_read_by_its_reference(sales, tmp_path):
+    """Not the model: that is the last step's table."""
+    first = {"id": "a", "op": "sql", "inputs": ["orders"], "sql": "SELECT * FROM orders"}
+    second = {"id": "b", "op": "sql", "inputs": ["a"], "sql": "SELECT order_id FROM a"}
+    handlers.record_step("specs/two_steps.yaml", first, portia_dir=sales)
+    handlers.record_step("specs/two_steps.yaml", second, portia_dir=sales)
+
+    out = handlers.record_step(
+        "specs/two_steps.yaml",
+        {**first, "sql": "SELECT order_id, amount FROM orders"},
+        supersedes="a",
+        portia_dir=sales,
+    )
+
+    assert out["outcome"]["n_cols"] == 2
+    assert "two_steps.yaml#a'" in out["more"] and "profile_source" in out["more"]
 
 
 def test_a_grain_claim_that_does_not_hold_refuses_the_step(sales, tmp_path):
@@ -1399,7 +1480,7 @@ def test_recording_a_step_records_what_the_model_looks_like(sales, tmp_path):
         },
         portia_dir=sales,
     )
-    assert out["model"] == "updated"
+    assert out["model"] == "per_customer" and out["catalog"] == "updated"
 
     models = catalog.load_models(sales)
     assert set(models) == {"per_customer"}

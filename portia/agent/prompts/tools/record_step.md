@@ -1,6 +1,7 @@
 <!-- placeholders: {expect_join}, {expect_normalize}, {expect_sql}, {hows}, {transform_ops},
      {blocking_flags}, {layers} — filled from handlers.step_vocabulary(); the ops and the spec
-     format own these lists, not this file. A literal brace in here must be doubled, or
+     format own these lists, not this file. {dropped}, {high_null} — from
+     handlers.spec_vocabulary(). A literal brace in here must be doubled, or
      str.format will eat it. -->
 Execute a decided step, measure the table it produces, and append it to a spec: the
 re-runnable record of what was done to the data and why.
@@ -187,10 +188,25 @@ database and which schema, and whether recording creates the table now or the us
 Run does, is in the brief's *Where the data lives*. A spec keeps one target; to move
 a table, the user edits the file.
 
-## A wide table
+## What comes back
 
-A step over a very wide table can report more than one answer can carry: the outcome names every
-column with a null rate and every column each input put into the output. Then the answer comes back
-shortened, saying so first: each long list given as its count, its ends and, for numbers, their
-spread. If even that does not fit, you get a receipt instead, saying the step was recorded and
-where. Either way the step was recorded; never record it again because its report was short.
+A step card. It says where the step was written, the model the spec builds, and whether the catalog
+and the graph took it. Then comes `outcome`, what the produced table turned out to be: n_rows,
+n_cols, its flags, and the grain claim as measured. Its exceptional columns are named under
+`flagged`: all_null (holds no value), newly_all_null (went in with values and came out with none)
+and high_null (at least {high_null} null). Each flag lists the columns that carry it, or under
+all_but the few that do not. A flag on too many to name is a count, with a `more` saying how to
+list them. `inputs` has a row per table the step read: how many of its columns reached the output,
+whether any of them holds a value there, and how many were dropped, named when {dropped} or fewer.
+A null n_dropped means none of its columns reached the output by name, which a rename or an
+aggregate also does, so it is not judged.
+
+`drift` holds each 'expect' field that missed, with what you expected and what the op reported.
+Your step itself is not sent back: it is in the spec, and `read_spec` with 'step' reads it.
+
+The card never lists every column, however wide the table. The table is indexed once the step is
+recorded, and `more` gives the name to read it by: the model, or '<spec>#<step id>' for a step that
+is not the spec's last.
+
+A step is never refused for the size of its answer. If what comes back is a receipt, the step was
+recorded all the same. Never record it again because its answer was short.

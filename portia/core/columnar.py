@@ -12,12 +12,13 @@ became cards: a list is now ``fields`` once and a row of values each
 grow with the table. `devtools/traces` still reads the old format back out of
 the logs written before. The grouped form (``by_type``), a table's columns as
 counts and spreads per type, went when `read_spec` became a card and stopped
-sending the built table's columns at all.
+sending the built table's columns at all, and `record_step` answers with a
+card that names a step's exceptions rather than every column.
 
-**What stays is the shortened form** (:func:`shorten`), for the reports that
-are still sent whole and can pass `tools.RESULT_BUDGET` on a very wide table:
-`record_step`'s and `run_spec`'s. It is the same report at a coarser grain,
-every item counted, rather than the first few that fit.
+**What stays is the shortened form** (:func:`shorten`), for the one report
+still sent whole that can pass `tools.RESULT_BUDGET` on a very wide table:
+`run_spec`'s, which is parked as it is. It is the same report at a coarser
+grain, every item counted, rather than the first few that fit.
 """
 
 from __future__ import annotations
