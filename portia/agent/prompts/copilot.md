@@ -34,6 +34,7 @@ marked `unknown` is a table portia cannot check, such as a warehouse view.
 ask a narrower question. A list with no `more` is whole. Never read the rows you
 were shown as all there are. What portia knows about every column and every table
 is also two tables, `portia_columns` and `portia_tables`, which `query_data` reads.
+They name things as `information_schema` does: `table_name`, `column_name`.
 
 ## The four moves
 
