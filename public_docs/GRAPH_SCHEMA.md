@@ -223,9 +223,11 @@ not be read and why — per model when the whole spec stalled, per column when o
 
 | kind | from → to | properties |
 |---|---|---|
-| `OVERLAPS` | `Column` → `Column` | `n_shared_values`, `left_coverage`, `right_coverage`, `comparable_types`, `asked_because`, `measured_at`, `left_fingerprint`, `right_fingerprint` |
+| `OVERLAPS` | `Column` → `Column` | `n_shared_values`, `left_coverage`, `right_coverage`, `comparable_types`, `asked_because`, `measured_at`, `left_fingerprint`, `right_fingerprint`, `origin` |
 
-Written only by `measure_overlaps`, which the copilot calls with pairs **it** chose.
+Written by `measure_overlaps`, which the copilot calls with pairs **it** chose, and since
+2026-10-13 by `join_findings`, which keeps the key measurement of a join it checked (one column
+each side, between two graph tables). Both require the copilot's reason.
 
 | property | means |
 |---|---|
@@ -236,6 +238,7 @@ Written only by `measure_overlaps`, which the copilot calls with pairs **it** ch
 | `asked_because` | **the agent's own sentence**, saying why it thought the pair was worth comparing |
 | `measured_at` | when |
 | `left_fingerprint` / `right_fingerprint` | what each end looked like at the time — see *Staleness* |
+| `origin` | which tool measured it: `measured` (`measure_overlaps`) or `join_check` (`join_findings`); an edge with none was written by `measure_overlaps` before 2026-10-13 |
 
 **Direction is load-bearing** and is the only thing that says which coverage is which. Overlap is
 not symmetric: 98% of orders' customer ids may exist in customers while only 40% of customers appear
@@ -302,7 +305,8 @@ Both of these are scoped to **one project** — see the top of this file.
 | **Refresh** on the knowledge pane | the structural half | a toast, pane stays usable |
 | indexing a source (window or `cli.index`) | the structural half | one line; the catalog is written regardless |
 | `record_step` | the structural half, so a table appears as it is built | reported in the result; the step is already on disk |
-| `measure_overlaps` | structural first, then the measurements | numbers still returned, `stored: false` |
+| `measure_overlaps` | structural first, then the measurements not already stored and fresh | numbers still returned, `stored: false` |
+| `join_findings` | its key measurement, when the join is on one column each side between two graph tables | the join's answer stands; `graph.kept: false` says why |
 
 Every one of them is **best-effort**. A stopped container is never allowed to cost you work you had
 already done.
