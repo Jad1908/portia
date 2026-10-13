@@ -685,7 +685,7 @@ def test_building_keeps_each_steps_shape_with_the_spec_it_ran(project):
     entry = catalog.load_models(project / catalog.DEFAULT_DIR)["mart_orders"]
     doc = spec.load_spec(project / spec.discover_specs(project)["mart_orders"])
     built = entry["built"]
-    assert built["fingerprint"] == pipeline.fingerprint(doc)
+    assert built[catalog.BUILT_FROM] == pipeline.fingerprint(doc)
     assert [s["id"] for s in built["steps"]] == [s["id"] for s in doc["steps"]]
     last = built["steps"][-1]
     assert set(last) == set(spec.SHAPE_KEYS)

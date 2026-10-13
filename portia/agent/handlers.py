@@ -2914,7 +2914,7 @@ def _last_shapes(entry: dict | None, doc: dict) -> tuple[dict[str, dict], dict]:
     """
     built = (entry or {}).get("built") or {}
     kept = built.get("steps")
-    if kept is not None and built.get("fingerprint") == pipeline.fingerprint(doc):
+    if kept is not None and built.get(catalog.BUILT_FROM) == pipeline.fingerprint(doc):
         return {str(s.get("id")): s for s in kept}, {"steps_measured": built.get("at")}
     if kept is not None:
         why = prompts.notice("steps_changed", at=built.get("at"))
