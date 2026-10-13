@@ -2015,8 +2015,15 @@ def _store_overlaps(graph, edges: list) -> dict:
         with store.session() as live:
             store.write(graph, live)
             written = store.write_measured(edges, live, graph.project)
+    except cancel.Cancelled:
+        raise
     except store.GraphUnavailable as exc:
         return {"stored": False, "not_stored_because": str(exc)}
+    except Exception as exc:  # noqa: BLE001 - measured numbers must not be lost to a failed write
+        # A database that dropped mid-write, rather than one never reached
+        # (2026-10-13): the numbers are measured either way, and the answer is
+        # a receipt for them, so a failure to keep them is said, never raised.
+        return {"stored": False, "not_stored_because": f"{type(exc).__name__}: {exc}"}
     if written < len(edges):
         return {
             "stored": False,

@@ -561,6 +561,21 @@ def test_with_no_graph_every_pair_is_measured_and_the_receipt_says_none_was_kept
     assert answer["stored"] is False and answer["not_stored_because"]
 
 
+def test_a_write_that_fails_half_way_still_answers_with_the_numbers(sales, recorded, monkeypatch):
+    """A database that drops mid-write is not one never reached, and the receipt
+    stands either way: the pairs were measured."""
+    monkeypatch.setattr(query, "stored_overlaps", lambda live, keys, *, project: {})
+
+    def dropped(edges, live, project):
+        raise RuntimeError("connection reset")
+
+    monkeypatch.setattr(store, "write_measured", dropped)
+    answer = handlers.measure_overlaps(_pairs(("customer_id", "customer_id")), sales)
+    (row,) = _receipt_rows(answer)
+    assert row["n_shared_values"] == 4
+    assert answer["stored"] is False and "connection reset" in answer["not_stored_because"]
+
+
 def test_a_missing_reason_is_refused_before_anything_is_measured(sales, monkeypatch):
     def never(*args, **kwargs):
         raise AssertionError("measured a pair before every pair was checked")
