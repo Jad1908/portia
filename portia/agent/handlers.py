@@ -2672,6 +2672,7 @@ def _index_model(
             metadata_only=backend.is_remote(table.con),
             written_to=written_to,
             fingerprint=fingerprint,
+            steps=spec.step_shapes(results),
         )
     except Exception as exc:  # noqa: BLE001 - a description must not fail a step
         return f"not updated — {exc}"

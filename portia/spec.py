@@ -46,6 +46,7 @@ from portia.checks.outcome import (
 from portia.core import cancel
 from portia.core.io import connect, source_table, write_table
 from portia.core.present import format_rate, frame_to_markdown, inline
+from portia.core.serialize import to_jsonable_nested
 from portia.core.table import Table
 from portia.ops import apply_join, apply_normalize, apply_sql
 from portia.ops.sql import render_text as render_sql
@@ -82,6 +83,37 @@ class StepResult:
         """Zero-conditions this step hit and did not acknowledge."""
         hit = BLOCKING_FLAGS & set(self.outcome.get("flags", []))
         return sorted(hit - set(self.acknowledged))
+
+
+#: What a run keeps about each step for the model's entry (:func:`step_shapes`).
+SHAPE_KEYS = ("id", "n_rows", "n_cols", "flags", "drift")
+
+
+def step_shapes(results: list[StepResult]) -> list[dict]:
+    """Each step's shape as a run measured it: rows, columns, flags and drift.
+
+    **What `read_spec` lists without running anything** *(2026-10-13)*. Every
+    run of a spec measures every step (`checks.outcome`), and until now the
+    measurements went back to whoever ran it and were dropped, so a spec card
+    could say what each step *is* and nothing about what it *made*. A run that
+    indexes the model keeps these on the model's entry (`catalog.index_model`),
+    beside when it ran and which version of the spec it ran, so a reader can
+    tell a shape from this spec from one measured before somebody edited it.
+    The shape only: what a step's columns hold is the built table's to say,
+    once it is indexed, and an intermediate's is a ``spec#step`` profile.
+    """
+    return [
+        to_jsonable_nested(
+            {
+                "id": r.id,
+                "n_rows": r.outcome.get("n_rows"),
+                "n_cols": r.outcome.get("n_cols"),
+                "flags": list(r.outcome.get("flags") or []),
+                "drift": dict(r.drift),
+            }
+        )
+        for r in results
+    ]
 
 
 #: Where a step names a table it reads. ``join`` and ``normalize`` name one per

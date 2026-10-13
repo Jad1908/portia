@@ -677,6 +677,21 @@ def test_building_records_what_the_table_it_built_looks_like(project):
     assert "top" in facts["name"] and "min" not in facts["name"]
 
 
+def test_building_keeps_each_steps_shape_with_the_spec_it_ran(project):
+    """What `read_spec` lists per step without running anything (`spec.step_shapes`)."""
+    _two_layer_project(project)
+    pipeline.build_project(project)
+
+    entry = catalog.load_models(project / catalog.DEFAULT_DIR)["mart_orders"]
+    doc = spec.load_spec(project / spec.discover_specs(project)["mart_orders"])
+    built = entry["built"]
+    assert built["fingerprint"] == pipeline.fingerprint(doc)
+    assert [s["id"] for s in built["steps"]] == [s["id"] for s in doc["steps"]]
+    last = built["steps"][-1]
+    assert set(last) == set(spec.SHAPE_KEYS)
+    assert last["n_cols"] == len(entry["columns"]) and last["n_rows"] == entry["indexed"]["rows"]
+
+
 def test_a_model_that_has_never_been_built_has_no_entry(project):
     """Absent means nobody has built it, which is a fact worth being able to
     see — the same reason a source with no read carries no `summary`."""
