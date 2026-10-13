@@ -297,7 +297,13 @@ def test_every_kind_of_answer_names_the_changed_table_first(shop):
         ("query_data", query),
         (
             "join_findings",
-            {"left": "orders", "right": "customers", "left_on": ["ORDER_ID"], "right_on": ["id"]},
+            {
+                "left": "orders",
+                "right": "customers",
+                "left_on": ["ORDER_ID"],
+                "right_on": ["id"],
+                "reason": "an order names a customer",
+            },
         ),
         ("read_spec", {"spec": "big_orders"}),
         ("set_interpretation", {"source": "orders", "note": "Amounts are in euros."}),

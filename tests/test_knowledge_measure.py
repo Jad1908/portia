@@ -451,3 +451,40 @@ def test_a_pair_measured_once_comes_back_from_the_graph_the_second_time(
     # Nothing was written, so the reasons stored are the first ones.
     (pair,) = query.lookup(measured, "orders", "country_name", project=pid)["compared_with"]
     assert "one by name and one by code" in pair["asked_because"]
+
+
+def test_a_join_check_lands_in_the_graph_with_its_origin(neo4j_session, project, monkeypatch, pid):
+    """25 join checks and 5 measurements in the logs, and the join checks kept nothing."""
+    monkeypatch.chdir(project)
+    found = handlers.join_findings(
+        "orders", "customers", keys=["customer_id"], reason="orders should name a customer"
+    )
+    assert found["graph"] == {"kept": True}
+
+    (neighbour,) = query.lookup(neo4j_session, "orders", project=pid)["neighbours"]
+    (pair,) = neighbour["pairs"]
+    assert (pair["column"], pair["other_column"]) == ("customer_id", "customer_id")
+    assert pair["origin"] == "join_check"
+    assert pair["asked_because"] == "orders should name a customer"
+    assert pair["n_shared_values"] == found["report"]["overlap"]["n_shared_keys"]
+    assert pair["stale"] is False
+
+
+def test_a_join_checks_measurement_is_reused_by_measure_overlaps(
+    neo4j_session, project, monkeypatch
+):
+    """One measurement with two occasions: either tool reads the other's."""
+    monkeypatch.chdir(project)
+    handlers.join_findings("orders", "customers", keys=["customer_id"], reason="the key")
+    again = handlers.measure_overlaps(
+        [
+            {
+                "left": "orders",
+                "left_column": "customer_id",
+                "right": "customers",
+                "right_column": "customer_id",
+                "reason": "the key, measured",
+            }
+        ]
+    )
+    assert again["n_from_graph"] == 1

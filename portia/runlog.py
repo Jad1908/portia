@@ -1121,6 +1121,11 @@ def _total_tokens(results: list[events.Event]) -> dict[str, Any]:
 SUBJECT_PART_CHARS = 24
 SUBJECT_CHARS = 48
 
+#: Arguments that are never what a call is about. ``reason`` is the sentence
+#: `join_findings` asks for *(2026-10-13)*: prose, which would push the two
+#: table names out of a 48-character label.
+NOT_A_SUBJECT = ("portia_dir", "reason")
+
 
 def call_subject(tool_input: dict | None) -> str:
     """What one call was *about*, in a few characters — `graph_lookup(orders.city)`.
@@ -1138,7 +1143,7 @@ def call_subject(tool_input: dict | None) -> str:
     read correctly for every tool there is. Still counting, never scoring: this
     says what was asked, not whether asking was right.
     """
-    items = [(k, v) for k, v in (tool_input or {}).items() if k != "portia_dir"]
+    items = [(k, v) for k, v in (tool_input or {}).items() if k not in NOT_A_SUBJECT]
     strings = [_clip(v, SUBJECT_PART_CHARS) for k, v in items if isinstance(v, str) and v]
     if strings:
         return _clip(".".join(strings), SUBJECT_CHARS)

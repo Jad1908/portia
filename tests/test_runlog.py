@@ -544,7 +544,10 @@ def test_one_file_holds_every_exchange(tmp_path):
     mean anything is the shape `runlog`'s own storage argument rejects."""
     log = runlog.start(tmp_path)
     log.event(events.prompt_event("merge them", model="m", effort="low"))
-    _turn(log, _call("join_findings", left="reservations"), _result())
+    # A `reason` is prose, never the subject: the label stays the table.
+    _turn(
+        log, _call("join_findings", left="reservations", reason="bookings name hotels"), _result()
+    )
     log.event(events.prompt_event("actually make it an inner join", model="m", effort="low"))
     _turn(log, _call("record_step"), _result())
 

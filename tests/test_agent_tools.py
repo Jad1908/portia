@@ -617,6 +617,10 @@ def test_a_wide_built_table_reads_back_grouped(monkeypatch):
 # --- the graph tools' arguments (2026-10-13) --------------------------------------------
 
 
+def test_a_join_check_requires_the_reason_its_measurement_is_kept_with():
+    assert tools.join_findings.input_schema["required"] == ["left", "right", "reason"]
+
+
 def test_graph_lookup_takes_a_neighbour_or_a_table_to_reach():
     properties = tools.graph_lookup.input_schema["properties"]
     assert {"table", "column", "neighbour", "to"} <= set(properties)

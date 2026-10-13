@@ -326,7 +326,12 @@ def test_profiling_the_hub(deep):
 
 def test_a_join_of_the_hub_to_a_neighbour(deep):
     with _inside(deep):
-        _assert_fits(_call("join_findings", {"left": "hub", "right": "n00", "keys": ["id"]}))
+        _assert_fits(
+            _call(
+                "join_findings",
+                {"left": "hub", "right": "n00", "keys": ["id"], "reason": "both are keyed by id"},
+            )
+        )
 
 
 def test_reading_the_24_step_spec(deep, long_spec):

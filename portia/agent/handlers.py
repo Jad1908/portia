@@ -2326,6 +2326,7 @@ def join_findings(
     right_on: list[str] | None = None,
     portia_dir: str = catalog.DEFAULT_DIR,
     *,
+    reason: str,
     left_columns: list[str] | None = None,
     right_columns: list[str] | None = None,
 ) -> dict:
@@ -2343,10 +2344,21 @@ def join_findings(
     separately because they are two schemas, exactly as ``left_on``/``right_on``
     already are.
 
+    **Its key measurement is kept in the graph** *(2026-10-13)*, as an
+    `OVERLAPS` edge with ``origin: join_check``, beside ``reason``, which is
+    required for the reason `measure_overlaps`' is: a zero without the sentence
+    that asked for it reads as a dead end. The logs held 25 join checks and 5
+    measurements, and every join check's numbers died with the turn. What was
+    and was not kept is the answer's ``graph`` (:func:`_keep_join`), and
+    nothing about the graph can fail the join's own answer.
+
     Call this **before** deciding anything about a merge.
     """
+    reason = (reason or "").strip()
+    if not reason:
+        raise ValueError(prompts.error("join_needs_a_reason"))
     con = connect()
-    return _join_findings(
+    found = _join_findings(
         _table(left, portia_dir, con),
         _table(right, portia_dir, con),
         on=keys,
@@ -2355,6 +2367,70 @@ def join_findings(
         left_columns=left_columns,
         right_columns=right_columns,
     )
+    return {**found, "graph": _keep_join(left, right, found["report"], reason, portia_dir)}
+
+
+def _keep_join(left: str, right: str, report: dict, reason: str, portia_dir: str) -> dict:
+    """Put a join check's key measurement in the graph, best-effort, and say what happened.
+
+    ``{"kept": True}``, or ``{"kept": False, "why": <sentence>}``. Kept only
+    when the join is on **one column a side between two tables the graph
+    holds**, sources or models, because that is what an `OVERLAPS` edge is:
+
+    - a composite key is several columns matched together, and no pair of
+      single columns measures it;
+    - a ``<spec>#<step>`` side is a table no build has made, so it has no node,
+      and its key may be one the step transformed (`join_findings` names
+      columns, so a transformed key only ever arrives this way);
+    - a table against itself is not a link between tables.
+
+    **Connected before the graph is built.** Building reads the whole catalog
+    and every spec, and on a machine with no database, which is the ordinary
+    case, that read would be paid on every join check for nothing. Any failure
+    past that point is reported in the answer, never raised: the join was
+    measured, and a database that is down or a column the graph lacks costs
+    only the keeping (§6.6).
+    """
+    lkeys, rkeys = report["keys"]["left"], report["keys"]["right"]
+    if len(lkeys) != 1 or len(rkeys) != 1:
+        return _not_kept(prompts.notice("join_not_kept_composite"))
+    if STEP_REF in left or STEP_REF in right:
+        return _not_kept(prompts.notice("join_not_kept_step"))
+    left, right = _known_name(left, portia_dir), _known_name(right, portia_dir)
+    if left == right:
+        return _not_kept(prompts.notice("join_not_kept_same_table"))
+    try:
+        with store.session() as live:
+            graph = knowledge.build_graph(_project_root(portia_dir), portia_dir=portia_dir).graph
+            try:
+                left_ref, right_ref = _graph_ref(left, graph), _graph_ref(right, graph)
+            except ValueError:
+                # A table with no node, which reads as its column missing.
+                return _not_kept(prompts.notice("join_not_kept_unattached"))
+            fingerprints = _table_fingerprints(graph)
+            edge = measure.overlap_edge(
+                measure.Pair(left_ref, lkeys[0], right_ref, rkeys[0], reason),
+                measure.from_join_report(report),
+                origin=measure.ORIGIN_JOIN_CHECK,
+                left_fingerprint=fingerprints.get(left_ref),
+                right_fingerprint=fingerprints.get(right_ref),
+            )
+            store.write(graph, live)
+            written = store.write_measured([edge], live, graph.project)
+    except cancel.Cancelled:
+        raise
+    except store.GraphUnavailable as exc:
+        return _not_kept(prompts.notice("join_not_kept_unavailable", reason=str(exc)))
+    except Exception as exc:  # noqa: BLE001 - the join's answer must not fail because of the graph
+        error = f"{type(exc).__name__}: {exc}"
+        return _not_kept(prompts.notice("join_not_kept_unavailable", reason=error))
+    if not written:
+        return _not_kept(prompts.notice("join_not_kept_unattached"))
+    return {"kept": True}
+
+
+def _not_kept(why: str) -> dict:
+    return {"kept": False, "why": why}
 
 
 def record_step(

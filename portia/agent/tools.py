@@ -1512,6 +1512,10 @@ async def set_interpretation(args: dict[str, Any]) -> dict[str, Any]:
             },
             "left_on": {"type": "array", "items": {"type": "string"}},
             "right_on": {"type": "array", "items": {"type": "string"}},
+            "reason": {
+                "type": "string",
+                "description": "Why these two might join on these keys — required, kept in the graph",
+            },
             "left_columns": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -1524,8 +1528,12 @@ async def set_interpretation(args: dict[str, Any]) -> dict[str, Any]:
             },
             "portia_dir": {"type": "string"},
         },
-        "required": ["left", "right"],
+        "required": ["left", "right", "reason"],
     },
+    # Read-only though it now keeps its key measurement in the graph: that is
+    # metadata in a store §5.2 calls re-derivable, best-effort and never asked
+    # about, the line `READ_TOOLS` draws for `measure_overlaps`. Without the hint
+    # Codex would stop every join check for an approval.
     annotations=_READ_ONLY,
 )
 async def join_findings(args: dict[str, Any]) -> dict[str, Any]:
@@ -1536,6 +1544,7 @@ async def join_findings(args: dict[str, Any]) -> dict[str, Any]:
             keys=args.get("keys"),
             left_on=args.get("left_on"),
             right_on=args.get("right_on"),
+            reason=args.get("reason") or "",
             left_columns=args.get("left_columns"),
             right_columns=args.get("right_columns"),
             **_dir(args),

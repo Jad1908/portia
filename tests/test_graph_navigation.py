@@ -572,6 +572,83 @@ def test_a_missing_reason_is_refused_before_anything_is_measured(sales, monkeypa
         handlers.measure_overlaps(pairs, sales)
 
 
+def test_a_join_check_needs_a_reason(sales):
+    with pytest.raises(ValueError, match="reason"):
+        handlers.join_findings(
+            "orders", "customers", keys=["customer_id"], portia_dir=sales, reason=""
+        )
+
+
+def test_a_join_check_keeps_its_key_measurement_in_the_graph(sales, recorded):
+    found = handlers.join_findings(
+        "orders",
+        "customers",
+        keys=["customer_id"],
+        portia_dir=sales,
+        reason="orders name customers",
+    )
+    assert found["graph"] == {"kept": True}
+    (edge,) = recorded["edges"]
+    overlap = found["report"]["overlap"]
+    assert edge.start.key == "source:orders.csv::customer_id"
+    assert edge.properties["origin"] == "join_check"
+    assert edge.properties["asked_because"] == "orders name customers"
+    assert edge.properties["n_shared_values"] == overlap["n_shared_keys"]
+    assert edge.properties["left_coverage"] == overlap["left_coverage"]
+    assert edge.properties["right_coverage"] == overlap["right_coverage"]
+    assert edge.properties["left_fingerprint"] and edge.properties["right_fingerprint"]
+
+
+def test_a_join_check_whose_column_the_graph_lacks_says_it_was_not_kept(sales, recorded):
+    recorded["attach"] = 0
+    found = handlers.join_findings(
+        "orders", "customers", keys=["customer_id"], portia_dir=sales, reason="r"
+    )
+    assert found["graph"]["kept"] is False and "no column" in found["graph"]["why"]
+
+
+@pytest.mark.parametrize(
+    ("left", "right", "keys", "says"),
+    [
+        ("orders", "orders", ["order_id", "customer_id"], "more than one column"),
+        ("orders", "orders", ["order_id"], "same table"),
+    ],
+)
+def test_what_a_join_check_does_not_keep_it_says(sales, recorded, left, right, keys, says):
+    found = handlers.join_findings(left, right, keys=keys, portia_dir=sales, reason="r")
+    assert found["graph"]["kept"] is False and says in found["graph"]["why"]
+    assert recorded["edges"] == []
+
+
+def test_a_join_check_on_a_steps_table_is_measured_and_not_kept(sales, recorded):
+    handlers.record_step(
+        "specs/chain.yaml",
+        {
+            "id": "first",
+            "op": "join",
+            "left": "orders",
+            "right": "customers",
+            "keys": ["customer_id"],
+            "how": "left",
+        },
+        portia_dir=sales,
+    )
+    found = handlers.join_findings(
+        "specs/chain.yaml#first", "customers", keys=["customer_id"], portia_dir=sales, reason="r"
+    )
+    assert found["report"]["left"]["n_rows"] == 10
+    assert found["graph"]["kept"] is False and "step produced" in found["graph"]["why"]
+    assert recorded["edges"] == []
+
+
+def test_a_join_check_never_fails_because_the_graph_is_down(sales):
+    found = handlers.join_findings(
+        "orders", "customers", keys=["customer_id"], portia_dir=sales, reason="r"
+    )
+    assert found["report"]["overlap"]["n_shared_keys"] == 4
+    assert found["graph"]["kept"] is False and "could not be written" in found["graph"]["why"]
+
+
 def test_graph_lookup_answers_one_question_at_a_time(sales):
     with pytest.raises(ValueError, match="one question at a time"):
         handlers.graph_lookup("orders", column="customer_id", to="customers", portia_dir=sales)
