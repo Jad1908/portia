@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from portia import catalog, findings, knowledge, pipeline, results, spec
-from portia.agent import chartspec, context, drawn, freshness, prompts, reserved
+from portia.agent import chartspec, context, drawn, freshness, graphcards, prompts, reserved
 from portia.checks import profiling, sql_joins
 from portia.checks.join import column_overlap
 from portia.checks.join import join_findings as _join_findings
@@ -642,19 +642,25 @@ def _matching(
 
 
 def graph_lookup(
-    table: str, column: str | None = None, portia_dir: str = catalog.DEFAULT_DIR
+    table: str,
+    column: str | None = None,
+    portia_dir: str = catalog.DEFAULT_DIR,
+    *,
+    neighbour: str | None = None,
+    to: str | None = None,
 ) -> dict:
-    """The router — *which* table should I look at, and where did this column come from.
+    """The map between tables: how to get from one to another, and what links them.
 
     Not a rung on the disclosure ladder: the ladder is depth on one source, and
     this is breadth. It sits **before** ``describe_source`` (`KNOWLEDGE_GRAPH.md`
-    §9.1) — ask it where to start, then climb.
+    §9.1) — ask it where to start, then climb. And it is where a relationship
+    is looked up before it is measured, since every measurement lands there.
 
-    Named without a column it returns the table's neighbourhood: what it reads,
-    what reads it, its groups, and every measured overlap grouped under the
-    table on the other end, with what both columns look like beside each number.
-    Add a column and it returns that column's lineage — one hop each way with
-    the step that explains it, plus the files underneath.
+    Four questions, one at a time (*2026-10-13*, `agent/graphcards.py` cuts
+    each to a card): the table alone is its neighbourhood, one entry per linked
+    table; ``neighbour`` is every measured pair between two tables in full;
+    ``column`` is that column's lineage a few hops each way and what it was
+    compared with; ``to`` is the routes from one table to another.
 
     The graph lives in Neo4j, which may not be running. That is not an error in
     the question; it is reported as itself so the caller can carry on with the
@@ -664,15 +670,21 @@ def graph_lookup(
     holds every project on the machine, so the question has to say which one it
     is about or it is a question about all of them.
     """
+    asked = [
+        name for name, value in (("column", column), ("neighbour", neighbour), ("to", to)) if value
+    ]
+    if len(asked) > 1:
+        raise ValueError(prompts.error("graph_one_question", given=_and(asked)))
     project = knowledge_schema.project_id(_project_root(portia_dir))
     try:
         with store.session() as live:
-            return query.lookup(live, table, column, project=project)
+            answer = query.lookup(live, table, column, neighbour=neighbour, to=to, project=project)
     except store.GraphUnavailable as exc:
         # Reframed rather than re-raised: what the model needs at this moment is
         # not the stack but which tools still work. The other refusals in
         # `prompts/errors/` exist for the same reason.
         raise ValueError(prompts.error("graph_unavailable", reason=str(exc))) from None
+    return graphcards.card(answer)
 
 
 #: Rows a `query_data` answer carries back when the caller does not say.
@@ -1874,7 +1886,7 @@ reserved.register(results.HANDLE, _kept_result)
 
 
 def measure_overlaps(pairs: list[dict], portia_dir: str = catalog.DEFAULT_DIR) -> dict:
-    """Measure whether column pairs share values, and keep the answers.
+    """Whether column pairs share values: from the graph where it knows, else measured and kept.
 
     **The pairs are yours to choose** (`KNOWLEDGE_GRAPH.md` §5.1). Nothing in code
     picks them: which relationships are worth a query is a judgment from meaning,
@@ -1884,36 +1896,104 @@ def measure_overlaps(pairs: list[dict], portia_dir: str = catalog.DEFAULT_DIR) -
 
     Each pair carries ``reason`` — why you think these two are worth comparing —
     and it is **required**. It is stored beside the numbers and it is what stops
-    a zero from reading as a dead end a year later (§4.4).
+    a zero from reading as a dead end a year later (§4.4). Every pair is checked
+    before any is measured, so a refusal costs no query.
 
-    The structural half of the graph is refreshed first, because a measurement
-    can only attach to columns the graph knows about, and refreshing is free.
+    **The graph first** *(2026-10-13)*. A pair the graph already holds, measured
+    against both tables as they are now (`measure.still_current`), is answered
+    from it and marked so, with when it was measured; only the rest are
+    measured, and only those are written. "The next session starts with them"
+    was the promise, and until this nothing read them back before measuring
+    again. A pair held but taken against a table that has changed since, or
+    whose fingerprints cannot be compared, is measured afresh: the old number is
+    not current, and re-measuring replaces it.
+
+    **The answer is a receipt** (`graphcards.overlaps_receipt`): a line a pair,
+    cut and said so past a fixed count, because the call has already written
+    and a refusal for size would read as a failure about something that
+    happened.
+
+    The structural half of the graph is refreshed before writing, because a
+    measurement can only attach to columns the graph knows about, and
+    refreshing is free.
     """
     con = connect()
     root = _project_root(portia_dir)
     graph = knowledge.build_graph(root, portia_dir=portia_dir).graph
     fingerprints = _table_fingerprints(graph)
+    columns = _graph_columns(graph)
+    resolved = [_pair(raw, graph, columns) for raw in pairs]
+    held, unreachable = _held_overlaps(resolved, graph.project)
 
-    measured, edges = [], []
-    for raw in pairs:
-        pair = _pair(raw, graph, portia_dir)
+    rows, edges = [], []
+    for i, pair in enumerate(resolved):
+        left_fp, right_fp = fingerprints.get(pair.spec.left), fingerprints.get(pair.spec.right)
+        seen = held.get(i)
+        if seen is not None and measure.still_current(seen, left_fp, right_fp):
+            rows.append(_receipt_row(pair, seen, graphcards.FROM_GRAPH))
+            continue
         overlap = column_overlap(
             _table(pair.left_table, portia_dir, con),
             pair.left_column,
             _table(pair.right_table, portia_dir, con),
             pair.right_column,
         )
-        measured.append({**overlap, "asked_because": pair.spec.asked_because})
-        edges.append(
-            measure.overlap_edge(
-                pair.spec,
-                overlap,
-                left_fingerprint=fingerprints.get(pair.spec.left),
-                right_fingerprint=fingerprints.get(pair.spec.right),
-            )
+        edge = measure.overlap_edge(
+            pair.spec, overlap, left_fingerprint=left_fp, right_fingerprint=right_fp
         )
+        edges.append(edge)
+        measured = {
+            **overlap,
+            "left_distinct": overlap["left"]["n_distinct"],
+            "right_distinct": overlap["right"]["n_distinct"],
+            "measured_at": edge.properties["measured_at"],
+        }
+        rows.append(_receipt_row(pair, measured, graphcards.FROM_QUERY))
 
-    return {"measured": measured, **_store_overlaps(graph, edges)}
+    kept: dict = {}
+    if edges and unreachable is not None:
+        # The read already found the graph down: a second connection would only
+        # say so again, slower.
+        kept = {"stored": False, "not_stored_because": unreachable}
+    elif edges:
+        kept = _store_overlaps(graph, edges)
+    return graphcards.overlaps_receipt(
+        rows, n_from_graph=len(rows) - len(edges), n_measured=len(edges), kept=kept
+    )
+
+
+def _held_overlaps(pairs: list[_ResolvedPair], project: str) -> tuple[dict[int, dict], str | None]:
+    """What the graph already holds for these pairs, by position, or why it could not say.
+
+    Only an unreachable graph is answered with nothing and its reason; the
+    measuring then goes ahead and its results say they were not kept. Any
+    other failure of the read is a bug in the read and is not swallowed.
+    """
+    keys = [
+        (
+            pair.spec.left.column(pair.spec.left_column).key,
+            pair.spec.right.column(pair.spec.right_column).key,
+        )
+        for pair in pairs
+    ]
+    try:
+        with store.session() as live:
+            return query.stored_overlaps(live, keys, project=project), None
+    except store.GraphUnavailable as exc:
+        return {}, str(exc)
+
+
+def _receipt_row(pair: _ResolvedPair, numbers: dict, answered_from: str) -> dict:
+    """One line of `measure_overlaps`' receipt, its fields `graphcards.RECEIPT_FIELDS`."""
+    return {
+        "left": f"{pair.left_table}.{pair.left_column}",
+        "right": f"{pair.right_table}.{pair.right_column}",
+        **{
+            key: numbers.get(key)
+            for key in (*measure.MEASURED, "left_distinct", "right_distinct", "measured_at")
+        },
+        "from": answered_from,
+    }
 
 
 def _store_overlaps(graph, edges: list) -> dict:
@@ -1958,8 +2038,14 @@ class _ResolvedPair:
     right_column: str
 
 
-def _pair(raw: dict, graph, portia_dir: str) -> _ResolvedPair:
-    """One requested pair, validated. A missing reason is refused, not defaulted."""
+def _pair(raw: dict, graph, columns: dict) -> _ResolvedPair:
+    """One requested pair, validated. A missing reason is refused, not defaulted.
+
+    Each column is named as the graph spells it, when only the case differs
+    (`dialect.resolve_columns`), so the measurement attaches to the column it
+    was taken on. A name the graph does not hold stays as typed, and the
+    measuring says whether the table has it.
+    """
     missing = [f for f in ("left", "left_column", "right", "right_column") if not raw.get(f)]
     if missing:
         raise ValueError(f"pair needs {', '.join(missing)}")
@@ -1968,13 +2054,36 @@ def _pair(raw: dict, graph, portia_dir: str) -> _ResolvedPair:
         raise ValueError(prompts.error("overlap_needs_a_reason"))
 
     left, right = _graph_ref(raw["left"], graph), _graph_ref(raw["right"], graph)
+    (left_column,) = dialects.resolve_columns([raw["left_column"]], columns.get(left, []))
+    (right_column,) = dialects.resolve_columns([raw["right_column"]], columns.get(right, []))
     return _ResolvedPair(
-        measure.Pair(left, raw["left_column"], right, raw["right_column"], reason),
+        measure.Pair(left, left_column, right, right_column, reason),
         raw["left"],
         raw["right"],
-        raw["left_column"],
-        raw["right_column"],
+        left_column,
+        right_column,
     )
+
+
+def _graph_columns(graph) -> dict:
+    """Each table's column names in the graph, by the table's ref."""
+    tables = {
+        f"{node.label.lower()}:{node.key}": node.ref
+        for node in graph.nodes.values()
+        if node.label in (knowledge_schema.SOURCE, knowledge_schema.MODEL)
+    }
+    out: dict = {}
+    for node in graph.nodes.values():
+        if node.label != knowledge_schema.COLUMN:
+            continue
+        # A column's key is its table's, then ``::`` and its name
+        # (`schema.column_key`); cut by the name's length, which a name holding
+        # ``::`` cannot fool.
+        name = str(node.properties.get("name"))
+        table = tables.get(node.key[: len(node.key) - len(name) - len("::")])
+        if table is not None:
+            out.setdefault(table, []).append(name)
+    return out
 
 
 def _graph_ref(table: str, graph):

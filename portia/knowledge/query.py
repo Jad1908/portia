@@ -5,56 +5,55 @@ stack was chosen so the agent **can** write its own Cypher (§3.4), and §7 leav
 open whether it should; that is a separate decision from whether traversal helps
 at all, and this is the half that answers the second question first.
 
-**What the graph is for is routing, and routing decides the shape of the answer**
-(§9.1). The disclosure ladder is depth on one source — `describe_source` →
-`profile_source` → `join_findings`, every rung answering *tell me more about this
-table*. The graph answers *which* table, and where a column came from. It sits
-**before** L2, not above L4.
+**What the graph is for is navigation between tables** (§9.1, and the tool
+revamp of 2026-10-13, `sandbox/limits/REVAMP_SPEC.md`). The disclosure ladder
+is depth on one source — `describe_source` → `profile_source` →
+`join_findings`, every rung answering *tell me more about this table*. The
+graph answers *which* table, how to get from one to another, and where a
+column came from. It sits **before** L2, not above L4.
 
-That framing is also this module's answer to §7's open question — *what a query
-is allowed to return at once* — which §9 sharpens rather than softens: a router
-that returns fifty things has not routed. So:
+Four questions, one per answer below:
 
-**Ask about a table and you get its neighbourhood, measurements included.** What
-it reads, what reads it, which groups it is in, and — grouped under each
-neighbour — every measured overlap with the numbers, the reason the agent asked
-and whether it still matches the files.
+- **A table**: its neighbourhood. One entry per table it is linked to — it
+  reads it, it is read by it, they share a group, or a pair of their columns
+  was measured — with the measured pairs inside the entry they belong to.
+- **A table and a neighbour**: every measured pair between the two, with what
+  both columns look like beside each number.
+- **A table and a column**: that column's lineage, a few hops each way, where
+  it bottoms out, and what it was compared with.
+- **A table and another to reach**: the routes between them
+  (:func:`routes`), found in Python over one query's table-to-table links.
 
-*That last part reverses this module's original rule*, which was **tables back,
-never column pairs**, on the grounds that a router returning fifty things has
-not routed. The rule was defending against a volume that does not exist.
-Measured on the AQN project: `stations` has **four** measured pairs and the entire
-23-source project has **eighteen**, at 3,973 characters. What the rule actually
-bought was an answer reading `overlaps AQN_TR_LOCMAP (2 measured pair(s))` —
-four measurements reduced to the number four, with no way to reach them without
-already knowing which columns to name. So `measure_overlaps` could tell the
-model it "keeps the answers ... so the next session starts with them", and the
-next session could not get them.
+**This module returns facts, whole; the agent's cards are cut elsewhere**
+(`agent/graphcards.py`). A cap is a decision about what an answer may cost a
+context window, and the sentence that says how to ask for the rest is prompt
+text, which this layer does not load (`catalog` and `ops/sql.py` sit below
+the prompts for the same reason). The terminal (`cli/knowledge.py`) reads
+these whole.
 
-What replaces the rule is a cap per neighbour (:data:`MAX_ROWS`), which bites on
-a table somebody has measured twenty-five pairs against and leaves the ordinary
-case whole.
+*The table answer's history, kept because both halves were argued.* Its
+original rule was **tables back, never column pairs**, on the grounds that a
+router returning fifty things has not routed. Measured on the AQN project,
+`stations` had **four** measured pairs and the whole 23-source project
+**eighteen**, at 3,973 characters; what the rule bought was `overlaps
+AQN_TR_LOCMAP (2 measured pair(s))`, four measurements reduced to the number
+four. So the pairs came back, grouped under the neighbour each connects to.
+**And `connected_columns` is gone** *(2026-10-13)*: the names of this table's
+columns that carry any relationship, which on a table whose columns are all
+lineage is every column. The user called it a naive dump, and it was: a
+column that matters to a neighbour is in that neighbour's pairs, and the
+column list is `describe_source`'s.
 
-**The columns come back only where they carry something** (:func:`_connected`).
-`stations` has 191 columns and 4 that have an `OVERLAPS` or a `DERIVES_FROM`; the
-answer names those 4 and states `n_columns` so nobody reads it as a 4-column
-table. The full list is `describe_source`'s, with roles and flags, and printing
-it here spent **5,091 of that answer's 7,015 characters** restating another
-tool.
-
-**And it says which pairings this project made that this table has not**
+**It says which pairings this project made that this table has not**
 (:func:`_precedents`). Not a shelf of candidates: three of those were tried
 against the real graph and all three fail, which that function records. What
 this replays is a measurement somebody already took, where the same column name
 elsewhere has been compared to something and this table's has not.
 
-**Ask about a column and you get that column's lineage.** One hop each way with
-the `via`/`step` pointer, plus the files it ultimately comes from. Not every path
-— a composite column would multiply them — and never the whole subgraph.
-
-**Nothing here ranks** (§6.1). Every list comes back in name order, which carries
-no claim; there is no "best candidate", no sort by coverage, no score. The
-numbers are reported and the agent decides which matter.
+**Nothing here ranks** (§6.1). Every list comes back in name order, a route in
+order of how many steps it takes and then by name, which carry no claim; there
+is no "best candidate", no sort by coverage, no score. The numbers are reported
+and the agent decides which matter.
 
 **Every question is asked of one project** (`schema.PROJECT`). One server holds
 them all, so the anchor of each query names its project; the traversals from
@@ -65,10 +64,13 @@ picture drew every project at once.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
+from difflib import get_close_matches
 from typing import Any
 
-from portia.knowledge.measure import MEASURED
+from portia.knowledge import measure
+from portia.knowledge.measure import MEASURED, ORIGIN, ORIGIN_MEASURED
 from portia.knowledge.schema import (
     COLUMN,
     DERIVATION,
@@ -92,27 +94,64 @@ from portia.knowledge.schema import (
 #: the one way a graph query on a small graph can still be slow.
 MAX_HOPS = 6
 
-#: Longest list any single answer returns. Reached only by something unusual —
-#: a table read by thirty models — and when it is reached the answer **says so**
-#: rather than quietly returning a slice.
+#: How many hops each way a column's lineage lists, upstream and downstream.
+#: Three is a staging, an intermediate and a mart: the whole of an ordinary
+#: build, and a short enough walk that a composite multiplying its paths stays
+#: a handful of rows. Anything further is one more question, asked of a column
+#: the answer already named.
+LINEAGE_HOPS = 3
+
+#: The most steps a route between two tables takes. **A placeholder**, as the
+#: revamp's caps are: three is *A joins B joins C joins D*, already more hops
+#: than a join anyone builds on without stopping to look.
+ROUTE_HOPS = 3
+
+#: The most routes one answer lists, fewest steps first. Also a placeholder.
+ROUTES = 10
+
+#: Longest list an error names. Reached only by something unusual, and when it
+#: is reached the message **says so** rather than quietly returning a slice.
 MAX_ROWS = 25
 
+#: How many near misses an unknown column's message names.
+CLOSE_MATCHES = 3
 
-def lookup(session: Any, table: str, column: str | None = None, *, project: str) -> dict:
-    """One table's neighbourhood, or one column's lineage, within one project.
 
-    ``table`` may be a source's name, a source's path, or a model's name. Give a
-    ``column`` to move from *which table* to *where this column came from* —
-    which is the same climb the ladder makes, made inside the graph.
+def lookup(
+    session: Any,
+    table: str,
+    column: str | None = None,
+    *,
+    neighbour: str | None = None,
+    to: str | None = None,
+    project: str,
+) -> dict:
+    """One of four answers about ``table``, within one project.
+
+    ``table`` may be a source's name, a source's path, or a model's name, and so
+    may ``neighbour`` and ``to``. With none of the three optional arguments the
+    answer is the table's neighbourhood; ``neighbour`` narrows it to one
+    neighbouring table, ``column`` moves to one column's lineage, and ``to``
+    asks for the routes between two tables. One at a time: they are different
+    questions, and an answer to two at once would be two answers.
 
     ``project`` is keyword-only and has no default: the server holds every
     project on the machine, and a default here would be a question about all of
     them that reads like a question about this one.
     """
+    asked = [
+        name for name, value in (("column", column), ("neighbour", neighbour), ("to", to)) if value
+    ]
+    if len(asked) > 1:
+        raise ValueError(f"one question at a time: {', '.join(asked)} were all given")
     found = _resolve(session, table, project)
-    if column is None:
-        return _table_answer(session, found, project)
-    return _column_answer(session, found, column, project)
+    if to:
+        return _routes_answer(session, found, _resolve(session, to, project), project)
+    if neighbour:
+        return _between_answer(session, found, _resolve(session, neighbour, project), project)
+    if column:
+        return _column_answer(session, found, column, project)
+    return _table_answer(session, found, project)
 
 
 # --- resolving --------------------------------------------------------------
@@ -122,20 +161,29 @@ def lookup(session: Any, table: str, column: str | None = None, *, project: str)
 #: model has only a name; a source has a name *and* the path that identifies it,
 #: and both are things a person or an agent will reasonably type.
 _TABLE_BY_NAME = (
-    f"MATCH (t) WHERE (t:Source OR t:Model) AND t.{PROJECT} = $project "
+    f"MATCH (t) WHERE (t:{SOURCE} OR t:{MODEL}) AND t.{PROJECT} = $project "
     "AND $name IN [t.name, t.path]"
 )
 
-#: What every answer needs to know about the table it is about. Named rather than
-#: spelled twice, the way `checks/join.py` names its overlap expressions.
-_TABLE_FIELDS = "labels(t)[0] AS kind, t.name AS name, t.path AS path, t.summary AS summary"
+#: What every answer needs to know about the table it is about. Counted rather
+#: than listed: a 1,579-column table's names were fetched on every question to
+#: be counted.
+_TABLE_FIELDS = (
+    "labels(t)[0] AS kind, t.name AS name, t.path AS path, "
+    f"size([(t)-[:{HAS_COLUMN}]->(c) | c]) AS n_columns"
+)
 
 
 def _resolve(session: Any, table: str, project: str) -> dict:
-    """Which node this name means, or an error naming what there is instead."""
+    """Which node this name means, or an error naming what there is instead.
+
+    A source and a model may share a name. The source wins, as it does in
+    `handlers._entry`: it is the one with a file behind it. ``kind`` sorts
+    ``Source`` after ``Model``, hence descending.
+    """
     rows = _run(
         session,
-        f"{_TABLE_BY_NAME} RETURN {_TABLE_FIELDS}, [(t)-[:{HAS_COLUMN}]->(c) | c.name] AS columns",
+        f"{_TABLE_BY_NAME} RETURN {_TABLE_FIELDS} ORDER BY kind DESC",
         name=table,
         project=project,
     )
@@ -154,7 +202,7 @@ def _unknown_table(session: Any, table: str, project: str) -> str:
         r["name"]
         for r in _run(
             session,
-            f"MATCH (t) WHERE (t:Source OR t:Model) AND t.{PROJECT} = $project "
+            f"MATCH (t) WHERE (t:{SOURCE} OR t:{MODEL}) AND t.{PROJECT} = $project "
             f"RETURN t.name AS name ORDER BY name LIMIT {MAX_ROWS}",
             project=project,
         )
@@ -170,17 +218,51 @@ _EMPTY_GRAPH = (
 )
 
 
-def _match(found: dict) -> str:
+def _unknown_column(session: Any, found: dict, column: str, project: str) -> str:
+    """A miss on a column: how many the table has, and the near misses.
+
+    **Not every name**, which is what it used to say: on a 1,579-column table
+    that was one error longer than the harness passes whole. The names that
+    differ only in case come first, because a typed name folded the wrong way is
+    the commonest miss.
+    """
+    names = [
+        row["name"]
+        for row in _run(
+            session,
+            f"MATCH {_match(found)}-[:{HAS_COLUMN}]->(c:{COLUMN}) RETURN c.name AS name",
+            key=found["key"],
+            project=project,
+        )
+    ]
+    folded = [name for name in names if name.lower() == column.lower()]
+    close = [*folded, *get_close_matches(column, names, n=CLOSE_MATCHES)]
+    near = list(dict.fromkeys(close))[:CLOSE_MATCHES]
+    where = f"no column {column!r} on {found['name']!r}, which has {len(names)}"
+    return f"{where} — closest: {', '.join(near)}" if near else f"{where}, none named like it"
+
+
+def _match(found: dict, var: str = "t", param: str = "key") -> str:
     """``(t:Model {project: $project, name: $key})`` — the node, by its identity.
 
     Which is the pair, not the key alone: two projects may each hold a
     ``data/orders.csv`` and they are two different tables (`schema.PROJECT`).
+    ``var`` and ``param`` let one query anchor two tables.
     """
     label = found["kind"]
-    return f"(t:{label} {{{PROJECT}: $project, {KEY_PROPERTY[label]}: $key}})"
+    return f"({var}:{label} {{{PROJECT}: $project, {KEY_PROPERTY[label]}: ${param}}})"
 
 
-# --- the two answers --------------------------------------------------------
+def _header(found: dict) -> dict:
+    """A table as an answer names it: its kind, its two names, how wide it is.
+
+    ``n_columns`` is there so nobody reads a short list of pairs as a small
+    table.
+    """
+    return {key: found[key] for key in ("kind", "name", "path", "n_columns")}
+
+
+# --- a measured pair, as a reader on one end sees it ------------------------
 
 
 #: What travels with each end of a measured pair, beyond the column's name.
@@ -194,18 +276,16 @@ def _match(found: dict) -> str:
 #: the most valuable finding in that project. They are the same line without
 #: this.
 #:
-#: Inline on each end rather than in a section of their own, because that is
-#: their whole job: detached from the pair they describe they are just more
-#: numbers. `null_rate` and `flags` are deliberately **not** here — four facts
-#: on both ends of every pair rebuilds the wall this answer just tore down, and
-#: `profile_source` is one call away.
+#: `null_rate` and `flags` are deliberately **not** here: `profile_source` is
+#: one call away.
 PAIR_FACTS = ("role", "n_distinct", *SHAPE_FACTS)
 
-#: What travels with the measurement itself. The fingerprints are **not** here:
-#: they exist so `stale` can be computed, `stale` is in the same answer, and two
-#: opaque `"{size}:{mtime}"` strings per edge are machinery the reader cannot
-#: act on. Nor is `project`, which every row of every answer would repeat.
-MEASUREMENT_FACTS = (*MEASURED, "asked_because", "measured_at")
+#: What travels with the measurement itself, as the edge holds it. The
+#: fingerprints are **not** here: they exist so `stale` can be computed, `stale`
+#: is in the same answer, and two opaque `"{size}:{mtime}"` strings per edge are
+#: machinery the reader cannot act on. Nor is `project`, which every row of
+#: every answer would repeat.
+MEASUREMENT_FACTS = (*MEASURED, "asked_because", ORIGIN, "measured_at")
 
 
 def _pick(properties: dict, keys: tuple[str, ...]) -> dict:
@@ -218,59 +298,176 @@ def _pick(properties: dict, keys: tuple[str, ...]) -> dict:
     return {key: properties[key] for key in keys if properties.get(key) is not None}
 
 
-def _table_answer(session: Any, found: dict, project: str) -> dict:
-    """The neighbourhood, with the measurements in it rather than counted."""
-    key, node = found["key"], _match(found)
+def pair_from_row(row: dict) -> dict:
+    """One measured pair, turned to face the table asked about.
+
+    The edge's two coverages are named for the direction it was measured in
+    (`measure.seen_from`). A reader standing on a table wants *this column's*
+    share and *the other's*, so ``coverage`` is the share of this table's rows
+    whose value is found on the other side, and ``other_coverage`` the reverse,
+    whichever way the edge points. An edge written before ``origin`` existed was
+    written by `measure_overlaps`, the only writer there was.
+
+    ``row`` is what :data:`_PAIR_RETURN` returns. Pure, so it is tested without
+    a database.
+    """
+    seen = measure.seen_from(row["measured"] or {}, from_start=bool(row["from_here"]))
     return {
-        "table": {
-            "kind": found["kind"],
-            "name": found["name"],
-            "path": found["path"],
-            "summary": found["summary"],
-            # Stated, so `connected_columns` reads as the subset it is rather
-            # than as the whole table.
-            "n_columns": len(found["columns"] or []),
-        },
-        "connected_columns": _connected(session, node, key, project),
-        "reads": _tables(session, f"MATCH {node}-[:{READS}]->(o) {_TABLE_RETURN}", key, project),
-        "read_by": _tables(session, f"MATCH {node}<-[:{READS}]-(o) {_TABLE_RETURN}", key, project),
-        "groups": _cap(
-            _run(
-                session,
-                f"MATCH {node}-[:{IN_GROUP}]->(g:Group) "
-                f"RETURN g.name AS name, g.context AS context, "
-                f"[(m)-[:{IN_GROUP}]->(g) | m.name] AS members ORDER BY name",
-                key=key,
-                project=project,
-            )
-        ),
-        "overlaps": _overlaps(session, node, key, project),
-        "precedents": _precedents(session, node, key, project),
+        "column": row["column"],
+        "other_column": row["other_column"],
+        "n_shared_values": seen.get("n_shared_values"),
+        "coverage": seen.get("left_coverage"),
+        "other_coverage": seen.get("right_coverage"),
+        "comparable_types": seen.get("comparable_types"),
+        ORIGIN: seen.get(ORIGIN) or ORIGIN_MEASURED,
+        "asked_because": seen.get("asked_because"),
+        "measured_at": seen.get("measured_at"),
+        "stale": row["stale"],
+        "column_facts": _pick(row.get("near") or {}, PAIR_FACTS),
+        "other_facts": _pick(row.get("far") or {}, PAIR_FACTS),
     }
 
 
-def _connected(session: Any, node: str, key: str, project: str) -> list[str]:
-    """This table's columns that carry a relationship, and only those.
+def turned(pair: dict) -> dict:
+    """A pair as the table on its other end sees it: each column and coverage swapped."""
+    return {
+        **pair,
+        "column": pair["other_column"],
+        "other_column": pair["column"],
+        "coverage": pair.get("other_coverage"),
+        "other_coverage": pair.get("coverage"),
+        "column_facts": pair.get("other_facts", {}),
+        "other_facts": pair.get("column_facts", {}),
+    }
 
-    A column with no `OVERLAPS` and no `DERIVES_FROM` has nothing to say in a
-    graph answer, and `stations` has 187 of them. Naming the other four is the
-    difference between an answer about relationships and a copy of
-    `describe_source`.
+
+#: Whether a measurement is still backed by the data it was taken from (§4.5),
+#: worked out at **read** time by comparing the fingerprints the edge recorded
+#: against the ones its two tables carry now. Nothing has to re-walk the graph
+#: when a file changes, and nothing has to be invalidated: the edge is **marked,
+#: never deleted**, because a deleted edge is indistinguishable from one nobody
+#: ever measured, which is the ambiguity §4.4 exists to remove.
+#:
+#: The `CASE` is because the edge's two fingerprints are *left* and *right* while
+#: the query's two tables are *this one* (``t``) and *the other one* (``o``), and
+#: which is which depends on the direction the measurement was taken in. `null`
+#: when a fingerprint is missing, which honestly reads as "cannot tell" rather
+#: than "fine".
+def _moved(near: str, far: str) -> str:
+    """Either end no longer matching what it was measured against.
+
+    ``t`` is the table asked about and ``o`` the one on the other end of the
+    edge; ``near``/``far`` say which of the edge's two recorded fingerprints
+    belongs to which of them.
     """
-    return [
-        row["name"]
-        for row in _run(
-            session,
-            f"MATCH {node}-[:{HAS_COLUMN}]->(c:{COLUMN}) "
-            f"WHERE (c)-[:{OVERLAPS}]-() OR (c)-[:{DERIVES_FROM}]-() "
-            "RETURN c.name AS name ORDER BY name",
-            key=key,
-            project=project,
+    return f"r.{near}_fingerprint <> t.fingerprint OR r.{far}_fingerprint <> o.fingerprint"
+
+
+_STALE = (
+    "CASE WHEN startNode(r).key = c.key "
+    f"THEN {_moved('left', 'right')} "
+    f"ELSE {_moved('right', 'left')} END AS stale"
+)
+
+#: One measured pair, for :func:`pair_from_row`: ``c`` is this table's column,
+#: ``d`` the other's, ``r`` the edge between them and ``o`` the other table.
+_PAIR_RETURN = (
+    "c.name AS column, properties(c) AS near, d.name AS other_column, properties(d) AS far, "
+    f"properties(r) AS measured, startNode(r).key = c.key AS from_here, {_STALE}"
+)
+
+#: The table on the other end of a link, as ``o``.
+_OTHER_RETURN = "labels(o)[0] AS kind, o.name AS name, o.path AS path"
+
+
+# --- a table's neighbourhood ------------------------------------------------
+
+
+def _table_answer(session: Any, found: dict, project: str) -> dict:
+    """Every table this one is linked to, with what links them, and its groups."""
+    node = _match(found)
+    args = {"key": found["key"], "project": project}
+    reads = _run(
+        session,
+        f"MATCH {node}-[:{READS}]->(o) RETURN 'reads' AS link, {_OTHER_RETURN} UNION ALL "
+        f"MATCH {node}<-[:{READS}]-(o) RETURN 'read_by' AS link, {_OTHER_RETURN}",
+        **args,
+    )
+    grouped = _run(
+        session,
+        f"MATCH {node}-[:{IN_GROUP}]->(g:{GROUP})<-[:{IN_GROUP}]-(o) WHERE o <> t "
+        f"RETURN g.name AS group_name, {_OTHER_RETURN}",
+        **args,
+    )
+    pairs = _run(
+        session,
+        f"MATCH {node}-[:{HAS_COLUMN}]->(c:{COLUMN})-[r:{OVERLAPS}]-"
+        f"(d:{COLUMN})<-[:{HAS_COLUMN}]-(o) WHERE o <> t "
+        f"RETURN {_OTHER_RETURN}, {_PAIR_RETURN}",
+        **args,
+    )
+    groups = _run(
+        session,
+        f"MATCH {node}-[:{IN_GROUP}]->(g:{GROUP}) RETURN g.name AS name, g.context AS context, "
+        f"size([(m)-[:{IN_GROUP}]->(g) | m]) AS n_members ORDER BY name",
+        **args,
+    )
+    return {
+        "table": _header(found),
+        "neighbours": gather_neighbours(reads, grouped, pairs),
+        "groups": groups,
+        "precedents": _precedents(session, node, args),
+    }
+
+
+def gather_neighbours(reads: list[dict], grouped: list[dict], pairs: list[dict]) -> list[dict]:
+    """One entry per neighbouring table, whatever links them, in name order.
+
+    **Grouped by neighbour because the neighbour is the relationship.** The
+    question the agent is standing in the middle of is *how does this table
+    connect to that one*, and the reads, the groups and the column pairs are
+    the answer to it rather than three lists beside each other. A table is
+    identified as the store identifies it, a source by its path and a model by
+    its name, so a source and a model that share a name stay two neighbours.
+
+    ``reads`` rows carry ``link`` (``reads`` or ``read_by``), ``grouped`` rows
+    the ``group_name`` they share, ``pairs`` rows what :func:`pair_from_row`
+    reads. Pure, so the shape is tested without a database. Nothing here is
+    ordered by a number (§6.1): neighbours by name, groups by name, pairs by
+    their two column names.
+    """
+    found: dict[tuple[str, str], dict] = {}
+
+    def entry(row: dict) -> dict:
+        key = row["path"] if row["kind"] == SOURCE else row["name"]
+        return found.setdefault(
+            (row["kind"], key),
+            {
+                "kind": row["kind"],
+                "name": row["name"] or row["path"],
+                "path": row["path"],
+                "reads": False,
+                "read_by": False,
+                "groups": [],
+                "pairs": [],
+            },
         )
-    ]
+
+    for row in reads:
+        entry(row)[row["link"]] = True
+    for row in grouped:
+        groups = entry(row)["groups"]
+        if row["group_name"] not in groups:
+            groups.append(row["group_name"])
+    for row in pairs:
+        entry(row)["pairs"].append(pair_from_row(row))
+    for neighbour in found.values():
+        neighbour["groups"].sort()
+        neighbour["pairs"].sort(key=lambda p: (p["column"], p["other_column"]))
+    return sorted(found.values(), key=lambda n: (n["name"], n["kind"], n["path"] or ""))
 
 
-def _precedents(session: Any, node: str, key: str, project: str) -> list[dict]:
+def _precedents(session: Any, node: str, args: dict, *, column: bool = False) -> list[dict]:
     """Pairings this project already committed to that this table has not.
 
     **Why this shape and not a shelf of candidates.** Three shelves a code
@@ -298,141 +495,101 @@ def _precedents(session: Any, node: str, key: str, project: str) -> list[dict]:
     which pairs were worth measuring, and this states which pairs exist.
 
     Only for columns carrying no measurement of their own — a column you have
-    already looked at is not a gap — and grouped by the target, because five
-    tables pointing at one catalog key is one fact, not five.
+    already looked at is not a gap. One row per (column, what it is compared
+    to, who compared it), flat, so a card can cut it like any list.
+    ``column`` narrows it to ``$column``, for the column answer.
     """
-    rows = _run(
-        session,
-        f"MATCH {node}-[:{HAS_COLUMN}]->(c:{COLUMN}) WHERE NOT (c)-[:{OVERLAPS}]-() "
-        f"MATCH (e:{COLUMN})-[r:{OVERLAPS}]-(f:{COLUMN}) "
-        f"WHERE r.{PROJECT} = $project AND e.name = c.name AND e.key <> c.key "
-        f"MATCH (et)-[:{HAS_COLUMN}]->(e) MATCH (ft)-[:{HAS_COLUMN}]->(f) "
-        f"{_PRECEDENT_RETURN} ORDER BY column, `table`, other_column, by",
-        key=key,
-        project=project,
-    )
-
-    grouped: dict[tuple, dict] = {}
-    for row in rows:
-        head = (row["column"], row["kind"], row["table"], row["other_column"])
-        entry = grouped.setdefault(
-            head,
-            {
-                "column": row["column"],
-                "against": {
-                    "kind": row["kind"],
-                    "table": row["table"],
-                    "column": row["other_column"],
-                    **_pick(row["far"], PAIR_FACTS),
-                },
-                "measured_elsewhere_by": [],
-            },
-        )
-        entry["measured_elsewhere_by"].append(
-            {
-                "table": row["by"],
-                "n_shared_values": row["n_shared_values"],
-                "asked_because": row["asked_because"],
-            }
-        )
-    for entry in grouped.values():
-        entry["measured_elsewhere_by"] = _cap(entry["measured_elsewhere_by"])
-    return _cap(list(grouped.values()))
+    anchor = f"MATCH {node}-[:{HAS_COLUMN}]->(c:{COLUMN}" + (" {name: $column})" if column else ")")
+    return _run(session, f"{anchor} {_PRECEDENT_MATCH} {_PRECEDENT_RETURN}", **args)
 
 
+#: Every measurement of a column with the same name elsewhere, from a column of
+#: this table that has none. ``e`` is the namesake, ``f`` what it was compared
+#: to, ``et`` and ``ft`` their tables.
+_PRECEDENT_MATCH = (
+    f"WHERE NOT (c)-[:{OVERLAPS}]-() MATCH (e:{COLUMN})-[r:{OVERLAPS}]-(f:{COLUMN}) "
+    f"WHERE r.{PROJECT} = $project AND e.name = c.name AND e.key <> c.key "
+    f"MATCH (et)-[:{HAS_COLUMN}]->(e) MATCH (ft)-[:{HAS_COLUMN}]->(f)"
+)
+
+#: What the namesake was compared to, and who compared it with what result.
+_PRECEDENT_AGAINST = (
+    "c.name AS column, labels(ft)[0] AS against_kind, ft.name AS against_table, "
+    "f.name AS against_column"
+)
+_PRECEDENT_BY = (
+    "et.name AS by_table, r.n_shared_values AS n_shared_values, r.asked_because AS asked_because"
+)
 _PRECEDENT_RETURN = (
-    "RETURN c.name AS column, labels(ft)[0] AS kind, ft.name AS `table`, "
-    "f.name AS other_column, properties(f) AS far, et.name AS by, "
-    "r.n_shared_values AS n_shared_values, r.asked_because AS asked_because"
+    f"RETURN {_PRECEDENT_AGAINST}, {_PRECEDENT_BY} "
+    "ORDER BY column, against_table, against_column, by_table"
 )
 
 
-def _overlaps(session: Any, node: str, key: str, project: str) -> list[dict]:
-    """Every measured pair, grouped under the table on the other end.
+# --- between two tables -----------------------------------------------------
 
-    **Grouped by neighbour because the neighbour is the relationship.** The
-    question the agent is standing in the middle of is *how does this table
-    connect to that one*, and the column pairs are the answer to it rather than
-    a list beside it.
 
-    Capped per neighbour, not overall: a truncated list has to announce itself
-    (:func:`_cap`), and announcing it inside the pair it belongs to says which
-    relationship you are only seeing part of.
-    """
-    rows = _run(
+def _between_answer(session: Any, found: dict, other: dict, project: str) -> dict:
+    """Everything that links two tables, every measured pair in full."""
+    if (found["kind"], found["key"]) == (other["kind"], other["key"]):
+        raise ValueError(f"{found['name']!r} is the table asked about; name a different neighbour")
+    node, far = _match(found), _match(other, "o", "other")
+    args = {"key": found["key"], "other": other["key"], "project": project}
+    links = _run(
+        session,
+        f"MATCH {node} MATCH {far} "
+        f"RETURN EXISTS {{ MATCH (t)-[:{READS}]->(o) }} AS reads, "
+        f"EXISTS {{ MATCH (o)-[:{READS}]->(t) }} AS read_by, "
+        f"[(t)-[:{IN_GROUP}]->(g:{GROUP})<-[:{IN_GROUP}]-(o) | g.name] AS groups",
+        **args,
+    )
+    pairs = _run(
         session,
         f"MATCH {node}-[:{HAS_COLUMN}]->(c:{COLUMN})-[r:{OVERLAPS}]-"
-        f"(d:{COLUMN})<-[:{HAS_COLUMN}]-(p) WHERE p <> t "
-        "RETURN labels(p)[0] AS kind, p.name AS `table`, p.path AS path, "
-        "c.name AS column, properties(c) AS near, "
-        "d.name AS other_column, properties(d) AS far, "
-        f"properties(r) AS measured, {_STALE} "
-        "ORDER BY `table`, column, other_column",
-        key=key,
-        project=project,
+        f"(d:{COLUMN})<-[:{HAS_COLUMN}]-{far} RETURN {_PAIR_RETURN}",
+        **args,
     )
-
-    grouped: dict[tuple, dict] = {}
-    for row in rows:
-        head = (row["kind"], row["table"], row["path"])
-        entry = grouped.setdefault(
-            head, {"kind": head[0], "table": head[1], "path": head[2], "pairs": []}
-        )
-        entry["pairs"].append(
-            {
-                "column": {"name": row["column"], **_pick(row["near"], PAIR_FACTS)},
-                "other_column": {"name": row["other_column"], **_pick(row["far"], PAIR_FACTS)},
-                **_pick(row["measured"], MEASUREMENT_FACTS),
-                "stale": row["stale"],
-            }
-        )
-    for entry in grouped.values():
-        entry["pairs"] = _cap(entry["pairs"])
-    return list(grouped.values())
+    link = links[0] if links else {}
+    return {
+        "table": _header(found),
+        "neighbour": _header(other),
+        "reads": bool(link.get("reads")),
+        "read_by": bool(link.get("read_by")),
+        "groups": sorted(link.get("groups") or []),
+        "pairs": sorted(
+            (pair_from_row(row) for row in pairs), key=lambda p: (p["column"], p["other_column"])
+        ),
+    }
 
 
-_TABLE_RETURN = "RETURN labels(o)[0] AS kind, o.name AS name, o.path AS path ORDER BY name"
+# --- one column -------------------------------------------------------------
 
 
 def _column_answer(session: Any, found: dict, column: str, project: str) -> dict:
-    """One column's lineage: one hop each way, plus the files underneath it."""
-    key, node = found["key"], _match(found)
+    """One column's lineage, a few hops each way, and what it was compared with."""
+    node = _match(found)
+    args = {"key": found["key"], "column": column, "project": project}
     facts = _run(
         session,
         f"MATCH {node}-[:{HAS_COLUMN}]->(c:{COLUMN} {{name: $column}}) "
         "RETURN c.role AS role, c.inferred AS inferred, c.null_rate AS null_rate, "
         f"c.n_distinct AS n_distinct, c.flags AS flags, c.{DERIVATION} AS {DERIVATION}",
-        key=key,
-        column=column,
-        project=project,
+        **args,
     )
     if not facts:
-        have = ", ".join(sorted(found["columns"] or [])) or "(none in the graph)"
-        raise ValueError(f"no column {column!r} on {found['name']!r} — have: {have}")
+        raise ValueError(_unknown_column(session, found, column, project))
 
     reached = f"MATCH {node}-[:{HAS_COLUMN}]->(c:{COLUMN} {{name: $column}})"
-    args = {"key": key, "column": column, "project": project}
+    compared = _run(
+        session,
+        f"{reached}-[r:{OVERLAPS}]-(d:{COLUMN})<-[:{HAS_COLUMN}]-(o) "
+        f"RETURN {_OTHER_RETURN}, {_PAIR_RETURN}",
+        **args,
+    )
     return {
         "column": {"table": found["name"], "name": column, **dict(facts[0])},
-        # One hop, with the pointer that says which step explains it. The chain
-        # beyond this is `origins`; returning every path would multiply on a
-        # composite and is what §7 warns a router must not do.
-        "derives_from": _cap(
-            _run(
-                session,
-                f"{reached}-[r:{DERIVES_FROM}]->(o:{COLUMN})<-[:{HAS_COLUMN}]-(p) "
-                f"{_LINEAGE_RETURN}, r.via AS via, r.step AS step ORDER BY `table`, column",
-                **args,
-            )
-        ),
-        "feeds": _cap(
-            _run(
-                session,
-                f"{reached}<-[r:{DERIVES_FROM}]-(o:{COLUMN})<-[:{HAS_COLUMN}]-(p) "
-                f"{_LINEAGE_RETURN}, r.via AS via, r.step AS step ORDER BY `table`, column",
-                **args,
-            )
-        ),
+        "upstream": _walk(session, reached, args, upstream=True),
+        "downstream": _walk(session, reached, args, upstream=False),
         # Where it bottoms out: the columns nothing else derives from, which on a
         # fully-resolved chain are the files themselves.
         #
@@ -445,89 +602,343 @@ def _column_answer(session: Any, found: dict, column: str, project: str) -> dict
         # says *the trail ends here and portia could not read past it*, which is
         # the honest answer and the same "mark, never delete" rule §4.5 applies
         # to a stale measurement.
-        "origins": _cap(
-            [
-                # Absent rather than null on the ordinary row: this is read by a
-                # model, and a key carrying `None` on every origin in the project
-                # is tokens spent saying nothing.
-                {k: v for k, v in row.items() if k != DERIVATION or v}
-                for row in _run(
-                    session,
-                    f"{reached}-[:{DERIVES_FROM}*1..{MAX_HOPS}]->(o:{COLUMN})<-[:{HAS_COLUMN}]-(p) "
-                    f"WHERE NOT (o)-[:{DERIVES_FROM}]->() "
-                    "RETURN DISTINCT labels(p)[0] AS kind, p.name AS `table`, p.path AS path, "
-                    f"o.name AS column, o.{DERIVATION} AS {DERIVATION} ORDER BY `table`, column",
-                    **args,
-                )
-            ]
+        "origins": [
+            # Absent rather than null on the ordinary row: this is read by a
+            # model, and a key carrying `None` on every origin in the project
+            # is tokens spent saying nothing.
+            {k: v for k, v in row.items() if k != DERIVATION or v}
+            for row in _run(
+                session,
+                f"{reached}-[:{DERIVES_FROM}*1..{MAX_HOPS}]->(o:{COLUMN})<-[:{HAS_COLUMN}]-(p) "
+                f"WHERE NOT (o)-[:{DERIVES_FROM}]->() "
+                "RETURN DISTINCT labels(p)[0] AS kind, p.name AS `table`, p.path AS path, "
+                f"o.name AS column, o.{DERIVATION} AS {DERIVATION} ORDER BY `table`, column",
+                **args,
+            )
+        ],
+        "compared_with": sorted(
+            (
+                {"table": row["name"] or row["path"], "kind": row["kind"], **pair_from_row(row)}
+                for row in compared
+            ),
+            key=lambda p: (p["table"], p["kind"], p["other_column"]),
         ),
-        # The same trim as the table answer: `properties(r)` wholesale shipped
-        # the project path and both fingerprints to the model on every edge,
-        # and `stale` is the only thing the fingerprints were for.
-        "overlaps": _cap(
-            [
-                _measurement(row)
-                for row in _run(
-                    session,
-                    f"{reached}-[r:{OVERLAPS}]-(o:{COLUMN})<-[:{HAS_COLUMN}]-(p) "
-                    f"{_LINEAGE_RETURN}, properties(o) AS far, properties(r) AS measured, "
-                    f"startNode(r).key = c.key AS measured_from_here, {_STALE} "
-                    "ORDER BY `table`, column",
-                    **args,
-                )
-            ]
-        ),
+        "precedents": _precedents(session, node, args, column=True),
     }
 
 
-_LINEAGE_RETURN = "RETURN labels(p)[0] AS kind, p.name AS `table`, p.path AS path, o.name AS column"
+def _walk(session: Any, reached: str, args: dict, *, upstream: bool) -> list[dict]:
+    """The columns ``LINEAGE_HOPS`` steps up or down the lineage, nearest first.
 
-#: The two raw property bags a measurement row carries, unpacked by
-#: :func:`_measurement` and never returned as they came.
-_RAW = ("far", "measured")
+    **A variable-length match, and a safe one**: anchored on one column,
+    following one directed edge kind, at most :data:`LINEAGE_HOPS` long. It is
+    a chain that widens only where a step reads several columns into one, and
+    that widening is the composite the answer exists to show. The match the
+    route search is forbidden is the other kind: unanchored, across measured
+    edges that go both ways.
 
-
-def _measurement(row: dict) -> dict:
-    """One measured overlap as the agent should read it.
-
-    The far column's own facts sit beside the numbers for the reason
-    :data:`PAIR_FACTS` exists, and `properties(r)` is trimmed for the reason
-    :data:`MEASUREMENT_FACTS` gives.
+    Each column once, at its nearest. ``via`` and ``step`` are the edge that
+    reached it: upstream, the step that read this column on the way to the one
+    asked about; downstream, the step that built it.
     """
-    return {
-        **{key: value for key, value in row.items() if key not in _RAW},
-        **_pick(row["far"], PAIR_FACTS),
-        **_pick(row["measured"], MEASUREMENT_FACTS),
-    }
+    arrow = (
+        f"-[:{DERIVES_FROM}*1..{LINEAGE_HOPS}]->"
+        if upstream
+        else f"<-[:{DERIVES_FROM}*1..{LINEAGE_HOPS}]-"
+    )
+    rows = _run(
+        session,
+        f"{reached} MATCH path = (c){arrow}(o:{COLUMN}) MATCH (p)-[:{HAS_COLUMN}]->(o) "
+        f"WITH p, o, length(path) AS hops, last(relationships(path)) AS r {_WALK_RETURN}",
+        **args,
+    )
+    seen: set[tuple] = set()
+    nearest = []
+    for row in rows:
+        place = (row["kind"], row["table"], row["path"], row["column"])
+        if place not in seen:
+            seen.add(place)
+            nearest.append(row)
+    return nearest
 
 
-#: Whether a measurement is still backed by the data it was taken from (§4.5),
-#: worked out at **read** time by comparing the fingerprints the edge recorded
-#: against the ones its two tables carry now. Nothing has to re-walk the graph
-#: when a file changes, and nothing has to be invalidated: the edge is **marked,
-#: never deleted**, because a deleted edge is indistinguishable from one nobody
-#: ever measured, which is the ambiguity §4.4 exists to remove.
-#:
-#: The `CASE` is because the edge's two fingerprints are *left* and *right* while
-#: the query's two tables are *this one* and *the other one*, and which is which
-#: depends on the direction the measurement was taken in. `null` when a
-#: fingerprint is missing, which honestly reads as "cannot tell" rather than
-#: "fine".
-def _moved(near: str, far: str) -> str:
-    """Either end no longer matching what it was measured against.
-
-    ``t`` is the table asked about and ``p`` the one on the other end of the
-    edge; ``near``/``far`` say which of the edge's two recorded fingerprints
-    belongs to which of them.
-    """
-    return f"r.{near}_fingerprint <> t.fingerprint OR r.{far}_fingerprint <> p.fingerprint"
-
-
-_STALE = (
-    "CASE WHEN startNode(r).key = c.key "
-    f"THEN {_moved('left', 'right')} "
-    f"ELSE {_moved('right', 'left')} END AS stale"
+_WALK_RETURN = (
+    "RETURN hops, labels(p)[0] AS kind, p.name AS `table`, p.path AS path, o.name AS column, "
+    "r.via AS via, r.step AS step ORDER BY hops, `table`, column, step"
 )
+
+
+# --- routes between two tables ----------------------------------------------
+
+
+@dataclass(frozen=True, order=True)
+class TableId:
+    """One table a route passes through: what to call it, its kind, its identity.
+
+    Ordered by name first, which is the only order a route list may take after
+    its length (§6.1); kind and key break a tie between a source and a model
+    that share a name.
+    """
+
+    name: str
+    kind: str
+    key: str
+
+
+@dataclass(frozen=True)
+class Link:
+    """One table-to-table link a route may take: a model reading a table, or a
+    measured pair with shared values, facing from ``start`` to ``end``."""
+
+    start: TableId
+    end: TableId
+    reads: bool = False
+    pair: dict | None = field(default=None, compare=False)
+
+
+@dataclass
+class Step:
+    """How one table of a route reaches the next: every link between the two.
+
+    ``reads`` when the first reads the second, ``read_by`` when the second
+    reads the first, and every measured pair with shared values, facing
+    forward, by column name.
+    """
+
+    reads: bool = False
+    read_by: bool = False
+    pairs: list[dict] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class Route:
+    tables: tuple[TableId, ...]
+    steps: tuple[Step, ...]
+
+
+def routes(
+    links: Iterable[Link],
+    start: TableId,
+    goal: TableId,
+    *,
+    max_steps: int = ROUTE_HOPS,
+    limit: int = ROUTES,
+) -> tuple[list[Route], int]:
+    """The routes from ``start`` to ``goal``: the first ``limit`` and how many there are.
+
+    **Searched in Python, over links one query fetched** (*2026-10-13*). A route
+    is a question about tables, and the graph's links between tables are a few
+    hundred at most: a model reading a table, and a measured pair whose columns
+    share values. Fetched once, they are searched here, where a cap on steps
+    is a loop bound rather than a variable-length match across column nodes
+    that the server would have to expand both ways from every measured column.
+
+    A route visits a table at most once and takes at most ``max_steps`` steps.
+    Two tables linked several ways are one step carrying all of them, so a
+    route is a sequence of tables and not a choice among their column pairs.
+    **Fewest steps first, then by the names along the way**: how many steps a
+    route takes is a fact about it, and nothing here orders by coverage or
+    shared values, which would be deciding which route is better (§6.1).
+
+    A measured zero is not a link. It is a fact about two columns, and it is
+    kept (§4.4); it is not a way from one table to the other.
+    """
+    ways = _ways(links)
+    found: list[tuple[TableId, ...]] = []
+
+    def walk(path: tuple[TableId, ...]) -> None:
+        for after in sorted(ways.get(path[-1], {})):
+            if after in path:
+                continue
+            if after == goal:
+                found.append((*path, after))
+            elif len(path) < max_steps:
+                walk((*path, after))
+
+    if start != goal:
+        walk((start,))
+    found.sort(key=lambda path: (len(path), path))
+    shown = [
+        Route(path, tuple(ways[a][b] for a, b in zip(path, path[1:], strict=False)))
+        for path in found[:limit]
+    ]
+    return shown, len(found)
+
+
+def _ways(links: Iterable[Link]) -> dict[TableId, dict[TableId, Step]]:
+    """Each table's next tables, and the step to each, from both ends of every link."""
+    ways: dict[TableId, dict[TableId, Step]] = {}
+
+    def step(a: TableId, b: TableId) -> Step:
+        return ways.setdefault(a, {}).setdefault(b, Step())
+
+    for link in links:
+        if link.start == link.end:
+            continue
+        forward, backward = step(link.start, link.end), step(link.end, link.start)
+        if link.reads:
+            forward.reads = backward.read_by = True
+        if link.pair is not None:
+            forward.pairs.append(link.pair)
+            backward.pairs.append(turned(link.pair))
+    for nexts in ways.values():
+        for each in nexts.values():
+            each.pairs.sort(key=lambda p: (p["column"], p["other_column"]))
+    return ways
+
+
+#: Both ends of a link, as ``a`` and ``b``.
+_ENDS = (
+    "labels(a)[0] AS a_kind, a.name AS a_name, a.path AS a_path, "
+    "labels(b)[0] AS b_kind, b.name AS b_name, b.path AS b_path"
+)
+
+#: A measured link's two columns: ``c`` on ``a``, ``d`` on ``b``.
+_LINK_COLUMNS = "c.name AS a_column, d.name AS b_column"
+
+#: Whether either end has moved since the link was measured, as `_STALE` asks,
+#: here without a `CASE`: the edge is read in its own direction.
+_LINK_STALE = "r.left_fingerprint <> a.fingerprint OR r.right_fingerprint <> b.fingerprint AS stale"
+
+#: The numbers on a measured link, facing from ``a`` to ``b`` as the edge does.
+_LINK_NUMBERS = (
+    "r.n_shared_values AS n_shared_values, r.left_coverage AS coverage, "
+    "r.right_coverage AS other_coverage, r.comparable_types AS comparable_types, "
+    f"coalesce(r.{ORIGIN}, '{ORIGIN_MEASURED}') AS origin, {_LINK_STALE}"
+)
+
+#: The same columns, empty, for a model reading a table.
+_NO_NUMBERS = (
+    "null AS a_column, null AS b_column, null AS n_shared_values, null AS coverage, "
+    "null AS other_coverage, null AS comparable_types, null AS origin, null AS stale"
+)
+
+#: Measured pairs whose columns share at least one value, started from the edges
+#: and filtered on their project, so nothing walks out from every table.
+_MEASURED_LINKS = (
+    f"MATCH (c:{COLUMN})-[r:{OVERLAPS}]->(d:{COLUMN}) "
+    f"WHERE r.{PROJECT} = $project AND r.n_shared_values > 0 "
+    f"MATCH (a)-[:{HAS_COLUMN}]->(c) MATCH (b)-[:{HAS_COLUMN}]->(d) WHERE a <> b "
+    f"RETURN 'overlaps' AS link, {_ENDS}, {_LINK_COLUMNS}, {_LINK_NUMBERS}"
+)
+
+#: Models reading tables, the same columns with no numbers.
+_READ_LINKS = (
+    f"MATCH (a:{MODEL})-[:{READS}]->(b) WHERE a.{PROJECT} = $project "
+    f"RETURN 'reads' AS link, {_ENDS}, {_NO_NUMBERS}"
+)
+
+#: **Every table-to-table link in the project, in one statement**, which is all
+#: :func:`routes` searches.
+_LINKS = f"{_MEASURED_LINKS} UNION ALL {_READ_LINKS}"
+
+#: The fields of a measured link that a route's step carries, facing forward.
+LINK_FIELDS = (
+    "n_shared_values",
+    "coverage",
+    "other_coverage",
+    "comparable_types",
+    ORIGIN,
+    "stale",
+)
+
+
+def link_from_row(row: dict) -> Link:
+    """One row of :data:`_LINKS` as a `Link`. Pure, for the tests."""
+    a, b = (
+        TableId(
+            row[f"{end}_name"] or row[f"{end}_path"],
+            row[f"{end}_kind"],
+            row[f"{end}_path"] if row[f"{end}_kind"] == SOURCE else row[f"{end}_name"],
+        )
+        for end in ("a", "b")
+    )
+    if row["link"] == "reads":
+        return Link(a, b, reads=True)
+    pair = {"column": row["a_column"], "other_column": row["b_column"]}
+    return Link(a, b, pair={**pair, **{key: row[key] for key in LINK_FIELDS}})
+
+
+def _table_id(found: dict) -> TableId:
+    return TableId(found["name"] or found["path"], found["kind"], found["key"])
+
+
+def _routes_answer(session: Any, found: dict, goal: dict, project: str) -> dict:
+    """The routes between two tables, fewest steps first, with how many there are."""
+    start, end = _table_id(found), _table_id(goal)
+    if start == end:
+        raise ValueError(f"a route needs two tables, and {found['name']!r} was named twice")
+    links = [link_from_row(row) for row in _run(session, _LINKS, project=project)]
+    shown, n = routes(links, start, end)
+    return {
+        "table": _header(found),
+        "to": _header(goal),
+        "routes": [
+            {
+                "tables": [t.name for t in route.tables],
+                "steps": [
+                    {"reads": s.reads, "read_by": s.read_by, "pairs": list(s.pairs)}
+                    for s in route.steps
+                ],
+            }
+            for route in shown
+        ],
+        "n_routes": n,
+    }
+
+
+# --- what measure_overlaps already has --------------------------------------
+
+
+#: The measurements already stored for a list of column pairs, by position.
+#: Both ends are named by key and project, which the store constrains, so each
+#: is one index lookup; the edge is matched either way round.
+_STORED_MATCH = (
+    "UNWIND $pairs AS p "
+    f"MATCH (a:{COLUMN} {{{PROJECT}: $project, {KEY_PROPERTY[COLUMN]}: p.left}})"
+    f"-[r:{OVERLAPS}]-(b:{COLUMN} {{{PROJECT}: $project, {KEY_PROPERTY[COLUMN]}: p.right}})"
+)
+_STORED = (
+    f"{_STORED_MATCH} RETURN p.i AS i, startNode(r).key = a.key AS from_left, "
+    "properties(r) AS measured, a.n_distinct AS left_distinct, b.n_distinct AS right_distinct"
+)
+
+
+def stored_overlaps(session: Any, pairs: list[tuple[str, str]], *, project: str) -> dict[int, dict]:
+    """What the graph already holds for each pair of column keys, by its position in ``pairs``.
+
+    `measure_overlaps` asks this before it measures anything (*2026-10-13*): a
+    pair measured once is read back rather than measured again, which is what
+    "the next session starts with them" always promised. Each found edge comes
+    back turned so *left* is the pair's left (`measure.seen_from`), with both
+    columns' ``n_distinct`` as the catalog recorded them. Whether it is still
+    current is the caller's question, against fingerprints it has and this
+    module does not.
+
+    Two pairs measured both ways round are two edges; the later measurement
+    is the one returned, as a re-measure in one direction replaces the edge.
+    """
+    if not pairs:
+        return {}
+    rows = _run(
+        session,
+        _STORED,
+        pairs=[{"i": i, "left": left, "right": right} for i, (left, right) in enumerate(pairs)],
+        project=project,
+    )
+    found: dict[int, dict] = {}
+    for row in rows:
+        seen = {
+            **measure.seen_from(row["measured"] or {}, from_start=bool(row["from_left"])),
+            "left_distinct": row["left_distinct"],
+            "right_distinct": row["right_distinct"],
+        }
+        earlier = found.get(row["i"])
+        if earlier is None or str(seen.get("measured_at") or "") > str(
+            earlier.get("measured_at") or ""
+        ):
+            found[row["i"]] = seen
+    return found
 
 
 # --- running them -----------------------------------------------------------
@@ -537,77 +948,84 @@ def _run(session: Any, statement: str, **params: Any) -> list[dict]:
     return [record.data() for record in session.run(statement, **params)]
 
 
-def _tables(session: Any, statement: str, key: str, project: str) -> list[dict]:
-    return _cap(_run(session, statement, key=key, project=project))
-
-
-def _cap(rows: list) -> list:
-    """Cut a list to :data:`MAX_ROWS`, saying so in the list itself when it bites.
-
-    A truncated answer that doesn't announce it is worse than a long one: the
-    agent reads a short list as *complete* and stops looking.
-    """
-    if len(rows) <= MAX_ROWS:
-        return rows
-    return [*rows[:MAX_ROWS], {"truncated": f"{len(rows) - MAX_ROWS} more not shown"}]
+# --- for a terminal ---------------------------------------------------------
 
 
 def render_text(answer: dict) -> str:
-    """Human-readable, for the CLI. The same numbers, never re-ordered."""
-    if "column" in answer:
+    """Human-readable, for the CLI. The same numbers, never re-ordered, and whole."""
+    if "routes" in answer:
+        return _render_routes(answer)
+    if "neighbour" in answer:
+        return _render_between(answer)
+    if "upstream" in answer:
         return _render_column(answer)
     return _render_table(answer)
 
 
-def _render_table(answer: dict) -> str:
-    table = answer["table"]
+def _title(table: dict) -> str:
     where = table["path"] or table["name"]
-    lines = [f"{table['kind']} {table['name']}  ({where})  {table['n_columns']} columns"]
-    connected = answer["connected_columns"]
-    lines.append(f"  connected columns: {', '.join(connected) or '(none)'}")
-    for heading, key in (("reads", "reads"), ("read by", "read_by")):
-        for row in answer[key]:
-            lines.append(f"  {heading}: {row.get('name') or row.get('truncated')}")
+    return f"{table['kind']} {table['name']}  ({where})  {table['n_columns']} columns"
+
+
+def _links(entry: dict) -> str:
+    """How a neighbour is linked, in words: reads, read by, the groups shared."""
+    words = [
+        word for word, on in (("reads it", entry["reads"]), ("read by it", entry["read_by"])) if on
+    ]
+    words += [f"group {group}" for group in entry["groups"]]
+    return ", ".join(words)
+
+
+def _render_table(answer: dict) -> str:
+    lines = [_title(answer["table"])]
     for group in answer["groups"]:
-        lines.append(f"  group {group['name']}: {', '.join(group.get('members') or [])}")
+        lines.append(f"  group {group['name']} ({group['n_members']} members): {group['context']}")
+    for neighbour in answer["neighbours"]:
+        how = _links(neighbour)
+        lines.append(f"  {neighbour['kind']} {neighbour['name']}" + (f"  — {how}" if how else ""))
+        lines += _render_pairs(neighbour["pairs"], indent="    ")
     for row in answer["precedents"]:
-        against = row["against"]
         lines.append(
             f"  {row['column']} has never been measured — elsewhere it is compared to "
-            f"{against['table']}.{against['column']}"
+            f"{row['against_table']}.{row['against_column']} by {row['by_table']}: "
+            f"n_shared_values {row['n_shared_values']}"
         )
-        for by in row["measured_elsewhere_by"]:
-            if "truncated" in by:
-                lines.append(f"    ({by['truncated']})")
-                continue
-            lines.append(f"    by {by['table']}: n_shared_values {by['n_shared_values']}")
-    for neighbour in answer["overlaps"]:
-        lines.append(f"  measured against {neighbour['table']}")
-        for pair in neighbour["pairs"]:
-            if "truncated" in pair:
-                lines.append(f"    ({pair['truncated']})")
-                continue
-            lines.append(f"    {_side(pair['column'])}")
-            lines.append(f"      vs {_side(pair['other_column'])}")
-            lines.append(f"      {_numbers(pair)}")
-            if pair.get("asked_because"):
-                lines.append(f'      "{pair["asked_because"]}"')
     return "\n".join(lines)
 
 
-def _side(column: dict) -> str:
+def _render_between(answer: dict) -> str:
+    lines = [_title(answer["table"]), f"  and {_title(answer['neighbour'])}"]
+    how = _links(answer)
+    lines.append(f"  linked: {how or '(no reads, no group)'}")
+    lines += _render_pairs(answer["pairs"], indent="  ", facts=True)
+    return "\n".join(lines)
+
+
+def _render_pairs(pairs: list[dict], *, indent: str, facts: bool = False) -> list[str]:
+    lines = []
+    for pair in pairs:
+        near = _side(pair["column"], pair["column_facts"]) if facts else pair["column"]
+        far = _side(pair["other_column"], pair["other_facts"]) if facts else pair["other_column"]
+        lines.append(f"{indent}{near}  vs  {far}")
+        lines.append(f"{indent}  {_numbers(pair)}")
+        if pair.get("asked_because"):
+            lines.append(f'{indent}  "{pair["asked_because"]}"')
+    return lines
+
+
+def _side(name: str, facts: dict) -> str:
     """One end of a pair: its name, then whichever facts it has.
 
-    The facts are what make the number above them readable, so they are on the
+    The facts are what make the number beside them readable, so they are on the
     same line as the column rather than in a block of their own
     (:data:`PAIR_FACTS`).
     """
-    facts = [
-        f"{key} {column[key]!r}" if key == "top" else f"{key} {column[key]}"
+    shown = [
+        f"{key} {facts[key]!r}" if key == "top" else f"{key} {facts[key]}"
         for key in PAIR_FACTS
-        if key in column
+        if key in facts
     ]
-    return f"{column['name']}" + (f"  [{', '.join(facts)}]" if facts else "")
+    return name + (f"  [{', '.join(shown)}]" if shown else "")
 
 
 def _numbers(pair: dict) -> str:
@@ -616,7 +1034,8 @@ def _numbers(pair: dict) -> str:
     A zero is printed as a zero and never as a verdict — `docs/KNOWLEDGE_GRAPH.md`
     §4.4 — which is why the reason the agent asked is printed under it.
     """
-    parts = [f"{key} {pair[key]}" for key in MEASURED if key in pair]
+    keys = ("n_shared_values", "coverage", "other_coverage", "comparable_types", ORIGIN)
+    parts = [f"{key} {pair[key]}" for key in keys if pair.get(key) is not None]
     if pair.get("stale"):
         parts.append("STALE — a file has changed since this was measured")
     return "  ".join(parts) or "(no numbers on this edge)"
@@ -630,17 +1049,38 @@ def _render_column(answer: dict) -> str:
         # about this column directly is the commoner way to arrive at it — and
         # an empty lineage with no explanation reads as *nobody built this*.
         lines.append("  (nothing readable underneath it)")
-    for heading, key in (("derives from", "derives_from"), ("feeds", "feeds")):
+    for heading, key in (("from", "upstream"), ("feeds", "downstream")):
         for row in answer[key]:
             pointer = f"  [{row.get('via')} at {row.get('step')}]" if row.get("via") else ""
-            lines.append(f"  {heading}: {row['table']}.{row['column']}{pointer}")
+            lines.append(f"  {heading} ({row['hops']}): {row['table']}.{row['column']}{pointer}")
     for row in answer["origins"]:
         # Said as a trail that stops rather than as an origin, because that is
         # what it is — see the query.
         unread = "  (nothing readable underneath it)" if row.get(DERIVATION) else ""
         lines.append(f"  origin: {row['table']}.{row['column']}{unread}")
-    for row in answer["overlaps"]:
-        lines.append(f"  overlaps {row['table']}.{row['column']}: {row['measured']}")
+    for row in answer["compared_with"]:
+        lines.append(f"  compared with {row['table']}.{row['other_column']}: {_numbers(row)}")
+    for row in answer["precedents"]:
+        lines.append(
+            f"  never measured; elsewhere compared to {row['against_table']}."
+            f"{row['against_column']} by {row['by_table']}"
+        )
+    return "\n".join(lines)
+
+
+def _render_routes(answer: dict) -> str:
+    lines = [
+        f"routes from {answer['table']['name']} to {answer['to']['name']}: {answer['n_routes']}"
+    ]
+    for route in answer["routes"]:
+        lines.append(f"  {' → '.join(route['tables'])}")
+        for a, b, step in zip(route["tables"], route["tables"][1:], route["steps"], strict=False):
+            how = [w for w, on in (("reads", step["reads"]), ("read by", step["read_by"])) if on]
+            how += [
+                f"{p['column']} = {p['other_column']} ({p['n_shared_values']} shared)"
+                for p in step["pairs"]
+            ]
+            lines.append(f"    {a} → {b}: {'; '.join(how)}")
     return "\n".join(lines)
 
 
@@ -774,7 +1214,7 @@ def choose_columns(
     # rest. The share is taken over what each table wants, so the picture
     # stays inside the cap and a table with columns still shows some.
     wants = {table: max(len(linked[table]), min(per_table, len(rows))) for table, rows in groups}
-    share = _fair_share(list(wants.values()), room) if sum(wants.values()) > room else None
+    share = fair_share(list(wants.values()), room) if sum(wants.values()) > room else None
 
     ids: list[str] = []
     sizes: dict[str, int] = {}
@@ -813,7 +1253,7 @@ def _clamp(n: int) -> int:
     return max(MIN_COLUMNS_SHOWN, min(MAX_COLUMNS_SHOWN, n))
 
 
-def _fair_share(counts: list[int], room: int) -> int:
+def fair_share(counts: list[int], room: int) -> int:
     """The most each table may draw so that all of them together fit in ``room``.
 
     The same number for every table, which is what makes it even; a table with

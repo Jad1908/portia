@@ -64,6 +64,7 @@ def test_the_edge_carries_no_per_side_counts():
     assert set(properties) == {
         *measure.MEASURED,
         "asked_because",
+        "origin",
         "measured_at",
         "left_fingerprint",
         "right_fingerprint",
@@ -166,12 +167,12 @@ def measured(neo4j_session, project, monkeypatch):
 
 def test_measuring_writes_both_the_numbers_and_the_reason(measured, pid):
     answer = query.lookup(measured, "orders", "country_name", project=pid)
-    assert len(answer["overlaps"]) == 1
-    overlap = answer["overlaps"][0]
-    assert overlap["table"] == "customers" and overlap["column"] == "country_code"
-    # Flat now, rather than a nested `measured` bag: the numbers, the reason and
+    (overlap,) = answer["compared_with"]
+    assert overlap["table"] == "customers" and overlap["other_column"] == "country_code"
+    # Flat, rather than a nested `measured` bag: the numbers, the reason and
     # what the far column looks like are one row the reader takes in at once.
     assert overlap["n_shared_values"] == 0
+    assert overlap["origin"] == "measured"
     assert "one by name and one by code" in overlap["asked_because"]
 
 
@@ -186,9 +187,9 @@ def test_a_measured_zero_is_kept_because_absence_would_mean_nobody_looked(measur
 def test_the_neighbourhood_hands_back_the_pairs_it_used_to_count(measured, pid):
     """The router earns its keep only once something has been measured — and it
     used to report the number two here rather than the two measurements."""
-    (neighbour,) = query.lookup(measured, "orders", project=pid)["overlaps"]
-    assert neighbour["table"] == "customers"
-    assert [(p["column"]["name"], p["other_column"]["name"]) for p in neighbour["pairs"]] == [
+    (neighbour,) = query.lookup(measured, "orders", project=pid)["neighbours"]
+    assert neighbour["name"] == "customers"
+    assert [(p["column"], p["other_column"]) for p in neighbour["pairs"]] == [
         ("country_name", "country_code"),
         ("customer_id", "customer_id"),
     ]
@@ -199,7 +200,7 @@ def test_the_neighbourhood_hands_back_the_pairs_it_used_to_count(measured, pid):
 
 def test_a_fresh_measurement_is_not_stale(measured, pid):
     assert (
-        query.lookup(measured, "orders", "customer_id", project=pid)["overlaps"][0]["stale"]
+        query.lookup(measured, "orders", "customer_id", project=pid)["compared_with"][0]["stale"]
         is False
     )
 
@@ -216,7 +217,7 @@ def test_rewriting_the_file_makes_the_measurement_stale_without_deleting_it(
     catalog.index_source(project / "data" / "orders.csv", portia_dir=project / catalog.DEFAULT_DIR)
     store.write(build_graph(project).graph, measured)
 
-    overlap = query.lookup(measured, "orders", "customer_id", project=pid)["overlaps"][0]
+    overlap = query.lookup(measured, "orders", "customer_id", project=pid)["compared_with"][0]
     assert overlap["stale"] is True
     assert overlap["n_shared_values"] == 2  # still there, still readable
 
@@ -258,7 +259,10 @@ def test_the_numbers_come_back_even_when_they_cannot_be_stored(project, monkeypa
         ]
     )
     assert result["stored"] is False
-    assert result["measured"][0]["n_shared_values"] == 2
+    fields = result["pairs"]["fields"]
+    (row,) = result["pairs"]["rows"]
+    assert row[fields.index("n_shared_values")] == 2
+    assert row[fields.index("from")] == "query"
 
 
 def test_the_graph_is_refreshed_before_a_measurement_attaches_to_it(
@@ -298,7 +302,7 @@ def test_the_graph_is_refreshed_before_a_measurement_attaches_to_it(
             }
         ]
     )
-    assert query.lookup(neo4j_session, "stg_orders", "country_name", project=pid)["overlaps"]
+    assert query.lookup(neo4j_session, "stg_orders", "country_name", project=pid)["compared_with"]
 
 
 def test_recording_a_step_puts_the_new_table_in_the_graph(neo4j_session, project, monkeypatch, pid):
@@ -318,12 +322,11 @@ def test_recording_a_step_puts_the_new_table_in_the_graph(neo4j_session, project
 
     answer = query.lookup(neo4j_session, "stg_orders", project=pid)
     assert answer["table"]["kind"] == "Model"
-    assert [t["name"] for t in answer["reads"]] == ["orders"]
+    assert [n["name"] for n in answer["neighbours"] if n["reads"]] == ["orders"]
     # …and the lineage of the table it just built is there too.
-    assert query.lookup(neo4j_session, "stg_orders", "country_name", project=pid)[
-        "derives_from"
-    ] == [
+    assert query.lookup(neo4j_session, "stg_orders", "country_name", project=pid)["upstream"] == [
         {
+            "hops": 1,
             "kind": "Source",
             "table": "orders",
             "path": "data/orders.csv",
@@ -397,7 +400,8 @@ def test_a_measurement_that_could_not_be_attached_is_not_reported_as_stored(
     )
 
     # The numbers were paid for and they are still handed back.
-    assert answer["measured"][0]["n_shared_values"] == 0
+    fields = answer["pairs"]["fields"]
+    assert answer["pairs"]["rows"][0][fields.index("n_shared_values")] == 0
     assert answer["stored"] is False
     assert "0 of 1" in answer["not_stored_because"]
 
@@ -410,3 +414,40 @@ def test_write_measured_counts_what_the_database_kept(neo4j_session):
     """Not what it was handed — the distinction the test above exists for."""
     edge = measure.overlap_edge(_pair(), MEASUREMENT)
     assert store.write_measured([edge], neo4j_session, "/tmp/p") == 0  # neither end exists yet
+
+
+# --- the graph first, and the join check's measurement ----------------------
+
+
+def test_a_pair_measured_once_comes_back_from_the_graph_the_second_time(
+    measured, project, monkeypatch, pid
+):
+    """`measure_overlaps` reads before it measures (2026-10-13): the same pair
+    asked again costs no query and says when it was measured."""
+    monkeypatch.chdir(project)
+    again = handlers.measure_overlaps(
+        [
+            {
+                "left": "orders",
+                "left_column": "customer_id",
+                "right": "customers",
+                "right_column": "customer_id",
+                "reason": "asked again",
+            },
+            # The same measurement asked from the other end: found either way
+            # round, its coverages turned to face the request.
+            {
+                "left": "customers",
+                "left_column": "country_code",
+                "right": "orders",
+                "right_column": "country_name",
+                "reason": "asked again, the other way",
+            },
+        ]
+    )
+    assert (again["n_from_graph"], again["n_measured"]) == (2, 0)
+    fields = again["pairs"]["fields"]
+    assert {row[fields.index("from")] for row in again["pairs"]["rows"]} == {"graph"}
+    # Nothing was written, so the reasons stored are the first ones.
+    (pair,) = query.lookup(measured, "orders", "country_name", project=pid)["compared_with"]
+    assert "one by name and one by code" in pair["asked_because"]

@@ -36,8 +36,9 @@ from portia.core.io import connect
 from portia.core.present import moment
 
 #: The arguments that name one table, by key: a source, a model, or
-#: ``<spec>#<step id>``. ``to`` is `graph_lookup`'s other end, ``table`` its first.
-NAMING = ("source", "table", "to", "left", "right")
+#: ``<spec>#<step id>``. ``table`` is `graph_lookup`'s first table, and ``to``
+#: and ``neighbour`` the other it may name.
+NAMING = ("source", "table", "to", "neighbour", "left", "right")
 
 #: The arguments that name several tables, as a list.
 NAMING_LISTS = ("inputs",)

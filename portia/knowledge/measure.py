@@ -50,6 +50,30 @@ MEASURED = (
     "comparable_types",
 )
 
+#: Which tool took a measurement, on the edge as ``origin``. A **closed** set,
+#: like `schema.VIA_OPS`, and for the same reason: a vocabulary that grows per
+#: run cannot be queried.
+#:
+#: ``measured`` is a pair the agent chose and `measure_overlaps` compared.
+#: ``join_check`` is the key of a join `join_findings` checked
+#: *(2026-10-13)*: that check measures exactly these four numbers for its
+#: key, and used to throw them away. The logs held 25 join checks and 5
+#: measurements, so most of what the agent learned about how tables connect
+#: never reached the graph. The two are the same measurement with a different
+#: occasion, and the occasion is worth keeping: a join check's reason is why
+#: the agent was about to *join*, which is a stronger claim than *compare*.
+#:
+#: An edge written before this property existed has none, and was written by
+#: `measure_overlaps`, the only writer there was; reads say ``measured`` for it.
+ORIGIN = "origin"
+ORIGIN_MEASURED = "measured"
+ORIGIN_JOIN_CHECK = "join_check"
+ORIGINS = (ORIGIN_MEASURED, ORIGIN_JOIN_CHECK)
+
+#: The properties that name a side, in left/right pairs. Turning an edge round
+#: swaps each pair and nothing else (:func:`seen_from`).
+SIDED = (("left_coverage", "right_coverage"), ("left_fingerprint", "right_fingerprint"))
+
 
 @dataclass(frozen=True)
 class Pair:
@@ -72,6 +96,7 @@ def overlap_edge(
     pair: Pair,
     measurement: dict,
     *,
+    origin: str = ORIGIN_MEASURED,
     left_fingerprint: str | None = None,
     right_fingerprint: str | None = None,
     when: datetime | None = None,
@@ -82,7 +107,11 @@ def overlap_edge(
     coverage is which. `query.py` reads it back with `startNode(r)` for exactly
     that reason — an undirected read of an edge holding two directional numbers
     would be a coin flip.
+
+    ``origin`` says which tool took it (:data:`ORIGINS`).
     """
+    if origin not in ORIGINS:
+        raise ValueError(f"unknown origin {origin!r} — have: {', '.join(ORIGINS)}")
     stamp = (when or datetime.now()).astimezone().isoformat(timespec="seconds")
     return Edge(
         OVERLAPS,
@@ -92,8 +121,62 @@ def overlap_edge(
             **{key: measurement[key] for key in MEASURED if key in measurement},
             # The agent's words, named so nobody mistakes them for a measurement.
             "asked_because": pair.asked_because,
+            ORIGIN: origin,
             "measured_at": stamp,
             "left_fingerprint": left_fingerprint,
             "right_fingerprint": right_fingerprint,
         },
     )
+
+
+def from_join_report(report: dict) -> dict:
+    """The four numbers of :data:`MEASURED`, read off a `checks.join` report.
+
+    **The same measurement, not a lookalike.** `join_report` and
+    `column_overlap` share their CTEs, their kind rule and their coverage
+    arithmetic (`checks/join.py`), so a one-column join's shared keys *are*
+    the column pair's shared values, its coverages are the same two shares of
+    rows, and ``key_dtype_match`` is ``comparable_types``. Only the names
+    differ, and this is where they are translated, once.
+    """
+    overlap = report["overlap"]
+    return {
+        "n_shared_values": overlap["n_shared_keys"],
+        "left_coverage": overlap["left_coverage"],
+        "right_coverage": overlap["right_coverage"],
+        "comparable_types": report["key_dtype_match"],
+    }
+
+
+def seen_from(properties: dict, *, from_start: bool) -> dict:
+    """An edge's properties with *left* meaning the end you are standing on.
+
+    The edge points from the column it was measured from, and its two
+    coverages and two fingerprints are named for that direction (§4.3). A
+    reader standing on the other end gets them swapped here, once, rather than
+    every caller remembering which is which: a coverage read from the wrong
+    end is a true number about the other table.
+    """
+    seen = dict(properties)
+    if not from_start:
+        for left, right in SIDED:
+            seen[left], seen[right] = properties.get(right), properties.get(left)
+    return seen
+
+
+def still_current(
+    seen: dict, left_fingerprint: str | None, right_fingerprint: str | None
+) -> bool | None:
+    """Whether a stored measurement was taken against the tables as they are now.
+
+    ``seen`` is the edge as :func:`seen_from` turns it, so *left* is the
+    caller's left. ``True`` when both recorded fingerprints match the current
+    ones, ``False`` when either moved, and ``None`` when any of the four is
+    missing: *cannot tell* is not *fine* (§4.5), and a caller deciding whether
+    to reuse a number treats it as moved.
+    """
+    recorded = (seen.get("left_fingerprint"), seen.get("right_fingerprint"))
+    current = (left_fingerprint, right_fingerprint)
+    if None in recorded or None in current:
+        return None
+    return recorded == current

@@ -612,3 +612,19 @@ def test_a_wide_built_table_reads_back_grouped(monkeypatch):
     assert list(answer)[0] == "shortened"
     (floats,) = answer["measured"]["columns_by_type"]
     assert floats["n_columns"] == 2000 and floats["first"][0] == "meter_0000"
+
+
+# --- the graph tools' arguments (2026-10-13) --------------------------------------------
+
+
+def test_graph_lookup_takes_a_neighbour_or_a_table_to_reach():
+    properties = tools.graph_lookup.input_schema["properties"]
+    assert {"table", "column", "neighbour", "to"} <= set(properties)
+    assert tools.graph_lookup.input_schema["required"] == ["table"]
+
+
+def test_the_graph_lookup_description_states_the_numbers_the_code_holds():
+    from portia.knowledge import query
+
+    assert f"at most {query.ROUTE_HOPS} steps" in tools.graph_lookup.description
+    assert f"up to {query.ROUTES} of them" in tools.graph_lookup.description
