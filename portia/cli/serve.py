@@ -22,7 +22,8 @@ is where each piece of it is put back:
 - **Which chat is this one.** `review_queries` and `record_finding` default to
   the newest chat, which is right when one process holds one conversation. With
   the window open beside a host, or two hosts on one project, the newest log is
-  not necessarily ours. This process knows its own, so it names it.
+  not necessarily ours. This process knows its own, so it names it, and the
+  data tools keep their results beside it (`portia/results.attach`).
 - **Charts.** `plot_data` publishes its rows to whatever surface is listening,
   and in this process nothing is. They are stashed under `.portia/drawn/`, a
   window open on the project shows them as the unsaved charts they are, the
@@ -53,7 +54,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from portia import catalog, runlog
+from portia import catalog, results, runlog
 from portia.agent import drawn, events, prompts
 from portia.core import cancel
 
@@ -84,6 +85,10 @@ class Session:
             self._log = runlog.start(
                 self.portia_dir, cwd=".", host=self.host, prompts=_prompts_read()
             )
+            # This process's data questions keep their results beside this log
+            # (`portia/results.py`). Once, for the session: a host may run
+            # calls side by side, and they all belong to this chat.
+            results.attach(self._log.path)
         return self._log
 
     def wrap(self, name: str, handler: Handler) -> Handler:

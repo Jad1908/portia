@@ -152,6 +152,8 @@ async def start(
     # (`portia/runlog.py`). Teed here, at the edge, for the same reason the CLI
     # tees in `run_turn` — the engine must not learn it is being observed.
     _open_log(chat, kind, prompt, label=label)
+    # Its tools keep their results beside this chat's log, and review this chat.
+    attached = engine.attach_results(chat.path)
 
     try:
         if chat.is_job:
@@ -187,6 +189,7 @@ async def start(
         if chat.resumed and exchange.subtype is None:
             await _refuse_resume(chat, exc)
     finally:
+        engine.attach_results(attached)
         exchange.running = False
         chat.job = None
         # An interrupted call whose result never came (the exchange was

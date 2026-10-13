@@ -752,15 +752,34 @@ def set_title(path: str | Path, title: str, portia_dir: str | Path = DEFAULT_DIR
     target.write_text(yaml.safe_dump(current, sort_keys=True, allow_unicode=True), encoding="utf-8")
 
 
+def companion(path: str | Path) -> Path:
+    """The folder beside a log, named by its stem: what portia kept for that chat.
+
+    Today that is the results of its questions (`portia/results.py`), which
+    belong to the chat and go with it. One folder per log rather than a shared
+    store, so that deleting a chat is deleting two paths, and a chat copied
+    elsewhere with its folder beside it still has its results. `logs_in` reads
+    ``*.jsonl`` only, so the folder is never listed as a log.
+    """
+    path = Path(path)
+    return path.parent / path.stem
+
+
 def delete(path: str | Path, portia_dir: str | Path = DEFAULT_DIR) -> None:
-    """Remove a log and the name it was given, if any.
+    """Remove a log, the name it was given, and what was kept beside it.
 
     The one artifact here nothing regenerates, which is why every surface
-    confirms first and why this does nothing clever: unlink, and drop the title.
+    confirms first and why this does nothing clever: unlink, drop the title,
+    and remove the chat's own folder (:func:`companion`). A stored result
+    belongs to one chat and goes with it; a finding that cites one keeps its
+    own copy of the rows it rests on, so nothing committed loses a number.
     """
+    import shutil
+
     path = Path(path)
     if path.is_file():
         path.unlink()
+    shutil.rmtree(companion(path), ignore_errors=True)
     if titles(portia_dir)[title_key(path)] is not None:
         set_title(path, "", portia_dir)
 
