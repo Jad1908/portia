@@ -38,6 +38,7 @@ import pytest
 
 from portia import catalog, findings
 from portia.agent import tools
+from portia.core import listing
 
 #: Claude Code passes an error result whole up to this many characters and cuts
 #: the middle out of anything longer (both binaries, both paths, 2026-10-10).
@@ -433,6 +434,23 @@ def test_the_index_of_sixty_tables_lists_them_all_or_says_how_many_more(estate):
         _says_how_to_get_the_rest(answer)
     assert whole["n_sources"] == 60 == whole["sources"]["n"]
     assert [row[0] for row in narrowed["sources"]["rows"]] == [f"t00{i}" for i in range(10)]
+
+
+@pytest.mark.parametrize(
+    ("tool", "args"),
+    [
+        ("describe_source", {"source": "t07"}),
+        ("query_data", {"sql": "SELECT 1", "inputs": ["t07"], "question": "is it there?"}),
+    ],
+)
+def test_an_unknown_name_among_sixty_tables_names_the_closest_few(estate, tool, args):
+    """It named every source and model: 1,694 characters at 80 sources (2026-10-13)."""
+    with _inside(estate):
+        result = _call(tool, args)
+    text = " ".join(result["content"][0]["text"].split())
+    assert result.get("is_error") and "Sources in this project: 60" in text
+    named = [f"t{i:03d}" for i in range(60) if f"t{i:03d}" in text]
+    assert 0 < len(named) <= listing.CLOSE_MATCHES, named
 
 
 @pytest.fixture(scope="module")

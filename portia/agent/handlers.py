@@ -1779,10 +1779,7 @@ def _known_refs(about: list[str], portia_dir: str, root: Path) -> list[str]:
         table, column = findings.split_ref(str(ref))
         table = dialects.resolve_columns([table], [*entries, *models])[0]
         if table not in entries and table not in models:
-            known = ", ".join(sorted({*entries, *models})) or "(none)"
-            close = get_close_matches(table, [*entries, *models], n=3)
-            hint = f" — closest: {', '.join(close)}" if close else ""
-            raise ValueError(f"no table {table!r} in this project{hint}. Known: {known}")
+            raise _no_such_table(table, list(entries), list(models))
         if column is not None and table in entries:
             names = [c["name"] for c in entries[table].get("columns", [])]
             if column not in names:
@@ -3251,15 +3248,17 @@ def _table(ref: str, portia_dir: str, con=None):
         # Not an indexed source. Before giving up, try the project's other models:
         # a name is allowed to be any of three things, and a message that names
         # only one of them reads as "that table doesn't exist" when the truth is
-        # "not by that name" (`docs/PIPELINE.md` §2.4).
+        # "not by that name" (`docs/PIPELINE.md` §2.4). The models are among
+        # `_entry`'s closest names, never all of them (`_no_such_table`).
+        if reserved.find(ref) is not None:
+            raise
         root = _project_root(portia_dir)
         models = spec.discover_specs(root)
         ref = dialects.resolve_columns([ref], models)[0]
         if ref in models:
             return _built_table(ref, models, root, con, portia_dir)
-        known = ", ".join(sorted(models)) or "(none)"
         raise ValueError(
-            f"{exc}. Models in this project: {known}. "
+            f"{str(exc).rstrip('.')}. "
             f"For a table an earlier step in the spec you are writing produced: {_STEP_REF_HINT}"
         ) from exc
 
@@ -3343,9 +3342,41 @@ def _known_name(name: str, portia_dir: str) -> str:
     (`CONNECTOR.md` §2.8.2's rule, applied to table names). Same resolver, same
     rule: exact first, then a unique case-insensitive match, else as it came.
     """
-    root = _project_root(portia_dir)
-    known = [*catalog.source_names(portia_dir), *spec.discover_specs(root)]
-    return dialects.resolve_columns([name], known)[0]
+    sources, models = _known_tables(portia_dir)
+    return dialects.resolve_columns([name], [*sources, *models])[0]
+
+
+def _known_tables(portia_dir: str) -> tuple[list[str], list[str]]:
+    """The names a tool may be given: the indexed sources, then the models, reading no entry."""
+    return catalog.source_names(portia_dir), list(spec.discover_specs(_project_root(portia_dir)))
+
+
+def _no_such_table(name: str, sources: list[str], models: list[str]) -> ValueError:
+    """The refusal of a table name that is no source and no model.
+
+    **The closest few and how many there are, never every name** *(2026-10-13)*.
+    It listed every source and every model, which grew with the project: at 80
+    sources one miss was 1,694 characters of names, a Haiku drive's, and the
+    name it had typed was ``portia_columns``. The near misses are
+    `core/listing.near_misses`', the graph's rule for an unknown column, and
+    the sentence says where the whole list is read.
+
+    **A name portia answers for itself is told so** (`agent/reserved.py`):
+    ``portia_columns``, ``portia_tables`` and a kept result's handle are tables
+    only ``query_data`` and ``plot_data`` read, and *no such table* about one
+    of them sends the model looking for a source that was never there.
+    """
+    if reserved.find(name) is not None:
+        return ValueError(prompts.error("reserved_is_not_a_source", table=name))
+    return ValueError(
+        prompts.error(
+            "unknown_table",
+            table=name,
+            closest=", ".join(listing.near_misses(name, [*sources, *models])) or "(none close)",
+            sources=len(sources),
+            models=len(models),
+        )
+    )
 
 
 def _entry(source: str, portia_dir: str) -> dict:
@@ -3356,7 +3387,8 @@ def _entry(source: str, portia_dir: str) -> dict:
     what lets `describe_source` open a table the project built, which the audit
     after every build starts with (`docs/COPILOT.md` §3). An unknown name is
     told about both halves, because *no indexed source* on a model that exists
-    reads as *that table does not exist* when the truth is *not by that name*.
+    reads as *that table does not exist* when the truth is *not by that name*:
+    its closest names come from both halves (:func:`_no_such_table`).
 
     **One entry is read, not the catalog** *(2026-10-08)*. Every tool that names
     a table comes through here, `query_data` once per input, and it loaded every
@@ -3368,11 +3400,7 @@ def _entry(source: str, portia_dir: str) -> dict:
     if entry is None:
         entry = catalog.load_models(portia_dir).get(source)
     if entry is None:
-        known = ", ".join(catalog.source_names(portia_dir)) or "(none indexed)"
-        models = ", ".join(sorted(catalog.load_models(portia_dir))) or "(none built)"
-        raise ValueError(
-            f"no indexed source or built model {source!r} — sources: {known}; models: {models}"
-        )
+        raise _no_such_table(source, *_known_tables(portia_dir))
     return dict(entry)
 
 

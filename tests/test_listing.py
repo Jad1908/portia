@@ -165,3 +165,16 @@ def test_the_profilers_flags_are_named_in_its_vocabulary_and_in_its_order(table)
         assert set(column["flags"]) <= set(profiling.FLAGS)
         positions = [profiling.FLAGS.index(f) for f in column["flags"]]
         assert positions == sorted(positions)
+
+
+# --- near misses ---------------------------------------------------------------
+
+
+def test_a_near_miss_differing_only_in_case_comes_first_and_the_rest_are_capped():
+    names = ["ORDERS", "orders_eu", "orders_us", "orders_uk", "customers"]
+    assert listing.near_misses("orders", names) == ["ORDERS", "orders_us", "orders_uk"]
+    assert len(listing.near_misses("orders", names, n=5)) == 5 - 1, "customers is not close"
+
+
+def test_nothing_close_is_an_empty_list():
+    assert listing.near_misses("portia_columns", [f"account_{i}" for i in range(80)]) == []

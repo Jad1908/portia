@@ -66,9 +66,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from difflib import get_close_matches
 from typing import Any
 
+from portia.core import listing
 from portia.knowledge import measure
 from portia.knowledge.measure import MEASURED, ORIGIN, ORIGIN_MEASURED
 from portia.knowledge.schema import (
@@ -112,9 +112,6 @@ ROUTES = 10
 #: Longest list an error names. Reached only by something unusual, and when it
 #: is reached the message **says so** rather than quietly returning a slice.
 MAX_ROWS = 25
-
-#: How many near misses an unknown column's message names.
-CLOSE_MATCHES = 3
 
 
 def lookup(
@@ -222,9 +219,8 @@ def _unknown_column(session: Any, found: dict, column: str, project: str) -> str
     """A miss on a column: how many the table has, and the near misses.
 
     **Not every name**, which is what it used to say: on a 1,579-column table
-    that was one error longer than the harness passes whole. The names that
-    differ only in case come first, because a typed name folded the wrong way is
-    the commonest miss.
+    that was one error longer than the harness passes whole. The near misses
+    are `core/listing.near_misses`', the rule every unknown name is answered by.
     """
     names = [
         row["name"]
@@ -235,9 +231,7 @@ def _unknown_column(session: Any, found: dict, column: str, project: str) -> str
             project=project,
         )
     ]
-    folded = [name for name in names if name.lower() == column.lower()]
-    close = [*folded, *get_close_matches(column, names, n=CLOSE_MATCHES)]
-    near = list(dict.fromkeys(close))[:CLOSE_MATCHES]
+    near = listing.near_misses(column, names)
     where = f"no column {column!r} on {found['name']!r}, which has {len(names)}"
     return f"{where} — closest: {', '.join(near)}" if near else f"{where}, none named like it"
 

@@ -171,6 +171,20 @@ def test_a_table_nobody_profiled_has_its_type_and_no_flags(shop):
     assert _records(answer) == [{"type": "VARCHAR", "flags": None, "null_rate": None}] * 2
 
 
+# --- named where a source belongs ----------------------------------------------------
+
+
+@pytest.mark.parametrize("name", ["portia_columns", "PORTIA_TABLES", "portia_result_bcdf"])
+def test_one_of_portias_own_tables_is_not_a_source_and_says_where_it_is_read(shop, name):
+    """A Haiku drive described `portia_columns` and was told every source's name (2026-10-13)."""
+    with pytest.raises(ValueError) as described:
+        handlers.describe_source(name, shop)
+    with pytest.raises(ValueError) as read:
+        handlers._table(name, shop)
+    for refused in (described, read):
+        assert str(refused.value) == prompts.error("reserved_is_not_a_source", table=name)
+
+
 # --- a warehouse project --------------------------------------------------------------
 
 

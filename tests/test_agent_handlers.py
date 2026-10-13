@@ -13,7 +13,7 @@ import pytest
 import yaml
 
 from portia import catalog, spec
-from portia.agent import handlers
+from portia.agent import handlers, prompts
 from portia.catalog import index_source, init_project
 from portia.fixtures import messy_customers, sales_customers, sales_orders
 
@@ -136,8 +136,8 @@ def test_an_entry_indexed_before_means_were_stored_says_so(project):
 
 
 def test_profile_source_names_what_is_available_when_missing(project):
-    with pytest.raises(ValueError, match="customers"):
-        handlers.profile_source("nope", project)
+    with pytest.raises(ValueError, match="Closest names: customers"):
+        handlers.profile_source("customer", project)
 
 
 def test_profile_source_columns_returns_only_what_was_asked_for(project):
@@ -1950,13 +1950,36 @@ def test_naming_a_table_reads_its_entry_and_no_other(sales, monkeypatch):
 
 
 def test_an_unknown_name_is_told_about_sources_and_models(sales):
-    with pytest.raises(ValueError, match="no indexed source or built model") as exc:
-        handlers.describe_source("nope", sales)
-    assert (
-        "sources:" in str(exc.value)
-        and "customers" in str(exc.value)
-        and "models:" in str(exc.value)
+    """The closest names of both halves and how many each has, never every name.
+
+    It listed every source and every model, which grew with the project: 1,694
+    characters at 80 sources, in a Haiku drive (2026-10-13).
+    """
+    handlers.record_step(
+        "specs/order_totals.yaml",
+        {"id": "t", "op": "sql", "inputs": ["orders"], "sql": "SELECT * FROM orders"},
+        portia_dir=sales,
     )
+    for typed, closest in (
+        ("ordrs", "orders"),
+        ("order_total", "order_totals"),
+        ("nope", "(none close)"),
+    ):
+        with pytest.raises(ValueError) as exc:
+            handlers.describe_source(typed, sales)
+        assert str(exc.value) == prompts.error(
+            "unknown_table", table=typed, closest=closest, sources=2, models=1
+        )
+
+
+def test_an_unknown_input_adds_the_step_form_and_no_list_of_models(sales):
+    with pytest.raises(ValueError) as exc:
+        handlers.query_data("SELECT * FROM ordrs", ["ordrs"], "how many?", portia_dir=sales)
+    message = str(exc.value)
+    assert message.startswith(
+        prompts.error("unknown_table", table="ordrs", closest="orders", sources=2, models=0)
+    )
+    assert "<spec path>#<step id>" in message and "Models in this project" not in message
 
 
 def test_a_local_build_profiles_the_model_and_the_entry_says_so(sales):
