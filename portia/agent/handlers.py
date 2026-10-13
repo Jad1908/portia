@@ -791,7 +791,23 @@ def _select(sql: str, inputs: list[str], portia_dir: str) -> Table:
                 f"another way (a model name, or the other spec's step)"
             )
         tables[key] = built[name] if name in built else _table(name, portia_dir, con)
-    return sql_op.apply_sql(tables, sql_op.rename_tables(sql, renames), name="query").table
+    try:
+        return sql_op.apply_sql(tables, sql_op.rename_tables(sql, renames), name="query").table
+    except sql_op.SqlTableUnknown as exc:
+        # **One of portia's own tables, read and not declared**, is said in
+        # those words (a Haiku drive, 2026-10-13, failed twice on the generic
+        # "reads only what it declares"). Never added to 'inputs' for it: the
+        # sandbox's rule is that a query reads exactly what it declares.
+        missing = [name for name in exc.names if reserved.find(name) is not None]
+        if not missing:
+            raise
+        if con is not None and backend.is_remote(con):
+            raise ValueError(
+                prompts.error(
+                    "reserved_with_warehouse", reserved=", ".join(missing), tables=", ".join(theirs)
+                )
+            ) from exc
+        raise ValueError(prompts.error("reserved_not_declared", table=missing[0])) from exc
 
 
 def interrupted_facts(tool: str, args: dict, portia_dir: str = catalog.DEFAULT_DIR) -> dict:

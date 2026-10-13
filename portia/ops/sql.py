@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import contextlib
 import re
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from typing import Any
 
 from portia.core import backend, cancel
@@ -123,6 +123,10 @@ FORBIDDEN = (
 SYSTEM_FUNCTIONS = "system$"
 
 _COMMENT = re.compile(r"--[^\n]*|/\*.*?\*/", re.DOTALL)
+
+#: The table DuckDB could not find, in its ``CatalogException``, which carries
+#: the name in its text and nowhere else (DuckDB 1.5).
+_MISSING_TABLE = re.compile(r"Table with name (.+?) does not exist")
 _WORD = re.compile(r"[a-z_][a-z0-9_]*")
 
 
@@ -137,7 +141,16 @@ class SqlTableUnknown(ValueError):
     caller's mistake and always has the same fix — declare it, or spell it the
     way it was declared. Everything else the sandbox raises is about the query
     itself and is passed through.
+
+    ``names`` is what the query named and the sandbox did not hold, as the
+    query spelled it, when that could be read: empty otherwise. A caller one
+    layer up words the case it knows more about, such as one of portia's own
+    tables left out of ``inputs`` (`agent/handlers._select`).
     """
+
+    def __init__(self, message: str, names: Sequence[str] = ()) -> None:
+        super().__init__(message)
+        self.names = tuple(names)
 
 
 def check_sql(sql: str) -> None:
@@ -289,7 +302,7 @@ def _apply_remote(inputs: dict[str, Table], sql: str, *, name: str, con: Any) ->
     dialect = dialects.of(con).name
     strays = undeclared_tables(sql, inputs, dialect=dialect)
     if strays:
-        raise SqlTableUnknown(_undeclared(strays, inputs))
+        raise SqlTableUnknown(_undeclared(strays, inputs), strays)
     # `compiled` is the quoted form too, not only the query: `pipeline.py` wraps
     # each step's compiled SQL in the same quoted CTE names `compose` uses, so a
     # `models/*.sql` carrying the unquoted reference would ship the exact
@@ -476,7 +489,9 @@ def apply_sql(inputs: dict[str, Table], sql: str, *, name: str = "sql") -> OpRes
             # drawn from `__portia_raw_`, an internal staging name that appears
             # nowhere in portia's vocabulary and cannot be acted on. Same rule
             # as `handlers._table` one layer up: say what the name *could* be.
-            raise SqlTableUnknown(_unknown_table(exc, inputs)) from exc
+            raise SqlTableUnknown(
+                _unknown_table(exc, inputs), _MISSING_TABLE.findall(str(exc))
+            ) from exc
         # The types the *query* produced, captured before the trip back out.
         types = dict(zip(result.columns, (str(t) for t in result.types), strict=True))
         out = result.df()

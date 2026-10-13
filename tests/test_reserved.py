@@ -17,6 +17,7 @@ import pytest
 
 from portia import catalog
 from portia.agent import handlers, prompts, reserved, tools
+from portia.ops import sql as sql_op
 
 
 @pytest.fixture
@@ -171,7 +172,7 @@ def test_a_table_nobody_profiled_has_its_type_and_no_flags(shop):
     assert _records(answer) == [{"type": "VARCHAR", "flags": None, "null_rate": None}] * 2
 
 
-# --- named where a source belongs ----------------------------------------------------
+# --- named where a source belongs, or read and not declared -------------------------
 
 
 @pytest.mark.parametrize("name", ["portia_columns", "PORTIA_TABLES", "portia_result_bcdf"])
@@ -183,6 +184,22 @@ def test_one_of_portias_own_tables_is_not_a_source_and_says_where_it_is_read(sho
         handlers._table(name, shop)
     for refused in (described, read):
         assert str(refused.value) == prompts.error("reserved_is_not_a_source", table=name)
+
+
+@pytest.mark.parametrize("name", ["Portia_Columns", "portia_result_bcdf"])
+def test_one_of_portias_tables_read_and_not_declared_is_told_to_declare_it(shop, name):
+    """The same Haiku drive failed twice on the sandbox's generic words.
+
+    Never added to 'inputs' for it: a query reads exactly what it declares.
+    """
+    with pytest.raises(ValueError) as refused:
+        _ask(f"SELECT count(*) AS n FROM orders, {name}", ["orders"], shop)
+    assert str(refused.value) == prompts.error("reserved_not_declared", table=name)
+
+
+def test_any_other_undeclared_table_keeps_the_sandboxs_own_words(shop):
+    with pytest.raises(ValueError, match="reads only what it declares in 'inputs'"):
+        _ask("SELECT count(*) AS n FROM orders, customers", ["orders"], shop)
 
 
 # --- a warehouse project --------------------------------------------------------------
@@ -201,6 +218,22 @@ def test_on_a_warehouse_portias_records_and_the_warehouse_are_never_one_query(sh
     monkeypatch.setattr(handlers, "connect", lambda: _Remote())
     with pytest.raises(ValueError) as refused:
         _ask("SELECT * FROM portia_tables, orders", ["portia_tables", "orders"], shop)
+    assert str(refused.value) == prompts.error(
+        "reserved_with_warehouse", reserved="portia_tables", tables="orders"
+    )
+
+
+def test_on_a_warehouse_a_record_read_and_not_declared_is_told_to_ask_alone(shop, monkeypatch):
+    """Adding it to 'inputs' would only meet the refusal above, so this says what that says."""
+    monkeypatch.setattr(handlers, "connect", lambda: _Remote())
+    monkeypatch.setattr(handlers, "_table", lambda name, portia_dir, con: object())
+
+    def undeclared(tables, sql, *, name):
+        raise sql_op.SqlTableUnknown("the sandbox's own words", ["portia_tables"])
+
+    monkeypatch.setattr(sql_op, "apply_sql", undeclared)
+    with pytest.raises(ValueError) as refused:
+        _ask("SELECT * FROM portia_tables, orders", ["orders"], shop)
     assert str(refused.value) == prompts.error(
         "reserved_with_warehouse", reserved="portia_tables", tables="orders"
     )
