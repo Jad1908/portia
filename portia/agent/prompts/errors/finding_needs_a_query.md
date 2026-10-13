@@ -10,6 +10,6 @@ number you authored — which is the one thing you may never do.
 Call `review_queries` to see this chat's queries with their numbers, then name the ones this
 finding rests on:
 
-    {"from": [7, 9], ...}
+    {{"from": [7, 9], ...}}
 
 Several is normal. A tolerance sweep is three queries and one finding.

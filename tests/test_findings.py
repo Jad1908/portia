@@ -171,6 +171,13 @@ def test_a_query_number_that_is_not_there_is_refused(sales):
         handlers.record_finding("q", "a", "b", ["orders"], [4], portia_dir=sales)
 
 
+def test_a_finding_citing_no_query_is_refused_in_words(sales):
+    """It raised ``KeyError: '"from"'`` once, from a literal brace in the refusal."""
+    _chat_with_queries(sales, "q")
+    with pytest.raises(ValueError, match="has to name the queries"):
+        handlers.record_finding("q", "a", "b", ["orders"], [], portia_dir=sales)
+
+
 # --- the read path ----------------------------------------------------------
 
 
