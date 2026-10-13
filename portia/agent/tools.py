@@ -925,6 +925,10 @@ async def get_context(args: dict[str, Any]) -> dict[str, Any]:
         "properties": {
             "source": {"type": "string", "description": "Source name, or model name"},
             **_COLUMN_FILTERS,
+            "findings_with": {
+                "type": "string",
+                "description": "Another table: the findings about the two, instead of the card",
+            },
             "portia_dir": {"type": "string"},
         },
         "required": ["source"],
@@ -933,7 +937,9 @@ async def get_context(args: dict[str, Any]) -> dict[str, Any]:
 )
 async def describe_source(args: dict[str, Any]) -> dict[str, Any]:
     return await _evidence(
-        lambda: handlers.describe_source(args["source"], **_filters(args)),
+        lambda: handlers.describe_source(
+            args["source"], findings_with=args.get("findings_with"), **_filters(args)
+        ),
         coarser=handlers.overview_of,
         args=args,
     )

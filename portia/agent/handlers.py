@@ -146,6 +146,19 @@ PROFILE_CAP = 50
 #: Notes a card carries: the latest this many, with how many there are in all.
 CARD_NOTES = 10
 
+#: Tables whose findings with this one a card shows, in name order, each with
+#: its latest `findings.PER_NEIGHBOUR`. The rest are named and counted
+#: (`FINDING_TABLES_NAMED`), and ``findings_with`` reads any one of them. A
+#: card of a table forty others had findings with was 19,317 characters,
+#: three-quarters of it findings (the scale test, 2026-10-13).
+CARD_FINDING_TABLES = 10
+
+#: Tables past `CARD_FINDING_TABLES` a card names, with how many findings each.
+FINDING_TABLES_NAMED = 100
+
+#: Findings ``describe_source(findings_with=…)`` shows about two tables, latest first.
+FINDINGS_WITH = 20
+
 #: Sources, and models, one `get_context` lists before it says how many more there are.
 CONTEXT_ROWS = 100
 
@@ -199,6 +212,7 @@ def card_vocabulary() -> dict[str, str]:
         "card": str(CARD_LISTS_ALL),
         "examples": str(TYPE_EXAMPLES),
         "notes": str(CARD_NOTES),
+        "finding_tables": str(CARD_FINDING_TABLES),
         "match_cap": str(MATCH_CAP),
         "profile_cap": str(PROFILE_CAP),
         "rows": str(CONTEXT_ROWS),
@@ -330,6 +344,7 @@ def describe_source(
     match: str | None = None,
     type_: str | None = None,
     flag: str | None = None,
+    findings_with: str | None = None,
 ) -> dict:
     """L2 — one table's card: what it is, what its columns mean, what anyone wrote about it.
 
@@ -359,7 +374,9 @@ def describe_source(
 
     **It also carries what anyone has already learned about this table**
     (`portia/findings.py`), grouped by the table on the other side, capped, with
-    the total stated. That is here rather than behind a tool of its own for one
+    the total stated: the first `CARD_FINDING_TABLES` tables in full, the rest
+    named and counted, and ``findings_with`` reads the findings about this
+    table and one other. That is here rather than behind a tool of its own for one
     measured reason: `graph_lookup` was called **zero times across four runs**
     while this rung was called 23 times in one of them. A surface the agent has
     to *think to* consult does not get consulted, and there is no reason to test
@@ -384,20 +401,23 @@ def describe_source(
     # read as *nothing to report* (`docs/CONNECTOR.md` §2.6).
     unprofiled = {} if profiled else {"profiled": False}
     cols = list(entry.get("columns") or [])
-    if _filtering(columns, match, type_, flag):
-        picked = _matching(cols, name, columns=columns, match=match, type_=type_, flag=flag)
-        shown = picked[:MATCH_CAP]
-        return {
-            "source": name,
-            **unprofiled,
-            "n_columns": len(cols),
-            "columns": listing.listing(
+    filtering = _filtering(columns, match, type_, flag)
+    if filtering or findings_with:
+        narrowed: dict[str, Any] = {"source": name}
+        if filtering:
+            picked = _matching(cols, name, columns=columns, match=match, type_=type_, flag=flag)
+            shown = picked[:MATCH_CAP]
+            narrowed.update(unprofiled)
+            narrowed["n_columns"] = len(cols)
+            narrowed["columns"] = listing.listing(
                 DESCRIBE_FIELDS,
                 [_row(col, DESCRIBE_FIELDS) for col in shown],
                 n=len(picked),
                 more=prompts.more("described_columns", left=len(picked) - len(shown)),
-            ),
-        }
+            )
+        if findings_with:
+            narrowed["findings"] = _findings_with(name, findings_with, portia_dir)
+        return narrowed
     card: dict[str, Any] = {
         "source": name,
         "path": _path_of(name, entry, portia_dir),
@@ -418,7 +438,7 @@ def describe_source(
     # every project that has never curated a chat.
     journal = findings.for_table(name, root=_project_root(portia_dir))
     if journal["n_findings"]:
-        card["findings"] = journal
+        card["findings"] = _findings_card(journal, name)
     notes = list(entry.get(catalog.NOTES) or [])
     if notes:
         latest = notes[-CARD_NOTES:]
@@ -430,6 +450,60 @@ def describe_source(
             more=prompts.more("notes_earlier", left=len(notes) - len(latest), source=name),
         )
     return card
+
+
+def _findings_card(journal: dict, source: str) -> dict:
+    """`findings.for_table`'s answer with a cap on the tables, the rest named and counted.
+
+    Each table already showed its latest `findings.PER_NEIGHBOUR` findings with
+    its total; the number of tables was the part that grew. The first
+    `CARD_FINDING_TABLES`, in `for_table`'s name order (findings about this
+    table alone first), stay as they were. The rest are a list of name and
+    count, and ``more`` says that ``findings_with`` reads any of them. The
+    ``table`` key is dropped: it is the name the call gave.
+    """
+    groups = list(journal["with"].items())
+    out: dict[str, Any] = {
+        "n_findings": journal["n_findings"],
+        "with": dict(groups[:CARD_FINDING_TABLES]),
+    }
+    rest = groups[CARD_FINDING_TABLES:]
+    if rest:
+        named = rest[:FINDING_TABLES_NAMED]
+        out["also_with"] = listing.listing(
+            ("table", "n"),
+            [[table, group["n"]] for table, group in named],
+            n=len(rest),
+            more=prompts.more("findings_tables", left=len(rest) - len(named)),
+        )
+    if rest or any(len(group["findings"]) < group["n"] for _, group in groups):
+        out["more"] = prompts.more("findings_with", source=source, cap=FINDINGS_WITH)
+    return out
+
+
+def _findings_with(source: str, other: str, portia_dir: str) -> dict:
+    """The findings about ``source`` and ``other`` together, latest first, up to `FINDINGS_WITH`.
+
+    ``other`` is matched against the tables the findings name, the way a column
+    name is matched (`core/dialect.resolve_columns`): exactly, else one match
+    without case. A table nothing has findings with answers none, which is a
+    fact rather than a refusal.
+    """
+    journal = findings.for_table(
+        source, root=_project_root(portia_dir), per_neighbour=FINDINGS_WITH
+    )
+    (other,) = dialects.resolve_columns([other], list(journal["with"]))
+    group = journal["with"].get(other) or {"n": 0, "findings": []}
+    briefs = group["findings"]
+    return {
+        "with_table": other,
+        "findings": listing.listing(
+            ("question", "answer", "so", "path"),
+            [[b["question"], b["answer"], b["so"], b["path"]] for b in briefs],
+            n=group["n"],
+            more=prompts.more("findings_older", left=group["n"] - len(briefs)),
+        ),
+    }
 
 
 def overview_of(card: dict) -> dict:

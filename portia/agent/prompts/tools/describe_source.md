@@ -1,4 +1,4 @@
-<!-- placeholders: {card}, {examples}, {notes}, {match_cap}, {flags}. Filled from agent/handlers.card_vocabulary. -->
+<!-- placeholders: {card}, {examples}, {notes}, {finding_tables}, {match_cap}, {flags}. Filled from agent/handlers.card_vocabulary. -->
 One table's card: what it is, what its columns mean, and everything anyone has written down
 about it. No statistics.
 
@@ -21,7 +21,9 @@ What comes back:
   {notes} are here, and 'more' counts the rest. Read them before you define anything on it. A note
   saying the outcome column is a grade is the difference between a label and a column of zeros.
 - 'findings': what earlier chats asked this table with a query and what it said, grouped by the
-  table on the other side, capped, with the total stated.
+  table on the other side. Each group shows its latest few and its total. Past the first
+  {finding_tables} tables, 'also_with' names the rest with a count each. 'findings_with' naming
+  one table answers the findings about the two instead of the card.
 
 To list columns, narrow. 'columns' takes exact names. 'match' takes a name pattern: 'meter_*'
 starts with meter_, '*office*' contains office, and case does not matter. 'type' takes a type as

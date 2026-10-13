@@ -426,3 +426,37 @@ def test_the_index_of_sixty_tables_lists_them_all_or_says_how_many_more(estate):
         _says_how_to_get_the_rest(answer)
     assert whole["n_sources"] == 60 == whole["sources"]["n"]
     assert [row[0] for row in narrowed["sources"]["rows"]] == [f"t00{i}" for i in range(10)]
+
+
+@pytest.fixture(scope="module")
+def crowded(tmp_path_factory) -> Path:
+    """A hub that a hundred other tables have three findings each with."""
+    root = _project(tmp_path_factory.mktemp("crowded"), {"hub": (12, 0.0)}, rows=10)
+    with _inside(root):
+        for i in range(100):
+            for k in range(3):
+                findings.record(
+                    question=f"Does the hub's region code line up with partner {i:03d}, take {k}?",
+                    answer="Mostly: nine regions in ten match, and the tenth is a spelling of R4.",
+                    so="Mapped the odd spelling before the join and kept the partner in the rollup.",
+                    about=["hub.region_code", f"partner_{i:03d}"],
+                    queries=[],
+                )
+    return root
+
+
+def test_a_card_with_findings_from_a_hundred_tables_names_them_all(crowded):
+    from portia.agent import handlers
+
+    with _inside(crowded):
+        answer = _answer(_call("describe_source", {"source": "hub"}))
+        pair = _answer(_call("describe_source", {"source": "hub", "findings_with": "PARTNER_050"}))
+    _says_how_to_get_the_rest(answer)
+    block = answer["findings"]
+    assert block["n_findings"] == 300 and block["more"]
+    assert len(block["with"]) == handlers.CARD_FINDING_TABLES
+    assert block["also_with"]["n"] == 100 - handlers.CARD_FINDING_TABLES
+    assert block["also_with"]["rows"][0] == [f"partner_{handlers.CARD_FINDING_TABLES:03d}", 3]
+    assert set(pair) == {"source", "findings"}
+    assert pair["findings"]["with_table"] == "partner_050"
+    assert pair["findings"]["findings"]["n"] == 3 and len(pair["findings"]["findings"]["rows"]) == 3
