@@ -2400,12 +2400,12 @@ def _keep_join(left: str, right: str, report: dict, reason: str, portia_dir: str
     """
     lkeys, rkeys = report["keys"]["left"], report["keys"]["right"]
     if len(lkeys) != 1 or len(rkeys) != 1:
-        return _not_kept(prompts.notice("join_not_kept_composite"))
+        return _graph_not_kept(prompts.notice("join_not_kept_composite"))
     if STEP_REF in left or STEP_REF in right:
-        return _not_kept(prompts.notice("join_not_kept_step"))
+        return _graph_not_kept(prompts.notice("join_not_kept_step"))
     left, right = _known_name(left, portia_dir), _known_name(right, portia_dir)
     if left == right:
-        return _not_kept(prompts.notice("join_not_kept_same_table"))
+        return _graph_not_kept(prompts.notice("join_not_kept_same_table"))
     try:
         with store.session() as live:
             graph = knowledge.build_graph(_project_root(portia_dir), portia_dir=portia_dir).graph
@@ -2413,7 +2413,7 @@ def _keep_join(left: str, right: str, report: dict, reason: str, portia_dir: str
                 left_ref, right_ref = _graph_ref(left, graph), _graph_ref(right, graph)
             except ValueError:
                 # A table with no node, which reads as its column missing.
-                return _not_kept(prompts.notice("join_not_kept_unattached"))
+                return _graph_not_kept(prompts.notice("join_not_kept_unattached"))
             fingerprints = _table_fingerprints(graph)
             edge = measure.overlap_edge(
                 measure.Pair(left_ref, lkeys[0], right_ref, rkeys[0], reason),
@@ -2427,16 +2427,16 @@ def _keep_join(left: str, right: str, report: dict, reason: str, portia_dir: str
     except cancel.Cancelled:
         raise
     except store.GraphUnavailable as exc:
-        return _not_kept(prompts.notice("join_not_kept_unavailable", reason=str(exc)))
+        return _graph_not_kept(prompts.notice("join_not_kept_unavailable", reason=str(exc)))
     except Exception as exc:  # noqa: BLE001 - the join's answer must not fail because of the graph
         error = f"{type(exc).__name__}: {exc}"
-        return _not_kept(prompts.notice("join_not_kept_unavailable", reason=error))
+        return _graph_not_kept(prompts.notice("join_not_kept_unavailable", reason=error))
     if not written:
-        return _not_kept(prompts.notice("join_not_kept_unattached"))
+        return _graph_not_kept(prompts.notice("join_not_kept_unattached"))
     return {"kept": True}
 
 
-def _not_kept(why: str) -> dict:
+def _graph_not_kept(why: str) -> dict:
     return {"kept": False, "why": why}
 
 
