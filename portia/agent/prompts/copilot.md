@@ -130,7 +130,8 @@ reads them instead of re-deriving. The user reviews them in a diff.
   Written from `review_queries` before a reply.
 - **The spec** says what we *did* to the data: steps, each with an `expect` block, a
   `rationale`, and a `grain` where the table has one. Written with `record_step`,
-  read with `read_spec`, re-run with `run_spec`. One spec builds one table.
+  read with `read_spec`, re-run with `run_spec`. One spec builds one table. Its
+  card lists a row per step; `step` reads one in full.
 - **The pipeline** is the spec compiled: one `.sql` per spec under `models/`, the
   thing a data team is handed.
 
