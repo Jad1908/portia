@@ -117,7 +117,7 @@ def test_a_missing_prompt_is_a_loud_error():
 
 def test_editor_notes_never_reach_the_model():
     """Files document their own placeholders in an HTML comment. It's for humans."""
-    for kind in ("tools", "tasks"):
+    for kind in ("tools", "tasks", "notices", "more"):
         for name in prompts.names(kind):
             assert "<!--" not in prompts.load(f"{kind}/{name}"), f"{kind}/{name}"
 
@@ -253,7 +253,9 @@ def test_the_query_exemption_cannot_swallow_prose():
 # --- every prompt file is read by something ------------------------------------------
 
 #: The `prompts.*` calls that load a file, and the folder each one reads from.
-_LOADERS = ("load", "tool", "task", "error")
+_LOADERS = ("load", "tool", "task", "error", "notice", "more")
+#: A loader whose folder is not its name plus an ``s``.
+_FOLDERS = {"more": "more"}
 
 
 def _loaded_prompt(node: ast.AST) -> str | None:
@@ -272,7 +274,9 @@ def _loaded_prompt(node: ast.AST) -> str | None:
     first = node.args[0]
     if not isinstance(first, ast.Constant) or not isinstance(first.value, str):
         return None
-    return first.value if func.attr == "load" else f"{func.attr}s/{first.value}"
+    if func.attr == "load":
+        return first.value
+    return f"{_FOLDERS.get(func.attr, func.attr + 's')}/{first.value}"
 
 
 def _call_sites() -> dict[str, list[str]]:
@@ -310,7 +314,7 @@ def test_no_prompt_file_is_dead_text():
         kind = name.split("/")[0] if "/" in name else ""
         if kind == "tools" and name.split("/", 1)[1] not in names:
             orphans.append(f"{name}.md: a description for no tool")
-        elif kind in ("tasks", "errors") and not sites.get(name):
+        elif kind in ("tasks", "errors", "notices", "more") and not sites.get(name):
             orphans.append(f"{name}.md: nothing loads it")
     assert not orphans, "\n".join(orphans)
 

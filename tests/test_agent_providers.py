@@ -732,6 +732,16 @@ def test_every_non_negotiable_is_in_the_overrides():
     assert not any(line.startswith("model_provider=") for line in lines)
 
 
+def test_codex_keeps_every_result_portia_sends_whole():
+    """Unset, a local model's slug keeps about 12,000 bytes of a result; portia sends up to 30,000."""
+    from portia.agent import tools
+
+    lines = codex_provider.overrides("http://127.0.0.1:5/mcp")
+    assert f"tool_output_token_limit={codex_provider.TOOL_OUTPUT_TOKEN_LIMIT}" in lines
+    kept = codex_provider.TOOL_OUTPUT_TOKEN_LIMIT * codex_provider.CODEX_BYTES_PER_UNIT
+    assert kept >= tools.RESULT_BUDGET
+
+
 def test_a_signed_out_account_is_refused_in_codexs_own_words(monkeypatch):
     monkeypatch.setattr(
         codex_provider,

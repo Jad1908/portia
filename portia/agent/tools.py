@@ -550,11 +550,51 @@ def _failed(exc: Exception) -> dict[str, Any]:
 
     An uncaught exception would still reach it as ``str(exc)``; going through
     here means we can add the context needed to pick a different move.
+
+    Shortened to `ERROR_BUDGET` here, saying so, rather than by the harness
+    (:func:`_within_error_budget`).
     """
     return {
-        "content": [{"type": "text", "text": f"{type(exc).__name__}: {exc}"}],
+        "content": [{"type": "text", "text": _within_error_budget(f"{type(exc).__name__}: {exc}")}],
         "is_error": True,
     }
+
+
+#: The longest error text a tool hands back, in characters.
+#:
+#: **Claude Code cuts the middle out of an error result longer than 11,024
+#: characters** and passes a success whole up to 50,000 (measured against both
+#: binaries on a fake server, 2026-10-10, `sandbox/limits`). An error is where
+#: the facts of a refusal live — `blocked_step` carries the produced table's
+#: measurements — and its middle was being dropped by a harness that says only
+#: how much it dropped. So portia cuts first, below that line, and says what it
+#: cut and where. Codex treats an error as it treats any result, so this is the
+#: lower of the two limits that apply to one.
+ERROR_BUDGET = 10_000
+
+
+def _within_error_budget(text: str) -> str:
+    """``text`` whole when it fits `ERROR_BUDGET`, else its start and end around a marker.
+
+    The notice comes first, as every notice in an answer does; then the start
+    of the error, which says what went wrong, and its end, which in portia's
+    refusals says what to do about it, with a marker where the middle was.
+    Both halves are the same length. The space the notice needs is reserved at
+    the length the cut could at most have, so the result never passes the
+    budget whatever the numbers come to.
+    """
+    size = len(text)
+    if size <= ERROR_BUDGET:
+        return text
+    budget = f"{ERROR_BUDGET:,}"
+    widest = f"{size:,}"
+    reserved = len(prompts.notice("error_shortened", size=widest, budget=budget, cut=widest))
+    reserved += len(prompts.notice("error_cut", cut=widest)) + len("\n\n\n\n")
+    room = ERROR_BUDGET - reserved
+    head, tail = text[: room - room // 2], text[size - room // 2 :]
+    cut = f"{size - len(head) - len(tail):,}"
+    notice = prompts.notice("error_shortened", size=widest, budget=budget, cut=cut)
+    return f"{notice}\n\n{head}\n{prompts.notice('error_cut', cut=cut)}\n{tail}"
 
 
 def _too_large(size: int) -> dict[str, Any]:

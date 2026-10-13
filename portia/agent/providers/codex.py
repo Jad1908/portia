@@ -109,6 +109,26 @@ _LABELS = {m.name: m.label for m in CATALOG}
 TOOL_TIMEOUT_SEC = 24 * 3600
 QUICK_TIMEOUT = 10.0
 
+#: How much of one tool result Codex keeps, in its own units: **8,000, which
+#: keeps 38,400 bytes** (2026-10-13).
+#:
+#: Codex cuts the middle out of a tool result past a limit it keeps in bytes,
+#: at 4.8 bytes per unit of this setting (``codex-cli 0.160.1``, measured on a
+#: scripted server: 2,000 kept 9,584 bytes, 25,000 kept 119,984). Unset, a
+#: bundled model's slug brings 10,000 units, 48,000 bytes, and **any slug the
+#: binary does not know, which is every local model, falls back to about 2,500,
+#: 12,000 bytes**: a 20,000-character answer portia sent whole reached a local
+#: model with its middle gone, and an error looks the same as a success there.
+#: Set here, every model keeps 8,000 × 4.8 = 38,400 bytes, above the 30,000
+#: characters portia's own guard lets through (`tools.RESULT_BUDGET`; the test
+#: holds the two together, since nothing here may import the SDK that module
+#: needs). Characters are bytes for ASCII; an answer dense with wider
+#: characters can still pass the byte limit before the character one.
+TOOL_OUTPUT_TOKEN_LIMIT = 8_000
+
+#: Bytes Codex keeps per unit of `TOOL_OUTPUT_TOKEN_LIMIT`, as measured above.
+CODEX_BYTES_PER_UNIT = 4.8
+
 #: What the binary's own default model is called in its strings, drawn as a
 #: hint beside the placeholder and never sent: the account decides.
 INSTALL_REMEDY = "Install it with `pip install 'portia[codex]'`, or `npm install -g @openai/codex`."
@@ -260,10 +280,14 @@ def overrides(mcp_url: str, *, model_context_window: int | None = None) -> tuple
     freely and writes stop, which is Codex's own approval flow keyed off the
     ``readOnlyHint`` every read tool already carries; and the sandbox stays
     read-only under a copilot that has no file tool to use it with anyway.
+    The result limit came later (2026-10-13): every answer portia sends whole
+    arrives whole, on a local model as on a bundled one
+    (`TOOL_OUTPUT_TOKEN_LIMIT`).
     """
     lines = [
         f'mcp_servers.{SERVER_NAME}.url="{mcp_url}"',
         f"mcp_servers.{SERVER_NAME}.tool_timeout_sec={TOOL_TIMEOUT_SEC}",
+        f"tool_output_token_limit={TOOL_OUTPUT_TOKEN_LIMIT}",
         'approval_policy="on-request"',
         'sandbox_mode="read-only"',
         "features.shell_tool=false",

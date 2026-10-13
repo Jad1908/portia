@@ -79,6 +79,25 @@ def error(name: str, **fields: object) -> str:
     return load(f"errors/{name}").format(**fields)
 
 
+def notice(name: str, **fields: object) -> str:
+    """A sentence an answer carries about itself, with its facts filled in.
+
+    Not a refusal: the answer is there and this says something about it the
+    model must read before the rest, that a table it names changed since it was
+    indexed, or that an error was shortened (`notices/`, 2026-10-13).
+    """
+    return load(f"notices/{name}").format(**fields)
+
+
+def more(name: str, **fields: object) -> str:
+    """What a list cut short says: how many were left out and how to ask a narrower question.
+
+    The ``more`` field of `core/listing.listing`, one file per kind of list
+    (`more/`). `core` loads no prompt, so the caller fills this and hands it in.
+    """
+    return load(f"more/{name}").format(**fields)
+
+
 def names(kind: str) -> set[str]:
     """Every prompt filed under ``kind`` (``"tools"``, ``"tasks"``). For tests."""
     return {p.stem for p in (HERE / kind).glob("*.md")}

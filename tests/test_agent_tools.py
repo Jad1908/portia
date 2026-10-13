@@ -94,6 +94,38 @@ def test_a_handler_that_raises_is_still_an_error_the_agent_can_read(monkeypatch)
     assert "no such source" in _text(result)
 
 
+def test_a_long_error_is_shortened_by_portia_and_says_so(monkeypatch):
+    """Claude Code cuts the middle out of an error past 11,024 characters; portia cuts first."""
+    start, end = "ValueError: the step broke because", "Fix the keys and record it again."
+    message = f"the step broke because{' x' * 30_000}. {end}"
+
+    def boom(*a, **k):
+        raise ValueError(message)
+
+    monkeypatch.setattr(tools.handlers, "profile_source", boom)
+    text = _text(_call("profile_source", {"source": "nope"}))
+
+    whole = f"ValueError: {message}"
+    assert len(text) <= tools.ERROR_BUDGET
+    notice, kept = text.split("\n\n", 1)
+    assert notice.startswith(f"This error was {len(whole):,} characters")
+    assert kept.startswith(start) and kept.endswith(end)
+    head, marker, tail = kept.split("\n", 2)
+    cut = len(whole) - len(head) - len(tail)
+    assert f"{cut:,} characters" in notice and f"{cut:,} characters" in marker
+    assert whole.startswith(head) and whole.endswith(tail)
+
+
+def test_an_error_inside_the_budget_is_untouched(monkeypatch):
+    message = "y" * (tools.ERROR_BUDGET - len("ValueError: "))
+
+    def boom(*a, **k):
+        raise ValueError(message)
+
+    monkeypatch.setattr(tools.handlers, "profile_source", boom)
+    assert _text(_call("profile_source", {"source": "nope"})) == f"ValueError: {message}"
+
+
 def test_a_missing_required_argument_still_raises_where_the_agent_sees_it(monkeypatch):
     """`_evidence` takes a thunk so the KeyError happens inside the try."""
     monkeypatch.setattr(tools.handlers, "profile_source", lambda *a, **k: {})
