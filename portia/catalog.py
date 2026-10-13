@@ -40,6 +40,7 @@ import yaml
 
 from portia.checks import profiling
 from portia.checks.profiling import profile_path
+from portia.core import backend, cancel
 from portia.core import dialect as dialects
 from portia.core.io import relative
 from portia.core.present import format_rate
@@ -287,6 +288,7 @@ def scope_table(qualified: str, con: Any, *, portia_dir: str | Path = DEFAULT_DI
         )
     name = source_name(qualified, portia_dir=d)
     facts = con.table_facts(qualified)
+    remember_facts(qualified, facts)
     columns = con.columns(qualified)
 
     src_file = d / "sources" / f"{name}.yaml"
@@ -355,7 +357,7 @@ def profile_remote(name: str, con: Any, *, portia_dir: str | Path = DEFAULT_DIR)
 
     qualified = str(existing["source"])
     profile = profiling.profile(source_table({"table": qualified}, con, name=name))
-    facts = _counted(con.table_facts(qualified), profile["n_rows"])
+    facts = _counted(_asked_now(qualified, con), profile["n_rows"])
     kind = facts.pop("kind", None)
     entry = _source_entry(qualified, profile, existing, facts)
     entry[REMOTE] = {**existing[REMOTE], **({"kind": kind} if kind else {})}
@@ -389,7 +391,7 @@ def _profile_model(name: str, con: Any, *, portia_dir: Path) -> dict:
             "target, or turn on agent_writes, and it can be profiled where it lands"
         )
     profile = profiling.profile(source_table({"table": written}, con, name=name))
-    facts = _counted(con.table_facts(written), profile["n_rows"])
+    facts = _counted(_asked_now(written, con), profile["n_rows"])
     facts.pop("kind", None)
     entry = _model_entry(name, profile, existing)
     _write(path, _placed_model(entry, existing, indexed=facts, profiled={"at": facts["at"]}))
@@ -661,6 +663,7 @@ def _written_facts(table: Table, written_to: str | None) -> dict | None:
         facts = dict(facts_of(written_to))
     except Exception:  # noqa: BLE001 — a description must not fail a build
         return None
+    remember_facts(written_to, facts)
     facts.pop("kind", None)
     return facts
 
@@ -682,7 +685,7 @@ def load_models(portia_dir: str | Path = DEFAULT_DIR) -> dict[str, dict]:
     could disagree with `spec.discover_specs`.
     """
     d = Path(portia_dir) / MODELS_DIR
-    return {path.stem: _read(path) for path in sorted(d.glob("*.yaml"))} if d.exists() else {}
+    return {path.stem: _read_entry(path) for path in sorted(d.glob("*.yaml"))} if d.exists() else {}
 
 
 def remove_model(name: str, *, portia_dir: str | Path = DEFAULT_DIR) -> Path | None:
@@ -980,7 +983,7 @@ def source_names(portia_dir: str | Path = DEFAULT_DIR) -> list[str]:
 def load_source(name: str, portia_dir: str | Path = DEFAULT_DIR) -> dict | None:
     """One source's entry, exactly as :func:`load_catalog` would hold it, or ``None``."""
     d = Path(portia_dir)
-    return _read(d / "sources" / f"{name}.yaml") if name in source_names(d) else None
+    return _read_entry(d / "sources" / f"{name}.yaml") if name in source_names(d) else None
 
 
 def _listed(d: Path, proj: dict) -> list[str]:
@@ -1092,15 +1095,245 @@ def is_stale(entry: dict, *, portia_dir: str | Path = DEFAULT_DIR) -> bool:
     return any(indexed.get(k) != now[k] for k in STALENESS_FACTS)
 
 
-def remote_changed(entry: dict, con: Any) -> bool:
+def remote_changed(entry: dict, con: Any, *, within: float = 0.0) -> bool:
     """Whether a scoped table has changed since it was indexed — one query, on request.
 
     The same two keys :data:`STALENESS_FACTS` names, which a remote entry
     records as bytes and ``LAST_ALTERED`` (`docs/CONNECTOR.md` §2.11).
+
+    ``within`` is how many seconds old an answer the warehouse already gave
+    may be and still stand for now (:func:`warehouse_facts`); ``0`` asks.
+    Raises what the session raises for a table it cannot find, a `ValueError`
+    on every connector here.
     """
     indexed = entry.get("indexed") or {}
-    now = con.table_facts(str(entry["source"]))
+    now = warehouse_facts(str(entry["source"]), con, within=within)
+    assert now is not None  # a connection was given, so it was asked
     return any(indexed.get(k) != now.get(k) for k in STALENESS_FACTS)
+
+
+# --- has it changed since it was indexed (2026-10-13) --------------------------------
+#
+# **Every answer touching a table that changed since portia indexed it says so
+# first** (`sandbox/limits/REVAMP_SPEC.md`, rule 6). `is_stale` has answered that
+# for a file since 2026-08-03, for the window's left pane; `remote_changed` was
+# written for a warehouse table with the reason it could not be on a render, a
+# query, and was then called by nothing. `freshness` is the one question both
+# halves answer, with what changed, for the agent's tools (`agent/freshness.py`
+# words it and puts it at the top of the answer).
+
+#: How long a warehouse's answer about one table is believed, in seconds.
+#:
+#: A burst of tool calls names the same tables over and over: a reading job
+#: describes eighteen of them and then queries each, and every answer has to
+#: say whether its tables changed. Asking the warehouse each time is a
+#: metadata query per table per call, about two seconds each on BigQuery
+#: (`CONNECTOR.md` §2.6.1). A minute is long enough that a burst asks once and
+#: short enough that a table reloaded mid-chat is noticed within the next few
+#: answers. Every `table_facts` portia asks for anyway (scoping, a profile, a
+#: build) refreshes it, so a re-index is never contradicted by an older answer.
+WAREHOUSE_FACTS_S = 60.0
+
+#: What the warehouse last said about a table, by (connection, qualified name):
+#: ``(time.monotonic() when asked, facts)``.
+_asked: dict[tuple[str, str], tuple[float, dict]] = {}
+_asked_lock = threading.Lock()
+
+
+def _asked_key(qualified: str) -> tuple[str, str]:
+    """The cache's key: the connection's name in the user's registry, and the table.
+
+    Two projects on one connection share what the warehouse said; a project on
+    another connection, opened in the same process, does not.
+    """
+    return backend.active().label, qualified
+
+
+def remember_facts(qualified: str, facts: dict) -> None:
+    """Keep what the warehouse just said about a table, for :func:`warehouse_facts`."""
+    with _asked_lock:
+        _asked[_asked_key(qualified)] = (time.monotonic(), dict(facts))
+
+
+def forget_facts() -> None:
+    """Drop every remembered answer: for tests, and for a caller that switches warehouses."""
+    with _asked_lock:
+        _asked.clear()
+
+
+def warehouse_facts(qualified: str, con: Any | None, *, within: float) -> dict | None:
+    """What the warehouse says about a table now: remembered if younger than ``within``.
+
+    ``None`` when nothing young enough is remembered and there is no ``con`` to
+    ask. Asking goes through ``con.table_facts`` and is remembered.
+    """
+    with _asked_lock:
+        held = _asked.get(_asked_key(qualified))
+    if held is not None and within > 0 and time.monotonic() - held[0] <= within:
+        return dict(held[1])
+    if con is None:
+        return None
+    facts = con.table_facts(qualified)
+    remember_facts(qualified, facts)
+    return dict(facts)
+
+
+def _asked_now(qualified: str, con: Any) -> dict:
+    """``con.table_facts``, asked now and remembered: for what records the facts."""
+    facts = warehouse_facts(qualified, con, within=0.0)
+    assert facts is not None
+    return facts
+
+
+#: What :func:`freshness` says changed, as codes. `agent/freshness.py` words
+#: them for the model; the window and the reserved tables read them as they are.
+FILE_CHANGED = "file_changed"
+FILE_GONE = "file_gone"
+TABLE_CHANGED = "table_changed"
+TABLE_GONE = "table_gone"
+
+#: Why :func:`freshness` cannot tell. ``no_marker``: nothing was recorded that
+#: could contradict the entry, which is a warehouse view (no size, no change
+#: time) or an entry with no facts. ``not_asked``: a warehouse table, with no
+#: connection given and no recent answer. ``unreachable``: the warehouse was
+#: asked and failed to answer.
+NO_MARKER = "no_marker"
+NOT_ASKED = "not_asked"
+UNREACHABLE = "unreachable"
+
+
+def freshness(
+    name: str, entry: dict, *, portia_dir: str | Path = DEFAULT_DIR, con: Any | None = None
+) -> dict | None:
+    """Whether the table behind ``entry`` changed since it was indexed. ``None`` when it did not.
+
+    Changed: ``{"source": name, "changed": <code>, ...}`` with the facts the
+    code rests on: a file's ``path`` and what it looked like then and now
+    (``was``/``now``: size and mtime), a warehouse table's ``table``, and
+    ``indexed``, when it was looked at. Cannot tell: ``{"source": name,
+    "changed": None, "unknown": True, "why": <code>}``.
+
+    **Codes, not sentences.** The words are the agent's to read and live in
+    its prompts (`agent/freshness.py`); this module is below the layer that
+    loads them, as `ops/sql.py` is.
+
+    A file is :func:`is_stale`'s question, a stat. A warehouse table is
+    :func:`remote_changed`'s, one metadata query on ``con``, believed for
+    `WAREHOUSE_FACTS_S`; without ``con`` only a remembered answer is used. A
+    view has nothing to compare and says so. A model a build wrote to the
+    warehouse is its written table; **a model built locally is ``None`` here**,
+    because it keeps no marker of its own: it is as fresh as the sources it
+    reads, which the caller checks (`spec.sources_read`).
+    """
+    indexed = entry.get("indexed") or {}
+    at = indexed.get("at")
+    if "model" in entry and "source" not in entry:
+        if not entry.get("table"):
+            return None
+        return _table_freshness(name, str(entry["table"]), indexed, con, kind="table")
+    if entry.get(REMOTE):
+        kind = (entry.get(REMOTE) or {}).get("kind") or "table"
+        return _table_freshness(name, str(entry.get("source")), indexed, con, kind=kind)
+    path = entry.get("source")
+    if not path or any(indexed.get(k) is None for k in STALENESS_FACTS):
+        return {"source": name, "changed": None, "unknown": True, "why": NO_MARKER}
+    target = project_root(portia_dir) / str(path)
+    if not target.exists():
+        return {"source": name, "changed": FILE_GONE, "path": str(path), "indexed": at}
+    now = file_facts(target)
+    if all(indexed.get(k) == now[k] for k in STALENESS_FACTS):
+        return None
+    return {
+        "source": name,
+        "changed": FILE_CHANGED,
+        "path": str(path),
+        "indexed": at,
+        "was": {k: indexed.get(k) for k in STALENESS_FACTS},
+        "now": {k: now[k] for k in STALENESS_FACTS},
+    }
+
+
+def _table_freshness(
+    name: str, qualified: str, indexed: dict, con: Any | None, *, kind: str
+) -> dict | None:
+    """:func:`freshness` for a table in the warehouse."""
+    unknown = {"source": name, "changed": None, "unknown": True}
+    if kind == "view" or indexed.get("mtime") is None:
+        return {**unknown, "why": NO_MARKER}
+    marked = {"source": qualified, "indexed": indexed}
+    try:
+        if warehouse_facts(qualified, None, within=WAREHOUSE_FACTS_S) is None and con is None:
+            return {**unknown, "why": NOT_ASKED}
+        changed = remote_changed(marked, con, within=WAREHOUSE_FACTS_S)
+    except cancel.Cancelled:
+        raise
+    except ValueError:
+        # Every connector says a table it cannot find with a `ValueError`.
+        return {
+            "source": name,
+            "changed": TABLE_GONE,
+            "table": qualified,
+            "indexed": indexed.get("at"),
+        }
+    except Exception:  # noqa: BLE001 - the driver's own failure; told as "cannot tell"
+        return {**unknown, "why": UNREACHABLE}
+    if not changed:
+        return None
+    return {
+        "source": name,
+        "changed": TABLE_CHANGED,
+        "table": qualified,
+        "indexed": indexed.get("at"),
+    }
+
+
+#: What :func:`freshness` reads off an entry, kept by :func:`_read_entry`.
+_MARKED = ("source", REMOTE, "indexed", "model", "table")
+
+#: The marked part of each entry file read, by path, with the file's
+#: ``(st_mtime_ns, st_size)`` when it was read.
+_marks: dict[str, tuple[tuple[int, int], dict]] = {}
+
+
+def _read_entry(path: Path) -> dict:
+    """`_read`, keeping the part :func:`marks` answers with while the file is unchanged.
+
+    The file is looked at before it is read, so one written between the two is
+    read again next time rather than trusted (`reload_catalog`'s rule).
+    """
+    seen: Seen = {}
+    key = str(path.absolute())
+    looked = _look(path, seen)
+    entry = _read(path)
+    if looked:
+        _marks[key] = (seen[str(path)], {k: entry[k] for k in _MARKED if k in entry})
+    return entry
+
+
+def marks(name: str, portia_dir: str | Path = DEFAULT_DIR) -> dict | None:
+    """The part of a table's entry :func:`freshness` reads, by name, or ``None``.
+
+    An indexed source first and then a built model, as `agent/handlers._entry`
+    looks. **Cheap after the first read**: a tool that just read the entry
+    (`load_source`, `load_models`) left its marks here, so asking whether its
+    table changed costs a stat of the entry file rather than a second parse of
+    YAML that is 265 kB on a 1,579-column table (`reload_catalog`'s numbers).
+    """
+    d = Path(portia_dir)
+    candidates = []
+    if name in source_names(d):
+        candidates.append(d / "sources" / f"{name}.yaml")
+    candidates.append(d / MODELS_DIR / f"{name}.yaml")
+    for path in candidates:
+        seen: Seen = {}
+        if not _look(path, seen):
+            continue
+        held = _marks.get(str(path.absolute()))
+        if held is not None and held[0] == seen[str(path)]:
+            return dict(held[1])
+        entry = _read_entry(path)
+        return {k: entry[k] for k in _MARKED if k in entry}
+    return None
 
 
 def file_facts(path: str | Path) -> dict:

@@ -47,7 +47,7 @@ from typing import Any
 from claude_agent_sdk import ToolAnnotations, create_sdk_mcp_server, tool
 
 from portia import spec
-from portia.agent import ask, chartspec, drawn, handlers, prompts
+from portia.agent import ask, chartspec, drawn, freshness, handlers, prompts
 from portia.core import cancel, columnar, present
 from portia.core.serialize import to_json_compact
 
@@ -757,6 +757,7 @@ async def _evidence(
     receipt: Callable[[Any, int], Any] | None = None,
     reads_data: bool = False,
     called: tuple[str, dict[str, Any]] | None = None,
+    args: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run one handler off the event loop and hand back what it found.
 
@@ -806,31 +807,45 @@ async def _evidence(
     `_interrupted`, with what portia measured after the press, and the
     exchange goes on. ``called`` is the tool's name and its arguments, which
     are how the window's card finds the call and what the measuring reads.
+
+    **A table that changed since it was indexed is named first** *(2026-10-13)*.
+    ``args`` are the call's arguments, or ``called``'s when it is not given,
+    and every table they name is checked once the handler has answered
+    (`agent/freshness.py`): one that changed, or that nothing can tell about,
+    is listed under a leading ``stale`` key, whichever form the answer takes,
+    coarsened and receipt included (:func:`_noticed`). After the handler,
+    because a profile of a warehouse table records its facts afresh and is
+    then not stale; on the worker, because the check is a stat or a metadata
+    query; and under the exchange's scope, so Stop reaches it.
     """
     tool_name, arguments = called or ("", {})
+    about = args if args is not None else arguments
     record = _register(tool_name, arguments) if reads_data else None
 
-    def stoppable() -> Any:
+    def stoppable() -> tuple[Any, list[dict]]:
         if record is None:
             with cancel.scope(_stop):
-                return call()
-        return _run_data(
+                found = call()
+                return found, _stale(about)
+        found = _run_data(
             record,
             call,
             lambda: handlers.interrupted_facts(tool_name, arguments, **_dir(arguments)),
         )
+        with cancel.scope(record.parent):
+            return found, _stale(about)
 
     try:
-        found = await asyncio.to_thread(stoppable)
-        text = encode(found)
+        found, stale = await asyncio.to_thread(stoppable)
+        text = encode(_noticed(found, stale))
         if len(text) > RESULT_BUDGET and coarser is not None:
-            coarse = to_json_compact(coarser(found))
+            coarse = to_json_compact(_noticed(coarser(found), stale))
             if len(coarse) <= RESULT_BUDGET:
                 text = coarse
             elif receipt is not None:
-                text = to_json_compact(receipt(found, len(coarse)))
+                text = to_json_compact(_noticed(receipt(found, len(coarse)), stale))
         elif len(text) > RESULT_BUDGET and receipt is not None:
-            text = to_json_compact(receipt(found, len(text)))
+            text = to_json_compact(_noticed(receipt(found, len(text)), stale))
     except _Interrupted:
         assert record is not None
         # **Stop wins, decided here and not on the worker.** The worker sees
@@ -851,6 +866,36 @@ async def _evidence(
         if record is not None:
             _retire(record)
     return _ok(text) if len(text) <= RESULT_BUDGET else _too_large(len(text))
+
+
+#: The key an answer's list of changed tables goes under, first.
+STALE = "stale"
+
+
+def _stale(args: dict[str, Any]) -> list[dict]:
+    """The ``stale`` list for a call with these arguments (`freshness.notices`).
+
+    A check that fails does not fail the answer, which has already been
+    measured; it says it could not check, as an entry, because an absent list
+    would read as *nothing changed*.
+    """
+    if not args:
+        return []
+    try:
+        return freshness.notices(args, **_dir(args))
+    except cancel.Cancelled:
+        raise
+    except Exception as exc:  # noqa: BLE001 - said in the answer, not swallowed
+        error = f"{type(exc).__name__}: {exc}"
+        why = prompts.notice("stale_check_failed", error=error)
+        return [{"changed": None, "unknown": True, "why": why}]
+
+
+def _noticed(payload: Any, stale: list[dict]) -> Any:
+    """``payload`` with ``stale`` as its first key, when there is anything to say."""
+    if not stale or not isinstance(payload, dict):
+        return payload
+    return {STALE: stale, **{key: value for key, value in payload.items() if key != STALE}}
 
 
 async def _awaited(
@@ -891,6 +936,7 @@ async def describe_source(args: dict[str, Any]) -> dict[str, Any]:
         lambda: handlers.describe_source(args["source"], **_dir(args)),
         encode=_as_columns,
         coarser=_described_by_type,
+        args=args,
     )
 
 
@@ -909,7 +955,8 @@ async def describe_source(args: dict[str, Any]) -> dict[str, Any]:
 )
 async def graph_lookup(args: dict[str, Any]) -> dict[str, Any]:
     return await _evidence(
-        lambda: handlers.graph_lookup(args["table"], column=args.get("column"), **_dir(args))
+        lambda: handlers.graph_lookup(args["table"], column=args.get("column"), **_dir(args)),
+        args=args,
     )
 
 
@@ -1397,7 +1444,8 @@ async def set_interpretation(args: dict[str, Any]) -> dict[str, Any]:
             roles=args.get("roles"),
             note=args.get("note"),
             **_dir(args),
-        )
+        ),
+        args=args,
     )
 
 
@@ -1522,6 +1570,7 @@ async def read_spec(args: dict[str, Any]) -> dict[str, Any]:
             **_dir(args),
         ),
         coarser=_spec_shortened,
+        args=args,
     )
 
 
