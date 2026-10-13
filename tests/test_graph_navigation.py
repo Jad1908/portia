@@ -554,7 +554,18 @@ def test_a_column_typed_in_another_case_is_kept_on_the_column_it_names(
     assert edge.end.key == "source:customers.csv::customer_id"
 
 
-def test_with_no_graph_every_pair_is_measured_and_the_receipt_says_none_was_kept(sales):
+@pytest.fixture
+def graph_down(monkeypatch):
+    """No graph to reach, whether or not a test server happens to be running.
+
+    These tests are about the answer when Neo4j is down. Without this they
+    passed only because no server was up, and failed on a machine where the
+    test server was (`tests/test_cli_knowledge.py` points at the same port).
+    """
+    monkeypatch.setenv("NEO4J_URI", "bolt://localhost:1")
+
+
+def test_with_no_graph_every_pair_is_measured_and_the_receipt_says_none_was_kept(sales, graph_down):
     answer = handlers.measure_overlaps(_pairs(("customer_id", "customer_id")), sales)
     (row,) = _receipt_rows(answer)
     assert row["from"] == "query" and row["n_shared_values"] == 4
@@ -656,7 +667,7 @@ def test_a_join_check_on_a_steps_table_is_measured_and_not_kept(sales, recorded)
     assert recorded["edges"] == []
 
 
-def test_a_join_check_never_fails_because_the_graph_is_down(sales):
+def test_a_join_check_never_fails_because_the_graph_is_down(sales, graph_down):
     found = handlers.join_findings(
         "orders", "customers", keys=["customer_id"], portia_dir=sales, reason="r"
     )
@@ -669,7 +680,7 @@ def test_graph_lookup_answers_one_question_at_a_time(sales):
         handlers.graph_lookup("orders", column="customer_id", to="customers", portia_dir=sales)
 
 
-def test_graph_lookup_with_the_graph_down_names_the_tools_that_still_work(sales):
+def test_graph_lookup_with_the_graph_down_names_the_tools_that_still_work(sales, graph_down):
     with pytest.raises(ValueError, match="describe_source"):
         handlers.graph_lookup("orders", portia_dir=sales)
 
