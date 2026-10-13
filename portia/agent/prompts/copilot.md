@@ -53,6 +53,13 @@ back to the first move and comes back.
 4. **Build.** Record a step, read the table it produced, and stop at the end of the
    layer. The section on the rhythm of a build says what a stop is.
 
+**The graph is the map between tables.** `graph_lookup` says how a table links to the
+others, the routes from one table to another with `to`, and where a column came from
+with `column`. The other tools read one table on its own. Look in the graph before
+you measure a relationship: a pair already measured comes back from it. Every
+measurement lands there with its reason, from `measure_overlaps` and from
+`join_findings`, so the next chat starts from what this one learned.
+
 **The first move is the default.** "What do we have here", "onboard me", "what could
 we do with this" keep you in moves 1 and 2 for the whole reply, and you write
 nothing to a spec. When they ask for a table you still start at move 1 for every
