@@ -29,16 +29,16 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
 
-from portia import catalog, findings, knowledge, pipeline, spec
+from portia import catalog, findings, knowledge, pipeline, results, spec
 from portia.agent import chartspec, context, drawn, freshness, prompts, reserved
 from portia.checks import profiling, sql_joins
 from portia.checks.join import column_overlap
 from portia.checks.join import join_findings as _join_findings
 from portia.checks.outcome import BLOCKING_FLAGS, REPORT_KEYS
-from portia.core import backend, cancel, listing
+from portia.core import backend, cancel, listing, present
 from portia.core import dialect as dialects
 from portia.core.io import connect, relative, source_table
-from portia.core.serialize import to_json, to_jsonable_nested
+from portia.core.serialize import to_json, to_json_compact, to_jsonable_nested
 from portia.core.table import Table, subquery
 from portia.knowledge import measure, query, store
 from portia.knowledge import schema as knowledge_schema
@@ -686,12 +686,33 @@ def graph_lookup(
 #: A cap with no way to ask past it is not a cap, it is a paging protocol nobody
 #: documented.
 #:
-#: So it is a default and `limit`/`offset` are arguments. There is no ceiling
-#: here because there is already one that is measured: `tools.RESULT_BUDGET`
-#: refuses an oversized result and names a smaller question, which is the same
-#: call `_requested` makes on an unknown column — a short answer that looks
-#: complete is worse than a refusal.
+#: So it is a default and `limit`/`offset` are arguments. **The ceiling is
+#: :data:`QUERY_CHARS` now, not a refusal** *(2026-10-13, the tool revamp)*: a
+#: big ``limit`` used to be refused by `tools.RESULT_BUDGET` with nothing sent,
+#: and the answer is now as many whole rows as fit, saying where to go on from.
 QUERY_ROWS = 20
+
+#: Columns a `query_data` answer carries before it says how many more there are
+#: and how to ask for them (``column_offset``). **A placeholder** *(2026-10-13)*.
+#: A row of a 1,579-column table was refused whole, one row or twenty, because
+#: the columns alone were over `tools.RESULT_BUDGET`; the copilot had no way to
+#: see any of it short of naming columns it had never been shown.
+QUERY_COLUMNS = 50
+
+#: How many characters an answer's rows may take, encoded. Rows are added whole
+#: until the next would pass it, and at least one always is: fifty columns of
+#: values cut at :data:`QUERY_CELL_CHARS` is under it. Leaves room in
+#: `tools.RESULT_BUDGET` for the field names, the notices and the ``more`` lines.
+QUERY_CHARS = 20_000
+
+#: The longest value an answer shows whole. Past it the value is cut, ends in
+#: :data:`CUT_MARK`, and the answer names the columns where that happened: the
+#: kept copy holds it whole, and ``substr`` reads it in pieces. A free-text
+#: column of long descriptions would otherwise let one row fill the answer.
+QUERY_CELL_CHARS = 300
+
+#: What a value cut at :data:`QUERY_CELL_CHARS` ends with.
+CUT_MARK = "…"
 
 
 def _select(sql: str, inputs: list[str], portia_dir: str) -> Table:
@@ -903,8 +924,9 @@ def query_data(
     portia_dir: str = catalog.DEFAULT_DIR,
     limit: int | None = None,
     offset: int = 0,
+    column_offset: int = 0,
 ) -> dict:
-    """Ask the data one question. Runs a SELECT, returns the answer, writes nothing.
+    """Ask the data one question. Runs a SELECT, returns the answer, writes nothing durable.
 
     **The tool for a question, where ``record_step`` is the tool for a
     decision.** Until this existed, `record_step` was the only path in the system
@@ -926,7 +948,8 @@ def query_data(
       measure the step it is appending (`spec.run_spec`), so asking question
       three re-executed questions one and two. Here each question is one SELECT.
     - **Nothing durable changes**, so there is nothing for the human to approve
-      and nothing to undo.
+      and nothing to undo. The whole result is kept beside the chat's log
+      (`portia/results.py`), which is the chat's own scratch and goes with it.
 
     The sandbox is `ops.sql`'s, unchanged and for its reasons: one ``SELECT``,
     checked readably first, then executed on a connection holding **exactly** the
@@ -937,55 +960,246 @@ def query_data(
     and for the same kind of reason: `review_queries` reads these back at the end
     of a chat so the agent can decide which ones were worth keeping, and thirty
     bare SQL strings are not reviewable. The sentence is the handle.
+
+    **The answer is bounded and every cut says how to go on** *(2026-10-13, the
+    tool revamp)*. Rows are capped by ``limit`` and by :data:`QUERY_CHARS`,
+    columns by :data:`QUERY_COLUMNS` (``column_offset`` moves along them), a
+    long value by :data:`QUERY_CELL_CHARS`; nothing is refused for size. The
+    rows are a list under ``fields``, and the question, the SQL and the inputs
+    are not sent back: the agent wrote them, and the log has them.
+
+    **Asking for another page reads the kept copy** rather than running the
+    query again: the same SQL over the same inputs, with ``limit``, ``offset``
+    or ``column_offset`` given, is answered from the result this chat kept for
+    it, and the answer says so (``paged``). On a warehouse that is the
+    difference between one bill for a result and one per page. A call with
+    none of the three is a question asked again, and runs.
     """
     asked = str(question or "").strip()
     if not asked:
         raise ValueError(prompts.error("query_needs_a_question"))
     if not inputs:
         raise ValueError(prompts.error("query_needs_inputs"))
-
-    produced = _select(sql, inputs, portia_dir)
-
-    n_rows = produced.count()
-    columns = list(produced.columns)
     # Paging happens **here**, on arguments, not by rewriting the query. See
     # :data:`QUERY_ROWS` for the session that made the difference visible.
     want = QUERY_ROWS if limit is None else max(0, int(limit))
     start = max(0, int(offset))
+    first_column = max(0, int(column_offset))
+
+    log = results.log_for(portia_dir)
+    paging = limit is not None or start > 0 or first_column > 0
+    kept = results.same(log, sql, inputs) if paging else None
+    notices: dict[str, str] = {}
+    if kept is not None:
+        n_rows, columns, source = kept.n_rows, list(kept.columns), results.table(kept)
+        notices["paged"] = prompts.notice("result_paged", result=kept.handle, at=kept.at)
+    else:
+        produced = _select(sql, inputs, portia_dir)
+        n_rows, columns = produced.count(), list(produced.columns)
+        outcome = results.keep(
+            produced,
+            log=log,
+            tool=findings.QUERY_TOOL,
+            question=asked,
+            sql=sql,
+            inputs=list(inputs),
+            n_rows=n_rows,
+            columns=columns,
+        )
+        if isinstance(outcome, results.Kept):
+            kept, source = outcome, results.table(outcome)
+        else:
+            source = produced
+            notices["not_kept"] = _not_kept(outcome)
+    handle = kept.handle if kept is not None else None
+
+    def more_rows(shown: str, next_offset: int) -> str:
+        if handle is None:
+            return prompts.more(
+                "query_rows_rerun", shown=shown, n_rows=f"{n_rows:,}", next_offset=next_offset
+            )
+        return prompts.more(
+            "query_rows", shown=shown, n_rows=f"{n_rows:,}", next_offset=next_offset, result=handle
+        )
+
+    def more_columns(shown: str, next_column: int) -> str:
+        if handle is None:
+            return prompts.more(
+                "query_columns_rerun",
+                shown=shown,
+                n_columns=f"{len(columns):,}",
+                next_column=next_column,
+            )
+        return prompts.more(
+            "query_columns",
+            shown=shown,
+            n_columns=f"{len(columns):,}",
+            next_column=next_column,
+            result=handle,
+        )
+
+    page = _page(
+        source,
+        columns,
+        n_rows=n_rows,
+        start=start,
+        want=want,
+        first_column=first_column,
+        budget=QUERY_CHARS,
+        more_rows=more_rows,
+        more_columns=more_columns,
+    )
+    if "cut" in page:
+        notices["cut"] = page.pop("cut")
+    return {
+        **notices,
+        "result": handle,
+        "n_rows": n_rows,
+        "n_columns": len(columns),
+        **page,
+    }
+
+
+def _not_kept(outcome: results.NotKept) -> str:
+    """Why a result was not kept, in words, with the number that decided it."""
+    if outcome.reason == results.TOO_MANY_ROWS:
+        return prompts.notice(
+            "result_not_kept_rows",
+            n_rows=f"{outcome.detail:,}",
+            cap=f"{results.KEEP_ROWS:,}",
+        )
+    if outcome.reason == results.TOO_MANY_VALUES:
+        return prompts.notice(
+            "result_not_kept_values",
+            n_values=f"{outcome.detail:,}",
+            cap=f"{results.KEEP_CELLS:,}",
+        )
+    if outcome.reason == results.TOO_LARGE:
+        return prompts.notice(
+            "result_not_kept_size",
+            size=present.size(outcome.detail),
+            cap=present.size(results.KEEP_BYTES),
+        )
+    if outcome.reason == results.NOT_WRITTEN:
+        return prompts.notice("result_not_kept_error", error=outcome.detail or "")
+    return prompts.notice("result_not_kept_no_chat")
+
+
+def _page(
+    table: Table,
+    columns: list[str],
+    *,
+    n_rows: int,
+    start: int,
+    want: int,
+    first_column: int,
+    budget: int,
+    more_rows: Callable[[str, int], str],
+    more_columns: Callable[[str, int], str],
+) -> dict:
+    """One window of a result as an answer shows it: ``fields`` and whole rows, every cut said.
+
+    Shared by `query_data` and `review_queries`' answers in full, so a result
+    reads the same through either door. Columns are the
+    :data:`QUERY_COLUMNS` from ``first_column`` (``columns_shown`` and
+    ``more_columns`` when that is not all of them); rows are taken whole, from
+    ``start``, while they fit in ``budget`` characters, and never fewer than
+    one. A value longer than :data:`QUERY_CELL_CHARS` is cut, and ``cut`` names
+    the columns it happened in, for the caller to put first.
+
+    The rows are read once, with a ``LIMIT`` no larger than what could fit,
+    so a big ``limit`` on a wide result reads what it can send and no more.
+    """
+    if columns and first_column >= len(columns):
+        raise ValueError(
+            prompts.error(
+                "column_offset_past_end",
+                column_offset=first_column,
+                n_columns=f"{len(columns):,}",
+            )
+        )
+    shown = columns[first_column : first_column + QUERY_COLUMNS]
+    out: dict[str, Any] = {}
+    if len(shown) < len(columns):
+        out["columns_shown"] = f"{first_column + 1}-{first_column + len(shown)}"
+        if first_column + len(shown) < len(columns):
+            out["more_columns"] = more_columns(out["columns_shown"], first_column + len(shown))
+    start = min(start, n_rows)
+    # The most rows that could fit: every value at least one character and a
+    # separator, and each row its brackets.
+    fits = max(1, budget // (2 * max(1, len(shown)) + 2))
+    fetched = _window(table, columns, first_column, len(shown), start, min(want, fits))
+    rows: list[list[Any]] = []
+    cut: dict[str, int] = {}
+    used = 0
+    for raw in fetched:
+        row = []
+        for column, value in zip(shown, raw, strict=True):
+            cell = to_jsonable_nested(value)
+            # A number, a boolean or a null is short; text and a nested value
+            # (a list column) are what can run long.
+            if isinstance(cell, str):
+                text = cell
+            elif isinstance(cell, list | dict):
+                text = to_json_compact(cell)
+            else:
+                text = ""
+            if len(text) > QUERY_CELL_CHARS:
+                cell = text[:QUERY_CELL_CHARS] + CUT_MARK
+                cut[column] = cut.get(column, 0) + 1
+            row.append(cell)
+        size = len(to_json_compact(row)) + 1
+        if rows and used + size > budget:
+            break
+        rows.append(row)
+        used += size
+    if cut:
+        out = {
+            "cut": prompts.notice(
+                "values_cut",
+                n=present.count(sum(cut.values()), "value"),
+                chars=QUERY_CELL_CHARS,
+                next=QUERY_CELL_CHARS + 1,
+                columns=", ".join(cut),
+            ),
+            **out,
+        }
+    if rows or start < n_rows:
+        more = more_rows(
+            f"{start + 1}-{start + len(rows)}" if rows else listing.NONE_SHOWN, start + len(rows)
+        )
+    else:
+        more = prompts.more("rows_past_end", n_rows=f"{n_rows:,}")
+    listed = listing.listing(shown, rows, n=n_rows, start=start, more=more)
+    out.update({key: value for key, value in listed.items() if key != "n"})
+    return out
+
+
+def _window(
+    table: Table, columns: list[str], first: int, width: int, start: int, n: int
+) -> list[tuple]:
+    """``n`` rows of ``table`` from ``start``: ``width`` columns of each, from column ``first``.
+
+    Named in the ``SELECT`` when every name is distinct, so a wide result reads
+    only the columns it sends; when two share a name (``SELECT a.id, b.id``)
+    the whole row is read and the columns taken by position, because a name
+    would pick the first of the two twice.
+    """
+    if n <= 0 or width <= 0:
+        return []
+    shown = columns[first : first + width]
+    distinct = len(set(columns)) == len(columns)
+    select = ", ".join(table.dialect.quote(c) for c in shown) if distinct else "*"
     window = Table(
-        produced.name,
-        f"SELECT * FROM {subquery(produced.query)} LIMIT {want} OFFSET {start}",
-        produced.con,
+        table.name,
+        f"SELECT {select} FROM {subquery(table.query)} LIMIT {int(n)} OFFSET {int(start)}",
+        table.con,
     )
     # Both exits from a `Table` are capped (`core/table.py`); `rows` is the one
     # for evidence rather than for a screen, so DuckDB's own types narrow through
-    # `core.serialize` instead of widening through pandas first. Records rather
-    # than tuples, as `checks.join`'s example rows already are — a positional row
-    # beside a column list is two things the reader has to align by hand.
-    rows = [
-        {col: to_jsonable_nested(value) for col, value in zip(columns, row, strict=True)}
-        for row in window.rows(want)
-    ]
-    answer = {
-        "question": asked,
-        "sql": sql,
-        "inputs": list(inputs),
-        "n_rows": n_rows,
-        "columns": columns,
-        "rows": rows,
-    }
-    if start:
-        answer["offset"] = start
-    if start + len(rows) < n_rows:
-        # Says how to see the rest, because the alternative is what happened:
-        # the same query rewritten with a bigger OFFSET.
-        answer["more"] = prompts.error(
-            "query_has_more_rows",
-            shown=f"{start + 1}-{start + len(rows)}",
-            n_rows=f"{n_rows:,}",
-            next_offset=start + len(rows),
-        )
-    return answer
+    # `core.serialize` instead of widening through pandas first.
+    got = window.rows(n)
+    return got if distinct else [tuple(row[first : first + width]) for row in got]
 
 
 #: The channels a chart may encode. **Which column goes where, and nothing more**
@@ -1085,13 +1299,31 @@ def plot_data(
             )
 
     n_rows = produced.count()
+    # **Kept, as a `query_data` result is** *(2026-10-13)*: the same door, so the
+    # same rule, and the numbers behind a chart are then one `query_data` on its
+    # handle away instead of a second run of its query, which on a warehouse is
+    # a second bill. A chart over the cap is drawn all the same (§2.7); only
+    # the receipt says it was not kept.
+    outcome = results.keep(
+        produced,
+        log=results.log_for(portia_dir),
+        tool=findings.PLOT_TOOL,
+        question=asked,
+        sql=sql,
+        inputs=list(inputs),
+        n_rows=n_rows,
+        columns=columns,
+    )
+    kept = outcome if isinstance(outcome, results.Kept) else None
+    # Read from the kept copy when there is one, so a warehouse is asked once.
+    source = results.table(kept) if kept is not None else produced
     # Uncapped on purpose (§2.7). These do not become tokens, so the one measured
     # limit in the system does not apply and there is no second one to invent.
     rows = [
         {col: to_jsonable_nested(value) for col, value in zip(columns, row, strict=True)}
-        for row in produced.rows(n_rows)
+        for row in source.rows(n_rows)
     ]
-    return {
+    chart: dict[str, Any] = {
         "tab": named,
         "question": asked,
         "sql": sql,
@@ -1100,7 +1332,11 @@ def plot_data(
         "columns": columns,
         "n_rows": n_rows,
         "rows": rows,
+        "result": kept.handle if kept is not None else None,
     }
+    if isinstance(outcome, results.NotKept):
+        chart["not_kept"] = _not_kept(outcome)
+    return chart
 
 
 def view_chart(tab: str) -> dict:
@@ -1302,6 +1538,41 @@ def _cited(numbers: list[int], reviewed: dict[int, dict]) -> list[dict]:
             f"{', '.join(f'#{n}' for n in missing)} in this chat. Available: {available}"
         )
     return [reviewed[n] for n in numbers]
+
+
+def _kept_result(name: str, request: reserved.Request) -> Table:
+    """A kept result, read by SQL under its handle (`portia/results.py`).
+
+    **This chat's first; another chat's only through a finding that cites
+    it** (the user's rule, 2026-10-13). There is no pool of every query
+    across chats: a handle this chat did not keep is looked for among the
+    findings' cited results, and refused when no finding cites it, when two
+    chats' findings cite the same letters, or when the chat that kept it has
+    been deleted, which takes its results with it.
+    """
+    handle = name.lower()
+    kept = results.find(results.log_for(request.portia_dir), handle)
+    if kept is not None:
+        return results.table(kept)
+    chats = sorted(
+        {
+            str(q["chat"])
+            for finding in findings.load_all(_project_root(request.portia_dir))
+            for q in finding.get("queries") or []
+            if q.get("stored") == handle and q.get("chat")
+        }
+    )
+    if not chats:
+        raise ValueError(prompts.error("no_such_result", result=name))
+    if len(chats) > 1:
+        raise ValueError(prompts.error("result_in_two_chats", result=name, chats=", ".join(chats)))
+    kept = results.find(results.log_for(request.portia_dir, chats[0]), handle)
+    if kept is None:
+        raise ValueError(prompts.error("result_chat_gone", result=name, chat=chats[0]))
+    return results.table(kept)
+
+
+reserved.register(results.HANDLE, _kept_result)
 
 
 def measure_overlaps(pairs: list[dict], portia_dir: str = catalog.DEFAULT_DIR) -> dict:

@@ -149,7 +149,7 @@ def test_a_call_and_its_result_are_in_the_log_as_the_app_writes_them(sales):
     assert events.tool_label(call.data["name"]) == "query_data"
     assert call.data["input"]["question"] == "how many orders are there?"
     assert result.data == {"id": call.data["id"], "text": text, "is_error": False}
-    assert json.loads(text)["rows"][0]["n"] == len(sales_orders())
+    assert json.loads(text)["rows"] == [[len(sales_orders())]]
 
 
 def test_the_header_names_the_host_and_the_listing_stops_there(sales):
@@ -223,7 +223,8 @@ def test_a_finding_rests_on_a_query_out_of_the_hosted_log(sales, tmp_path):
     assert not failed, text
     (finding,) = findings.load_all(tmp_path)
     assert finding["queries"][0]["sql"] == "SELECT count(*) AS n FROM orders"
-    assert json.loads(finding["queries"][0]["result"])["rows"][0]["n"] == len(sales_orders())
+    copied = json.loads(finding["queries"][0]["result"])
+    assert copied["fields"] == ["n"] and copied["rows"] == [[len(sales_orders())]]
 
 
 CHART = {

@@ -86,7 +86,10 @@ def test_a_big_chart_says_unpaired_beside_its_picture():
 def test_the_facts_are_the_receipts_own():
     """One function, so the numbers beside the pixels are the ones it drew from."""
     receipt = tools._receipt(chart())
-    assert {k: v for k, v in receipt.items() if k != "drawn"} == tools._facts(chart())
+    # Besides the facts, a receipt says which tab it drew and where the rows
+    # were kept (`portia/results.py`), which a picture has no need to repeat.
+    about = ("drawn", "result", "not_kept")
+    assert {k: v for k, v in receipt.items() if k not in about} == tools._facts(chart())
 
 
 def test_a_picture_with_no_rows_behind_it_still_comes_back():

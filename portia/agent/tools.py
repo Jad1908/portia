@@ -1048,6 +1048,13 @@ async def profile_source(args: dict[str, Any]) -> dict[str, Any]:
                 "description": f"Rows to return (default {handlers.QUERY_ROWS})",
             },
             "offset": {"type": "integer", "description": "Rows to skip, to page through a result"},
+            "column_offset": {
+                "type": "integer",
+                "description": (
+                    f"Columns to skip, to page across a result wider than "
+                    f"{handlers.QUERY_COLUMNS} columns"
+                ),
+            },
             "portia_dir": {"type": "string"},
         },
         "required": ["question", "sql", "inputs"],
@@ -1062,6 +1069,7 @@ async def query_data(args: dict[str, Any]) -> dict[str, Any]:
             args["question"],
             limit=args.get("limit"),
             offset=args.get("offset") or 0,
+            column_offset=args.get("column_offset") or 0,
             **_dir(args),
         ),
         reads_data=True,
@@ -1177,7 +1185,10 @@ def _receipt(chart: dict) -> dict:
     axis. A field the spec encodes is a field the user is looking at. The spec
     itself is not echoed: the agent wrote it and it is in the log verbatim.
     """
-    receipt = {"drawn": chart["tab"], **_facts(chart)}
+    # Where the rows were kept (`portia/results.py`), or first, why they were
+    # not: the numbers behind the picture are one `query_data` on the handle away.
+    receipt: dict[str, Any] = {"not_kept": chart["not_kept"]} if chart.get("not_kept") else {}
+    receipt.update({"drawn": chart["tab"], "result": chart.get("result"), **_facts(chart)})
     # A chart a surface could not draw, reported after its own call returned
     # (`VISUALIZATION.md` §11.2). It rides here because there is nowhere earlier
     # to put it, and it is worth having late: a reply that draws nine charts can

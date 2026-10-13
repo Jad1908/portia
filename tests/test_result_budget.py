@@ -235,7 +235,6 @@ def _eighty_pairs() -> list[dict]:
     ]
 
 
-@KNOWN
 def test_the_look_back_after_thirty_questions(deep, chat):
     with _inside(deep):
         _assert_fits(_call("review_queries", {}))
@@ -276,7 +275,6 @@ def test_running_a_24_step_spec(deep, long_spec):
         _assert_fits(_call("run_spec", {"spec_path": long_spec}))
 
 
-@KNOWN
 def test_one_row_of_every_column_of_an_800_column_table(deep):
     with _inside(deep):
         _assert_fits(
@@ -287,7 +285,6 @@ def test_one_row_of_every_column_of_an_800_column_table(deep):
         )
 
 
-@KNOWN
 def test_six_hundred_rows_of_a_five_column_answer(deep):
     rows = (
         "SELECT id, region_code, k, id * k AS idk, region_code || k AS rk FROM hub, range(16) r(k)"

@@ -29,6 +29,11 @@ def sales(tmp_path, monkeypatch):
     return str(d)
 
 
+def _records(answer: dict) -> list[dict]:
+    """An answer's rows as records: its ``fields`` once, each row a list (`core/listing.py`)."""
+    return [dict(zip(answer["fields"], row, strict=True)) for row in answer["rows"]]
+
+
 def test_it_answers_and_the_answer_is_jsonable(sales):
     got = handlers.query_data(
         "SELECT count(*) AS n FROM orders",
@@ -36,10 +41,19 @@ def test_it_answers_and_the_answer_is_jsonable(sales):
         "how many orders are there?",
         portia_dir=sales,
     )
-    assert got["n_rows"] == 1
-    assert got["rows"][0]["n"] == len(sales_orders())
-    assert got["question"] == "how many orders are there?"
+    assert got["n_rows"] == 1 and got["n_columns"] == 1
+    assert got["fields"] == ["n"]
+    assert got["rows"] == [[len(sales_orders())]]
     json.dumps(got)  # an int64 reaching a tool result breaks the loop at runtime
+
+
+def test_nothing_the_call_sent_is_sent_back(sales):
+    """The agent wrote the question, the SQL and the inputs, and the log has them:
+    echoing them was most of a small answer, and every answer in a review."""
+    got = handlers.query_data(
+        "SELECT count(*) AS n FROM orders", ["orders"], "how many?", portia_dir=sales
+    )
+    assert not {"question", "sql", "inputs"} & set(got)
 
 
 def test_a_zero_is_an_answer_rather_than_a_refusal(sales):
@@ -73,7 +87,7 @@ def test_it_joins_across_the_declared_inputs(sales):
         "how many orders match a known customer?",
         portia_dir=sales,
     )
-    assert got["rows"][0]["n"] > 0
+    assert _records(got)[0]["n"] > 0
 
 
 def test_an_undeclared_table_is_simply_not_there(sales):
@@ -140,8 +154,8 @@ def test_offset_pages_without_rewriting_the_query(sales):
     page = handlers.query_data(
         _long(89), ["orders"], "the next page", portia_dir=sales, limit=20, offset=20
     )
-    assert page["offset"] == 20
-    assert [r["i"] for r in page["rows"]][:3] == [20, 21, 22]
+    assert page["shown"] == "21-40"
+    assert [r["i"] for r in _records(page)][:3] == [20, 21, 22]
     assert "offset: 40" in page["more"]
 
 
@@ -205,8 +219,7 @@ def test_a_step_ref_input_answers_to_its_bare_id(sales):
         question="how many big orders?",
         portia_dir=sales,
     )
-    assert got["rows"][0]["n"] > 0
-    assert got["sql"] == "SELECT count(*) AS n FROM big_orders", "the log keeps what was asked"
+    assert _records(got)[0]["n"] > 0
 
 
 def test_two_inputs_reducing_to_one_name_are_refused(sales):

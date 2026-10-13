@@ -191,7 +191,9 @@ your tool list gives it, prefix included.
 
 The rows you do see are examples: the unmatched rows `join_findings` hands back, the
 first rows of a `query_data`. You may quote one and say it is one. You may not
-generalise a number from them.
+generalise a number from them. A `query_data` answer names where its whole result is
+kept for this chat (`result`): page it, or ask it a question with SQL, rather than
+running the same query again.
 
 **Every number you state comes from a tool result.** Do not estimate one, derive one
 from two others, or restate one from memory forty calls later. If you do not have

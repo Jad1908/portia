@@ -1,5 +1,6 @@
-Ask the data one question. Runs one SELECT over the tables you name, hands back the
-answer, and writes nothing anywhere.
+Ask the data one question. Runs one SELECT over the tables you name and hands back the answer.
+It writes nothing anyone will read: the whole result is kept for this chat, under the name the
+answer gives it, and goes when the chat does.
 
 THIS IS THE TOOL FOR A QUESTION. `record_step` is the tool for a decision. How many
 rows match, what an intermediate join actually produces, whether a value exists,
@@ -27,8 +28,8 @@ freely before you decide anything.
                AND e.START_DATE BETWEEN '2025-06-01' AND '2025-08-31'"}}
 
 'inputs' is every table the query reads, by name: an indexed source, a model in
-this project, or '<spec>#<step id>' for a table an earlier step produced. The query
-runs on a connection holding exactly those and nothing else.
+this project, '<spec>#<step id>' for a table an earlier step produced, or a result
+this chat kept. The query runs on a connection holding exactly those and nothing else.
 
 'sql' is one SELECT. Not two statements, not a write, not a file read. Quote a
 column name that has spaces or mixed case with double quotes, exactly as the
@@ -38,14 +39,41 @@ catalog spells it.
 
 ## What comes back
 
-'n_rows' is how many rows the query produced. 'rows' is as many as you asked for,
-20 by default, so a sample is never mistaken for the whole answer.
+    {{"result": "portia_result_kxbt", "n_rows": 89, "n_columns": 3,
+     "shown": "1-20", "fields": ["city", "events", "share"],
+     "rows": [["Paris", 574, 0.26], ["Lyon", 112, 0.05]],
+     "more": "Rows 1-20 of 89. For the next ones ..."}}
 
-To see more, change the arguments, not the query. 'limit' takes more rows,
-'offset' skips to the next page, and both apply on top of whatever your SQL says.
-A big 'limit' on a wide result is refused for size; select fewer columns, not fewer
-rows. If you want a number rather than rows, ask for one: count, sum and group by
-are usually the better question anyway.
+'n_rows' and 'n_columns' are the whole result. 'fields' names the columns once, and
+each row is a list of values in that order. Your question, SQL and inputs are not
+sent back.
+
+EVERY CUT SAYS SO. 'more' says how many rows were left out and how to go on.
+'more_columns' does the same past the first 50 columns, and 'columns_shown' says
+which ones you have. 'cut' names the columns where a long value was cut short. Read
+those before you treat the rows as the whole answer.
+
+'result' is the name this result is kept under, for this chat. Three uses:
+
+- Another page. Call again with the same sql and inputs and an 'offset' (rows) or a
+  'column_offset' (columns). It reads the kept copy, says so in 'paged', and nothing
+  runs again: on a warehouse that is one bill instead of one per page.
+- A question about the result. Put its name in 'inputs' and write a SELECT over it.
+  A WHERE, a count or a GROUP BY over 89 rows you already have beats paging through
+  them, and it does not touch the tables again.
+- The review. `review_queries` lists each question beside its result's name.
+
+When 'result' is null the result was too big to keep, and 'not_kept' says why. Then
+another page runs the query again, and a count, a filter or fewer columns is the
+better question.
+
+A result's name and the question's number in `review_queries` are two different
+things. Cite a question by its number in `record_finding`; read a result by its name.
+
+Change the arguments, not the query. 'limit' (default 20) and 'offset' apply on top
+of whatever your SQL says; a SELECT rewritten with its own OFFSET is a new question
+and runs again. A big 'limit' gets as many whole rows as fit in one answer, and
+'more' says where it stopped.
 
 ## portia's own records, as tables
 
@@ -56,8 +84,9 @@ what one `describe_source` per table cannot: which columns anywhere are mostly n
 which tables have a column named like `%_id`, which tables changed since they were
 indexed. `flags` is a list, so ask `list_contains(flags, 'high_null')`.
 
-They run in DuckDB's SQL on this machine, whatever the project's engine. On a
-warehouse project a query reads them or the warehouse's tables, never both.
+They, and the results this chat kept, run in DuckDB's SQL on this machine, whatever
+the project's engine. On a warehouse project a query reads them or the warehouse's
+tables, never both.
 
 ## What it does not do
 
