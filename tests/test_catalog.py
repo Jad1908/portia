@@ -717,3 +717,16 @@ def test_a_built_table_records_the_rows_its_build_measured(tmp_path, table):
 
     assert entry["indexed"] == {"rows": 5}
     assert handlers.row_facts(entry) == {"n_rows": 5}
+
+
+def test_only_a_written_summary_is_a_summary(tmp_path):
+    from portia import catalog
+
+    d = tmp_path / ".portia"
+    index_source(_write_source(tmp_path), portia_dir=d)
+    drafted = load_catalog(d)["sources"]["customers"]
+    assert drafted["summary"] and catalog.written_summary(drafted) is None
+    set_interpretation("customers", summary="The EU customer list.", portia_dir=d)
+    written = load_catalog(d)["sources"]["customers"]
+    assert catalog.written_summary(written) == "The EU customer list."
+    assert catalog.written_summary({"model": "m", "summary": None}) is None

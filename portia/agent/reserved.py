@@ -288,8 +288,7 @@ def _table_rows(request: Request) -> list[dict]:
             groups.setdefault(str(member), []).append(str(group.get("name")))
     rows = []
     for name, kind, entry in _entries(request):
-        summary = entry.get("summary") or None
-        written = bool(summary) and catalog.is_interpreted(entry)
+        written = catalog.written_summary(entry)
         if kind == SOURCE:
             path = _text(entry.get("source"))
         else:
@@ -302,8 +301,8 @@ def _table_rows(request: Request) -> list[dict]:
                 "path": path,
                 "n_rows": catalog.row_count(entry),
                 "n_columns": len(entry.get("columns") or []),
-                "read": written,
-                "summary": summary if written else None,
+                "read": written is not None,
+                "summary": written,
                 "groups": groups.get(name, []),
                 "stale": request.stale.get(name),
                 "indexed_at": _text(

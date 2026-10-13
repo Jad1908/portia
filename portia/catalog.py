@@ -1400,6 +1400,24 @@ def is_interpreted(entry: dict) -> bool:
     return AUTO_DRAFT_MARKER not in (entry.get("summary") or "")
 
 
+def written_summary(entry: dict) -> str | None:
+    """The summary somebody wrote, the agent or the user; ``None`` when there is none.
+
+    **What a tool answer calls ``summary``** *(2026-10-13)*. The draft
+    `_auto_summary` writes at indexing restates the profile ("17544 rows, 1579
+    columns. Watch-outs: …") and on a sparse table it named every mostly-null
+    column, which made it most of a 1,579-column table's description; its
+    facts are the columns' flags and the entry's row count, measured, where
+    they belong. It is still drafted, because it is what marks a source as not
+    read yet (:func:`is_interpreted`: the window's pane, the brief's index, the
+    graph), and it is never shown as prose anywhere.
+    """
+    summary = entry.get("summary")
+    if not summary or not is_interpreted(entry):
+        return None
+    return str(summary)
+
+
 def _register(d: Path, name: str) -> None:
     proj = d / "project.yaml"
     data: dict[str, Any] = _read(proj) if proj.exists() else {}
