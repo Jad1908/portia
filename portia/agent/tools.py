@@ -47,7 +47,7 @@ from typing import Any
 from claude_agent_sdk import ToolAnnotations, create_sdk_mcp_server, tool
 
 from portia import spec
-from portia.agent import ask, chartspec, drawn, freshness, handlers, prompts
+from portia.agent import ask, chartspec, drawn, freshness, handlers, prompts, reserved
 from portia.core import cancel, columnar, present
 from portia.core.serialize import to_json_compact
 
@@ -1029,7 +1029,7 @@ async def profile_source(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     "query_data",
-    prompts.tool("query_data"),
+    prompts.tool("query_data", **reserved.vocabulary()),
     {
         "type": "object",
         "properties": {

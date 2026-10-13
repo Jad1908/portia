@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from portia import catalog, findings, knowledge, pipeline, spec
-from portia.agent import chartspec, context, drawn, prompts
+from portia.agent import chartspec, context, drawn, prompts, reserved
 from portia.checks import profiling, sql_joins
 from portia.checks.join import column_overlap
 from portia.checks.join import join_findings as _join_findings
@@ -37,7 +37,7 @@ from portia.checks.profiling import profile_path
 from portia.core import backend, cancel
 from portia.core import dialect as dialects
 from portia.core.io import connect, relative, source_table
-from portia.core.serialize import to_json, to_jsonable
+from portia.core.serialize import to_json, to_jsonable_nested
 from portia.core.table import Table, subquery
 from portia.knowledge import measure, query, store
 from portia.knowledge import schema as knowledge_schema
@@ -282,8 +282,36 @@ def _select(sql: str, inputs: list[str], portia_dir: str) -> Table:
     <step id>`` was refused as undeclared. The 2026-09-06 session hit that
     three times in a row, right after the same form had worked in
     ``record_step`` — two doors, one convention, honoured by one of them.
+
+    **A name portia answers for itself is an input too** *(2026-10-13,
+    `agent/reserved.py`)*: ``portia_columns``, ``portia_tables``, and whatever
+    else registers there. Each is built from portia's records on a local
+    DuckDB connection of its own and copied into the sandbox like a source.
+
+    **On a warehouse, a query reads portia's records or the warehouse's
+    tables, never both** — refused here, before anything runs, with a sentence
+    saying how to split it. The records are on this machine and the tables
+    are where they are: the warehouse path runs the query where the data is
+    (`ops/sql._apply_remote`), and putting a few thousand catalog rows into
+    that statement as literals would ship portia's notes about every table to
+    the warehouse on every such query, in a statement that grows with the
+    catalog. A query naming only reserved inputs needs nothing from the
+    warehouse, so it runs locally, in DuckDB's SQL, on any project, which is
+    what makes the catalog queryable there at all. `apply_sql` chooses its
+    path off the first input's connection, so the order of the inputs is kept.
     """
-    con = connect()
+    own = [name for name in inputs if reserved.find(name) is not None]
+    theirs = [name for name in inputs if reserved.find(name) is None]
+    con = connect() if theirs else None
+    if own and con is not None and backend.is_remote(con):
+        raise ValueError(
+            prompts.error(
+                "reserved_with_warehouse",
+                reserved=", ".join(own),
+                tables=", ".join(theirs),
+            )
+        )
+    built = reserved.tables(own, portia_dir, reserved.connection()) if own else {}
     tables: dict[str, Any] = {}
     renames: dict[str, str] = {}
     for name in inputs:
@@ -295,7 +323,7 @@ def _select(sql: str, inputs: list[str], portia_dir: str) -> Table:
                 f"two inputs answer to the name {key!r} — refer to one of them "
                 f"another way (a model name, or the other spec's step)"
             )
-        tables[key] = _table(name, portia_dir, con)
+        tables[key] = built[name] if name in built else _table(name, portia_dir, con)
     return sql_op.apply_sql(tables, sql_op.rename_tables(sql, renames), name="query").table
 
 
@@ -330,10 +358,12 @@ def interrupted_facts(tool: str, args: dict, portia_dir: str = catalog.DEFAULT_D
     # and not the whole answer. Under the name the query reads it by.
     tables: dict[str, Any] = {}
     keys: dict[str, str] = {}
+    own = [name for name in names if reserved.find(name) is not None]
+    built = reserved.tables(own, portia_dir, reserved.connection()) if own else {}
     for name in names:
         key = name.partition(STEP_REF)[2] if STEP_REF in name else name
         try:
-            tables[key] = _table(name, portia_dir, con)
+            tables[key] = built[name] if name in built else _table(name, portia_dir, con)
         except ValueError:
             continue
         keys[name] = key
@@ -499,7 +529,7 @@ def query_data(
     # than tuples, as `checks.join`'s example rows already are — a positional row
     # beside a column list is two things the reader has to align by hand.
     rows = [
-        {col: to_jsonable(value) for col, value in zip(columns, row, strict=True)}
+        {col: to_jsonable_nested(value) for col, value in zip(columns, row, strict=True)}
         for row in window.rows(want)
     ]
     answer = {
@@ -624,7 +654,7 @@ def plot_data(
     # Uncapped on purpose (§2.7). These do not become tokens, so the one measured
     # limit in the system does not apply and there is no second one to invent.
     rows = [
-        {col: to_jsonable(value) for col, value in zip(columns, row, strict=True)}
+        {col: to_jsonable_nested(value) for col, value in zip(columns, row, strict=True)}
         for row in produced.rows(n_rows)
     ]
     return {

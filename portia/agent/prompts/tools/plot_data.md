@@ -47,7 +47,8 @@ Do not draw three numbers. A bar chart of three bars is a sentence with axes on 
 
 'inputs' is every table the query reads, by name — an indexed source, another model
 in this project, or '<spec>#<step id>'. The query runs on a connection holding
-exactly those and nothing else.
+exactly those and nothing else. `portia_columns` and `portia_tables`, portia's own
+records as tables, work here as they do in `query_data`.
 
 'sql' is one SELECT, exactly as in `query_data`.
 

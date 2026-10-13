@@ -31,7 +31,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from portia.core.serialize import to_jsonable
+from portia.core.serialize import to_jsonable_nested
 
 #: What ``shown`` says when a list holds nothing at this position: an empty
 #: list, or an offset past its end.
@@ -84,7 +84,7 @@ def listing(
     for row in rows:
         if len(row) != width:
             raise ValueError(f"a row has {len(row)} values for {width} fields: {list(fields)}")
-        out_rows.append([jsonable(value) for value in row])
+        out_rows.append([to_jsonable_nested(value) for value in row])
     if start < 0 or n < 0:
         raise ValueError(
             f"a listing starts at 0 or later and counts 0 or more (start={start}, n={n})"
@@ -101,20 +101,6 @@ def listing(
             )
         out["more"] = more
     return out
-
-
-def jsonable(value: Any) -> Any:
-    """``value`` as plain JSON, nested lists and maps included.
-
-    `core.serialize.to_jsonable` is for one scalar and turns anything else into
-    its string, which is right for a date and wrong for a cell holding a list of
-    flags: ``["constant"]`` would reach the model as ``"['constant']"``.
-    """
-    if isinstance(value, Mapping):
-        return {str(key): jsonable(item) for key, item in value.items()}
-    if isinstance(value, list | tuple | set | frozenset):
-        return [jsonable(item) for item in value]
-    return to_jsonable(value)
 
 
 def flagged(columns: Sequence[Mapping[str, Any]], *, order: Sequence[str] = ()) -> dict:

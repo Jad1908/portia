@@ -19,12 +19,12 @@ freely before you decide anything.
 
 ## The call
 
-    {"question": "are there rank-100 events in Paris in summer 2025?",
+    {{"question": "are there rank-100 events in Paris in summer 2025?",
      "inputs": ["EVENTS", "EVENT_PLACES"],
      "sql": "SELECT count(*) AS n FROM EVENTS e
              JOIN EVENT_PLACES p ON e.ID = p.EVENT_ID
              WHERE e.RANK = 100 AND p.NAME = 'Paris'
-               AND e.START_DATE BETWEEN '2025-06-01' AND '2025-08-31'"}
+               AND e.START_DATE BETWEEN '2025-06-01' AND '2025-08-31'"}}
 
 'inputs' is every table the query reads, by name: an indexed source, a model in
 this project, or '<spec>#<step id>' for a table an earlier step produced. The query
@@ -46,6 +46,18 @@ To see more, change the arguments, not the query. 'limit' takes more rows,
 A big 'limit' on a wide result is refused for size; select fewer columns, not fewer
 rows. If you want a number rather than rows, ask for one: count, sum and group by
 are usually the better question anyway.
+
+## portia's own records, as tables
+
+Two more names work in 'inputs'. `portia_columns` is one row per column of every
+source and model: {portia_columns}. `portia_tables` is one row per source and
+model: {portia_tables}. They hold the catalog's facts, never the data, and answer
+what one `describe_source` per table cannot: which columns anywhere are mostly null,
+which tables have a column named like `%_id`, which tables changed since they were
+indexed. `flags` is a list, so ask `list_contains(flags, 'high_null')`.
+
+They run in DuckDB's SQL on this machine, whatever the project's engine. On a
+warehouse project a query reads them or the warehouse's tables, never both.
 
 ## What it does not do
 

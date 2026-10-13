@@ -1,0 +1,248 @@
+"""portia's own records as tables: `portia_columns` and `portia_tables` through `query_data`.
+
+Built from the catalog and handed to the SQL sandbox as one more declared input
+(`agent/reserved.py`). The project here is tiny and local; the warehouse is a
+connection that only says it is remote, which is all the refusal reads.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import re
+
+import pandas as pd
+import pytest
+
+from portia import catalog
+from portia.agent import handlers, prompts, reserved, tools
+
+
+@pytest.fixture
+def shop(tmp_path, monkeypatch) -> str:
+    """Two files, one with an upper-case column, a group, and a model built from one."""
+    monkeypatch.chdir(tmp_path)
+    pd.DataFrame(
+        {"ORDER_ID": [1, 2, 3, 4], "amount": [1.5, 2.5, 4.0, None], "shop": ["a", "a", "a", "a"]}
+    ).to_csv("orders.csv", index=False)
+    pd.DataFrame({"id": [1, 2], "name": ["x", "y"]}).to_csv("customers.csv", index=False)
+    d = tmp_path / ".portia"
+    catalog.init_project("a shop", portia_dir=d)
+    catalog.index_source("orders.csv", portia_dir=d)
+    catalog.index_source("customers.csv", portia_dir=d)
+    catalog.set_group("sales", sources=["orders"], portia_dir=d)
+    handlers.record_step(
+        "specs/big_orders.yaml",
+        {
+            "id": "big",
+            "op": "sql",
+            "inputs": ["orders"],
+            "sql": "SELECT * FROM orders WHERE amount > 2",
+        },
+        portia_dir=str(d),
+    )
+    return str(d)
+
+
+def _ask(sql: str, inputs: list[str], d: str, **kwargs) -> dict:
+    return handlers.query_data(sql, inputs, "what does the catalog hold?", portia_dir=d, **kwargs)
+
+
+def test_portia_columns_is_one_row_per_column_with_its_facts(shop):
+    answer = _ask(
+        "SELECT name, type, flags, null_rate, n_distinct, min, max, top, top_freq "
+        "FROM portia_columns WHERE table_name = 'orders' ORDER BY position",
+        ["portia_columns"],
+        shop,
+    )
+    rows = {row["name"]: row for row in answer["rows"]}
+    assert list(rows) == ["ORDER_ID", "amount", "shop"]
+    assert rows["ORDER_ID"]["type"] == "integer" and rows["ORDER_ID"]["max"] == 4
+    assert rows["amount"]["null_rate"] == 0.25 and rows["amount"]["min"] == 1.5
+    assert rows["shop"]["top"] == "a" and rows["shop"]["top_freq"] == 4
+    assert "constant" in rows["shop"]["flags"]
+
+
+def test_a_flag_is_asked_with_list_contains_across_every_table(shop):
+    answer = _ask(
+        "SELECT table_name, kind, name FROM portia_columns "
+        "WHERE list_contains(flags, 'constant') ORDER BY table_name, position",
+        ["portia_columns"],
+        shop,
+    )
+    assert [(r["table_name"], r["kind"], r["name"]) for r in answer["rows"]] == [
+        ("big_orders", "model", "shop"),
+        ("orders", "source", "shop"),
+    ]
+
+
+def test_portia_tables_is_one_row_per_source_and_model(shop):
+    catalog.set_interpretation("customers", summary="One row per customer.", portia_dir=shop)
+    answer = _ask("SELECT * FROM portia_tables ORDER BY kind DESC, name", ["portia_tables"], shop)
+    rows = {row["name"]: row for row in answer["rows"]}
+    assert answer["columns"] == [name for name, _ in reserved.TABLE_FIELDS]
+    assert rows["orders"]["kind"] == "source" and rows["orders"]["path"] == "orders.csv"
+    assert rows["orders"]["n_rows"] == 4 and rows["orders"]["n_columns"] == 3
+    assert rows["orders"]["groups"] == ["sales"] and rows["customers"]["groups"] == []
+    assert rows["orders"]["read"] is False and rows["orders"]["summary"] is None, "drafted only"
+    assert rows["customers"]["read"] is True
+    assert rows["customers"]["summary"] == "One row per customer."
+    assert rows["big_orders"]["kind"] == "model"
+    assert rows["big_orders"]["path"] == "specs/big_orders.yaml"
+    assert rows["big_orders"]["n_rows"] == 2
+    assert all(row["stale"] is False for row in rows.values())
+    assert rows["orders"]["indexed_at"]
+
+
+def test_a_changed_file_is_stale_and_so_is_what_is_built_from_it(shop):
+    with open("orders.csv", "a", encoding="utf-8") as f:
+        f.write("5,9.0,a\n")
+    later = os.stat("orders.csv").st_mtime + 5
+    os.utime("orders.csv", (later, later))
+    answer = _ask("SELECT name, stale FROM portia_tables ORDER BY name", ["portia_tables"], shop)
+    assert {r["name"]: r["stale"] for r in answer["rows"]} == {
+        "big_orders": True,
+        "customers": False,
+        "orders": True,
+    }
+
+
+def test_the_catalog_and_the_data_meet_in_one_query_locally(shop):
+    answer = _ask(
+        "SELECT t.n_rows AS recorded, (SELECT count(*) FROM orders) AS counted "
+        "FROM portia_tables t WHERE t.name = 'orders'",
+        ["portia_tables", "orders"],
+        shop,
+    )
+    assert answer["rows"] == [{"recorded": 4, "counted": 4}]
+
+
+def test_a_reserved_name_is_matched_the_way_the_engine_folds_it(shop):
+    answer = _ask("SELECT count(*) AS n FROM PORTIA_COLUMNS", ["PORTIA_COLUMNS"], shop)
+    assert answer["rows"] == [{"n": 3 + 2 + 3}]
+
+
+def test_a_chart_reads_them_too(shop):
+    chart = handlers.plot_data(
+        "SELECT name, n_columns FROM portia_tables",
+        ["portia_tables"],
+        "how wide is each table?",
+        "widths",
+        {"mark": "bar", "encoding": {"x": {"field": "name"}, "y": {"field": "n_columns"}}},
+        portia_dir=shop,
+    )
+    assert chart["n_rows"] == 3
+
+
+def test_a_table_nobody_profiled_has_its_type_and_no_flags(shop):
+    entry = catalog.load_source("customers", portia_dir=shop)
+    entry["columns"] = [
+        {"name": c["name"], "role": None, "dtype": "VARCHAR"} for c in entry["columns"]
+    ]
+    catalog._write(catalog.Path(shop) / "sources" / "customers.yaml", entry)
+    answer = _ask(
+        "SELECT type, flags, null_rate FROM portia_columns WHERE table_name = 'customers'",
+        ["portia_columns"],
+        shop,
+    )
+    assert answer["rows"] == [{"type": "VARCHAR", "flags": None, "null_rate": None}] * 2
+
+
+# --- a warehouse project --------------------------------------------------------------
+
+
+class _Remote:
+    """A connection that says it is a warehouse; asking it anything fails the test."""
+
+    remote = True
+
+    def execute(self, *a, **k):
+        raise AssertionError("the warehouse was asked")
+
+
+def test_on_a_warehouse_portias_records_and_the_warehouse_are_never_one_query(shop, monkeypatch):
+    monkeypatch.setattr(handlers, "connect", lambda: _Remote())
+    with pytest.raises(ValueError) as refused:
+        _ask("SELECT * FROM portia_tables, orders", ["portia_tables", "orders"], shop)
+    assert str(refused.value) == prompts.error(
+        "reserved_with_warehouse", reserved="portia_tables", tables="orders"
+    )
+
+
+def test_on_a_warehouse_a_query_of_portias_records_alone_runs_here(shop, monkeypatch):
+    def no_warehouse():
+        raise AssertionError("a catalog-only query opened the warehouse")
+
+    monkeypatch.setattr(handlers, "connect", no_warehouse)
+    answer = _ask("SELECT count(*) AS n FROM portia_tables", ["portia_tables"], shop)
+    assert answer["rows"] == [{"n": 3}]
+
+
+# --- the registry ------------------------------------------------------------------
+
+
+def test_a_name_registered_later_is_an_input_the_same_way(shop, monkeypatch):
+    """The mechanism a chat's stored results (``q1``, ``q2`` …) are meant to use."""
+    monkeypatch.setattr(reserved, "_registry", list(reserved._registry))
+    seen = []
+
+    def stored(name: str, request: reserved.Request):
+        seen.append((name, request.portia_dir))
+        rows = [{"n": int(name[1:]), "label": "kept"}]
+        return reserved.create(request.con, name, [("n", "INTEGER"), ("label", "VARCHAR")], rows)
+
+    reserved.register(re.compile(r"q\d+"), stored)
+    answer = _ask("SELECT n, label FROM q7", ["q7"], shop)
+    assert answer["rows"] == [{"n": 7, "label": "kept"}]
+    assert seen == [("q7", shop)]
+    assert reserved.find("q") is None and reserved.find("orders") is None
+
+
+def test_registering_a_name_again_replaces_it(monkeypatch):
+    monkeypatch.setattr(reserved, "_registry", list(reserved._registry))
+    before = len(reserved._registry)
+    reserved.register("scratch", lambda name, request: None)  # type: ignore[arg-type,return-value]
+    reserved.register("scratch", lambda name, request: None)  # type: ignore[arg-type,return-value]
+    assert len(reserved._registry) == before + 1
+
+
+def test_the_columns_the_description_lists_are_the_tables_columns(shop):
+    description = next(t for t in tools.ALL_TOOLS if t.name == "query_data").description
+    for table, fields in (
+        (reserved.COLUMNS, reserved.COLUMN_FIELDS),
+        (reserved.TABLES, reserved.TABLE_FIELDS),
+    ):
+        listed = reserved.vocabulary()[table]
+        assert listed in description
+        answer = _ask(f"SELECT * FROM {table} LIMIT 0", [table], shop)
+        assert answer["columns"] == [name for name, _ in fields] == listed.split(", ")
+
+
+def test_an_empty_project_has_empty_tables_with_their_columns(tmp_path):
+    d = tmp_path / ".portia"
+    catalog.init_project("nothing yet", portia_dir=d)
+    answer = _ask("SELECT * FROM portia_columns", ["portia_columns"], str(d))
+    assert answer["n_rows"] == 0
+    assert answer["columns"] == [name for name, _ in reserved.COLUMN_FIELDS]
+
+
+def test_through_the_tool_a_reserved_input_carries_no_stale_notice(shop):
+    tool = next(t for t in tools.ALL_TOOLS if t.name == "query_data")
+    args = {
+        "question": "q",
+        "sql": "SELECT count(*) AS n FROM portia_columns",
+        "inputs": ["portia_columns"],
+        "portia_dir": shop,
+    }
+    result = asyncio.run(tool.handler(args))
+    assert "is_error" not in result
+    payload = json.loads(result["content"][0]["text"])
+    assert "stale" not in payload and payload["rows"] == [{"n": 8}]
+
+
+def test_an_interrupted_query_counts_a_reserved_input_too(shop):
+    facts = handlers.interrupted_facts(
+        "query_data", {"sql": "SELECT * FROM portia_tables", "inputs": ["portia_tables"]}, shop
+    )
+    assert facts["inputs"] == {"portia_tables": {"rows": 3, "from": handlers.COUNTED}}
