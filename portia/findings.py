@@ -252,6 +252,16 @@ def around_model(model: str, inputs: list[str], root: str | Path = ".") -> list[
     )
 
 
+def touching(table: str, root: str | Path = ".") -> list[dict]:
+    """Every finding whose ``about`` names ``table``, newest first, each once.
+
+    What `describe_source` lists on a card, a row a finding with the tables it
+    is about (`agent/handlers._findings_card`). Newest first is the order
+    :func:`load_all` reads them in, which is time and never a ranking.
+    """
+    return [f for f in load_all(root) if table in tables(f)]
+
+
 def for_table(
     table: str,
     root: str | Path = ".",
@@ -269,13 +279,15 @@ def for_table(
 
     Each group is capped and states its own total, so a short list never reads as
     a short history — the rule `knowledge/query.py` already follows.
+
+    **For a person, not the agent** *(2026-10-14)*: `cli/journal list --table`
+    renders it. A finding about several tables is in each of their groups,
+    which a reader scanning by table wants and an answer the model reads
+    pays for once per table; `describe_source` lists :func:`touching` instead.
     """
     groups: dict[str, list[dict]] = {}
-    for finding in load_all(root):
-        tables = _tables(finding.get("about") or [])
-        if table not in tables:
-            continue
-        others = sorted(t for t in tables if t != table)
+    for finding in touching(table, root):
+        others = sorted(t for t in tables(finding) if t != table)
         for neighbour in others or [""]:
             groups.setdefault(neighbour, []).append(finding)
 

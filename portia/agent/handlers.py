@@ -22,6 +22,7 @@ turns them into a tool result the agent can react to.
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 from difflib import get_close_matches
@@ -146,15 +147,26 @@ PROFILE_CAP = 50
 #: Notes a card carries: the latest this many, with how many there are in all.
 CARD_NOTES = 10
 
-#: Tables whose findings with this one a card shows, in name order, each with
-#: its latest `findings.PER_NEIGHBOUR`. The rest are named and counted
-#: (`FINDING_TABLES_NAMED`), and ``findings_with`` reads any one of them. A
-#: card of a table forty others had findings with was 19,317 characters,
-#: three-quarters of it findings (the scale test, 2026-10-13).
-CARD_FINDING_TABLES = 10
+#: Findings a card lists, latest first, each once with the tables it is about.
+#: When there are more, the tables they are about are named with a count each
+#: (`FINDING_TABLES_NAMED`), and ``findings_with`` reads any one of them.
+#:
+#: **Once, not once per table** *(2026-10-14)*. The card grouped findings by
+#: the other table each one names (`findings.for_table`), so a finding about
+#: eight tables was printed eight times: on a public energy dataset's metadata
+#: table, three findings were twelve entries and 8,307 of the card's 12,273
+#: characters. Before that, by 2026-10-13, the number of groups was capped,
+#: because a card of a table forty others had findings with was 19,317
+#: characters (the scale test).
+CARD_FINDINGS = 10
 
-#: Tables past `CARD_FINDING_TABLES` a card names, with how many findings each.
+#: Tables a card names when it cannot list every finding, with how many each is in.
 FINDING_TABLES_NAMED = 100
+
+#: What a card, and ``findings_with``, say about each finding. ``tables`` is
+#: every table it is about, this one included, in the order its ``about`` names
+#: them; the rest of the record is `read_spec`'s ``finding``.
+CARD_FINDING_FIELDS = ("question", "answer", "so", "tables", "path")
 
 #: Findings ``describe_source(findings_with=…)`` shows about two tables, latest first.
 FINDINGS_WITH = 20
@@ -212,7 +224,7 @@ def card_vocabulary() -> dict[str, str]:
         "card": str(CARD_LISTS_ALL),
         "examples": str(TYPE_EXAMPLES),
         "notes": str(CARD_NOTES),
-        "finding_tables": str(CARD_FINDING_TABLES),
+        "findings": str(CARD_FINDINGS),
         "match_cap": str(MATCH_CAP),
         "profile_cap": str(PROFILE_CAP),
         "rows": str(CONTEXT_ROWS),
@@ -373,10 +385,10 @@ def describe_source(
     was ever refused, so nothing flagged it.
 
     **It also carries what anyone has already learned about this table**
-    (`portia/findings.py`), grouped by the table on the other side, capped, with
-    the total stated: the first `CARD_FINDING_TABLES` tables in full, the rest
-    named and counted, and ``findings_with`` reads the findings about this
-    table and one other. That is here rather than behind a tool of its own for one
+    (`portia/findings.py`): the latest `CARD_FINDINGS` findings, each once with
+    the tables it is about, the total stated, the tables of the rest named and
+    counted, and ``findings_with`` reads the findings about this table and one
+    other. That is here rather than behind a tool of its own for one
     measured reason: `graph_lookup` was called **zero times across four runs**
     while this rung was called 23 times in one of them. A surface the agent has
     to *think to* consult does not get consulted, and there is no reason to test
@@ -436,9 +448,9 @@ def describe_source(
     # called for every table a session reads, and a line saying *nobody has
     # learned anything about this yet* would be paid for on every source of
     # every project that has never curated a chat.
-    journal = findings.for_table(name, root=_project_root(portia_dir))
-    if journal["n_findings"]:
-        card["findings"] = _findings_card(journal, name)
+    about = findings.touching(name, root=_project_root(portia_dir))
+    if about:
+        card.update(_findings_card(about, name))
     notes = list(entry.get(catalog.NOTES) or [])
     if notes:
         latest = notes[-CARD_NOTES:]
@@ -452,33 +464,48 @@ def describe_source(
     return card
 
 
-def _findings_card(journal: dict, source: str) -> dict:
-    """`findings.for_table`'s answer with a cap on the tables, the rest named and counted.
+def _findings_card(about: list[dict], source: str) -> dict:
+    """A card's ``findings``: the latest `CARD_FINDINGS`, a row each, all counted.
 
-    Each table already showed its latest `findings.PER_NEIGHBOUR` findings with
-    its total; the number of tables was the part that grew. The first
-    `CARD_FINDING_TABLES`, in `for_table`'s name order (findings about this
-    table alone first), stay as they were. The rest are a list of name and
-    count, and ``more`` says that ``findings_with`` reads any of them. The
-    ``table`` key is dropped: it is the name the call gave.
+    ``about`` is `findings.touching`'s list, newest first. Past the cap,
+    ``findings_by_table`` names every other table those findings are about,
+    by name, with how many each is in (the ``n`` ``findings_with`` answers),
+    the first `FINDING_TABLES_NAMED` of them: that is the narrower question,
+    where the grouped card answered it by printing a finding under each.
     """
-    groups = list(journal["with"].items())
+    shown = about[:CARD_FINDINGS]
     out: dict[str, Any] = {
-        "n_findings": journal["n_findings"],
-        "with": dict(groups[:CARD_FINDING_TABLES]),
-    }
-    rest = groups[CARD_FINDING_TABLES:]
-    if rest:
-        named = rest[:FINDING_TABLES_NAMED]
-        out["also_with"] = listing.listing(
-            ("table", "n"),
-            [[table, group["n"]] for table, group in named],
-            n=len(rest),
-            more=prompts.more("findings_tables", left=len(rest) - len(named)),
+        "findings": listing.listing(
+            CARD_FINDING_FIELDS,
+            [_finding_row(f) for f in shown],
+            n=len(about),
+            more=prompts.more(
+                "findings_with", left=len(about) - len(shown), source=source, cap=FINDINGS_WITH
+            ),
         )
-    if rest or any(len(group["findings"]) < group["n"] for _, group in groups):
-        out["more"] = prompts.more("findings_with", source=source, cap=FINDINGS_WITH)
+    }
+    if len(shown) < len(about):
+        counts = Counter(t for f in about for t in findings.tables(f) if t != source)
+        tables = sorted(counts)
+        named = tables[:FINDING_TABLES_NAMED]
+        out["findings_by_table"] = listing.listing(
+            ("table", "n"),
+            [[table, counts[table]] for table in named],
+            n=len(tables),
+            more=prompts.more("findings_tables", left=len(tables) - len(named)),
+        )
     return out
+
+
+def _finding_row(finding: dict) -> list:
+    """One finding as `CARD_FINDING_FIELDS` say it."""
+    return [
+        finding.get("question", ""),
+        finding.get("answer", ""),
+        finding.get("so", ""),
+        findings.tables(finding),
+        finding.get("path", ""),
+    ]
 
 
 def _findings_with(source: str, other: str, portia_dir: str) -> dict:
@@ -489,19 +516,18 @@ def _findings_with(source: str, other: str, portia_dir: str) -> dict:
     without case. A table nothing has findings with answers none, which is a
     fact rather than a refusal.
     """
-    journal = findings.for_table(
-        source, root=_project_root(portia_dir), per_neighbour=FINDINGS_WITH
-    )
-    (other,) = dialects.resolve_columns([other], list(journal["with"]))
-    group = journal["with"].get(other) or {"n": 0, "findings": []}
-    briefs = group["findings"]
+    about = findings.touching(source, root=_project_root(portia_dir))
+    named = {t for f in about for t in findings.tables(f) if t != source}
+    (other,) = dialects.resolve_columns([other], named)
+    found = [f for f in about if other != source and other in findings.tables(f)]
+    shown = found[:FINDINGS_WITH]
     return {
         "with_table": other,
         "findings": listing.listing(
-            ("question", "answer", "so", "path"),
-            [[b["question"], b["answer"], b["so"], b["path"]] for b in briefs],
-            n=group["n"],
-            more=prompts.more("findings_older", left=group["n"] - len(briefs)),
+            CARD_FINDING_FIELDS,
+            [_finding_row(f) for f in shown],
+            n=len(found),
+            more=prompts.more("findings_older", left=len(found) - len(shown)),
         ),
     }
 
