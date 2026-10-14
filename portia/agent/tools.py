@@ -1462,7 +1462,7 @@ async def set_group(args: dict[str, Any]) -> dict[str, Any]:
             "roles": {
                 "type": "object",
                 "additionalProperties": {"type": "string"},
-                "description": "Column name -> role",
+                "description": "Column name, or a pattern such as meter_*, -> role",
             },
             "note": {
                 "type": "string",

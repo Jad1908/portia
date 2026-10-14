@@ -8,6 +8,11 @@ import pytest
 import yaml
 
 from portia.catalog import (
+    COLUMN,
+    PATTERN,
+    SOURCE,
+    UnknownName,
+    assign_roles,
     index_source,
     init_project,
     is_stale,
@@ -119,8 +124,127 @@ def test_set_interpretation_rejects_unknown_source_and_column(tmp_path):
 
     with pytest.raises(ValueError, match="no catalog entry"):
         set_interpretation("nope", summary="x", portia_dir=d)
-    with pytest.raises(ValueError, match="no such column"):
+    with pytest.raises(ValueError, match="no column 'nope' in 'customers', which has 8"):
         set_interpretation("customers", roles={"nope": "identifier"}, portia_dir=d)
+
+
+# --- roles by pattern, on a wide table ---------------------------------------
+
+#: The width of the meter table the copilot gave one role with ``*``.
+WIDE = 1579
+SITES = ("north", "south", "east", "west")
+USES = ("office", "lodging", "parking", "school")
+
+
+@pytest.fixture(scope="module")
+def wide(tmp_path_factory):
+    """A 1,579-column meter table: ``timestamp``, then one column per meter, indexed."""
+    import duckdb
+
+    root = tmp_path_factory.mktemp("wide")
+    meters = [f"{SITES[i % 4]}_{USES[(i // 4) % 4]}_{i:04d}" for i in range(WIDE - 1)]
+    exprs = ["TIMESTAMP '2016-01-01' + INTERVAL (i) HOUR AS timestamp"]
+    exprs += [f"(i * {c + 3}) % 97 AS {name}" for c, name in enumerate(meters)]
+    con = duckdb.connect()
+    con.execute(f"COPY (SELECT {', '.join(exprs)} FROM range(24) t(i)) TO '{root}/meters.csv'")
+    con.close()
+    d = root / ".portia"
+    index_source(root / "meters.csv", portia_dir=d)
+    return d
+
+
+def _entry(d):
+    return yaml.safe_load((d / "sources" / "meters.yaml").read_text(encoding="utf-8"))
+
+
+def test_one_pattern_gives_a_role_to_every_meter_and_the_answer_counts_them(wide):
+    """The real case: ``*`` for 1,578 meter columns, beside the one exact name."""
+    before = _entry(wide)
+    written = set_interpretation(
+        "meters", roles={"timestamp": "timestamp", "*": "measure"}, portia_dir=wide
+    )
+
+    assert written.roles == {"timestamp": 1, "*": WIDE - 1}
+    after = _entry(wide)
+    roles = [c["role"] for c in after["columns"]]
+    assert roles[0] == "timestamp", "an exact name wins over a pattern that also matches it"
+    assert set(roles[1:]) == {"measure"}
+    for old, new in zip(before["columns"], after["columns"], strict=True):
+        assert {k: v for k, v in old.items() if k != "role"} == {
+            k: v for k, v in new.items() if k != "role"
+        }, "a role is judgment; every fact stays as it was"
+
+
+def test_roles_given_by_a_pattern_survive_a_reindex(wide):
+    set_interpretation("meters", roles={"north_*": "north meter"}, portia_dir=wide)
+    index_source(wide.parent / "meters.csv", portia_dir=wide)
+    roles = {c["name"]: c["role"] for c in _entry(wide)["columns"]}
+    assert roles["north_office_0000"] == "north meter"
+
+
+def test_a_misspelled_role_column_on_a_wide_table_names_the_closest_few_not_every_column(wide):
+    with pytest.raises(UnknownName) as refused:
+        set_interpretation("meters", roles={"north_ofice_0000": "x"}, portia_dir=wide)
+    assert refused.value.kind == COLUMN and refused.value.n == WIDE
+    assert refused.value.closest[0] == "north_office_0000"
+    assert len(str(refused.value)) < 200, "it listed all 1,579 names: 34,557 characters"
+
+
+def test_a_pattern_that_matches_no_column_is_refused_and_nothing_is_written(wide):
+    before = _entry(wide)
+    with pytest.raises(UnknownName) as refused:
+        set_interpretation(
+            "meters", summary="never written", roles={"*": "x", "valley_*": "y"}, portia_dir=wide
+        )
+    assert refused.value.kind == PATTERN and refused.value.name == "valley_*"
+    assert _entry(wide) == before, "a refused call writes nothing, the summary included"
+
+
+def test_an_exact_name_wins_then_the_more_specific_pattern_then_the_first_given():
+    names = ["ts", "north_office_1", "north_school_2", "south_office_3", "a_b"]
+    assigned, counts = assign_roles(
+        {
+            "*": "any",
+            "north_*": "north",
+            "north_office_*": "north office",
+            "TS": "time",
+            "*_b": "ends b",
+            "a_*": "starts a",
+        },
+        names,
+        table="t",
+    )
+    assert assigned == {
+        "ts": "time",
+        "north_office_1": "north office",
+        "north_school_2": "north",
+        "south_office_3": "any",
+        "a_b": "ends b",
+    }
+    assert counts == {
+        "*": 1,
+        "north_*": 1,
+        "north_office_*": 1,
+        "TS": 1,
+        "*_b": 1,
+        "a_*": 0,
+    }, "a tie goes to the key given first, and the one that set nothing says 0"
+
+
+def test_a_pattern_matches_without_case_and_a_set_is_a_wildcard():
+    assigned, counts = assign_roles(
+        {"NORTH_[os]*": "north"}, ["north_office", "north_x"], table="t"
+    )
+    assert assigned == {"north_office": "north"} and counts == {"NORTH_[os]*": 1}
+
+
+def test_a_group_member_that_is_not_indexed_names_the_closest_sources(tmp_path):
+    csv = _write_source(tmp_path)
+    d = tmp_path / ".portia"
+    index_source(csv, portia_dir=d)
+    with pytest.raises(UnknownName) as refused:
+        set_group("g", sources=["customer"], portia_dir=d)
+    assert refused.value.kind == SOURCE and refused.value.closest == ["customers"]
 
 
 def test_load_catalog_bundles_project_and_sources(tmp_path):

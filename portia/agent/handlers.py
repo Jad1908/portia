@@ -2322,16 +2322,39 @@ def set_interpretation(
     if summary is None and not roles and note is None:
         raise ValueError("nothing to record — pass a summary, roles, a note, or several")
 
-    path = catalog.set_interpretation(
-        source, summary=summary, roles=roles, note=note, portia_dir=portia_dir
-    )
+    try:
+        written = catalog.set_interpretation(
+            source, summary=summary, roles=roles, note=note, portia_dir=portia_dir
+        )
+    except catalog.UnknownName as exc:
+        raise ValueError(_unknown_name(exc)) from None
     return {
         "source": source,
-        "path": str(path),
+        "path": str(written.path),
         "summary_written": summary is not None,
-        "roles_written": sorted(roles or {}),
+        # How many columns each key set, never their names: a pattern given to
+        # 1,578 meter columns is one key and one count (`catalog.assign_roles`).
+        "roles_written": written.roles,
         "note_written": note is not None,
     }
+
+
+def _unknown_name(exc: catalog.UnknownName) -> str:
+    """The copilot's refusal of a name the catalog did not have: the closest few and a count.
+
+    The catalog's own sentence is for the window; this one says what to do
+    next in the copilot's terms, from `agent/prompts/errors/`.
+    """
+    closest = ", ".join(exc.closest) or "(none close)"
+    if exc.kind == catalog.SOURCE:
+        return prompts.error("unknown_group_source", source=exc.name, n=exc.n, closest=closest)
+    if exc.kind == catalog.PATTERN:
+        return prompts.error(
+            "role_pattern_matches_nothing", pattern=exc.name, source=exc.table, n=exc.n
+        )
+    return prompts.error(
+        "unknown_role_column", column=exc.name, source=exc.table, n=exc.n, closest=closest
+    )
 
 
 def set_group(
@@ -2350,7 +2373,10 @@ def set_group(
     if context is None and sources is None:
         raise ValueError("nothing to record — pass a context, sources, or both")
 
-    catalog.set_group(name, context=context, sources=sources, portia_dir=portia_dir)
+    try:
+        catalog.set_group(name, context=context, sources=sources, portia_dir=portia_dir)
+    except catalog.UnknownName as exc:
+        raise ValueError(_unknown_name(exc)) from None
     return {"group": name, "context_written": context is not None, "sources": sources or []}
 
 
