@@ -473,8 +473,8 @@ def test_set_group_records_shared_context_and_membership(project):
     assert "export quirks" in group["context"]
     members = handlers.get_context(project, group="VENDOR_FEED")
     assert _names(members["sources"]) == ["customers"]
-    with pytest.raises(ValueError, match="vendor_feed"):
-        handlers.get_context(project, group="nope")
+    with pytest.raises(ValueError, match="among this project's 1. Closest names: vendor_feed"):
+        handlers.get_context(project, group="vendor_fed")
 
 
 def test_set_group_rejects_an_unindexed_source(project):
@@ -551,17 +551,20 @@ def test_record_step_names_chainable_steps_when_a_ref_is_unknown(sales):
         },
         portia_dir=sales,
     )
-    with pytest.raises(ValueError, match="Earlier steps in this spec: bridged"):
+    with pytest.raises(ValueError) as refused:
         handlers.record_step(
             "specs/chain.yaml",
             {
                 "id": "x",
                 "op": "normalize",
-                "input": "typo",
+                "input": "bridge",
                 "transforms": [{"column": "name", "op": "strip"}],
             },
             portia_dir=sales,
         )
+    text = " ".join(str(refused.value).split())
+    assert "an earlier step of this spec, which has 1; closest ids: bridged." in text
+    assert "an earlier step of this spec by its bare id" in text
 
 
 def test_join_findings_can_measure_a_table_an_earlier_step_produced(sales):
@@ -833,7 +836,7 @@ def test_an_unknown_step_id_names_the_steps_that_exist(sales):
         },
         portia_dir=sales,
     )
-    with pytest.raises(ValueError, match="no step 'typo' in specs/chain.yaml — have: first"):
+    with pytest.raises(ValueError, match="No step 'typo' in 'chain', which has 1 steps"):
         handlers.join_findings(
             "specs/chain.yaml#typo",
             "customers",
@@ -1663,10 +1666,10 @@ def test_read_spec_takes_a_path_as_well_as_a_name(sales, tmp_path):
     assert out["model"] == "order_totals" and _names(out["reads"]) == ["stg_orders"]
 
 
-def test_read_spec_names_the_known_specs_on_an_unknown_name(sales, tmp_path):
+def test_read_spec_names_the_closest_specs_on_an_unknown_name(sales, tmp_path):
     _write_spec(tmp_path, "specs/staging/stg_orders.yaml", _STG)
-    with pytest.raises(ValueError, match="stg_orders"):
-        handlers.read_spec("ghost", portia_dir=sales)
+    with pytest.raises(ValueError, match="among the project's 1. Closest names: stg_orders"):
+        handlers.read_spec("stg_order", portia_dir=sales)
 
 
 def _two_steps(sales) -> None:

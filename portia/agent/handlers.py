@@ -25,7 +25,6 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
-from difflib import get_close_matches
 from pathlib import Path
 from typing import Any
 
@@ -331,7 +330,12 @@ def _members(groups: list[dict], group: str) -> set[str]:
     found = next((g for g in groups if str(g.get("name")) == wanted), None)
     if found is None:
         raise ValueError(
-            prompts.error("unknown_group", group=group, groups=", ".join(names) or "(none)")
+            prompts.error(
+                "unknown_group",
+                group=group,
+                n=len(names),
+                closest=", ".join(listing.near_misses(group, names)) or "(none close)",
+            )
         )
     return {str(s) for s in found.get("sources") or []}
 
@@ -1339,9 +1343,7 @@ def plot_data(
         if field not in columns:
             raise ValueError(
                 prompts.error(
-                    "chart_unknown_column",
-                    field=field,
-                    columns=", ".join(columns),
+                    "chart_unknown_column", field=field, returned=_returned(field, columns)
                 )
             )
 
@@ -1384,6 +1386,21 @@ def plot_data(
     if isinstance(outcome, results.NotKept):
         chart["not_kept"] = _not_kept(outcome)
     return chart
+
+
+#: How many columns a chart's query may return and still be named whole when the
+#: spec encodes one it did not return. A chart's query is the copilot's own
+#: ``SELECT`` of a few columns, and the whole list is then the answer; past this
+#: it is a ``SELECT *`` of a wide table, and the closest few and a count are.
+CHART_COLUMNS_NAMED = 20
+
+
+def _returned(field: str, columns: list[str]) -> str:
+    """What `chart_unknown_column` says the query returned: every column, or the closest few."""
+    if len(columns) <= CHART_COLUMNS_NAMED:
+        return prompts.error("chart_columns_all", columns=", ".join(columns) or "(none)")
+    closest = ", ".join(listing.near_misses(field, columns)) or "(none close)"
+    return prompts.error("chart_columns_closest", n=len(columns), closest=closest)
 
 
 def view_chart(tab: str) -> dict:
@@ -1818,7 +1835,7 @@ def _known_refs(about: list[str], portia_dir: str, root: Path) -> list[str]:
         if column is not None and table in entries:
             names = [c["name"] for c in entries[table].get("columns", [])]
             if column not in names:
-                close = get_close_matches(column, names, n=3)
+                close = listing.near_misses(column, names)
                 hint = f" — closest: {', '.join(close)}" if close else ""
                 raise ValueError(
                     f"no column {column!r} in {table!r}{hint}. "
@@ -2132,12 +2149,15 @@ def _graph_ref(table: str, graph):
             return node.ref
         if node.label == knowledge_schema.MODEL and node.key == table:
             return node.ref
-    known = sorted(
-        n.properties.get("name") or n.key
-        for n in graph.nodes.values()
-        if n.label in (knowledge_schema.SOURCE, knowledge_schema.MODEL)
-    )
-    raise ValueError(f"no table {table!r} in the graph — have: {', '.join(known) or '(none)'}")
+    # The graph is the catalog restated, so a miss is the catalog's miss: the
+    # closest few and a count, never every table (`_no_such_table`).
+    names = {
+        label: [
+            str(n.properties.get("name") or n.key) for n in graph.nodes.values() if n.label == label
+        ]
+        for label in (knowledge_schema.SOURCE, knowledge_schema.MODEL)
+    }
+    raise _no_such_table(table, names[knowledge_schema.SOURCE], names[knowledge_schema.MODEL])
 
 
 def _table_fingerprints(graph) -> dict:
@@ -2288,7 +2308,7 @@ def _requested(profiled: list[dict], columns: list[str] | None, source: str) -> 
     columns = dialects.resolve_columns(columns, by_name)
     missing = [c for c in columns if c not in by_name]
     if missing:
-        close = get_close_matches(missing[0], by_name, n=3)
+        close = listing.near_misses(missing[0], by_name)
         raise ValueError(
             prompts.error(
                 "unknown_column",
@@ -2594,7 +2614,7 @@ def record_step(
     models = {n: p for n, p in spec.discover_specs(root).items() if n != path.stem}
 
     step_ids = {s["id"] for s in steps}
-    at = _superseded_index(steps, supersedes, replacement=step.get("id"))
+    at = _superseded_index(steps, supersedes, replacement=step.get("id"), model=name)
     _normalize_step_refs(step, spec_path=str(path))
     _validate_step(step, existing=steps, replacing=supersedes)
     for ref in _source_refs(step, known_steps=step_ids | set(models)):
@@ -2602,12 +2622,17 @@ def record_step(
             sources[ref] = _source_ref(ref, portia_dir)
         except ValueError as exc:
             # It's none of the three things a name can be. Say all three, or the
-            # caller assumes chaining is unsupported rather than mistyped.
-            known = ", ".join(sorted(step_ids)) or "(none yet)"
-            other = ", ".join(sorted(models)) or "(none)"
+            # caller assumes chaining is unsupported rather than mistyped. The
+            # closest few of each and a count, never every name: the refusal
+            # as a table already names the closest sources and models.
+            ids = [str(s["id"]) for s in steps]
             raise ValueError(
-                f"{exc}. Earlier steps in this spec: {known}. "
-                f"Other models in this project, which you may name directly: {other}"
+                prompts.error(
+                    "unknown_step_input",
+                    refused=str(exc),
+                    n=len(ids),
+                    closest=", ".join(listing.near_misses(ref, ids)) or "(none close)",
+                )
             ) from exc
 
     # Run before writing. An exception here — a missing column, a transform that
@@ -3053,15 +3078,7 @@ def _step_card(
     ids = [str(s.get("id")) for s in steps]
     (found,) = dialects.resolve_columns([wanted], ids)
     if found not in ids:
-        raise ValueError(
-            prompts.error(
-                "unknown_step",
-                step=wanted,
-                model=model,
-                n=len(ids),
-                closest=", ".join(get_close_matches(wanted, ids, n=3)) or "(none close)",
-            )
-        )
+        raise _no_such_step(wanted, ids, model=model)
     at = ids.index(found)
     shape = shapes.get(found) or {}
     readers = [ids[i] for i in range(at + 1, len(steps)) if found in spec.step_inputs(steps[i])]
@@ -3095,7 +3112,7 @@ def _finding_card(ref: str, *, root: Path, portia_dir: str) -> dict:
                 "unknown_finding",
                 finding=ref,
                 n=len(known),
-                closest=", ".join(get_close_matches(stem, known, n=3)) or "(none close)",
+                closest=", ".join(listing.near_misses(stem, known)) or "(none close)",
             )
         )
     where = relative(path, root)
@@ -3210,7 +3227,7 @@ def _grain_facts(grain: dict | None, names: list[str]) -> dict | None:
     if not grain or grain.get("measurable", True):
         return grain
     missing = list(grain.get("missing_columns") or [])
-    return {**grain, "closest": {col: get_close_matches(col, names, n=3) for col in missing}}
+    return {**grain, "closest": {col: listing.near_misses(col, names) for col in missing}}
 
 
 def _flag_unlisted(flag: str, read_at: str | None) -> str:
@@ -3235,10 +3252,13 @@ def _resolve_spec(ref: str, models: dict[str, Path], root: Path) -> tuple[str, P
     given = root / ref
     if given.suffix == ".yaml" and given.is_file():
         return name, given
-    known = ", ".join(sorted(models)) or "(none yet)"
     raise ValueError(
-        f"no spec named {name!r}. Specs in this project: {known}. "
-        "Each is listed under Pipeline in your brief."
+        prompts.error(
+            "unknown_spec",
+            spec=name,
+            n=len(models),
+            closest=", ".join(listing.near_misses(name, sorted(models))) or "(none close)",
+        )
     )
 
 
@@ -3383,15 +3403,27 @@ def _step_table(ref: str, portia_dir: str, con=None):
     spec_path, _, step_id = ref.partition(STEP_REF)
     root = _project_root(portia_dir)
     models = spec.discover_specs(root)
-    _, path = _resolve_spec(spec_path, models, root)
+    name, path = _resolve_spec(spec_path, models, root)
     doc = spec.load_spec(path)
     steps = doc.get("steps") or []
     ids = [s["id"] for s in steps]
     if step_id not in ids:
-        known = ", ".join(ids) or "(no steps yet)"
-        raise ValueError(f"no step {step_id!r} in {spec_path} — have: {known}")
+        raise _no_such_step(step_id, ids, model=name)
     prefix = {**doc, "steps": steps[: ids.index(step_id) + 1]}
     return spec.run_spec(prefix, base_dir=root, con=con or connect(), models=models)[-1].table
+
+
+def _no_such_step(step_id: str, ids: list[str], *, model: str) -> ValueError:
+    """The refusal of a step id a spec does not have: the closest few and a count, never every id."""
+    return ValueError(
+        prompts.error(
+            "unknown_step",
+            step=step_id,
+            model=model,
+            n=len(ids),
+            closest=", ".join(listing.near_misses(step_id, ids)) or "(none close)",
+        )
+    )
 
 
 def _known_name(name: str, portia_dir: str) -> str:
@@ -3477,7 +3509,9 @@ def _source_ref(source: str, portia_dir: str):
     return catalog.source_ref_of(entry)
 
 
-def _superseded_index(steps: list[dict], supersedes: str | None, *, replacement: Any) -> int | None:
+def _superseded_index(
+    steps: list[dict], supersedes: str | None, *, replacement: Any, model: str
+) -> int | None:
     """Where the replaced step sits, or ``None`` when this is an ordinary append.
 
     Refused while **another** step reads the id being retired, which is
@@ -3489,8 +3523,7 @@ def _superseded_index(steps: list[dict], supersedes: str | None, *, replacement:
         return None
     at = next((i for i, s in enumerate(steps) if s.get("id") == supersedes), None)
     if at is None:
-        known = ", ".join(s["id"] for s in steps) or "(none)"
-        raise ValueError(f"no step {supersedes!r} in this spec. Steps: {known}")
+        raise _no_such_step(supersedes, [str(s["id"]) for s in steps], model=model)
 
     if replacement != supersedes:
         readers = [

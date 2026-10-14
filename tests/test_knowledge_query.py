@@ -485,9 +485,11 @@ def test_a_column_carries_the_catalogs_facts_and_not_a_new_measurement(filled, p
 # --- misses -----------------------------------------------------------------
 
 
-def test_an_unknown_table_names_what_there_is(filled, pid):
-    with pytest.raises(ValueError, match="mart_orders"):
-        query.lookup(filled, "nope", project=pid)
+def test_an_unknown_table_names_its_near_misses_and_not_every_table(filled, pid):
+    with pytest.raises(ValueError, match="closest: mart_orders"):
+        query.lookup(filled, "mart_order", project=pid)
+    with pytest.raises(ValueError, match="none named like it"):
+        query.lookup(filled, "zzz", project=pid)
 
 
 def test_an_unknown_column_names_its_near_misses_and_not_every_column(filled, pid):

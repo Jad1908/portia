@@ -159,6 +159,23 @@ def test_a_channel_naming_a_column_the_query_did_not_return_is_refused(sales):
     assert "customer_id" in str(exc.value)
 
 
+def test_a_wide_query_names_the_closest_columns_and_a_count_not_every_column(sales):
+    """A `SELECT *` of a 1,579-column table listed every name in the refusal."""
+    wide = ", ".join(f"amount * {i} AS meter_{i:04d}" for i in range(handlers.CHART_COLUMNS_NAMED))
+    with pytest.raises(ValueError) as exc:
+        handlers.plot_data(
+            f"SELECT customer_id, {wide} FROM orders",
+            ["orders"],
+            "one meter per customer?",
+            "Meters",
+            bars(y={"field": "meter_007"}),
+            portia_dir=sales,
+        )
+    text = str(exc.value)
+    assert f"It returned {handlers.CHART_COLUMNS_NAMED + 1} columns" in text
+    assert "meter_0007" in text and "meter_0019" not in text
+
+
 def test_a_field_differing_from_the_column_only_by_case_is_respelled(sales):
     """`count(*) AS count` comes back from a warehouse as COUNT and the spec says
     `count`: six of twelve charts in one session were refused for it. The spec is

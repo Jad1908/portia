@@ -128,11 +128,12 @@ def test_renaming_a_step_another_one_reads_is_refused(sales):
         )
 
 
-def test_superseding_a_step_that_is_not_there_names_the_ones_that_are(sales):
+def test_superseding_a_step_that_is_not_there_names_the_closest_and_a_count(sales):
     handlers.record_step("specs/m.yaml", _step("a", "SELECT * FROM orders"), portia_dir=sales)
-    with pytest.raises(ValueError, match="Steps: a"):
+    handlers.record_step("specs/m.yaml", _step("b", "SELECT * FROM orders"), portia_dir=sales)
+    with pytest.raises(ValueError, match="No step 'a2' in 'm', which has 2 steps. Closest ids: a."):
         handlers.record_step(
-            "specs/m.yaml", _step("c", "SELECT 1"), supersedes="nope", portia_dir=sales
+            "specs/m.yaml", _step("c", "SELECT 1"), supersedes="a2", portia_dir=sales
         )
 
 
