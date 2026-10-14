@@ -400,7 +400,7 @@ def _built_columns(graph: Graph, node: Ref, measured: dict[str, dict]) -> _Relat
     with no catalog is the bare node it always was.
 
     The relation it returns carries the names, so a model that reads this one
-    resolves against them rather than inheriting the gap (§1.2's cascade).
+    resolves against them rather than inheriting the gap (`docs/SQL_LINEAGE.md` §1's cascade).
     """
     for position, (name, facts) in enumerate(measured.items(), start=1):
         column = _add_column(graph, node, name, facts, position=position, derivation_unknown=True)
@@ -415,7 +415,7 @@ def _model_relation(model: Ref, produced: _Relation | None) -> _Relation:
     sources. A model's columns are nodes (§4.1), so the chain is a hop per model
     — B's column derives from A's column, which derives from the source column.
     Reaching past A would skip the node that makes the middle of the path
-    visible, which is the half of §2 that lineage is for.
+    visible, which is the half of §1 that lineage is for.
     """
     if produced is None:
         return _Relation(None, reason=_UNBUILT)

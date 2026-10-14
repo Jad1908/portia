@@ -14,7 +14,7 @@ Two rules this module exists to enforce:
 - **Facts only; no ranking.** Nothing here may sort, score, prioritize or
   suggest an answer. Shaping *how much* we return is fine (that's token budget);
   deciding *what matters* is the agent's job. Re-read ``CLAUDE.md`` →
-  "facts vs judgment" before adding a helper that looks like a shortcut.
+  *Facts versus judgment* before adding a helper that looks like a shortcut.
 
 Errors are raised, not returned — ``tools.py`` catches them at the edge and
 turns them into a tool result the agent can react to.
@@ -385,11 +385,9 @@ def describe_source(
     (`portia/findings.py`): the latest `CARD_FINDINGS` findings, each once with
     the tables it is about, the total stated, the tables of the rest named and
     counted, and ``findings_with`` reads the findings about this table and one
-    other. That is here rather than behind a tool of its own for one
-    measured reason: `graph_lookup` was called **zero times across four runs**
-    while this rung was called 23 times in one of them. A surface the agent has
-    to *think to* consult does not get consulted, and there is no reason to test
-    that a fifth time (`docs/FINDINGS.md` §6.1).
+    other. That is here rather than behind a tool of its own because this is
+    the rung the agent pulls for every table: a surface the agent has to *think
+    to* consult is one it skips (`docs/FINDINGS.md` §6.1).
 
     **And the notes, for the same reason** *(2026-09-05, `docs/COPILOT.md` §2)*.
     A note is what a chat learned about this table that a summary cannot hold
@@ -407,7 +405,7 @@ def describe_source(
     profiled = catalog.is_profiled(entry)
     # A scoped warehouse table nobody has profiled says so as a **field**: its
     # types are the warehouse's and it has no flags yet. A silence here would
-    # read as *nothing to report* (`docs/CONNECTOR.md` §2.6).
+    # read as *nothing to report* (`docs/CONNECTORS.md` §2.6).
     unprofiled = {} if profiled else {"profiled": False}
     cols = list(entry.get("columns") or [])
     filtering = _filtering(columns, match, type_, flag)
@@ -1253,23 +1251,6 @@ def _window(
     return got if distinct else [tuple(row[first : first + width]) for row in got]
 
 
-#: The channels a chart may encode. **Which column goes where, and nothing more**
-#: (`docs/VISUALIZATION.md` §2.4).
-#:
-#: Every chart grammar is partly a transform language — Vega-Lite will take
-#: ``aggregate: "mean"`` in a channel and Plotly will bin for you — and a number
-#: a chart grammar produced is a number no ``SELECT`` returned, that nothing
-#: logged and `findings.review` cannot read back. That is the line this project
-#: exists to hold, restated for pixels. So the ``GROUP BY`` lives in the SQL,
-#: where it is measured in the sandbox and copied into a finding verbatim, and a
-#: channel is a column name.
-#:
-#: **The list is long on purpose** *(2026-09-03)*. It was `x`/`y`/`color` and the
-#: marks were four, which meant the copilot told a user a pie chart was not
-#: supported — and it was right, and there was no reason for it to be. A short
-#: vocabulary is not the no-compute rule; it is an arbitrary limit that happened
-#: to sit next to it. `theta` and `radius` are what a pie needs, `size` is what
-#: makes a scatter a bubble chart, and `column`/`row` are small multiples.
 def plot_data(
     sql: str,
     inputs: list[str],
@@ -1288,8 +1269,8 @@ def plot_data(
     That difference is why it exists. After indexing, portia has measured
     twenty-three sources and the user has read none of them, so a copilot that
     goes straight to *"should this join be inner or left?"* is asking a question
-    the user cannot yet answer (`VISION.md` → *Flow*, phases 5 and 6). A chart is
-    how they catch up.
+    the user cannot yet answer (`VISION.md` → *Flow — from indexed to a
+    pipeline*, phases 5 and 6). A chart is how they catch up.
 
     It is also why the rows are not in what you get back. A tool result is pasted
     into the conversation as text and `tools.RESULT_BUDGET` refuses it over
@@ -1334,7 +1315,7 @@ def plot_data(
     # The encoding is respelled to the columns the SELECT returned when only
     # the case differs: `count(*) AS count` comes back from a warehouse as
     # `COUNT`, and six of twelve charts in one session were refused for it
-    # (`CONNECTOR.md` §2.8.2). A real wrong-column encode is still refused below.
+    # (`CONNECTORS.md` §2.8.2). A real wrong-column encode is still refused below.
     vega = chartspec.respell(vega, dialects.resolve_columns(chartspec.fields(vega), columns))
     for field in chartspec.fields(vega):
         # Refused rather than drawn without it, as an unknown column is
@@ -2073,15 +2054,16 @@ def _store_overlaps(graph, edges: list) -> dict:
 
     A stopped container must not lose the caller the numbers it just paid for,
     so this reports rather than raises: the measurements are in the result
-    either way, and only their *durability* is in question (§6.6).
+    either way, and only their *durability* is in question
+    (`KNOWLEDGE_GRAPH.md` §6.6).
 
     **A reachable database is not the same as a stored measurement**, and that
     gap used to be silent (`docs/SQL_LINEAGE.md` §1.5). The write matches both
     ends, so a pair on a column the graph does not hold is dropped by Neo4j
     without an error — and this returned `stored: True` regardless. A number the
     agent paid a real query for, was told was kept, and then could not find is
-    worse than the one §4.4 is about: there, at least, nobody had spent
-    anything.
+    worse than the one `KNOWLEDGE_GRAPH.md` §4.4 is about: there, at least,
+    nobody had spent anything.
     """
     try:
         with store.session() as live:
@@ -2295,7 +2277,7 @@ def _measured(source: str, portia_dir: str) -> tuple[str, list[dict], dict, str]
     if entry and catalog.is_profiled(entry):
         return name, list(entry.get("columns") or []), row_facts(entry), STORED
     if "source" in entry:
-        # The opt-in scan (`docs/CONNECTOR.md` §2.6): a scoped table was
+        # The opt-in scan (`docs/CONNECTORS.md` §2.6): a scoped table was
         # indexed as metadata, and this is the moment somebody asked for the
         # numbers. The facts are written back, so the second ask is free.
         profile = catalog.profile_remote(name, connect(), portia_dir=portia_dir)
@@ -2502,7 +2484,7 @@ def _keep_join(left: str, right: str, report: dict, reason: str, portia_dir: str
     case, that read would be paid on every join check for nothing. Any failure
     past that point is reported in the answer, never raised: the join was
     measured, and a database that is down or a column the graph lacks costs
-    only the keeping (§6.6).
+    only the keeping (`KNOWLEDGE_GRAPH.md` §6.6).
     """
     lkeys, rkeys = report["keys"]["left"], report["keys"]["right"]
     if len(lkeys) != 1 or len(rkeys) != 1:
@@ -2650,7 +2632,7 @@ def record_step(
     if layer and not doc.get("layer"):
         doc["layer"] = layer
     # Where the table is created on a warehouse — the same kind of claim as the
-    # layer, and the agent's to make per table (`CONNECTOR.md` §2.7.1). Set once;
+    # layer, and the agent's to make per table (`CONNECTORS.md` §2.7.1). Set once;
     # a different one later is refused rather than silently kept, because a
     # move the agent believes happened and didn't is a table in two places.
     spec.validate_target(target)
@@ -2773,7 +2755,7 @@ def record_step(
 
 def _write_model(name: str, results: list[Any], *, target: str | None) -> str | None:
     """Create the model's table in the warehouse, on the hand-off only
-    (`docs/CONNECTOR.md` §2.7.1). ``None`` everywhere else.
+    (`docs/CONNECTORS.md` §2.7.1). ``None`` everywhere else.
 
     **After the gate and after the spec is saved**, so a step a zero refused
     never reaches the warehouse and the table is the one the spec describes.
@@ -2847,18 +2829,19 @@ def _index_model(
 def _sync_graph(root: Path, portia_dir: str) -> str:
     """Put the table this spec now builds into the graph — best effort, always.
 
-    The third of §5's write moments, and the one that was missing: a spec written
-    mid-conversation used to be invisible to `graph_lookup` until something else
-    triggered a rebuild, so the graph could be confidently wrong about what
-    exists. Recording a step is exactly when a **new table** comes into being,
-    and the column lineage of that table is derived from the spec that was just
-    saved — so this is a restatement of a file that changed one line ago.
+    One of `KNOWLEDGE_GRAPH.md` §5's refresh moments, and the one that was
+    missing: a spec written mid-conversation used to be invisible to
+    `graph_lookup` until something else triggered a rebuild, so the graph could
+    be confidently wrong about what exists. Recording a step is exactly when a
+    **new table** comes into being, and the column lineage of that table is
+    derived from the spec that was just saved — so this is a restatement of a
+    file that changed one line ago.
 
     Cheap: building the graph reads YAML and runs nothing (`knowledge/build.py`),
     and the write is a handful of `UNWIND`s. It is also **never fatal** — the
     step is already recorded and the spec is already on disk, and failing the
     write because a container is stopped would undo none of that while losing
-    the user their step (§6.6).
+    the user their step (`KNOWLEDGE_GRAPH.md` §6.6).
     """
     try:
         knowledge.sync(root, portia_dir=portia_dir)
@@ -3361,8 +3344,7 @@ def _project_root(portia_dir: str) -> Path:
     """The repo portia is plugged into — the parent of its own directory.
 
     Everything a project holds is relative to this: the specs, the compiled
-    models, and (once `PIPELINE.md` §2.7 lands) every data file that may be
-    indexed at all.
+    models, and every data file that may be indexed at all.
     """
     return Path(portia_dir).parent
 
@@ -3412,8 +3394,7 @@ def _profile_model(name: str, portia_dir: str) -> dict:
 def _built_table(ref: str, models: dict, root: Path, con, portia_dir: str):
     """A model's table: the one in the warehouse when this spec built it, else by running the spec.
 
-    **Reading a built table back** (`CONNECTOR.md` §2.7.2, the half of
-    `BACKLOG.md`'s entry that the hand-off made possible). A model entry that
+    **Reading a built table back** (`CONNECTORS.md` §2.7.2). A model entry that
     carries a ``table`` was written by a build of the spec whose ``fingerprint``
     it also carries; while the spec still has that fingerprint, the table in
     the warehouse *is* the model, and profiling it is one scan rather than a
@@ -3488,7 +3469,7 @@ def _known_name(name: str, portia_dir: str) -> str:
     The third session on Snowflake typed `INT_UNIFIED_INSPECTIONS` and
     `STG_NYC_INSPECTIONS` for models it had itself named in lower case — the
     warehouse had just shown them to it that way — and was refused twice
-    (`CONNECTOR.md` §2.8.2's rule, applied to table names). Same resolver, same
+    (`CONNECTORS.md` §2.8.2's rule, applied to table names). Same resolver, same
     rule: exact first, then a unique case-insensitive match, else as it came.
     """
     sources, models = _known_tables(portia_dir)
@@ -3692,9 +3673,9 @@ def _expect_notes(unknown: list[str], op: str) -> str:
 
     `n_rows` is the case worth the code: it is not invented, it is sitting in the
     `outcome` block of the very result the model just read, so being told the op
-    "never reports" it reads as a contradiction. Two reports, two questions —
-    `CLAUDE.md` → "Drift and outcome are different questions" — and the fix is to
-    say which one the word belongs to and name the op's own equivalent.
+    "never reports" it reads as a contradiction. Two reports, two questions
+    (`checks/outcome.REPORT_KEYS` says why), and the fix is to say which one the
+    word belongs to and name the op's own equivalent.
     """
     rows = _EXPECTABLE[op] & {"result_rows", "input_rows"}
     equivalent = "result_rows" if "result_rows" in rows else ("input_rows" if rows else "")
@@ -3831,7 +3812,7 @@ def _normalize_step_refs(step: dict, *, spec_path: str) -> None:
     what the spec stores — a step referring to its own spec by path in its own
     spec is noise in a file whose whole point is being readable in a diff.
 
-    **And it rewrites the query, not only the declaration** (`PIPELINE.md` §8,
+    **And it rewrites the query, not only the declaration** (`PIPELINE.md` §8.2,
     2026-09-04). A `sql` step names its inputs in two places — the ``inputs``
     list and the SQL text — and `ops.sql.apply_sql` registers each input under
     exactly the key the step declared. Normalizing one and not the other is what

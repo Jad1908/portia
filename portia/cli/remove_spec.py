@@ -117,15 +117,16 @@ def remove(p: Removal, root: str | Path = ".") -> list[Path]:
 def _sync(root: str | Path) -> None:
     """Rebuild the structural graph so the Model nodes go with their specs.
 
-    **Best-effort, exactly like `handlers.record_step`'s sync** (§6.6): the files
+    **Best-effort, exactly like `handlers.record_step`'s sync**
+    (`docs/KNOWLEDGE_GRAPH.md` §6.6): the files
     are already gone and a stopped container must not turn that into a failure.
 
     Nothing here deletes a measurement. A rebuild prunes structural edges and
     then any node left with no relationships at all, so a Model whose spec is
     gone goes with it — and a Column of that model carrying an `OVERLAPS` stays,
     because `OVERLAPS` is never pruned (§4.4, §5.2). That leaves a measured
-    column with no table, which is a real hole and is `BACKLOG.md`'s to close;
-    it is dormant today because nothing has ever measured a model.
+    column with no table, live since join checks keep measurements against
+    models (`BACKLOG_NEXT.md` §4, Bugs).
     """
     try:
         knowledge.sync(root)

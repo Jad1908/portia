@@ -1,7 +1,7 @@
 """The gallery — figures the user kept, on disk, in folders they arrange.
 
-`docs/VISUALIZATION.md` §6. **This reverses that section's first decision**, on
-the user's call *(2026-09-03)*: keeping a chart used to write a finding and
+`docs/VISUALIZATION.md` §6.2: a kept chart is a figure file. **This reversed an
+earlier decision**, on the user's call *(2026-09-03)*: keeping a chart used to write a finding and
 nothing else, on the reasoning that a chart which changed a decision and a
 counting query that changed a decision are the same kind of thing and a second
 home for one of them is how the two drift. That argument was about the *prose*

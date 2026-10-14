@@ -1,8 +1,7 @@
 """Left pane — the project directory, filtered to what portia reads.
 
-`VISION.md` asks how we decide what to surface inside a big repo. The answer is
-still **a file appears if portia knows about it**, but that is now a *filter over
-a real tree* rather than six flat sections. What the sections cost was the shape
+`VISION.md` → Layout: **a file appears if portia knows about it**, as a *filter
+over a real tree* rather than six flat sections. What the sections cost was the shape
 of the project: a spec in ``specs/staging/`` and its model in
 ``models/staging/`` came out as two same-named rows with nothing on screen
 saying where either file was — which is the first question anyone asks of a
@@ -156,7 +155,7 @@ def show_selection() -> None:
             row.classes(remove=_SELECTED_ROW)
 
 
-# --- the warehouse (`docs/CONNECTOR.md` §2.13) -------------------------------
+# --- the Database section (`docs/CONNECTORS.md` §2.13) -----------------------
 
 #: Not a cloud: one of the databases can be on this machine (2026-09-20).
 #: A connection is a link; the database it reaches is the cylinder under it.
@@ -178,9 +177,9 @@ def _warehouse_section() -> None:
 
     A directory walk cannot reach a warehouse, and a folder that is not on disk,
     opened by a click that runs a query, would be the tree lying about what a
-    row is. So this is its own section between the tree and the histories, with
+    row is. So this is its own section, pinned below the tree, with
     the connection as its head, databases and schemas as its levels and the
-    scoped tables as its rows. **Kind, never rank**: a cloud for the connection,
+    scoped tables as its rows. **Kind, never rank**: `sym_r_link` for the connection,
     one glyph for a database and one for a schema, the source glyph for a table.
     It draws the **scope** only — the picker on the add-data screen is where the
     rest of the warehouse is browsed, as `data_dir` scopes the file tree.
@@ -228,7 +227,7 @@ def _connection_word() -> str:
 
 def _warehouse_node(node: tree.Node, depth: int) -> None:
     if node.kind == state.MODEL:
-        # A table portia built there (`CONNECTOR.md` §2.7.2): the model glyph,
+        # A table portia built there (`CONNECTORS.md` §2.7.2): the model glyph,
         # and a click opens **the catalog's entry for it**, read the way a
         # source's is — with the spec one button away from there. It opened the
         # spec until 2026-09-07, which left no way to see or ask for what portia
@@ -300,7 +299,7 @@ def connect_in_background() -> None:
     """Open the session off the loop and redraw when it is known how that went.
 
     Called when a project that names a connection opens, and from the buttons
-    above. A browser may open (`docs/CONNECTOR.md` §2.4); the window says
+    above. A browser may open (`docs/CONNECTORS.md` §2.4); the window says
     *connecting* meanwhile and never blocks on it. A connection that needs a
     secret is **not** attempted here — that would fail on purpose and draw a
     failure for something nobody has been asked for yet; the pane offers
@@ -630,7 +629,7 @@ def _figure_row(figure: dict, depth: int) -> None:
     path = figure["path"]
     row = _row(
         # **A figure is a tab, so the row is lit by the strip and not by the
-        # selection** (§6.4). Selecting it would have put the picture in tab zero
+        # selection** (`VISUALIZATION.md` §6.4). Selecting it would have put the picture in tab zero
         # and stood down whichever chart was in front of it, which is the pane
         # ignoring a click that was about neither.
         partial(_showing, path),
@@ -652,7 +651,7 @@ def _figure_row(figure: dict, depth: int) -> None:
 
 
 def _showing(key: str) -> bool:
-    """Whether a tab is on screen — in either half of a split pane (§3.7).
+    """Whether a tab is on screen — in either half of a split pane (`VISUALIZATION.md` §3.7).
 
     The rows here say *where a picture went*, and a tab in the split half is as
     much on screen as the one beside it. Reading one group would leave the row

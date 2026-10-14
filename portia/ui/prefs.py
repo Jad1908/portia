@@ -5,7 +5,7 @@
 reader, not about the data: which model they reach for, which folders they had
 open, where they dragged a card. None of it is a fact anyone else on the project
 should inherit through a commit, and `.portia/` is the record of what the data
-*is* (`engine.VIEWS` made this argument first, for the canvas filter).
+*is*.
 
 It replaced three files that each had their own read, write and "the file is
 broken" rule (`recents.json`, `views.json`, `layouts.json`), which is the shape
@@ -677,7 +677,7 @@ def _on_disk(saved: dict[str, Any], shape: dict[str, Any]) -> dict[str, Any]:
     The baseline used to be the app's state right after restoring, which
     counted as written everything the file never held: a project opened with
     `--project`, a default nobody changed. Once `sync` wrote only what moved
-    (§2.3.1), those were never written at all, and a window launched on a
+    (`PREFERENCES.md` §2.3.1), those were never written at all, and a window launched on a
     project reopened on the picker (2026-09-25, found by restarting a window).
     """
     return {name: saved.get(name) for name in shape}

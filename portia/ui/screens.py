@@ -1,7 +1,7 @@
 """The screens before the three panes — and the one gate in the app.
 
 These exist so a test run never needs a terminal (docs/VISION.md → "The
-no-terminal audit"): creating the project, writing its brief, and adding the
+no-terminal bar"): creating the project, writing its brief, and adding the
 data files are all in the window, or the bar is not met.
 
 Three states, in order:
@@ -888,7 +888,7 @@ def _file_items() -> tuple[picktree.Item, ...]:
 def _file_tree() -> None:
     """Folders and files under the data folder, every box saying what is under it.
 
-    **A folder is a box now** *(2026-09-18, `CONNECTOR.md` §2.5.1)*. The list
+    **A folder is a box now** *(2026-09-18, `CONNECTORS.md` §2.5.1)*. The list
     was flat, so leaving out one year of a folder-per-year extract was a click
     per file, and nothing but reading every row said which folders were whole.
 
@@ -1106,7 +1106,7 @@ def _choose(mode: str) -> None:
         open_connect_dialog()
 
 
-# --- the warehouse route (`docs/CONNECTOR.md`) ---------------------------------
+# --- the warehouse route (`docs/CONNECTORS.md`) --------------------------------
 
 WAREHOUSE_HEADING = "Tables in scope"
 CONNECT_TITLE = "Connect to a database"
@@ -1117,7 +1117,7 @@ CONNECT_SUB = "Saved outside the repo with no secret in it. The project only nam
 NAME_FIELD = ("name", "Connection name", True, "work")
 CHANGE_PROVIDER = "Change"
 #: The dialog's project half, under the picked connection or the form
-#: (`CONNECTOR.md` §2.7.1): whether the copilot may create tables as it
+#: (`CONNECTORS.md` §2.7.1): whether the copilot may create tables as it
 #: records. The project's, not the connection's. Where a table goes is not
 #: asked here at all: it is each spec's own target, the copilot's call.
 PROJECT_HEAD = "This project"
@@ -1158,7 +1158,7 @@ def _warehouse_route() -> None:
 
     The connection itself is made in its own dialog (`open_connect_dialog`), so
     this card is about the tables — the same question the folder picker asks of
-    a repo, one level up (`CONNECTOR.md` §2.5). Ticked tables join the one
+    a repo, one level up (`CONNECTORS.md` §2.5). Ticked tables join the one
     Index button below, because scoping is indexing at the metadata tier.
     """
     with ui.element("div").classes("add-section"):
@@ -1230,12 +1230,12 @@ def _connection_state() -> None:
 
 def _scope_picker() -> None:
     """Database → schema → table as **one tree**, listed lazily, every box ticking
-    what is under it (`picktree.py`, `CONNECTOR.md` §2.5.1).
+    what is under it (`picktree.py`, `CONNECTORS.md` §2.5.1).
 
     It was the folder picker's shape, one level at a time, and that shape was
     wrong for this question. A folder is *chosen*, once; tables are *collected*,
     from several schemas, and a browser that draws one schema cannot show what
-    was ticked in the last one. A schema row also had no box, so §2.5's
+    was ticked in the last one. A schema row also had no box, so the old
     *ticking a schema ticks its tables* was written and never built.
 
     The filter box and the scrolling region are outside the tree's refreshable:
@@ -1352,7 +1352,7 @@ async def _toggle_scope(key: str) -> None:
 async def _tick_schema(key: str, on: bool) -> None:
     """A schema's box, or a database's: list what is under it, then tick it.
 
-    **A snapshot, never a rule** (`CONNECTOR.md` §2.5.1): the press ticks the
+    **A snapshot, never a rule** (`CONNECTORS.md` §2.5.1): the press ticks the
     tables that are there now, and `scope` stays a list of names. A table
     somebody creates in that schema next month joins nothing until a person
     ticks it, because with the profile switch on it would otherwise be scanned
@@ -1869,7 +1869,7 @@ def _pick_provider(kind: str) -> None:
 
 def _project_fields() -> None:
     """The project's half of the dialog, drawn under whichever view is up: the
-    hand-off switch (`CONNECTOR.md` §2.7.1).
+    hand-off switch (`CONNECTORS.md` §2.7.1).
 
     Under the **list** too. A saved connection is the user's and asks for
     nothing; this is the project's and always shows. A *Build writes to* field
@@ -2589,7 +2589,7 @@ def _profile_toggle() -> None:
     """Whether a scoped table is scanned as it arrives. Warehouse route only.
 
     Locally there is no switch because a profile of a file is free and always
-    happens. On a warehouse it is a scan on the meter (`CONNECTOR.md` §2.6),
+    happens. On a warehouse it is a scan on the meter (`CONNECTORS.md` §2.6),
     and until 2026-09-07 the only way to ask for one was the inspector's
     *Profile now*, one table at a time, after the fact. A user who ticked six
     tables and pressed Index watched them arrive as metadata and read that as
@@ -3193,8 +3193,8 @@ async def _interpret_pending() -> None:
     **A loop, not one turn**, because indexing a second batch while the first is
     being read is an ordinary thing to do on this screen: the names queue up in
     `pending_interpret` and are picked up when the running turn ends. The
-    `busy` guard is checked immediately before `turn.start`, with nothing
-    awaited in between — `turn.start` refuses a second live turn silently, and
+    `busy` guard is checked immediately before `exchange.start`, with nothing
+    awaited in between — `exchange.start` refuses a second live turn silently, and
     silently is exactly how a batch would go unread.
 
     The status line is deliberately coarse — one sentence, not a running
@@ -3224,7 +3224,7 @@ async def _interpret_pending() -> None:
         finally:
             APP.indexing_status = ""
             # A turn that ended mid-question leaves an invitation to go and
-            # answer something nobody can answer any more (`turn._resolve_orphans`).
+            # answer something nobody can answer any more (`exchange._resolve_orphans`).
             dismiss_invitation()
             _redraw_progress()
 
@@ -3356,7 +3356,7 @@ def _decision_line() -> str:
 
 
 def offer_workspace() -> None:
-    """Invite them through to the decision. Called by `turn._stop`, once.
+    """Invite them through to the decision. Called by `exchange._stop`, once.
 
     Silent when the popup could not be built — an invitation that fails to
     appear must not take the turn down with it, and the way out of this screen

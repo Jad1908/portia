@@ -1,4 +1,4 @@
-"""The connector package, without a warehouse (`docs/CONNECTOR.md` §6).
+"""The connector package, without a warehouse (`docs/CONNECTORS.md` §4).
 
 What is decided in code — the registry, the suggestions, which backend a
 project resolves to, how a described type is spelled, the cancel throttle — is
@@ -235,11 +235,11 @@ def test_write_table_refuses_a_remote_table(tmp_path):
     from portia.core.table import Table
 
     t = Table(name="m", query="SELECT 1", con=snowflake.Session(_FakeRaw(), owner=True))
-    with pytest.raises(ValueError, match="CONNECTOR.md"):
+    with pytest.raises(ValueError, match="Build creates the model tables"):
         write_table(t, tmp_path / "m.csv")
 
 
-# --- how a session is signed in (`CONNECTOR.md` §2.4, revised 2026-09-04) ---------
+# --- how a session is signed in (`CONNECTORS.md` §2.4, revised 2026-09-04) ---------
 
 
 def test_a_connection_defaults_to_browser_sign_in_and_records_only_the_others(tmp_path):
@@ -274,7 +274,7 @@ def test_a_password_connection_refuses_to_connect_without_one_before_asking_the_
 
 
 def test_the_hand_off_rides_the_backend_and_a_stale_target_key_is_dropped(tmp_path, monkeypatch):
-    """`agent_writes` is a project setting (`CONNECTOR.md` §2.7.1): absent means off,
+    """`agent_writes` is a project setting (`CONNECTORS.md` §2.7.1): absent means off,
     `set_connection(agent_writes=None)` leaves it alone, and the backend carries it
     so `record_step` reads it off the process, not a file. A `target` key left by
     the two days a project-wide one existed is removed: nothing reads it."""

@@ -48,10 +48,10 @@ DEFAULT_MODEL = "claude-sonnet-5-5"
 
 #: Every model Claude Code's own ``/model`` picker offers, in its order and
 #: split as it splits them: the four it names by alias, then the rest
-#: (`docs/PROVIDERS.md` §5.1). Read off the ``models`` list Claude Code 2.1.294
+#: (`docs/PROVIDERS.md` §5). Read off the ``models`` list Claude Code 2.1.294
 #: reports when a client connects. No ``claude-agent-sdk`` bundles a binary that
 #: new yet: 0.2.164's 2.1.292 runs Haiku 5.5 as a model it does not recognise
-#: (`docs/PROVIDERS.md` §5.3). A model newer than the lock is one a picker can
+#: (`docs/PROVIDERS.md` §5). A model newer than the lock is one a picker can
 #: still be typed into, because ``--model`` takes anything the SDK accepts and
 #: this list is a convenience, never a validation set.
 CATALOG = (

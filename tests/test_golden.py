@@ -4,7 +4,7 @@ This is the test `docs/DUCKDB_MIGRATION.md` §7 asks for before any implementati
 moves. It is not a unit test — the other files in this directory assert that a
 number is *right*. This one asserts that a number **did not change**, which is a
 different and, for the migration, more valuable claim: the copilot reads these
-dicts, so a changed shape is a changed prompt (§2.1).
+dicts, so a changed shape is a changed prompt (§2).
 
 When a case fails, the useful question is never "how do I make it pass". It is
 "did I mean to change this?" — and usually the answer is no, and the test just
@@ -58,7 +58,7 @@ _ONE_TYPE_PER_COLUMN = (
 #:
 #: Every entry is a decision recorded in `docs/DUCKDB_MIGRATION.md`. Nothing goes
 #: in here to make a test pass; an undocumented difference is a regression, and
-#: the point of §7.2 is that each exception has to be argued for in prose first.
+#: the point of §2 is that each exception has to be argued for in prose first.
 #: An excepted path is a field the golden files stop protecting on that backend,
 #: so the list is meant to stay short and each entry is scoped as narrowly as it
 #: can be — a case name rather than ``"*"`` wherever the difference is local.

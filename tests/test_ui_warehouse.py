@@ -1,9 +1,10 @@
-"""The window's half of the connector, without a browser (`docs/CONNECTOR.md` §2.13).
+"""The window's half of the connector, without a browser (`docs/CONNECTORS.md` §2.13).
 
 What the pinned section draws is a tree built from the catalog by a function
 that imports no NiceGUI; what opening a project does with a connection it
 cannot reach is a state on `App`, not an exception. Both are pinned here. The
-pixels are checked by driving the app (§10 of `VISUALIZATION.md`).
+pixels are checked by driving the app (`CLAUDE.md` → *A browser pass is a step
+in the build order for UI*).
 """
 
 from __future__ import annotations
@@ -54,7 +55,7 @@ def test_the_scope_is_drawn_as_database_schema_table():
 
 
 def test_a_table_portia_built_is_drawn_under_its_schema_as_a_model():
-    """`CONNECTOR.md` §2.7.2: what the project wrote sits beside what it reads,
+    """`CONNECTORS.md` §2.7.2: what the project wrote sits beside what it reads,
     with the model glyph saying which is which. A model with no written table
     is not in the warehouse and is not drawn there."""
     sources = {"ORDERS": _remote("SALES", "PUBLIC", "ORDERS")}
@@ -142,7 +143,7 @@ def test_saving_a_connection_refuses_a_missing_field_before_writing_anything(tmp
 
 
 def test_the_hand_off_rides_the_held_backend_without_dropping_the_session(tmp_path, monkeypatch):
-    """`CONNECTOR.md` §2.7.1: the switch is a project setting and rides the
+    """`CONNECTORS.md` §2.7.1: the switch is a project setting and rides the
     process's backend; flipping it keeps the session a browser login opened."""
     from portia.connectors import registry, snowflake
 

@@ -721,7 +721,8 @@ def test_rebuilding_refreshes_facts_and_keeps_what_a_human_wrote(project):
 
 def test_a_profile_that_fails_does_not_fail_the_build(project, monkeypatch, capsys):
     """The `.sql` is written and the table is correct; a description of it is a
-    by-product and may not take the thing it describes down with it (§6.6)."""
+    by-product and may not take the thing it describes down with it
+    (`docs/KNOWLEDGE_GRAPH.md` §6.6)."""
     _two_layer_project(project)
 
     def boom(*_a, **_k):

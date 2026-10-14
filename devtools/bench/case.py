@@ -1,4 +1,4 @@
-"""A case: the estate, the threads, and the facts a person would bring (`docs/BENCHMARK_EVAL.md` §5.2, §8).
+"""A case: the estate, the threads, and the facts a person would bring (`docs/BENCHMARK_EVAL.md` §14.3, §8).
 
 One YAML file per case. It holds everything a run needs and nothing a run
 decides: the brief the project opens with, where the data comes from, the

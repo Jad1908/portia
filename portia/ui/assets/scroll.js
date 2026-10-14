@@ -7,7 +7,7 @@
 // the difference between clicking through a project and losing your place in it.
 //
 // **The offset is client state, exactly like the canvas's pan and zoom**
-// (`canvas.js`, and `CLAUDE.md` → the canvas view). The server never learns it,
+// (`canvas.js`, and `CLAUDE.md` → Window). The server never learns it,
 // never persists it and is not asked for it on a render: it states a
 // `data-scroll-key` in the DOM and this puts the position back on whatever
 // element now carries that key. A key per artifact rather than one per pane, so

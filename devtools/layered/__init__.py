@@ -22,8 +22,10 @@ a source read by **two** models        that hiding one model keeps a file its
 a deliberately **long table name**     that a card truncates rather than wraps
 a spec with **one** step and one with  that a card's height follows its rows
 **six**
-a **ghost step** in ``int_order_       that a step nothing reads is visible as
-totals``                               such — see `docs/PIPELINE.md` §6
+a **ghost step** in ``int_order_       that a step nothing reads is a bug
+totals``                               `cli/build --check` reports, not
+                                       something the canvas draws
+                                       (`docs/PIPELINE.md` §6)
 ===================================== ========================================
 
 **Deterministic**, like `demodata`: the same call writes byte-identical files, so

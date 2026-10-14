@@ -305,7 +305,8 @@ async def _open_chat(chat: Chat, session, *, model: str, effort: str | None, pro
     **Effort is not switchable** and the composer says so: it is a
     `ClaudeAgentOptions` field, so it is fixed for the life of a client, and the
     SDK has no runtime equivalent of `set_model` for it. A chat picked up from
-    disk gets a *new* client, so effort is choosable again there (§3.3).
+    disk gets a *new* client, so effort is choosable again there
+    (`CHAT_SESSIONS.md` §3.3).
     """
     if chat.conversation is None:
         answer, confirm = _callbacks(chat)
@@ -363,7 +364,7 @@ def _fail_before_starting(prompt, model, effort, kind, label, chat, exc: Excepti
 
 
 async def interrupt() -> None:
-    """Stop the message in flight. **The only way to cut one short** (§7).
+    """Stop the message in flight. **The only way to cut one short** (`CONVERSATION.md` §7).
 
     Nothing has to be resolved first — the SDK cancels the parked `can_use_tool`
     task itself and a result arrives (§8, measured). What this owes is the
@@ -582,7 +583,7 @@ def _record(event: events.Event, chat: Chat) -> None:
     # The rows and nothing else. The whole pane refreshed here for a year, and
     # what that cost was the composer: rebuilding it per event destroyed the
     # textarea a few times a second, caret and focus with it, while somebody was
-    # writing the follow-up §7 calls the normal case. The chrome around the rows
+    # writing the follow-up `CONVERSATION.md` §7 calls the normal case. The chrome around the rows
     # changes at human pace and refreshes at those moments (`transcript.pane`).
     #
     # And of the rows, **only the tail** *(2026-09-07)*: what has settled is
@@ -657,7 +658,7 @@ def auto_allow(tool_name: str) -> bool:
 
     Read at the moment of the call rather than captured when the chat opened, so
     turning it on mid-conversation applies to the next write — `Conversation`
-    holds one client across exchanges (`docs/CONVERSATION.md` §4), and a
+    holds one client across exchanges (`docs/CHAT_SESSIONS.md` §3.3), and a
     preference frozen at connect time would be one you have to end the chat to
     change. That is what lets autopilot be turned **off** mid-run too, which is
     the direction that matters.

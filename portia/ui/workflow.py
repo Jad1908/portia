@@ -99,7 +99,7 @@ def pane() -> None:
         # right group beside nothing.
         _half(state.LEFT)
         return
-    # **Two groups at once** (§3.7). A vertical splitter, the same control the
+    # **Two groups at once** (`VISUALIZATION.md` §3.7). A vertical splitter, the same control the
     # three panes are made of, so there is one idea of *a draggable divider* in
     # this window rather than two — and its position is the client's, like every
     # other splitter here: nothing measures it and nothing persists it.
@@ -135,7 +135,7 @@ def _tab(key: str, group: str = "") -> None:
 
     Tab zero is the selection dispatch this pane has always been, which is phase
     1's deliberate half-measure: charts and figures are tabs, everything else is
-    still one selection drawn in the first one (§3.1).
+    still one selection drawn in the first one (`VISUALIZATION.md` §3.1).
 
     A chart tab is **not** a selection. The left pane and the tab strip are two
     ways of saying what is on screen, and picking a chart must not silently
@@ -1177,7 +1177,7 @@ def _blocks() -> list[tuple[dict, Any]]:
     """The open spec's steps in spec order, each with its result if it has one.
 
     **Spec order, and the spec is what supplies it.** The order is the recorded
-    sequence of decisions (`DESIGN.md` → the graph), so deriving it from whatever
+    sequence of decisions (`DESIGN.md` → `report-pane`), so deriving it from whatever
     the last run happened to produce would make the list change shape depending
     on how far the run got. A result whose step is no longer in the spec is still
     drawn, at the end: it is a leftover rather than a gap in the sequence, and
@@ -1508,7 +1508,7 @@ def _rows_label(entry: dict) -> str:
 def _profile_state(name: str, entry: dict) -> None:
     """Whether measured facts stand behind the columns below — and the opt-in scan.
 
-    `docs/CONNECTOR.md` §2.6: a scoped table indexes as metadata because a
+    `docs/CONNECTORS.md` §2.6: a scoped table indexes as metadata because a
     profile is a scan on someone's meter, and this is where a person asks for
     it. The state is stated either way, so absent facts read as *not profiled*
     rather than as a profile with nothing in it.
@@ -2184,9 +2184,9 @@ def _knowledge_inspector() -> None:
                 # `knowledge.sync` that indexing and `record_step` call.
                 c.button("Refresh", _refresh_knowledge, icon="autorenew")
         if data.get("unavailable"):
-            # §3.5 — the window has to behave sensibly when the database is down,
-            # and sensibly means saying so rather than drawing an empty canvas
-            # that reads as "there is nothing here".
+            # `KNOWLEDGE_GRAPH.md` §3.5: the window has to behave sensibly when
+            # the database is down, and sensibly means saying so rather than
+            # drawing an empty canvas that reads as "there is nothing here".
             c.empty_note(f"The graph is not reachable: {data['unavailable']}")
             return
         if not data["nodes"]:

@@ -11,7 +11,7 @@ comments there.
 Nothing in this module touches authentication. Credential resolution happens
 inside the SDK's bundled binary, using whatever is in the user's environment;
 portia sets no auth variables, proxies nothing, and detects nothing. See
-`PLAN.md` → "Auth posture".
+`PLAN.md` → Auth posture.
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ EFFORTS = ("low", "medium", "high", "xhigh", "max")
 #:   CLAUDE.md out and does not touch this;
 #: - it sends a **second request per chat** asking the model for a session
 #:   title. Cheap on Anthropic, and on a local server a full prompt pass that
-#:   also evicts the conversation's cached prefix (§6.1's request 1).
+#:   also evicts the conversation's cached prefix.
 #:
 #: These are not auth variables and the auth posture (`PLAN.md`) is unchanged:
 #: the account still resolves inside the binary from the user's own environment.
@@ -219,7 +219,7 @@ def build_options(
         # supposed to have no way out; it tried to write to Drive twice. Measured
         # on that machine: `claude -p` lists them, `--strict-mcp-config` lists
         # none. With a warehouse connection in the process this stops being a
-        # leak and becomes the leak (`docs/CONNECTOR.md`).
+        # leak and becomes the leak (`docs/CONNECTORS.md`).
         strict_mcp_config=True,
         cwd=str(cwd) if cwd else None,
         hooks=cast(Any, _curation_hooks(curator)) if curator is not None else None,
@@ -289,9 +289,10 @@ class Conversation:
     without the dummy-hook workaround), and `query()` is just a transport write,
     so calling it again is the SDK's own multi-turn shape rather than a trick.
 
-    **A chat dies with the process** (§4). This holds a live subprocess, so
+    **A live client dies with the process.** This holds a live subprocess, so
     whoever opens one owns closing it; the durable artifacts are written as the
-    chat goes and are what survives.
+    chat goes, and a later process picks the chat up from its log by
+    ``resume`` (`docs/CHAT_SESSIONS.md` §3.3).
 
     **`send` refuses to overlap rather than queueing** (§7). A queued message
     would have to arrive either before or after whatever the agent does next,
@@ -392,7 +393,7 @@ class Conversation:
     def busy(self) -> bool:
         """Whether a message is in flight — **not** whether a chat exists.
 
-        The distinction is the one `CONVERSATION.md` §9 asks the app to make: an
+        The distinction is the one `CONVERSATION.md` §7 asks the app to make: an
         open chat sitting idle must not read as busy, or it blocks indexing for
         as long as it stays open.
         """

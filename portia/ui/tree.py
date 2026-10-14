@@ -26,15 +26,15 @@ is what stops an empty ``.venv``-shaped tree from being drawn.
 (``data_root``, set on the add-data screen and stored as ``data_dir`` in
 ``project.yaml``). A repo of any size holds CSVs that are not this project's
 data — a test fixture, an export someone left in ``notebooks/`` — and drawing
-them all was the filter's one remaining way of being wrong at scale, which is
-the case `VISION.md` flags as untested. Scoping costs nothing where the setting
+them all was the filter's one remaining way of being wrong at scale (`VISION.md`
+→ Open questions: scoping handles a big repo). Scoping costs nothing where the setting
 is unset: ``data_root=None`` means the whole repo, which is what every project
 written before the field did.
 
 **Only the readable half.** A file portia *knows* — a spec, a compiled model, an
 output, a saved run, an indexed source — is drawn wherever it lives, because
-those are portia's own artifacts rather than your data, and `VISION.md`'s
-no-terminal audit maps four of its rows onto reading them in this pane. Scoping
+those are portia's own artifacts rather than your data, and the
+no-terminal bar (`VISION.md`) means reading them in this pane. Scoping
 them to a data folder would take ``models/*.sql`` off screen the moment someone
 pointed the picker at ``data/``.
 
@@ -90,7 +90,7 @@ class Node:
 
 #: The two levels above a table in a warehouse. Their own kinds because they are
 #: their own icons: a database is not a folder, and drawing it as one would say
-#: a click opens a directory (`docs/CONNECTOR.md` §2.13).
+#: a click opens a directory (`docs/CONNECTORS.md` §2.13).
 DATABASE = "database"
 SCHEMA = "schema"
 
@@ -106,7 +106,7 @@ def warehouse(
     tables, and **the tables portia built there**.
 
     Built from the source entries that carry a ``remote`` block and the model
-    entries that carry a ``table`` (`catalog.index_model`, `CONNECTOR.md`
+    entries that carry a ``table`` (`catalog.index_model`, `CONNECTORS.md`
     §2.7.2), so it draws what the project reads and what it wrote and nothing
     else — the picker is where the rest of the warehouse is browsed, as
     `data_dir` scopes the file tree. ``rel`` is the qualified prefix (``DB``,

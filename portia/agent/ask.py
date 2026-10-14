@@ -1,6 +1,6 @@
 """Surfacing a decision to the human — the heart of the product.
 
-`PLAN.md`'s non-negotiable: when something is ambiguous the copilot **asks**
+`PLAN.md`'s second non-negotiable: when something is ambiguous the copilot **asks**
 rather than guessing or hard-stopping. On the Claude harness the Agent SDK
 already gives us the mechanism — the built-in ``AskUserQuestion`` tool routes
 through the ``can_use_tool`` callback with structured questions and options —

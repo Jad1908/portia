@@ -1,4 +1,4 @@
-"""Snowflake, as the connection `core.table.Table` expects (`docs/CONNECTOR.md`).
+"""Snowflake, as the connection `core.table.Table` expects (`docs/CONNECTORS.md`).
 
 `Table` asks six things of a connection: ``execute(sql)`` returning something
 with ``fetchone``/``fetchall``/``fetch_df``, ``sql(query)`` returning something

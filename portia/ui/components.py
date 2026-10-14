@@ -494,7 +494,7 @@ def button(
 ) -> ui.button:
     """One button. ``kind`` is primary | secondary | tertiary.
 
-    The teal fill is scarce on purpose — at most one per view. It marks the
+    The teal fill is scarce on purpose — at most one per pane. It marks the
     action the loop is waiting on, which on a stopped turn is Answer or Allow
     (DESIGN.md → `write-confirm`).
 
@@ -524,7 +524,7 @@ def button(
     elif split:
         classes += " btn-split"
     # color=None so Quasar doesn't add `bg-primary`: which fill a button gets is
-    # a portia decision (there is at most one accent fill per view), not a
+    # a portia decision (there is at most one accent fill per pane), not a
     # framework default.
     b = ui.button(label, on_click=on_click, icon=icon, color=None).props("unelevated no-caps dense")
     b.classes(classes)
@@ -566,8 +566,8 @@ def segmented(options, current, on_pick: Callable[[str], Any]) -> None:
 def mark_selected(rows: Mapping[str, ui.element], picked: str, selected: str) -> None:
     """Move a selected class onto ``picked`` across rows already drawn, redrawing none.
 
-    The one way a pick inside a floating card shows (`DESIGN.md` → a click
-    changes what it changed): the Settings rail, the providers list, a
+    The one way a pick inside a floating card shows (`DESIGN.md` → Layout
+    stability, rule 6): the Settings rail, the providers list, a
     segmented control, a theme card, a saved connection. A row deleted since it
     was drawn is skipped, because the card around it may have been rebuilt.
     """
@@ -618,7 +618,7 @@ def model_effort(
     the open project.
 
     **The provider and the model are one control** (`model_menu`,
-    `docs/PROVIDERS.md` §5.1), and each provider's list is its own: the
+    `docs/PROVIDERS.md` §5), and each provider's list is its own: the
     catalog Claude Code or Codex ships, or whatever the Ollama server says it
     serves, read off the loop by `engine.list_models` and drawn from
     `App.provider_models`. A model is picked *with* its provider, so
@@ -634,7 +634,7 @@ def model_effort(
     The model can change between exchanges (`set_model`); effort is a
     `ClaudeAgentOptions` field and the provider is the binary's environment,
     so both stop being offered rather than being offered and quietly ignored
-    (`docs/CONVERSATION.md` §7). Effort is not drawn at all on a provider that
+    (`docs/CHAT_SESSIONS.md` §3.6). Effort is not drawn at all on a provider that
     ignores it (`Provider.honours_effort`), for the same reason.
 
     **One line of menus, T3 Code's shape** *(2026-10-06, the user's call)*:
@@ -655,7 +655,7 @@ def model_effort(
     listed = _drawn_list(kind)
     # One row that never wraps: the picker, then the slot for the listing
     # spinner and the refresh. The picker is one control for the provider and
-    # the model together (`docs/PROVIDERS.md` §5.1): closed it is the mark and
+    # the model together (`DESIGN.md` → `model-picker`): closed it is the mark and
     # the model's name, open it is a rail of providers beside that provider's
     # models, current first and the legacy ones folded under a row of their
     # own, the way T3 Code draws it (the user's call, 2026-09-23).
@@ -681,7 +681,7 @@ def model_effort(
         # No effort control at all on a provider that ignores it: a disabled
         # one would be a setting that sets nothing. A parked chat's effort is
         # stated in the same place, disabled, since a client keeps the one it
-        # was opened with (`docs/CONVERSATION.md` §7).
+        # was opened with (`docs/CHAT_SESSIONS.md` §3.6).
         if provider.honours_effort:
             spend_rule()
             effort_menu(app.effort, on_effort, enabled=not effort_disabled)
@@ -1596,7 +1596,7 @@ def artifact_row(
     tree: str | None = None,
     light: str = "",
 ) -> ui.element:
-    """One file portia knows about. Selected is one of the accent's three jobs.
+    """One file portia knows about. Selected is the accent-soft wash (`DESIGN.md` → Tokens).
 
     ``light`` draws a `status_light` of that kind before the meta word, for the
     one row whose meta is a state that changes while you watch: the warehouse

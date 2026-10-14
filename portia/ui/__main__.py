@@ -125,7 +125,7 @@ def main() -> None:
     # project that was open, unless one was just named (`app.restore`).
     app.restore()
 
-    # A chat holds a live SDK subprocess (`docs/CONVERSATION.md` §4). Closing
+    # A chat holds a live SDK subprocess (`docs/CHAT_SESSIONS.md` §3.3). Closing
     # the window is the last way out of a project, so it is the last place one
     # can be closed on purpose rather than left to the process dying.
     nicegui_app.on_shutdown(_close_chats)

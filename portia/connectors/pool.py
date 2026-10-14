@@ -209,7 +209,7 @@ def opens_on(connection: Connection) -> str | None:
     """``DATABASE`` or ``DATABASE.SCHEMA`` off the registry entry, or nothing.
 
     Prose only: the brief offers it as the place to start building, and
-    nothing writes there because of it (`CONNECTOR.md` §2.7.1). A provider
+    nothing writes there because of it (`CONNECTORS.md` §2.7.1). A provider
     that calls its levels something else maps them here through the same two
     field names, which is §2.5's rule applied to a form.
     """

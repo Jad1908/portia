@@ -58,7 +58,7 @@ def build_brief(portia_dir: str = catalog.DEFAULT_DIR) -> str:
 def where_the_data_lives(cat: dict | None = None) -> str:
     """The section of the brief that says which engine this project runs on.
 
-    One file per backend under ``prompts/backend/`` (`docs/CONNECTOR.md` §2.9):
+    One file per backend under ``prompts/backend/`` (`docs/CONNECTORS.md` §2.9):
     the local one names DuckDB and files, the Snowflake one names the dialect,
     the credits, the role and the scope. **Part of L1, not of L0**, because it is
     a fact about *this project*, and because a tool description is loaded once
@@ -82,7 +82,7 @@ def where_the_data_lives(cat: dict | None = None) -> str:
 
 
 def _render_writes(active) -> str:
-    """The paragraph on who writes tables (`CONNECTOR.md` §2.7.1).
+    """The paragraph on who writes tables (`CONNECTORS.md` §2.7.1).
 
     Two files, because the two modes are two different instructions and not one
     with a flag in it: on the hand-off, recording a step **is** the build of that
@@ -188,11 +188,12 @@ def _render_sources(sources: dict) -> list[str]:
     """One line per source: its name, and one sentence of what it is.
 
     **The structural facts used to be here and are not any more** (2026-08-04,
-    `KNOWLEDGE_GRAPH.md` §9.4 phase D). A column count and a candidate-key list
-    are exactly what `describe_source` and `profile_source` exist to serve, so
-    pushing them into every request paid for them on every turn whether or not
-    that source was ever mentioned — and they are the half of the line that
-    grows with the *shape* of a project rather than with its size.
+    `KNOWLEDGE_GRAPH.md` §9.4 phase D). A column count is exactly what
+    `describe_source` and `profile_source` exist to serve, so pushing it into
+    every request paid for it on every turn whether or not that source was ever
+    mentioned — and it is the half of the line that grows with the *shape* of a
+    project rather than with its size. (A candidate-key list sat beside it until
+    2026-09-01; nothing nominates a key now.)
 
     What stays is what cannot be pulled cheaply enough to be worth pulling: the
     **name**, because the agent cannot ask about a source it does not know
@@ -201,13 +202,13 @@ def _render_sources(sources: dict) -> list[str]:
     are the routing decision itself; everything else is the answer to a question
     it has not asked yet.
 
-    §1.4 wants this to go further — an index that lists everything is the wrong
-    shape at 50 sources, and a neighbourhood you walk outward from is the right
+    It could go further — an index that lists everything may be the wrong
+    shape at 50 sources, and a neighbourhood you walk outward from the right
     one. It is not taken further here on purpose: "unproven at 50" is not a
     measurement, this repo has a standing rule about acting on evidence that was
     never designed to support the claim, and there is no re-runnable fixture that
-    would show whether dropping the sentence helped or hurt. `BACKLOG.md` holds
-    what the fuller change looks like and what would have to be true to take it.
+    would show whether dropping the sentence helped or hurt. The prompt audit
+    (`BACKLOG_NEXT.md` §2) holds the fuller change and what it would need.
     """
     return [
         f"- **{name}** — {first_sentence(entry.get('summary') or '')}"

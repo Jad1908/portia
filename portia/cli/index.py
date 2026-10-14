@@ -60,9 +60,10 @@ def ensure_project_context(portia_dir: str) -> None:
 def sync_graph(portia_dir: str) -> None:
     """Refresh the knowledge graph's structural half — **best effort, always**.
 
-    §5 names indexing as a write moment, and §9.4 needs it: at source 23 the
-    copilot queries the graph to judge which pairs are worth measuring, so the
-    sources it has already read have to be in there by the time it looks.
+    `docs/KNOWLEDGE_GRAPH.md` §5 names indexing as a write moment, and §5.1
+    needs it: at source 23 the copilot queries the graph to judge which pairs
+    are worth measuring, so the sources it has already read have to be in there
+    by the time it looks.
 
     It never fails the index. An index that stops because a container is stopped
     is precisely the leak §6.6 warns about — a design decision escaping into a

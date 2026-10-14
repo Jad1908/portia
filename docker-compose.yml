@@ -18,7 +18,7 @@ services:
       - "7687:7687" # bolt — the driver
     environment:
       # Development only, and it is the same string the tests look for. Nothing
-      # in here is data: the graph holds metadata *about* the data (§6.3).
+      # in here is data: the graph holds metadata *about* the data.
       NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-portia-dev}
     volumes:
       - neo4j-data:/data

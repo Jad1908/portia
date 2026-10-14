@@ -142,7 +142,7 @@ window.portiaKnowledge = (function () {
       },
       // A count, so mono, at a column's size and ink; dashed, because it
       // stands in for columns that are not on the picture — the ghost card's
-      // *not quite here* (DESIGN.md), and not a colour, so it cannot read as
+      // dashed border (DESIGN.md → `model-card-ghost`), and not a colour, so it cannot read as
       // a severity.
       [MORE]: box(p, {
         fill: p.surface,
@@ -245,7 +245,7 @@ window.portiaKnowledge = (function () {
   }
 
   // **Where every node sits is the client's**, like the pan and the zoom
-  // (DESIGN.md → Window: they never round-trip). A refresh of the middle pane
+  // (DESIGN.md → Interaction rules: what the client owns never round-trips). A refresh of the middle pane
   // replaces the canvas, and the new one starts every node it has seen before
   // where the old one had floated it to, by its id, so a refresh does not throw
   // the picture into a new shape; the physics carries on from there. Only a

@@ -76,7 +76,7 @@ def test_the_form_writes_the_error_only_while_its_switch_is_on(monkeypatch):
 
 def test_neither_route_is_the_primary_action():
     """Public or private is the user's call, so the fill that marks *the* action
-    goes on neither (`DESIGN.md`: at most one primary per view, and here none)."""
+    goes on neither (`DESIGN.md`: at most one primary per pane, and here none)."""
     import inspect
 
     assert 'kind="primary"' not in inspect.getsource(panel._panel.func)

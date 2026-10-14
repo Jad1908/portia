@@ -9,7 +9,7 @@ edit. One exchange instead of a session, so dozens cost what a handful of
 full runs cost.
 
 **Outcomes are predicates over what the run left**, never a reading of the
-transcript's quality, and never a route's shape (§2.7, §6.2): whether a
+transcript's quality, and never a route's shape (§6.2): whether a
 question was asked, whether any result showed a fan-out before a step was
 recorded, whether a step was recorded at all. A run's outcome is the set of
 predicates that held; the tally counts each combination as k of N and names

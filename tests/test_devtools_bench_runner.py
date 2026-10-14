@@ -1,4 +1,4 @@
-"""A case through portia with nobody at the keyboard (`BENCHMARK_EVAL.md` §7 of the roadmap, §8).
+"""A case through portia with nobody at the keyboard (`BENCHMARK_EVAL.md` §14.3, §8).
 
 Driven with a fake client, like `test_agent_session.py`: what is worth pinning
 is the runner's own logic. A question reaches the fact its anchors name and

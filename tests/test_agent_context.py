@@ -207,7 +207,7 @@ def test_the_brief_no_longer_promises_candidate_keys(project):
     assert "candidate keys" not in context.build_brief(project)
 
 
-# --- where the data lives (`docs/CONNECTOR.md` §2.9) -------------------------------
+# --- where the data lives (`docs/CONNECTORS.md` §2.9) -------------------------------
 
 
 def test_the_brief_ends_with_where_the_data_lives_and_it_is_local_by_default(project):
@@ -241,7 +241,7 @@ def test_a_warehouse_project_gets_its_own_section_with_the_connection_and_target
 
 
 def test_the_brief_says_who_writes_tables_and_that_each_spec_names_where():
-    """`CONNECTOR.md` §2.7.1: off, the agent is told only the user writes; on, that
+    """`CONNECTORS.md` §2.7.1: off, the agent is told only the user writes; on, that
     recording a step creates the table. Both say the target is the spec's own and
     offer the connection's database as the place to start, or say it names none."""
     from portia.agent import context

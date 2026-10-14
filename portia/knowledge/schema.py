@@ -1,7 +1,7 @@
 """The graph's vocabulary, and a graph as plain python.
 
-`docs/KNOWLEDGE_GRAPH.md` §4 is the argument; this is the vocabulary table from
-it, in code. Nothing here talks to a database — a `Graph` is a set of nodes and
+`public_docs/GRAPH_SCHEMA.md` is the vocabulary and `docs/KNOWLEDGE_GRAPH.md` §4
+holds the argument; this is that vocabulary, in code. Nothing here talks to a database — a `Graph` is a set of nodes and
 edges that can be built, asserted on and printed with no server running, and
 `store.py` is the only module that knows what Cypher is.
 
@@ -85,8 +85,8 @@ READS = "READS"
 DERIVES_FROM = "DERIVES_FROM"
 
 #: Column — Column. Two columns were compared; here is how far their values
-#: coincide. **Nothing in this package writes one yet** — it is the measured half
-#: (§5.1, phase C). It is named here because the writer has to know which kinds
+#: coincide. It is the measured half (§5.1): `measure.py` builds the edge, and
+#: `measure_overlaps` and `join_findings` write it. It is named here because the writer has to know which kinds
 #: are structural in order to leave everything else alone: a rebuild off the
 #: files must never delete a measurement (§5.2 — Neo4j is a store, not a cache).
 OVERLAPS = "OVERLAPS"
@@ -105,9 +105,10 @@ VIA_OPS = ("join", "normalize", "sql")
 
 #: On a Model column: portia could not name a single column its values came
 #: from. `docs/SQL_LINEAGE.md` §5.5 — and it exists because *no outgoing
-#: `DERIVES_FROM`* already means something else. `query.origins` reads a column
-#: with no outgoing edges as the place the data came from, which is true of a
-#: file's column and a lie about `count(*) AS n`. Without this property the two
+#: `DERIVES_FROM`* already means something else. A column answer's ``origins``
+#: (`query._column_answer`) reads a column with no outgoing edges as the place
+#: the data came from, which is true of a file's column and a lie about
+#: `count(*) AS n`. Without this property the two
 #: are the same shape, and the graph would report a computed column as a source.
 #:
 #: **Two states, never a vocabulary.** It is present or it is absent, which is

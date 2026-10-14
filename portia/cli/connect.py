@@ -187,7 +187,7 @@ def main() -> None:
         "--agent-writes",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="let the copilot create each model's table as it records the step (CONNECTOR.md §2.7.1)",
+        help="let the copilot create each model's table as it records the step (CONNECTORS.md §2.7.1)",
     )
     use.set_defaults(run=_use)
 

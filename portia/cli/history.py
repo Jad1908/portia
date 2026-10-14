@@ -16,8 +16,8 @@ what `--kind` is for. **It is not called `chats`** — that sits one letter from
 Rendering a replay reuses `cli.chat.render`, so a run reads the way it read
 live. What it adds is the half the live terminal drops on purpose: tool results,
 questions, answers and write confirmations. Those are what the run is worth
-reading for, and `docs/BACKLOG.md` asks for the live view to stay as it was so
-transcripts stay comparable to the runs already scored against them.
+reading for, and the live view stays as it was so transcripts stay comparable
+to the runs already scored against them.
 
 Both verbs read one project — the one `--dir` points at, defaulting to `.portia`
 under the current directory. It takes an absolute path, so another project's
@@ -110,7 +110,7 @@ def render_summary(summary: dict) -> str:
     """The header of a replay: what this was, and what it did.
 
     Counts, not a verdict. Nothing here says one went well — see
-    `runlog.summary`, and `CLAUDE.md` → facts vs judgment.
+    `runlog.summary`, and `CLAUDE.md` → Facts versus judgment.
     """
     effort = f", effort {summary['effort']}" if summary.get("effort") else ""
     models = summary.get("models") or []

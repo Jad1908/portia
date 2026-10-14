@@ -1,8 +1,8 @@
 """Build the knowledge graph: ``python -m portia.cli.knowledge [--write]``.
 
-§5 says a build command is needed regardless of anything else: someone cloning
-the repo gets the YAML from git and no graph, so there has to be a way to
-construct it from the project.
+`docs/KNOWLEDGE_GRAPH.md` §5 says a build command is needed regardless of
+anything else: someone cloning the repo gets the YAML from git and no graph, so
+there has to be a way to construct it from the project.
 
 **Reading it costs nothing and needs no database.** With no flags this reads the
 catalog and the specs, builds the graph in memory and prints what is in it —
@@ -10,10 +10,10 @@ which is how phase A is checked without an agent or a server anywhere near it
 (§9.4). ``--cypher`` prints exactly what would be sent, for the same reason.
 ``--write`` is the only form that needs Neo4j running.
 
-Unresolved models are reported, never treated as a failure. A `sql` step's
-output columns cannot be named from a spec, and a pipeline that uses the hatch
-is not a broken pipeline — the count is evidence for §7's open question about
-buying a SQL parser, and nothing more.
+Unresolved columns are reported, never treated as a failure. A `sql` step is
+read with a parser, and what is left over is aggregates, literals and queries
+no parser can read (`docs/SQL_LINEAGE.md` §9.4): a count of the residue, not a
+broken pipeline.
 """
 
 from __future__ import annotations

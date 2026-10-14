@@ -1,6 +1,6 @@
 """Tables portia answers for itself in a query's inputs: its own records, read with SQL.
 
-**Facts as tables** *(2026-10-13, `sandbox/limits/REVAMP_SPEC.md`, rule 5)*. Every
+**Facts as tables** *(2026-10-13, `docs/TOOL_SURFACE.md` §3, rule 5)*. Every
 fact the catalog holds about a column used to reach the agent only through
 `describe_source` and `profile_source`, one table at a time and in whatever
 shape those answers took; "which columns of any table are mostly null and

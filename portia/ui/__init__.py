@@ -1,4 +1,4 @@
-"""portia's window — V0 of the three-pane app (docs/VISION.md, docs/DESIGN.md).
+"""portia's window, the three-pane app (docs/VISION.md, docs/DESIGN.md).
 
     python -m portia.ui [--project DIR] [--port 8080]
 
@@ -21,10 +21,10 @@ Layout, per module:
 
 - `app.py`      — the window: toolbar, three panes, which screen is showing
 - `screens.py`  — before the panes: open a project · the brief · add data
-- `artifacts.py`— left: what portia knows about, past copilot turns included
+- `artifacts.py`— left: what portia knows about, and the database section
 - `workflow.py` — middle: the spec as a graph, over the run report
-- `transcript.py` — right: the turn, the question form, the write confirmation
-- `turn.py`     — driving `session.run` with the app's own answer/confirm
+- `transcript.py` — right: the chats, the question form, the write confirmation
+- `exchange.py` — driving a chat's exchange with the app's own answer/confirm
 - `engine.py`   — the only module that calls the engine
 - `graph.py`    — DAG geometry for the **pipeline** canvas (no NiceGUI import)
 - `assets/knowledge.js` — the **knowledge graph**, drawn by vis-network. A
@@ -36,7 +36,7 @@ Layout, per module:
 - `state.py`    — what is being looked at (no NiceGUI import)
 - `theme.py` + `assets/portia.css` — the look, as tokens
 
-Two rules hold the whole thing together, both from `DESIGN.md`:
+Two rules hold the whole thing together, both from `VISION.md`'s principles:
 **no computation in the UI**, and **colour and prominence communicate kind,
 never rank** — the screen must not smuggle in the prioritization the checks layer
 refuses to make.

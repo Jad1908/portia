@@ -564,10 +564,10 @@ def _failed(exc: Exception) -> dict[str, Any]:
 #:
 #: **Claude Code cuts the middle out of an error result longer than 11,024
 #: characters** and passes a success whole up to 50,000 (measured against both
-#: binaries on a fake server, 2026-10-10, `sandbox/limits`). An error is where
-#: the facts of a refusal live — `blocked_step` carries the produced table's
-#: measurements — and its middle was being dropped by a harness that says only
-#: how much it dropped. So portia cuts first, below that line, and says what it
+#: binaries on a fake server, 2026-10-10, `docs/TOOL_SURFACE.md` §1). An error
+#: is where the facts of a refusal live — `blocked_step` carries the produced
+#: table's measurements — and its middle was being dropped by a harness that
+#: says only how much it dropped. So portia cuts first, below that line, and says what it
 #: cut and where. Codex treats an error as it treats any result, so this is the
 #: lower of the two limits that apply to one.
 ERROR_BUDGET = 10_000
@@ -607,8 +607,8 @@ def _too_large(size: int) -> dict[str, Any]:
     the copilot knew. A truncated payload is a short answer that looks complete.
 
     The item this closes asked for the opposite — *degrade instead of refuse* —
-    and it is kept that way in `SPRINT.md`, because the argument only changed
-    once there were smaller questions to point at. `profile_source` takes
+    because the argument only changed once there were smaller questions to
+    point at. `profile_source` takes
     `columns` and `join_findings` takes `left_columns`/`right_columns`; before
     those existed, refusing would have been a dead end rather than a redirect.
     """
@@ -947,8 +947,9 @@ def _await_graph_writes() -> None:
     """Hold a graph read until the graph writes already running in this process have answered.
 
     **A harness runs the read-only calls of one message together** (Claude Code
-    up to ten), and `join_findings` and `measure_overlaps` are read-only by
-    their hint. So a copilot that checks a join and asks for a route in the same
+    up to ten), and `join_findings` is read-only by its hint. `measure_overlaps`
+    carries no hint at all (logged as a bug, `BACKLOG_NEXT.md` §4), and the wait
+    covers it all the same. So a copilot that checks a join and asks for a route in the same
     message had its route read before the join's measurement was written: a real
     session asked for `elec_long → weather` in the message that measured
     `metadata → weather`, and was told there was no route that the graph held a
@@ -1189,9 +1190,9 @@ def _draw(args: dict[str, Any]) -> dict:
 
     Publishing happens **on the worker thread**, inside `_evidence`'s
     `to_thread`, and a sink that needs to be on the event loop hops there itself
-    — `ui/engine.py` is the only module in the app that knows there is a thread,
-    and it already owns that `call_soon_threadsafe`. Hopping here instead would
-    put a second copy of that knowledge in the module that must not have it.
+    — the window's sink is in `ui/exchange.py`, and it already owns that
+    `call_soon_threadsafe`. Hopping here instead would put a second copy of that
+    knowledge in the module that must not have it.
     """
     chart = handlers.plot_data(
         args["sql"],
@@ -1558,9 +1559,10 @@ async def set_interpretation(args: dict[str, Any]) -> dict[str, Any]:
         "required": ["left", "right", "reason"],
     },
     # Read-only though it now keeps its key measurement in the graph: that is
-    # metadata in a store §5.2 calls re-derivable, best-effort and never asked
-    # about, the line `READ_TOOLS` draws for `measure_overlaps`. Without the hint
-    # Codex would stop every join check for an approval.
+    # metadata in a store `KNOWLEDGE_GRAPH.md` §5.2 calls re-derivable,
+    # best-effort and never asked about, the line `READ_TOOLS` draws for
+    # `measure_overlaps`. Without the hint Codex would stop every join check for
+    # an approval.
     annotations=_READ_ONLY,
 )
 async def join_findings(args: dict[str, Any]) -> dict[str, Any]:
@@ -1744,11 +1746,11 @@ async def ask_user(args: dict[str, Any]) -> dict[str, Any]:
 #:
 #: The line is **"does it change a durable artifact the user reviews in a diff"**,
 #: not "does it write anything at all". `measure_overlaps` is here despite storing
-#: its results: what it writes is metadata *about* the data, in a store §5.2 is
-#: explicit about being re-derivable — losing it costs time, not truth — and the
-#: decisions still live in the spec, in git. Confirming each of a dozen pairs
-#: while indexing would also make the one tool that has to be used in bulk the
-#: most expensive one to use.
+#: its results: what it writes is metadata *about* the data, in a store
+#: `KNOWLEDGE_GRAPH.md` §5.2 is explicit about being re-derivable — losing it
+#: costs time, not truth — and the decisions still live in the spec, in git.
+#: Confirming each of a dozen pairs while indexing would also make the one tool
+#: that has to be used in bulk the most expensive one to use.
 READ_TOOLS = [
     get_context,
     graph_lookup,

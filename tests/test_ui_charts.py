@@ -649,7 +649,7 @@ def test_the_gallery_starts_open():
 
 
 def test_the_folder_field_is_shut_on_a_fresh_chart():
-    """The top level is the right answer nearly every time (§6.3)."""
+    """The top level is the right answer nearly every time (§6.2)."""
     assert Chart(name="x").keep_where is False
 
 
@@ -773,7 +773,7 @@ def test_the_next_receipt_carries_the_failure():
     assert receipt["render_failures"] == {"Orders": "Invalid specification"}
 
 
-# --- the fourth tab (§3.10) --------------------------------------------------
+# --- the fourth tab (§3.7) ---------------------------------------------------
 #
 # Driven in a browser: the drag logic held, and what changed at the fourth tab
 # was geometry — the strip overflowed and the drop zone covered it. These pin

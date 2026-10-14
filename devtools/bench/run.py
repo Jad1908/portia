@@ -1,4 +1,4 @@
-"""The runner: a case through portia with nobody at the keyboard (`docs/BENCHMARK_EVAL.md` §7 of the roadmap, §8).
+"""The runner: a case through portia with nobody at the keyboard (`docs/BENCHMARK_EVAL.md` §14.3, §8).
 
 A run is a fresh project folder, the case's data written into it, the brief
 set, the facts indexed, and then each thread of the case as its own chat: a

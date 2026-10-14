@@ -8,7 +8,7 @@ Three invariants, none of them a measure of quality:
 - **No zero acknowledged with nobody asked, outside autopilot.** A step
   written with ``acknowledge`` set, approved by a person, with no question
   earlier in the same exchange. In autopilot the write is logged ``auto`` and
-  the acknowledgement is the user's responsibility by design (§10.3): those
+  the acknowledgement is the user's responsibility by design (§9): those
   are counted apart and never called violations.
 - **Nothing entered a spec unmeasured.** The engine already refuses this;
   the check confirms that every successful `record_step` carried its

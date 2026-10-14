@@ -223,8 +223,7 @@ def fans_out(report: dict, how: str = "left") -> bool:
     by many rows on the left, so ``max_right_to_left`` is well above one on every
     ordinary lookup — and the result still holds each left row exactly once. The
     flag fired on nearly every fact-to-dimension join, which is how the one
-    warning that protects a total gets learned as noise (`BACKLOG.md` → Checks,
-    `SPRINT.md` F1). The right side's repetition is not hidden: ``relationship``
+    warning that protects a total gets learned as noise. The right side's repetition is not hidden: ``relationship``
     says ``many:1`` and ``extra_right_copies`` counts it.
     """
     counts = report["fan_out"]
@@ -452,7 +451,7 @@ def column_overlap(left: Table, left_column: str, right: Table, right_column: st
     coverage arithmetic are all the same, and two of those drifting apart is how
     the terminal and the graph end up disagreeing about one number.
 
-    **Deliberately not `join_findings`** (§9.3). That one is heavy by design and
+    **Deliberately not `join_findings`.** That one is heavy by design and
     returns example rows for a single pair; this returns numbers for a pair the
     agent is asking about among several. It costs the same single scan-and-group
     per side either way, so the saving is in what comes back, not in the query.
@@ -625,8 +624,7 @@ def _carried_nulls(
 def predicted_nulls(report: dict, left: dict, right: dict) -> dict:
     """How many rows of each join type's result would hold a null in each carried column.
 
-    **The nulls a join creates, measured before it is built** (`BACKLOG.md` →
-    Checks, `SPRINT.md` F2). The report counts keys, and a left join that keeps
+    **The nulls a join creates, measured before it is built.** The report counts keys, and a left join that keeps
     every row reports nothing dropped however many of them found no match:
     500 bookings, 160 with an event, and the check said *500 rows, none
     dropped* while the table it described had no event on 340. The copilot may
@@ -726,8 +724,8 @@ def _example_rows(this: Table, columns: list[str], where: str) -> list[dict]:
     ``ORDER BY ALL`` keeps the same run answering with the same rows. It now
     orders by the projection rather than by the whole table, so the key leads the
     sort — which is a change in *which* three rows come back, not in how many.
-    Neither ordering picks the rows covering the most data; that is `BACKLOG.md`
-    → Checks, *"every sample list is alphabetical, never by frequency"*.
+    Neither ordering picks the rows covering the most data; that is
+    `BACKLOG_NEXT.md` §4, *"Samples are ordered by value, not frequency"*.
     """
     projection = ", ".join(this.dialect.quote(c) for c in columns)
     order = this.dialect.order_by_all(len(columns), skip=_unsortable(this, columns))

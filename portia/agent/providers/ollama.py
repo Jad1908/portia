@@ -7,7 +7,7 @@ the loop is untouched: the permission callback, the question tool, the Stop
 hook, interrupt and resume all live in the binary, not in the API it calls.
 `docs/PROVIDERS.md` §2 is the argument for taking that route first, and §3 is
 what it does not give: the effort knob is accepted and ignored, there is no
-prompt cache, and the binary's own system prompt rides on top of portia's.
+prompt cache, and there is no price.
 
 **What this module measures, and why it has to.** A remote API either answers
 or refuses. A local server does two things a remote one never does, and both
@@ -64,9 +64,9 @@ DEFAULT_HOST = "http://127.0.0.1:11434"
 
 #: The token the SDK's binary requires and Ollama ignores, which is what
 #: Ollama's own documentation says to set. It is a fixed string with no secret
-#: in it (`docs/PLAN.md` → Auth posture, revised 2026-09-08). The two variable
-#: names are the package's (`providers.BASE_URL_VAR`, `providers.TOKEN_VAR`),
-#: shared with every local provider.
+#: in it (`docs/PLAN.md` → Auth posture). The two variable names are the
+#: package's (`providers.BASE_URL_VAR`, `providers.TOKEN_VAR`), shared with
+#: every local provider.
 TOKEN = "ollama"
 
 #: How long a loaded model stays in memory after a preflight, so the first

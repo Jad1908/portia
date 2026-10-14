@@ -370,8 +370,8 @@ def test_expect_on_n_rows_says_which_report_that_word_belongs_to(sales):
     `n_rows` is not invented — it is in the `outcome` block of the result the
     model has just read. Being told the op "never reports" it is a contradiction
     of what is on screen, so the message has to name the *other* report the word
-    comes from and the op's own equivalent (`CLAUDE.md` → drift and outcome are
-    different questions).
+    comes from and the op's own equivalent (the reason is on
+    `checks/outcome.REPORT_KEYS`).
     """
     with pytest.raises(ValueError) as raised:
         handlers.record_step(

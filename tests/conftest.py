@@ -189,7 +189,7 @@ TEST_URI = os.environ.get("NEO4J_TEST_URI", "bolt://localhost:7688")
 def snowflake_session():
     """A real Snowflake session — or a skip. ``PORTIA_TEST_CONNECTION=<name>``.
 
-    The graph's argument, applied to the warehouse (`docs/CONNECTOR.md` §6):
+    The graph's argument, applied to the warehouse (`docs/CONNECTORS.md` §4):
     everything the connector *decides* is tested without one — the registry,
     the dialect's text, the parse check, the catalog entry's shape — and what
     needs a session is whether the adapter's questions are the ones Snowflake

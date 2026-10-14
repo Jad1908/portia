@@ -105,7 +105,7 @@ def open_project(path: str | Path, app: App) -> Path:
     """Point the app at a directory, creating it if it doesn't exist yet.
 
     Testing means a fresh directory per run, so a path that isn't there yet is
-    created rather than rejected (docs/VISION.md → `project-open`).
+    created rather than rejected (docs/VISION.md → Opening a project).
 
     The process working directory moves with it. That is not incidental: the
     engine resolves a catalog's ``source:`` paths and a spec's ``sources:`` paths
@@ -179,7 +179,7 @@ def open_project(path: str | Path, app: App) -> Path:
     app.left_add_data = bool(app.sources)
     # The warehouse, if the project names one: the backend is installed now and
     # the session is opened later, off the loop, because opening one may open a
-    # browser (`docs/CONNECTOR.md` §2.4).
+    # browser (`docs/CONNECTORS.md` §2.4).
     app.warehouse_closed = frozenset()
     app.connect_form, app.connect_error, app.connect_secret = {}, "", ""
     forget_scope_picker(app)
@@ -221,7 +221,7 @@ def choose_data(mode: str, app: App) -> None:
 def can_change_data(app: App) -> bool:
     """Whether *where is the data* can still be answered differently.
 
-    A project reads from one place (`CONNECTOR.md` §2.2): a file cannot be
+    A project reads from one place (`CONNECTORS.md` §2.2): a file cannot be
     joined to a warehouse table without one side crossing the wire. So the
     answer is open until something is indexed and held after, because the
     first source is what would have to be mixed with. Until 2026-09-18 it was
@@ -252,7 +252,7 @@ def needs_secret(app: App) -> bool:
 def forget_scope_picker(app: App) -> None:
     """Drop what the scope picker listed and ticked: it was another connection's.
 
-    A browse is a query, so `browse_scope` keeps each answer on the app and the
+    A browse is a query, so `browse_remote` keeps each answer on the app and the
     picker draws from there. **That answer belongs to the connection that gave
     it** *(2026-09-20, the user's report)*: connect to BigQuery, then connect to
     PostgreSQL from the same screen, and the tree still drew BigQuery's
@@ -474,7 +474,7 @@ async def preflight(app: App, kind: str, model: str) -> Any:
     `Provider.preflight` with the length of everything portia composes for the
     model (`session.prompt_chars`), both off the loop: composing the brief
     reads the catalog, and a local provider loads the model, which is seconds
-    the first time (§4.5, §4.6). Returns the provider's `Preflight`; the
+    the first time (`PROVIDERS.md` §4.5, §4.6). Returns the provider's `Preflight`; the
     caller draws the refusal.
     """
     from portia.agent import providers, session
@@ -557,7 +557,7 @@ def save_connection(fields: dict[str, str], *, app: App, agent_writes: bool = Fa
     and nothing is written to the project until the registry accepted it.
     ``fields`` is the form as the dialog holds it: ``name``, ``kind``, ``auth``
     and the provider's own keys, which the provider says (`CONNECTORS.md`
-    §2.4). ``agent_writes`` is the hand-off (`CONNECTOR.md` §2.7.1).
+    §2.4). ``agent_writes`` is the hand-off (`CONNECTORS.md` §2.7.1).
     """
     from portia.connectors import registry
 
@@ -606,7 +606,7 @@ def _form_of(connection) -> dict[str, str]:
 
 
 def set_agent_writes(on: bool, app: App) -> None:
-    """The hand-off, durably and on the held backend (`CONNECTOR.md` §2.7.1).
+    """The hand-off, durably and on the held backend (`CONNECTORS.md` §2.7.1).
 
     The flag rides the `Backend` value, so the installed one is rebuilt —
     keeping its session, which `install_backend` would drop.
@@ -828,7 +828,7 @@ def _scope_one(qualified: str, portia_dir: str, stop: cancel.Scope | None) -> st
 async def profile_remote(app: App, name: str) -> dict:
     """The opt-in scan of one warehouse table — scoped, or built there — off the loop.
 
-    `docs/CONNECTOR.md` §2.6 for a source; the same call takes a model's name
+    `docs/CONNECTORS.md` §2.6 for a source; the same call takes a model's name
     since 2026-09-07 (`catalog.profile_remote`). The graph is refreshed after,
     because a Column node's facts come off the entry this just filled in.
     """
@@ -1410,7 +1410,7 @@ def project_tree(app: App) -> tuple[tree.Node, ...]:
     wherever it lives. See `tree` for why the two halves are scoped differently.
     """
     # A warehouse project draws no un-indexed *file* as data: its data is the
-    # scope, in the pinned section (`docs/CONNECTOR.md` §2.2, no mixing). The
+    # scope, in the pinned section (`docs/CONNECTORS.md` §2.2, no mixing). The
     # artifacts portia wrote are still drawn wherever they live.
     readable = () if app.connection else readable_suffixes()
     return tree.build(app.root, known_files(app), readable, app.data_dir or None)
@@ -1456,12 +1456,12 @@ def journal_for(app: App, model: str) -> tuple[list[dict], list[dict]]:
     goes through this module. Reads YAML and runs nothing, so it is cheap enough
     for the render path the report region sits on.
 
-    Two lists, not one *(2026-09-04)*. The first is `findings.for_spec` — records
-    that named this model. The second is every finding about a table upstream of
-    it, which the spec declares and `graph.upstream_ids` walks, so a finding about
+    Two halves, which the pane draws as one chronological list
+    (`docs/FINDINGS.md` §6.3). The first is `findings.for_spec` — records that
+    named this model. The second is every finding about a table upstream of it,
+    which the spec declares and `graph.upstream_ids` walks, so a finding about
     ``orders`` is under every model built from ``orders`` whether or not the agent
-    named one. The journal was empty in every real session; the second list is
-    the half of it that needs nobody to remember anything.
+    named one: the half that needs nobody to remember anything.
     """
     docs = project_docs(app)
     upstream = graph.upstream_ids(docs, model) - {model} if model in docs else set()
@@ -1993,7 +1993,7 @@ class SourceState:
     #: Whether measured facts stand behind the entry (`catalog.is_profiled`).
     #: A file always; a warehouse table only once somebody paid for the scan.
     #: **Orthogonal to ``state``**: the copilot reads a scoped table off its
-    #: metadata (`CONNECTOR.md` §2.6), so a table can be read and never
+    #: metadata (`CONNECTORS.md` §2.6), so a table can be read and never
     #: profiled, and this is the axis the Indexing tab could not see
     #: (2026-09-07). Its Index button took files only, so a metadata-only
     #: table sat at *not read* with nothing on the tab able to profile it.
@@ -2042,7 +2042,7 @@ def source_states(app: App) -> list[SourceState]:
     # root, and thirty scoped tables were listed among seventy stray CSVs and
     # Parquet files, by stem, so *forecast_runs* ten times, each one
     # tickable for an Index that would have profiled it into a project that
-    # cannot join it to anything (`CONNECTOR.md` §2.2, no mixing).
+    # cannot join it to anything (`CONNECTORS.md` §2.2, no mixing).
     if not app.connection:
         states += [
             SourceState(name=path.stem, rel=rel, state=UNINDEXED)
@@ -2483,7 +2483,8 @@ def chart_queries(app: App, chart: State.Chart) -> list[dict]:
     **Looked up rather than remembered.** `handlers.plot_data` runs inside the
     MCP server and has no idea what position the log will give its call — the log
     is teed at the edges, after the fact — so the chart cannot carry one. The tab
-    name is the handle, which it already is everywhere else (§3.3), and the
+    name is the handle, which it already is everywhere else
+    (`VISUALIZATION.md` §3.3), and the
     *last* match wins because redrawing under a name supersedes.
 
     Empty when the chart came from somewhere that is not a chat (a test harness,

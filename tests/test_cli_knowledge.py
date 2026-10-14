@@ -1,4 +1,4 @@
-"""`python -m portia.cli.knowledge` — the build command §5 says is needed anyway.
+"""`python -m portia.cli.knowledge` — the build command `docs/KNOWLEDGE_GRAPH.md` §5 says is needed anyway.
 
 Someone cloning the repo gets the YAML from git and no graph. What these pin is
 that reading and printing one costs nothing: no database, no data files, no
