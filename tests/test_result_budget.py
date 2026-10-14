@@ -295,15 +295,20 @@ def test_six_hundred_rows_of_a_five_column_answer(deep):
         )
 
 
-@KNOWN
 def test_measuring_eighty_pairs_in_one_call(deep, neo4j_session):
+    """A receipt, a line a pair, and the pairs past its cap said how to read."""
     pairs = _eighty_pairs()
     with _inside(deep):
-        _assert_fits(_call("measure_overlaps", {"pairs": pairs}))
+        result = _call("measure_overlaps", {"pairs": pairs})
+    _assert_fits(result)
+    assert '"more"' in result["content"][0]["text"], "a cut receipt says how to read the rest"
 
 
-@KNOWN
 def test_the_neighbourhood_of_a_table_with_eighty_overlaps(deep, neo4j_session):
+    """Eighty pairs asked, forty distinct (each is sent twice), one per neighbour.
+
+    The second half of the calls is answered from the graph (2026-10-13), and
+    the card is a row per neighbour with its pair inside it."""
     pairs = _eighty_pairs()
     with _inside(deep):
         for start in range(0, 80, 20):
@@ -321,7 +326,12 @@ def test_profiling_the_hub(deep):
 
 def test_a_join_of_the_hub_to_a_neighbour(deep):
     with _inside(deep):
-        _assert_fits(_call("join_findings", {"left": "hub", "right": "n00", "keys": ["id"]}))
+        _assert_fits(
+            _call(
+                "join_findings",
+                {"left": "hub", "right": "n00", "keys": ["id"], "reason": "both are keyed by id"},
+            )
+        )
 
 
 def test_reading_the_24_step_spec(deep, long_spec):

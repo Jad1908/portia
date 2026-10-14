@@ -410,7 +410,9 @@ def test_an_input_that_no_longer_resolves_costs_only_its_own_size(sales):
 
 def test_a_tool_with_no_sql_gets_the_sizes_of_what_it_read(sales):
     facts = handlers.interrupted_facts(
-        "join_findings", {"left": "orders", "right": "customers"}, portia_dir=sales
+        "join_findings",
+        {"left": "orders", "right": "customers", "reason": "orders name a customer"},
+        portia_dir=sales,
     )
     assert set(facts) == {"inputs"}
     assert facts["inputs"]["customers"]["rows"] == 6

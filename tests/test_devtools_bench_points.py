@@ -85,6 +85,10 @@ def test_a_point_may_run_under_one_of_the_cases_variants(tmp_path):
 # --- the vocabulary ------------------------------------------------------------------
 
 
+#: The sentence a join check is asked with (required since 2026-10-13).
+REASON = "bookings near an event should match it"
+
+
 def _call(tool: str, call_id: str, **inp: Any) -> events.Event:
     return events.Event(
         events.TOOL_CALL, {"name": f"mcp__portia__{tool}", "input": inp, "id": call_id}
@@ -115,7 +119,7 @@ def test_measured_fan_out_counts_only_evidence_before_the_decision(tmp_path):
     """§6.2 — a check called after the join was recorded is not evidence for it."""
     before = _transcript(
         tmp_path / "a",
-        _call("join_findings", "c1", left="reservations", right="city_events"),
+        _call("join_findings", "c1", left="reservations", right="city_events", reason=REASON),
         _result("c1", FANNED),
         _call("record_step", "c2", spec_path="s.yaml", step=STEP),
         _result("c2", {"outcome": {}}),
@@ -124,7 +128,7 @@ def test_measured_fan_out_counts_only_evidence_before_the_decision(tmp_path):
         tmp_path / "b",
         _call("record_step", "c2", spec_path="s.yaml", step=STEP),
         _result("c2", {"outcome": {}}),
-        _call("join_findings", "c1", left="reservations", right="city_events"),
+        _call("join_findings", "c1", left="reservations", right="city_events", reason=REASON),
         _result("c1", FANNED),
     )
     assert points.measured_fan_out(before) and points.measured_join(before)
@@ -135,7 +139,7 @@ def test_measured_fan_out_counts_only_evidence_before_the_decision(tmp_path):
 def test_a_clean_join_finding_is_measured_but_not_a_fan_out(tmp_path):
     run = _transcript(
         tmp_path,
-        _call("join_findings", "c1", left="a", right="b"),
+        _call("join_findings", "c1", left="a", right="b", reason=REASON),
         _result("c1", CLEAN),
     )
     assert points.measured_join(run) and not points.measured_fan_out(run)
@@ -144,7 +148,7 @@ def test_a_clean_join_finding_is_measured_but_not_a_fan_out(tmp_path):
 def test_a_failed_call_is_not_a_measurement_and_a_refused_step_is_not_a_record(tmp_path):
     run = _transcript(
         tmp_path,
-        _call("join_findings", "c1", left="a", right="b"),
+        _call("join_findings", "c1", left="a", right="b", reason=REASON),
         _result("c1", {"error": "no such column"}, error=True),
         _call("record_step", "c2", spec_path="s.yaml", step=STEP),
         _result("c2", {"error": "blocked"}, error=True),

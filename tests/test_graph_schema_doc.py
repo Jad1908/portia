@@ -66,6 +66,7 @@ def test_every_property_a_measurement_writes_is_documented(text):
         "measured_at",
         "left_fingerprint",
         "right_fingerprint",
+        "origin",
     }
     for name in written:
         assert f"`{name}`" in text, f"{name} lands on an OVERLAPS edge and is not documented"

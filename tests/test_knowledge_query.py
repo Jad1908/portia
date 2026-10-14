@@ -5,9 +5,11 @@ That is deliberate and it is the honest place to draw the line: what `query.py`
 contains is Cypher, and a stub session that answered Cypher would be a second,
 wrong implementation of Neo4j that every one of these tests would pass against.
 
-What they pin is `docs/KNOWLEDGE_GRAPH.md` §9.1 and §7 — **ask about a table and
-you get tables back**, not column pairs, because a router that returns fifty
-things has not routed; and nothing comes back ranked (§6.1).
+What they pin is `docs/KNOWLEDGE_GRAPH.md` §9.1 — **ask about a table and you get
+its neighbours back**, each with what links it, the measured pairs inside the
+neighbour they connect to; a route is searched over one query's links; and
+nothing comes back ranked (§6.1). How those answers are cut into the agent's
+cards is `test_graph_navigation.py`'s, with no database.
 """
 
 from __future__ import annotations
@@ -116,35 +118,32 @@ def filled(neo4j_session, project):
 # --- asking about a table ---------------------------------------------------
 
 
+def _neighbour(answer: dict, name: str) -> dict:
+    (found,) = [n for n in answer["neighbours"] if n["name"] == name]
+    return found
+
+
 def test_a_source_answers_with_the_models_that_read_it(filled, pid):
     answer = query.lookup(filled, "orders", project=pid)
     assert answer["table"]["kind"] == "Source"
-    assert [t["name"] for t in answer["read_by"]] == ["stg_orders"]
-    assert answer["reads"] == []
-    # Every column of `orders` feeds an `stg_orders` column, so every one of
-    # them is connected. Lineage counts as a relationship; the filter only
-    # drops columns that carry nothing at all.
     assert answer["table"]["n_columns"] == 3
-    assert answer["connected_columns"] == ["amount", "customer_id", "order_id"]
+    assert [n["name"] for n in answer["neighbours"] if n["read_by"]] == ["stg_orders"]
+    assert not any(n["reads"] for n in answer["neighbours"])
 
 
-def test_a_column_that_carries_nothing_is_not_named(filled, pid):
-    """The filter that took AQN's `stations` from 191 columns to 4.
-
-    Nothing reads `returns` and nothing has been compared to it, so neither of
-    its columns has anything to say in a graph answer. `n_columns` still says
-    the table has two, so an empty list reads as *nothing connects here* rather
-    than as *this table has no columns*.
-    """
+def test_a_table_linked_to_nothing_has_no_neighbours(filled, pid):
+    """Nothing reads `returns`, it is in no group and nothing was compared to
+    it. `n_columns` still says the table has three, so an empty list reads as
+    *nothing connects here* rather than as *this table has no columns*."""
     answer = query.lookup(filled, "returns", project=pid)
     assert answer["table"]["n_columns"] == 3
-    assert answer["connected_columns"] == []
+    assert answer["neighbours"] == []
 
 
 def test_a_model_answers_with_what_it_reads_including_another_model(filled, pid):
     answer = query.lookup(filled, "mart_orders", project=pid)
     assert answer["table"]["kind"] == "Model"
-    assert [(t["kind"], t["name"]) for t in answer["reads"]] == [
+    assert [(n["kind"], n["name"]) for n in answer["neighbours"] if n["reads"]] == [
         ("Source", "customers"),
         ("Model", "stg_orders"),
     ]
@@ -155,37 +154,32 @@ def test_a_source_can_be_named_by_its_path(filled, pid):
     assert query.lookup(filled, "data/orders.csv", project=pid)["table"]["name"] == "orders"
 
 
-def test_a_group_comes_back_with_its_members(filled, pid):
-    groups = query.lookup(filled, "orders", project=pid)["groups"]
-    assert [g["name"] for g in groups] == ["sales"]
-    assert sorted(groups[0]["members"]) == ["customers", "orders"]
+def test_a_group_is_named_once_and_its_members_are_neighbours(filled, pid):
+    answer = query.lookup(filled, "orders", project=pid)
+    assert answer["groups"] == [
+        {"name": "sales", "context": "what the shop exports", "n_members": 2}
+    ]
+    assert _neighbour(answer, "customers")["groups"] == ["sales"]
 
 
 def test_a_table_answer_does_not_restate_describe_source(filled, pid):
     """The whole column list is `describe_source`'s job and cost 73% of this
     answer when it was here — 5,091 of 7,015 characters on AQN's `stations`.
 
-    What replaced it is the columns that carry a relationship, plus `n_columns`
-    so a four-name list off a 191-column table cannot read as a small table.
+    And `connected_columns`, the names of the columns carrying any link, is gone
+    too (2026-10-13): on a table whose columns are all lineage it was every
+    column, and a column that matters to a neighbour is in that neighbour's pairs.
     """
     answer = query.lookup(filled, "orders", project=pid)
-    assert set(answer) == {
-        "table",
-        "connected_columns",
-        "reads",
-        "read_by",
-        "groups",
-        "overlaps",
-        "precedents",
-    }
+    assert set(answer) == {"table", "neighbours", "groups", "precedents"}
     # And nothing of the pipeline's own vocabulary: `layer` groups the project
     # canvas and says nothing about what a table is *to* another table.
-    assert set(answer["table"]) == {"kind", "name", "path", "summary", "n_columns"}
+    assert set(answer["table"]) == {"kind", "name", "path", "n_columns"}
 
 
-def test_nothing_is_measured_yet_so_there_is_nothing_to_overlap(filled, pid):
-    """Phase B reads; phase C measures. An overlap here would be fabricated."""
-    assert query.lookup(filled, "orders", project=pid)["overlaps"] == []
+def test_nothing_is_measured_yet_so_no_neighbour_has_a_pair(filled, pid):
+    """Phase B reads; phase C measures. A pair here would be fabricated."""
+    assert all(n["pairs"] == [] for n in query.lookup(filled, "orders", project=pid)["neighbours"])
 
 
 def _measure(session, pid, left_col, right_col, reason, numbers):
@@ -205,14 +199,12 @@ def _measure(session, pid, left_col, right_col, reason, numbers):
     )
 
 
-def test_a_measurement_comes_back_whole_rather_than_counted(filled, pid):
-    """The reason this answer was reshaped.
-
-    It used to say `overlaps customers (1 measured pair(s))`, and reaching the
+def test_a_measurement_comes_back_inside_the_neighbour_it_links(filled, pid):
+    """It used to say `overlaps customers (1 measured pair(s))`, and reaching the
     pair meant already knowing which column to name — so the 18 measurements in
-    the AQN project were, in practice, write-only. Now the pairs are grouped
-    under the neighbour they connect to, with the numbers and the sentence the
-    agent wrote when it asked.
+    the AQN project were, in practice, write-only. Now the pairs sit in the
+    neighbour they connect to, with the numbers and the sentence the agent wrote
+    when it asked.
     """
     _measure(
         filled,
@@ -220,18 +212,35 @@ def test_a_measurement_comes_back_whole_rather_than_counted(filled, pid):
         "customer_id",
         "customer_id",
         "orders should reference the customer list",
-        {"n_shared_values": 2, "left_coverage": 1.0, "right_coverage": 1.0},
+        {"n_shared_values": 2, "left_coverage": 1.0, "right_coverage": 0.5},
     )
 
-    (neighbour,) = query.lookup(filled, "orders", project=pid)["overlaps"]
-    assert neighbour["table"] == "customers"
-    (pair,) = neighbour["pairs"]
+    (pair,) = _neighbour(query.lookup(filled, "orders", project=pid), "customers")["pairs"]
     assert pair["n_shared_values"] == 2
     assert pair["asked_because"] == "orders should reference the customer list"
+    assert pair["origin"] == "measured"
     # `None`, not `False`: this measurement recorded no fingerprints, so whether
     # it still matches the files cannot be told — and null says *cannot tell*
     # where `False` would say *fine* (§4.5).
     assert pair["stale"] is None
+
+
+def test_a_pair_faces_the_table_asked_about(filled, pid):
+    """The edge points from orders; asked from customers, the coverages turn."""
+    _measure(
+        filled,
+        pid,
+        "customer_id",
+        "customer_id",
+        "orders should reference the customer list",
+        {"n_shared_values": 2, "left_coverage": 1.0, "right_coverage": 0.5},
+    )
+    from_orders = _neighbour(query.lookup(filled, "orders", project=pid), "customers")["pairs"][0]
+    from_customers = _neighbour(query.lookup(filled, "customers", project=pid), "orders")["pairs"][
+        0
+    ]
+    assert (from_orders["coverage"], from_orders["other_coverage"]) == (1.0, 0.5)
+    assert (from_customers["coverage"], from_customers["other_coverage"]) == (0.5, 1.0)
 
 
 def test_each_end_of_a_pair_carries_what_makes_its_number_readable(filled, pid):
@@ -251,12 +260,12 @@ def test_each_end_of_a_pair_carries_what_makes_its_number_readable(filled, pid):
         {"n_shared_values": 0, "left_coverage": 0.0, "right_coverage": 0.0},
     )
 
-    (pair,) = query.lookup(filled, "orders", project=pid)["overlaps"][0]["pairs"]
-    assert pair["column"]["name"] == "customer_id"
-    assert pair["column"]["n_distinct"] == 2
+    (pair,) = query.lookup(filled, "orders", neighbour="customers", project=pid)["pairs"]
+    assert pair["column"] == "customer_id"
+    assert pair["column_facts"]["n_distinct"] == 2
     # And the value that explains the zero: ' C1 ' is padded, 'C1' is not.
-    assert pair["column"]["top"] == " C1 "
-    assert pair["other_column"]["top"] == "C1"
+    assert pair["column_facts"]["top"] == " C1 "
+    assert pair["other_facts"]["top"] == "C1"
 
 
 def test_a_pairing_the_project_already_made_is_offered_where_it_has_not(filled, pid):
@@ -288,13 +297,15 @@ def test_a_pairing_the_project_already_made_is_offered_where_it_has_not(filled, 
     # Which of those `returns.customer_id` belongs against is judgment, so both
     # are stated and neither is ranked. (On AQN only one side matches, because
     # the event catalog calls its key `ID` rather than `READING_ID`.)
-    assert [(p["column"], p["against"]["table"], p["against"]["column"]) for p in precedents] == [
+    assert [(p["column"], p["against_table"], p["against_column"]) for p in precedents] == [
         ("customer_id", "customers", "customer_id"),
         ("customer_id", "orders", "customer_id"),
     ]
-    (by,) = precedents[0]["measured_elsewhere_by"]
-    assert by["table"] == "orders" and by["n_shared_values"] == 2
-    assert by["asked_because"] == "orders should reference the customer list"
+    assert precedents[0]["by_table"] == "orders" and precedents[0]["n_shared_values"] == 2
+    assert precedents[0]["asked_because"] == "orders should reference the customer list"
+    # The column answer carries the same replay, for that one column.
+    column = query.lookup(filled, "returns", "customer_id", project=pid)
+    assert len(column["precedents"]) == 2
 
 
 def test_a_column_you_have_already_measured_is_not_offered_as_a_gap(filled, pid):
@@ -330,8 +341,90 @@ def test_a_measurement_does_not_ship_the_machinery_that_computed_it(filled, pid)
         {"n_shared_values": 2, "left_coverage": 1.0, "right_coverage": 1.0},
     )
 
-    (pair,) = query.lookup(filled, "orders", project=pid)["overlaps"][0]["pairs"]
+    (pair,) = _neighbour(query.lookup(filled, "orders", project=pid), "customers")["pairs"]
     assert not {"project", "left_fingerprint", "right_fingerprint"} & set(pair)
+
+
+# --- between two tables -----------------------------------------------------
+
+
+def test_between_two_tables_is_every_link_and_every_pair(filled, pid):
+    _measure(
+        filled,
+        pid,
+        "customer_id",
+        "customer_id",
+        "same key",
+        {"n_shared_values": 2, "left_coverage": 1.0, "right_coverage": 1.0},
+    )
+    answer = query.lookup(filled, "orders", neighbour="customers", project=pid)
+    assert answer["neighbour"]["name"] == "customers"
+    assert (answer["reads"], answer["read_by"], answer["groups"]) == (False, False, ["sales"])
+    assert [(p["column"], p["other_column"]) for p in answer["pairs"]] == [
+        ("customer_id", "customer_id")
+    ]
+
+    built = query.lookup(filled, "stg_orders", neighbour="orders", project=pid)
+    assert built["reads"] and not built["read_by"] and built["pairs"] == []
+
+
+def test_a_table_is_not_its_own_neighbour(filled, pid):
+    with pytest.raises(ValueError, match="different neighbour"):
+        query.lookup(filled, "orders", neighbour="data/orders.csv", project=pid)
+
+
+# --- routes -----------------------------------------------------------------
+
+
+def test_a_route_runs_through_the_models_that_read_both_tables(filled, pid):
+    """orders is read by stg_orders, which mart_orders reads with customers."""
+    answer = query.lookup(filled, "orders", to="customers", project=pid)
+    assert answer["n_routes"] == 1
+    (route,) = answer["routes"]
+    assert route["tables"] == ["orders", "stg_orders", "mart_orders", "customers"]
+    assert [(s["reads"], s["read_by"]) for s in route["steps"]] == [
+        (False, True),
+        (False, True),
+        (True, False),
+    ]
+
+
+def test_a_measured_pair_that_shares_values_is_the_shortest_route(filled, pid):
+    _measure(
+        filled,
+        pid,
+        "customer_id",
+        "customer_id",
+        "same key",
+        {"n_shared_values": 2, "left_coverage": 1.0, "right_coverage": 0.5},
+    )
+    answer = query.lookup(filled, "customers", to="orders", project=pid)
+    assert [r["tables"] for r in answer["routes"]] == [
+        ["customers", "orders"],
+        ["customers", "mart_orders", "stg_orders", "orders"],
+    ]
+    (step,) = answer["routes"][0]["steps"]
+    (pair,) = step["pairs"]
+    # Walked from customers, against the edge's direction: turned to face it.
+    assert (pair["coverage"], pair["other_coverage"]) == (0.5, 1.0)
+
+
+def test_a_measured_zero_is_not_a_route(filled, pid):
+    """It is kept, and it is a fact about two columns; it is not a way between tables."""
+    _measure(
+        filled,
+        pid,
+        "customer_id",
+        "customer_id",
+        "the padded key against the clean one",
+        {"n_shared_values": 0, "left_coverage": 0.0, "right_coverage": 0.0},
+    )
+    answer = query.lookup(filled, "orders", to="customers", project=pid)
+    assert [len(r["steps"]) for r in answer["routes"]] == [3]
+
+
+def test_a_table_unreachable_in_the_steps_allowed_has_no_route(filled, pid):
+    assert query.lookup(filled, "returns", to="orders", project=pid)["n_routes"] == 0
 
 
 # --- asking about a column --------------------------------------------------
@@ -339,8 +432,9 @@ def test_a_measurement_does_not_ship_the_machinery_that_computed_it(filled, pid)
 
 def test_a_column_says_which_column_it_came_from_and_which_step_explains_it(filled, pid):
     answer = query.lookup(filled, "stg_orders", "customer_id", project=pid)
-    assert answer["derives_from"] == [
+    assert answer["upstream"] == [
         {
+            "hops": 1,
             "kind": "Source",
             "table": "orders",
             "path": "data/orders.csv",
@@ -352,9 +446,12 @@ def test_a_column_says_which_column_it_came_from_and_which_step_explains_it(fill
 
 
 def test_lineage_walks_through_a_model_to_the_file_underneath(filled, pid):
-    """One hop is what it derives from; `origins` is where it bottoms out."""
+    """Hops each way, nearest first; `origins` is where it bottoms out."""
     answer = query.lookup(filled, "mart_orders", "amount", project=pid)
-    assert [r["table"] for r in answer["derives_from"]] == ["stg_orders"]
+    assert [(r["hops"], r["table"]) for r in answer["upstream"]] == [
+        (1, "stg_orders"),
+        (2, "orders"),
+    ]
     assert answer["origins"] == [
         {"kind": "Source", "table": "orders", "path": "data/orders.csv", "column": "amount"}
     ]
@@ -362,22 +459,21 @@ def test_lineage_walks_through_a_model_to_the_file_underneath(filled, pid):
 
 def test_a_shared_key_shows_both_origins(filled, pid):
     """`coalesce(l.k, r.k)` — two edges, each with the step explaining its side."""
-    edges = query.lookup(filled, "mart_orders", "customer_id", project=pid)["derives_from"]
-    assert {(r["table"], r["via"]) for r in edges} == {
+    answer = query.lookup(filled, "mart_orders", "customer_id", project=pid)
+    assert {(r["table"], r["via"]) for r in answer["upstream"] if r["hops"] == 1} == {
         ("stg_orders", "join"),
         ("customers", "join"),
     }
-    origins = query.lookup(filled, "mart_orders", "customer_id", project=pid)["origins"]
-    assert {r["table"] for r in origins} == {
-        "orders",
-        "customers",
-    }
+    assert {r["table"] for r in answer["origins"]} == {"orders", "customers"}
 
 
-def test_a_source_column_says_what_is_built_from_it(filled, pid):
+def test_a_source_column_says_what_is_built_from_it_hops_downstream(filled, pid):
     """The forward direction — what §4.5 needs to answer 'this file changed, so what'."""
-    feeds = query.lookup(filled, "orders", "amount", project=pid)["feeds"]
-    assert [(r["table"], r["column"]) for r in feeds] == [("stg_orders", "amount")]
+    downstream = query.lookup(filled, "orders", "amount", project=pid)["downstream"]
+    assert [(r["hops"], r["table"], r["column"]) for r in downstream] == [
+        (1, "stg_orders", "amount"),
+        (2, "mart_orders", "amount"),
+    ]
 
 
 def test_a_column_carries_the_catalogs_facts_and_not_a_new_measurement(filled, pid):
@@ -394,9 +490,17 @@ def test_an_unknown_table_names_what_there_is(filled, pid):
         query.lookup(filled, "nope", project=pid)
 
 
-def test_an_unknown_column_names_the_columns_there_are(filled, pid):
-    with pytest.raises(ValueError, match="amount"):
-        query.lookup(filled, "orders", "nope", project=pid)
+def test_an_unknown_column_names_its_near_misses_and_not_every_column(filled, pid):
+    """Every name was one error longer than a harness passes whole, on a wide table."""
+    with pytest.raises(ValueError, match="which has 3 — closest: amount"):
+        query.lookup(filled, "orders", "AMOUNT", project=pid)
+    with pytest.raises(ValueError, match="none named like it"):
+        query.lookup(filled, "orders", "zzz", project=pid)
+
+
+def test_one_question_at_a_time(filled, pid):
+    with pytest.raises(ValueError, match="one question at a time"):
+        query.lookup(filled, "orders", "amount", to="customers", project=pid)
 
 
 def test_an_empty_graph_says_to_build_it_rather_than_that_the_table_is_missing(neo4j_session, pid):
@@ -536,7 +640,7 @@ def test_a_column_with_nothing_underneath_it_says_so_instead_of_looking_like_a_f
 
     counted = query.lookup(neo4j_session, "agg_orders", "n", project=pid)
     assert counted["column"]["derivation"] == "unknown"
-    assert counted["derives_from"] == []
+    assert counted["upstream"] == []
     assert "nothing readable underneath it" in query.render_text(counted)
 
     # The column beside it resolved, and says nothing about derivation at all.

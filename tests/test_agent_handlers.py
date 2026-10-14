@@ -237,7 +237,13 @@ def test_set_interpretation_rejects_an_empty_write(project):
 
 
 def test_join_findings_surfaces_the_problems_without_ranking_them(sales):
-    out = handlers.join_findings("orders", "customers", keys=["customer_id"], portia_dir=sales)
+    out = handlers.join_findings(
+        "orders",
+        "customers",
+        keys=["customer_id"],
+        portia_dir=sales,
+        reason="orders name a customer",
+    )
     json.dumps(out)
 
     report, evidence = out["report"], out["evidence"]
@@ -554,7 +560,11 @@ def test_join_findings_can_measure_a_table_an_earlier_step_produced(sales):
         portia_dir=sales,
     )
     out = handlers.join_findings(
-        "specs/chain.yaml#orders_named", "customers", keys=["customer_id"], portia_dir=sales
+        "specs/chain.yaml#orders_named",
+        "customers",
+        keys=["customer_id"],
+        portia_dir=sales,
+        reason="orders name a customer",
     )
     json.dumps(out)
     assert out["report"]["left"]["n_rows"] == 10  # the joined table, not the 8-row source
@@ -590,7 +600,11 @@ def test_a_step_reference_only_runs_the_spec_up_to_that_step(sales):
     path.write_text(yaml.safe_dump(doc), encoding="utf-8")
 
     out = handlers.join_findings(
-        "specs/chain.yaml#first", "customers", keys=["customer_id"], portia_dir=sales
+        "specs/chain.yaml#first",
+        "customers",
+        keys=["customer_id"],
+        portia_dir=sales,
+        reason="orders name a customer",
     )
     assert out["report"]["left"]["n_rows"] == 10
 
@@ -716,7 +730,11 @@ def test_join_findings_reads_another_specs_model_by_name(sales):
     )
 
     findings = handlers.join_findings(
-        "stg_orders", "customers", keys=["customer_id"], portia_dir=sales
+        "stg_orders",
+        "customers",
+        keys=["customer_id"],
+        portia_dir=sales,
+        reason="orders name a customer",
     )
 
     assert findings["report"]["left"]["n_rows"] > 0
@@ -756,7 +774,11 @@ def test_a_step_reference_reaches_a_spec_in_a_layer_folder(sales):
         out = handlers.profile_source(f"{ref}#orders_with_customers", sales)
         assert out["n_rows"] == 10
         joined = handlers.join_findings(
-            f"{ref}#orders_with_customers", "customers", keys=["customer_id"], portia_dir=sales
+            f"{ref}#orders_with_customers",
+            "customers",
+            keys=["customer_id"],
+            portia_dir=sales,
+            reason="orders name a customer",
         )
         assert joined["report"]["left"]["n_rows"] == 10
 
@@ -765,7 +787,11 @@ def test_an_unknown_table_name_points_at_the_step_form(sales):
     """Otherwise the message reads 'no such table' when the truth is 'not by that name'."""
     with pytest.raises(ValueError, match="spec path.*#.*step id"):
         handlers.join_findings(
-            "reservations_hotels", "customers", keys=["customer_id"], portia_dir=sales
+            "reservations_hotels",
+            "customers",
+            keys=["customer_id"],
+            portia_dir=sales,
+            reason="orders name a customer",
         )
 
 
@@ -784,7 +810,11 @@ def test_an_unknown_step_id_names_the_steps_that_exist(sales):
     )
     with pytest.raises(ValueError, match="no step 'typo' in specs/chain.yaml — have: first"):
         handlers.join_findings(
-            "specs/chain.yaml#typo", "customers", keys=["customer_id"], portia_dir=sales
+            "specs/chain.yaml#typo",
+            "customers",
+            keys=["customer_id"],
+            portia_dir=sales,
+            reason="orders name a customer",
         )
 
 

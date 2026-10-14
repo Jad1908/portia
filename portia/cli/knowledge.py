@@ -35,6 +35,8 @@ def main() -> None:
     )
     parser.add_argument("--table", help="ask the stored graph about one table instead of building")
     parser.add_argument("--column", help="with --table: that column's lineage")
+    parser.add_argument("--neighbour", help="with --table: every measured pair with this table")
+    parser.add_argument("--to", help="with --table: the routes from it to this table")
     parser.add_argument(
         "--forget-unscoped",
         action="store_true",
@@ -46,7 +48,7 @@ def main() -> None:
         _forget_unscoped()
         return
     if args.table:
-        _lookup(args.table, args.column, args.root)
+        _lookup(args.table, args.column, args.root, neighbour=args.neighbour, to=args.to)
         return
 
     result = build.build_graph(args.root)
@@ -74,7 +76,14 @@ def _print_cypher(graph) -> None:
         print(f"{statement};" + (f"  -- {len(rows)} row(s)" if rows else ""))
 
 
-def _lookup(table: str, column: str | None, root: str) -> None:
+def _lookup(
+    table: str,
+    column: str | None,
+    root: str,
+    *,
+    neighbour: str | None = None,
+    to: str | None = None,
+) -> None:
     """The read path, from a terminal — the same queries the copilot's tool runs.
 
     A play surface, in the sense `CLI` always means here: it must go through
@@ -88,7 +97,14 @@ def _lookup(table: str, column: str | None, root: str) -> None:
 
     try:
         with store.session() as session:
-            answer = query.lookup(session, table, column, project=schema.project_id(root))
+            answer = query.lookup(
+                session,
+                table,
+                column,
+                neighbour=neighbour,
+                to=to,
+                project=schema.project_id(root),
+            )
             print(query.render_text(answer))
     except store.GraphUnavailable as exc:
         raise SystemExit(str(exc)) from None

@@ -46,7 +46,7 @@ from typing import Any
 from claude_agent_sdk import ToolAnnotations, create_sdk_mcp_server, tool
 
 from portia import spec
-from portia.agent import ask, chartspec, drawn, freshness, handlers, prompts, reserved
+from portia.agent import ask, chartspec, drawn, freshness, graphcards, handlers, prompts, reserved
 from portia.core import cancel, columnar, present
 from portia.core.serialize import to_json_compact
 
@@ -947,12 +947,17 @@ async def describe_source(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     "graph_lookup",
-    prompts.tool("graph_lookup"),
+    prompts.tool("graph_lookup", **graphcards.vocabulary()),
     {
         "type": "object",
         "properties": {
             "table": {"type": "string", "description": "Source name, source path, or model name"},
             "column": {"type": "string", "description": "One column of it, for lineage"},
+            "neighbour": {
+                "type": "string",
+                "description": "Another table: every measured pair between the two",
+            },
+            "to": {"type": "string", "description": "Another table: the routes from table to it"},
         },
         "required": ["table"],
     },
@@ -960,7 +965,13 @@ async def describe_source(args: dict[str, Any]) -> dict[str, Any]:
 )
 async def graph_lookup(args: dict[str, Any]) -> dict[str, Any]:
     return await _evidence(
-        lambda: handlers.graph_lookup(args["table"], column=args.get("column"), **_dir(args)),
+        lambda: handlers.graph_lookup(
+            args["table"],
+            column=args.get("column"),
+            neighbour=args.get("neighbour"),
+            to=args.get("to"),
+            **_dir(args),
+        ),
         args=args,
     )
 
@@ -997,9 +1008,28 @@ async def graph_lookup(args: dict[str, Any]) -> dict[str, Any]:
 async def measure_overlaps(args: dict[str, Any]) -> dict[str, Any]:
     return await _evidence(
         lambda: handlers.measure_overlaps(args["pairs"], **_dir(args)),
+        receipt=_overlaps_receipt,
         reads_data=True,
         called=("measure_overlaps", args),
     )
+
+
+#: What a `measure_overlaps` receipt keeps when even its list of pairs does not fit.
+_OVERLAP_COUNTS = ("n_pairs", "n_from_graph", "n_measured", "stored", "not_stored_because")
+
+
+def _overlaps_receipt(payload: dict, size: int) -> dict:
+    """`measure_overlaps`' counts, when its one-line-a-pair receipt is over the budget.
+
+    The receipt is cut at `graphcards.RECEIPT_ROWS` and fits by design; this is
+    for the names that are long enough to defeat that, because the call has
+    already written by then and a refusal would read as *nothing happened*
+    (:func:`_step_receipt`'s reason).
+    """
+    return {
+        "receipt": prompts.error("overlaps_receipt", size=f"{size:,}", budget=f"{RESULT_BUDGET:,}"),
+        **{key: payload[key] for key in _OVERLAP_COUNTS if key in payload},
+    }
 
 
 @tool(
@@ -1482,6 +1512,10 @@ async def set_interpretation(args: dict[str, Any]) -> dict[str, Any]:
             },
             "left_on": {"type": "array", "items": {"type": "string"}},
             "right_on": {"type": "array", "items": {"type": "string"}},
+            "reason": {
+                "type": "string",
+                "description": "Why these two might join on these keys — required, kept in the graph",
+            },
             "left_columns": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -1494,8 +1528,12 @@ async def set_interpretation(args: dict[str, Any]) -> dict[str, Any]:
             },
             "portia_dir": {"type": "string"},
         },
-        "required": ["left", "right"],
+        "required": ["left", "right", "reason"],
     },
+    # Read-only though it now keeps its key measurement in the graph: that is
+    # metadata in a store §5.2 calls re-derivable, best-effort and never asked
+    # about, the line `READ_TOOLS` draws for `measure_overlaps`. Without the hint
+    # Codex would stop every join check for an approval.
     annotations=_READ_ONLY,
 )
 async def join_findings(args: dict[str, Any]) -> dict[str, Any]:
@@ -1506,6 +1544,7 @@ async def join_findings(args: dict[str, Any]) -> dict[str, Any]:
             keys=args.get("keys"),
             left_on=args.get("left_on"),
             right_on=args.get("right_on"),
+            reason=args.get("reason") or "",
             left_columns=args.get("left_columns"),
             right_columns=args.get("right_columns"),
             **_dir(args),
