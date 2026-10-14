@@ -47,7 +47,7 @@ from typing import Any
 from claude_agent_sdk import ToolAnnotations, create_sdk_mcp_server, tool
 
 from portia import spec
-from portia.agent import ask, chartspec, drawn, handlers, prompts
+from portia.agent import ask, chartspec, drawn, freshness, handlers, prompts, reserved
 from portia.core import cancel, columnar, present
 from portia.core.serialize import to_json_compact
 
@@ -550,11 +550,51 @@ def _failed(exc: Exception) -> dict[str, Any]:
 
     An uncaught exception would still reach it as ``str(exc)``; going through
     here means we can add the context needed to pick a different move.
+
+    Shortened to `ERROR_BUDGET` here, saying so, rather than by the harness
+    (:func:`_within_error_budget`).
     """
     return {
-        "content": [{"type": "text", "text": f"{type(exc).__name__}: {exc}"}],
+        "content": [{"type": "text", "text": _within_error_budget(f"{type(exc).__name__}: {exc}")}],
         "is_error": True,
     }
+
+
+#: The longest error text a tool hands back, in characters.
+#:
+#: **Claude Code cuts the middle out of an error result longer than 11,024
+#: characters** and passes a success whole up to 50,000 (measured against both
+#: binaries on a fake server, 2026-10-10, `sandbox/limits`). An error is where
+#: the facts of a refusal live — `blocked_step` carries the produced table's
+#: measurements — and its middle was being dropped by a harness that says only
+#: how much it dropped. So portia cuts first, below that line, and says what it
+#: cut and where. Codex treats an error as it treats any result, so this is the
+#: lower of the two limits that apply to one.
+ERROR_BUDGET = 10_000
+
+
+def _within_error_budget(text: str) -> str:
+    """``text`` whole when it fits `ERROR_BUDGET`, else its start and end around a marker.
+
+    The notice comes first, as every notice in an answer does; then the start
+    of the error, which says what went wrong, and its end, which in portia's
+    refusals says what to do about it, with a marker where the middle was.
+    Both halves are the same length. The space the notice needs is reserved at
+    the length the cut could at most have, so the result never passes the
+    budget whatever the numbers come to.
+    """
+    size = len(text)
+    if size <= ERROR_BUDGET:
+        return text
+    budget = f"{ERROR_BUDGET:,}"
+    widest = f"{size:,}"
+    reserved = len(prompts.notice("error_shortened", size=widest, budget=budget, cut=widest))
+    reserved += len(prompts.notice("error_cut", cut=widest)) + len("\n\n\n\n")
+    room = ERROR_BUDGET - reserved
+    head, tail = text[: room - room // 2], text[size - room // 2 :]
+    cut = f"{size - len(head) - len(tail):,}"
+    notice = prompts.notice("error_shortened", size=widest, budget=budget, cut=cut)
+    return f"{notice}\n\n{head}\n{prompts.notice('error_cut', cut=cut)}\n{tail}"
 
 
 def _too_large(size: int) -> dict[str, Any]:
@@ -717,6 +757,7 @@ async def _evidence(
     receipt: Callable[[Any, int], Any] | None = None,
     reads_data: bool = False,
     called: tuple[str, dict[str, Any]] | None = None,
+    args: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run one handler off the event loop and hand back what it found.
 
@@ -766,31 +807,45 @@ async def _evidence(
     `_interrupted`, with what portia measured after the press, and the
     exchange goes on. ``called`` is the tool's name and its arguments, which
     are how the window's card finds the call and what the measuring reads.
+
+    **A table that changed since it was indexed is named first** *(2026-10-13)*.
+    ``args`` are the call's arguments, or ``called``'s when it is not given,
+    and every table they name is checked once the handler has answered
+    (`agent/freshness.py`): one that changed, or that nothing can tell about,
+    is listed under a leading ``stale`` key, whichever form the answer takes,
+    coarsened and receipt included (:func:`_noticed`). After the handler,
+    because a profile of a warehouse table records its facts afresh and is
+    then not stale; on the worker, because the check is a stat or a metadata
+    query; and under the exchange's scope, so Stop reaches it.
     """
     tool_name, arguments = called or ("", {})
+    about = args if args is not None else arguments
     record = _register(tool_name, arguments) if reads_data else None
 
-    def stoppable() -> Any:
+    def stoppable() -> tuple[Any, list[dict]]:
         if record is None:
             with cancel.scope(_stop):
-                return call()
-        return _run_data(
+                found = call()
+                return found, _stale(about)
+        found = _run_data(
             record,
             call,
             lambda: handlers.interrupted_facts(tool_name, arguments, **_dir(arguments)),
         )
+        with cancel.scope(record.parent):
+            return found, _stale(about)
 
     try:
-        found = await asyncio.to_thread(stoppable)
-        text = encode(found)
+        found, stale = await asyncio.to_thread(stoppable)
+        text = encode(_noticed(found, stale))
         if len(text) > RESULT_BUDGET and coarser is not None:
-            coarse = to_json_compact(coarser(found))
+            coarse = to_json_compact(_noticed(coarser(found), stale))
             if len(coarse) <= RESULT_BUDGET:
                 text = coarse
             elif receipt is not None:
-                text = to_json_compact(receipt(found, len(coarse)))
+                text = to_json_compact(_noticed(receipt(found, len(coarse)), stale))
         elif len(text) > RESULT_BUDGET and receipt is not None:
-            text = to_json_compact(receipt(found, len(text)))
+            text = to_json_compact(_noticed(receipt(found, len(text)), stale))
     except _Interrupted:
         assert record is not None
         # **Stop wins, decided here and not on the worker.** The worker sees
@@ -811,6 +866,36 @@ async def _evidence(
         if record is not None:
             _retire(record)
     return _ok(text) if len(text) <= RESULT_BUDGET else _too_large(len(text))
+
+
+#: The key an answer's list of changed tables goes under, first.
+STALE = "stale"
+
+
+def _stale(args: dict[str, Any]) -> list[dict]:
+    """The ``stale`` list for a call with these arguments (`freshness.notices`).
+
+    A check that fails does not fail the answer, which has already been
+    measured; it says it could not check, as an entry, because an absent list
+    would read as *nothing changed*.
+    """
+    if not args:
+        return []
+    try:
+        return freshness.notices(args, **_dir(args))
+    except cancel.Cancelled:
+        raise
+    except Exception as exc:  # noqa: BLE001 - said in the answer, not swallowed
+        error = f"{type(exc).__name__}: {exc}"
+        why = prompts.notice("stale_check_failed", error=error)
+        return [{"changed": None, "unknown": True, "why": why}]
+
+
+def _noticed(payload: Any, stale: list[dict]) -> Any:
+    """``payload`` with ``stale`` as its first key, when there is anything to say."""
+    if not stale or not isinstance(payload, dict):
+        return payload
+    return {STALE: stale, **{key: value for key, value in payload.items() if key != STALE}}
 
 
 async def _awaited(
@@ -851,6 +936,7 @@ async def describe_source(args: dict[str, Any]) -> dict[str, Any]:
         lambda: handlers.describe_source(args["source"], **_dir(args)),
         encode=_as_columns,
         coarser=_described_by_type,
+        args=args,
     )
 
 
@@ -869,7 +955,8 @@ async def describe_source(args: dict[str, Any]) -> dict[str, Any]:
 )
 async def graph_lookup(args: dict[str, Any]) -> dict[str, Any]:
     return await _evidence(
-        lambda: handlers.graph_lookup(args["table"], column=args.get("column"), **_dir(args))
+        lambda: handlers.graph_lookup(args["table"], column=args.get("column"), **_dir(args)),
+        args=args,
     )
 
 
@@ -942,7 +1029,7 @@ async def profile_source(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     "query_data",
-    prompts.tool("query_data"),
+    prompts.tool("query_data", **reserved.vocabulary()),
     {
         "type": "object",
         "properties": {
@@ -1357,7 +1444,8 @@ async def set_interpretation(args: dict[str, Any]) -> dict[str, Any]:
             roles=args.get("roles"),
             note=args.get("note"),
             **_dir(args),
-        )
+        ),
+        args=args,
     )
 
 
@@ -1482,6 +1570,7 @@ async def read_spec(args: dict[str, Any]) -> dict[str, Any]:
             **_dir(args),
         ),
         coarser=_spec_shortened,
+        args=args,
     )
 
 

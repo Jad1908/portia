@@ -64,3 +64,17 @@ def test_to_json_is_readable_and_keeps_unicode():
 def test_nan_never_reaches_a_json_document():
     assert not math.isnan(0.0)
     assert json.loads(to_json({"rate": to_jsonable(float("nan"))})) == {"rate": None}
+
+
+def test_a_nested_value_keeps_its_lists_and_maps():
+    """A list-valued cell stays a list; `to_jsonable` alone would make it a string."""
+    from decimal import Decimal
+
+    from portia.core.serialize import to_jsonable, to_jsonable_nested
+
+    assert to_jsonable(["constant"]) == "['constant']"
+    assert to_jsonable_nested(["constant", Decimal("1.5")]) == ["constant", 1.5]
+    assert to_jsonable_nested({"a": (1, float("nan")), 2: {"b": None}}) == {
+        "a": [1, None],
+        "2": {"b": None},
+    }

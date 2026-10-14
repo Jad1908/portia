@@ -668,3 +668,65 @@ def test_reading_one_entry_opens_no_other_entry(tmp_path, monkeypatch):
     catalog.load_source("a", tmp_path / ".portia")
 
     assert opened == ["project.yaml", "a.yaml"]
+
+
+# --- the row count is a fact on every entry (2026-10-13) --------------------------
+
+
+def test_indexing_a_file_records_its_row_count_as_a_fact(tmp_path):
+    from portia import catalog
+
+    d = tmp_path / ".portia"
+    index_source(_write_source(tmp_path), portia_dir=d)
+    entry = load_catalog(d)["sources"]["customers"]
+
+    assert entry["indexed"]["rows"] == 40
+    assert catalog.row_count(entry) == 40 and catalog.rows_recorded(entry)
+    assert not is_stale(entry, portia_dir=d), "the count is not a staleness fact"
+
+
+def test_an_entry_indexed_before_counts_were_kept_says_so_and_the_summary_is_not_read(tmp_path):
+    from portia import catalog
+    from portia.agent import handlers, prompts
+
+    d = tmp_path / ".portia"
+    src_file = index_source(_write_source(tmp_path), portia_dir=d)
+    old = yaml.safe_load(src_file.read_text(encoding="utf-8"))
+    del old["indexed"]["rows"]
+    src_file.write_text(yaml.safe_dump(old, sort_keys=False), encoding="utf-8")
+    entry = load_catalog(d)["sources"]["customers"]
+
+    assert "40 rows" in entry["summary"]
+    assert catalog.row_count(entry) is None and not catalog.rows_recorded(entry)
+    assert handlers.row_facts(entry) == {
+        "n_rows": None,
+        "n_rows_note": prompts.notice("rows_not_recorded"),
+    }
+
+
+def test_a_built_table_records_the_rows_its_build_measured(tmp_path, table):
+    import pandas as pd
+
+    from portia import catalog
+    from portia.agent import handlers
+
+    d = tmp_path / ".portia"
+    built = table(pd.DataFrame({"id": [1, 2, 3, 4, 5]}), "m")
+    catalog.index_model("m", built, portia_dir=d)
+    entry = catalog.load_models(d)["m"]
+
+    assert entry["indexed"] == {"rows": 5}
+    assert handlers.row_facts(entry) == {"n_rows": 5}
+
+
+def test_only_a_written_summary_is_a_summary(tmp_path):
+    from portia import catalog
+
+    d = tmp_path / ".portia"
+    index_source(_write_source(tmp_path), portia_dir=d)
+    drafted = load_catalog(d)["sources"]["customers"]
+    assert drafted["summary"] and catalog.written_summary(drafted) is None
+    set_interpretation("customers", summary="The EU customer list.", portia_dir=d)
+    written = load_catalog(d)["sources"]["customers"]
+    assert catalog.written_summary(written) == "The EU customer list."
+    assert catalog.written_summary({"model": "m", "summary": None}) is None

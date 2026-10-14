@@ -61,6 +61,30 @@ def duration(seconds: float | None) -> str:
     return f"{int(seconds // HOUR)}h {int((seconds % HOUR) // MINUTE):02d}m"
 
 
+#: How a moment reads: to the minute, local time, no zone. The catalog stamps an
+#: entry to the second with its offset, and a file's mtime to the microsecond;
+#: a sentence saying which came first needs neither.
+MOMENT = "%Y-%m-%d %H:%M"
+
+
+def moment(value: Any) -> str:
+    """`2026-10-13 09:12`, from an ISO timestamp or seconds since the epoch.
+
+    ``None`` reads as unknown, and a value that is neither is given back as
+    written, since a hand-edited catalog may hold anything there.
+    """
+    from datetime import datetime
+
+    if value is None:
+        return "—"
+    try:
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            return datetime.fromtimestamp(float(value)).astimezone().strftime(MOMENT)
+        return datetime.fromisoformat(str(value)).strftime(MOMENT)
+    except (ValueError, OverflowError, OSError):
+        return str(value)
+
+
 #: Decimal units, because that is what the vendor prints: `ollama list` says
 #: 5.2 GB for the file the model picker is about to name, and a picker saying
 #: 4.8 GiB for the same file is two numbers for one fact.

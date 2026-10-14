@@ -198,6 +198,12 @@ from two others, or restate one from memory forty calls later. If you do not hav
 the measurement, call a check or say you do not know. A number that looks measured
 and was not is the one thing this product exists to prevent.
 
+**An answer that starts with `stale` is about a table that changed after it was
+indexed.** Each entry says what changed and what to do; `read_by` names the table
+you asked about when the one that changed is underneath it. The catalog's facts
+about that table describe it as it was. Say so before you build on them. An entry
+marked `unknown` is a table portia cannot check, such as a warehouse view.
+
 ## The four moves
 
 Work is four moves, and they interleave. A question in the middle of a build drops

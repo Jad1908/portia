@@ -251,11 +251,47 @@ def dependencies(models: dict[str, Path], *, base_dir: str | Path = ".") -> dict
     inputs inside one spec are.
     """
     docs = {name: load_spec(Path(base_dir) / path) for name, path in models.items()}
+    return _model_reads(docs)
+
+
+def _model_reads(docs: dict[str, dict]) -> dict[str, set[str]]:
+    """`dependencies` over specs already loaded, by model name."""
     return {
         name: {ref for step in (doc.get("steps") or []) for ref in step_inputs(step)}
-        & set(models) - {name}
+        & set(docs) - {name}
         for name, doc in docs.items()
     }
+
+
+def sources_read(models: dict[str, Path], *, base_dir: str | Path = ".") -> dict[str, list[str]]:
+    """The sources each model's table is built from, its own and those of every model it reads.
+
+    A source is named as the spec's ``sources:`` block names it, which is the
+    catalog's name for it when `record_step` wrote the block. The model's own
+    come first, then each model it reads, nearest first, each name once.
+
+    **What a built table is as fresh as** *(2026-10-13)*. A model built
+    locally keeps no change marker of its own (`catalog.freshness`): what it
+    holds is a function of its spec and the files underneath, and a file that
+    changed after the build is what makes the model's catalog facts old. The
+    answer that names a model says which of those changed.
+    """
+    docs = {name: load_spec(Path(base_dir) / path) for name, path in models.items()}
+    reads = _model_reads(docs)
+    out: dict[str, list[str]] = {}
+    for name in docs:
+        names: list[str] = []
+        visited, queue = {name}, [name]
+        while queue:
+            model = queue.pop(0)
+            for source in docs[model].get("sources") or {}:
+                if source not in names:
+                    names.append(str(source))
+            for upstream in sorted(reads[model] - visited):
+                visited.add(upstream)
+                queue.append(upstream)
+        out[name] = names
+    return out
 
 
 def upstream_of(

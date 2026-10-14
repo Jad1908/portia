@@ -56,6 +56,21 @@ def to_jsonable(v: Any) -> Any:
     return str(v)
 
 
+def to_jsonable_nested(value: Any) -> Any:
+    """``value`` as plain JSON, its lists and maps walked into, every scalar through `to_jsonable`.
+
+    `to_jsonable` is for one scalar and turns anything else into its string,
+    which is right for a date and wrong for a list: a DuckDB ``VARCHAR[]`` cell
+    of ``['constant']`` reached the model as the string ``"['constant']"``
+    (2026-10-13, the first list-valued column portia itself serves).
+    """
+    if isinstance(value, dict):
+        return {str(key): to_jsonable_nested(item) for key, item in value.items()}
+    if isinstance(value, list | tuple | set | frozenset):
+        return [to_jsonable_nested(item) for item in value]
+    return to_jsonable(value)
+
+
 def to_json(obj: Any) -> str:
     """Serialize an already-jsonable evidence dict to a stable, readable string.
 

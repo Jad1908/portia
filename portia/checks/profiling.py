@@ -67,6 +67,21 @@ BOOLEAN, DATETIME, STRING, OTHER = "boolean", "datetime", "string", "other"
 #: Kinds that get describe()-style range and spread rather than a modal value.
 NUMERIC_KINDS = frozenset({INTEGER, FLOAT, NUMERIC})
 
+#: Every flag :func:`_flags` can raise, in the order it raises them. **The
+#: vocabulary, written down once** *(2026-10-13)*: an answer that lists flags
+#: (`core/listing.flagged`) shows them in this order, which is the profiler's
+#: fixed one and says nothing about which matters. `tests/test_listing.py` holds
+#: `_flags` to it.
+FLAGS = (
+    "all_null",
+    "constant",
+    "high_null",
+    "mixed_types",
+    "leading_trailing_whitespace",
+    "numeric_stored_as_text",
+    "high_cardinality",
+)
+
 #: DuckDB's names, then Snowflake's, BigQuery's and PostgreSQL's where they differ.
 #: Snowflake's numbers are all ``NUMBER(p, s)`` and are read by `_scale`; its
 #: text is ``TEXT`` and its timestamps are ``TIMESTAMP_NTZ``/``_LTZ``/``_TZ``,

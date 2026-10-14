@@ -425,6 +425,10 @@ def test_on_a_warehouse_nothing_is_scanned_and_the_catalog_says_the_sizes(
     entry = catalog.load_source("orders", portia_dir=sales)
     entry["indexed"] = {**entry["indexed"], "rows": 1234, "approximate": ["rows"]}
     catalog._write(Path(sales) / "sources" / "orders.yaml", entry)
+    # An entry indexed before counts were kept (2026-10-13) has none to give.
+    uncounted = catalog.load_source("customers", portia_dir=sales)
+    uncounted["indexed"].pop("rows")
+    catalog._write(Path(sales) / "sources" / "customers.yaml", uncounted)
 
     class Warehouse:
         remote = True
