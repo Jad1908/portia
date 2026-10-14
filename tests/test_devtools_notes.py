@@ -74,3 +74,13 @@ def test_health_states_budget_status_and_history(folder: Path, monkeypatch) -> N
 def test_a_public_clone_has_no_notes_and_passes(tmp_path: Path, capsys) -> None:
     assert notes.main(["--notes", str(tmp_path / "docs")]) == 0
     assert "No notes" in capsys.readouterr().out
+
+
+def test_the_checker_does_not_read_its_own_examples(folder: Path, repo: Path) -> None:
+    """Its docstring and this file quote broken citations on purpose."""
+    for rel in notes.SELF:
+        path = repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# CONNECTOR.md is gone; PIPELINE.md §6 too.\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    assert not any(b.startswith(notes.SELF) for b in notes.cites(repo, notes.load_notes(folder)))
