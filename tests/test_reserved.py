@@ -158,6 +158,47 @@ def test_a_chart_reads_them_too(shop):
     assert chart["n_rows"] == 3
 
 
+def test_data_type_finds_the_all_null_columns_the_engine_stores_as_text(shop):
+    """The real case (2026-10-14): an UNPIVOT refused DOUBLE beside VARCHAR, and the
+    VARCHAR columns were the empty meters. `type` says `empty`; the engine's type is
+    what the copilot asked for, by `information_schema`'s name for it."""
+    pd.DataFrame(
+        {"reading_at": ["2024-01-01 00:00", "2024-01-01 01:00"], "m1": [1.5, 2.5], "m2": [None] * 2}
+    ).to_csv("meters.csv", index=False)
+    catalog.index_source("meters.csv", portia_dir=shop)
+    answer = _ask(
+        "SELECT table_name, column_name FROM portia_columns WHERE data_type = 'VARCHAR'",
+        ["portia_columns"],
+        shop,
+    )
+    assert {"table_name": "meters", "column_name": "m2"} in _records(answer)
+    typed = _ask(
+        "SELECT column_name, type, data_type FROM portia_columns "
+        "WHERE table_name = 'meters' ORDER BY position",
+        ["portia_columns"],
+        shop,
+    )
+    assert [(r["type"], r["data_type"]) for r in _records(typed)] == [
+        ("datetime", "TIMESTAMP"),
+        ("float", "DOUBLE"),
+        ("empty", "VARCHAR"),
+    ]
+
+
+def test_a_models_columns_carry_their_storage_type_too(shop):
+    answer = _ask(
+        "SELECT column_name, data_type FROM portia_columns "
+        "WHERE table_name = 'big_orders' ORDER BY position",
+        ["portia_columns"],
+        shop,
+    )
+    assert [(r["column_name"], r["data_type"]) for r in _records(answer)] == [
+        ("ORDER_ID", "BIGINT"),
+        ("amount", "DOUBLE"),
+        ("shop", "VARCHAR"),
+    ]
+
+
 def test_a_table_nobody_profiled_has_its_type_and_no_flags(shop):
     entry = catalog.load_source("customers", portia_dir=shop)
     entry["columns"] = [

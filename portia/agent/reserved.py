@@ -183,7 +183,10 @@ def create(con: Any, name: str, fields: Sequence[tuple[str, str]], rows: list[di
 #: and ``column_name``, here and ``table_name`` in :data:`TABLES`, because a
 #: model already knows them from every SQL engine it has read about. With
 #: ``name`` for both, two Haiku drives guessed ``source`` and then
-#: ``column_name``, and each guess was a failed query.
+#: ``column_name``, and each guess was a failed query. ``data_type`` is the
+#: third *(2026-10-14)*: the engine's storage type, which a Haiku drive asked
+#: for by that name to find the all-null columns an ``UNPIVOT`` refused, and
+#: which ``type`` (portia's reading of the values) is not.
 COLUMNS = "portia_columns"
 COLUMN_FIELDS: tuple[tuple[str, str], ...] = (
     ("table_name", "VARCHAR"),
@@ -191,6 +194,7 @@ COLUMN_FIELDS: tuple[tuple[str, str], ...] = (
     ("position", "INTEGER"),
     ("column_name", "VARCHAR"),
     ("type", "VARCHAR"),
+    ("data_type", "VARCHAR"),
     ("role", "VARCHAR"),
     ("flags", "VARCHAR[]"),
     ("null_rate", "DOUBLE"),
@@ -276,6 +280,10 @@ def _column_rows(request: Request) -> list[dict]:
                     "position": position,
                     "column_name": _text(column.get("name")),
                     "type": _text(column.get("inferred") or column.get("dtype")),
+                    # The engine's storage type, beside portia's reading of the
+                    # values: an all-null column is `empty` to one and `VARCHAR`
+                    # to the other. Null on an entry indexed before it was kept.
+                    "data_type": _text(column.get("dtype")),
                     "role": _text(column.get("role")),
                     # Absent on a column nobody measured, which is not the same
                     # as measured and unflagged.

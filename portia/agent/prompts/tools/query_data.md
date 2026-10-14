@@ -80,10 +80,12 @@ and runs again. A big 'limit' gets as many whole rows as fit in one answer, and
 Two more names work in 'inputs'. `portia_columns` is one row per column of every
 source and model: {portia_columns}. `portia_tables` is one row per source and
 model: {portia_tables}. They name things as `information_schema` does: a table is
-`table_name` in both, a column is `column_name`. They hold the catalog's facts, never
-the data, and answer what one `describe_source` per table cannot: which columns
-anywhere are mostly null, which tables have a column named like `%_id`, which tables
-changed since they were indexed. `flags` is a list, so ask
+`table_name` in both, a column is `column_name`. `data_type` is the type the engine
+stores a column as (`VARCHAR`, `DOUBLE`), which is what a cast or an UNPIVOT sees;
+`type` is portia's reading of its values (`float`, `empty`). They hold the catalog's
+facts, never the data, and answer what one `describe_source` per table cannot: which
+columns anywhere are mostly null, which tables have a column named like `%_id`, which
+tables changed since they were indexed. `flags` is a list, so ask
 `list_contains(flags, 'high_null')`.
 
 They, and the results this chat kept, run in DuckDB's SQL on this machine, whatever
