@@ -237,7 +237,7 @@ def test_a_question_stops_even_when_every_write_is_auto_allowed():
     reached the confirmation path — `ask.py` branches on it first — so the
     copilot keeps its ability to ask **by construction** rather than because
     somebody remembered to exclude it. A mode that silenced questions would not
-    be autopilot; it would be the copilot guessing, which is `PLAN.md`'s first
+    be autopilot; it would be the copilot guessing, which is `PLAN.md`'s second
     non-negotiable.
     """
     asked: list[list[dict]] = []

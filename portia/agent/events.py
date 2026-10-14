@@ -3,8 +3,8 @@
 `TECH_STACK.md` promises the engine emits a clean stream of questions, insights
 and decisions, and that the UI *sits on top of it* and stays swappable. This is
 that seam: SDK message objects in, small JSON-serializable events out. The CLI
-renders them to a terminal today; the three-panel app (docs/VISION.md) will
-render the same stream without the engine knowing the difference.
+renders them to a terminal; the three-pane app (docs/VISION.md) renders the
+same stream without the engine knowing the difference.
 
 Keep events dumb. No formatting, no colour, no decisions about what's worth
 showing — that's the renderer's job, at the edge.
@@ -97,10 +97,9 @@ def from_message(message: Any) -> Iterator[Event]:
                 "text": getattr(message, "result", None),
                 "usage": getattr(message, "usage", None),
                 "cost_usd": getattr(message, "total_cost_usd", None),
-                # The SDK's id for the session this exchange belonged to. Carried
-                # so a chat can record which one it was (`CONVERSATION.md` §4) —
-                # it costs one key, and it is what would make reopening a chat an
-                # addition rather than a rewrite. Nothing reads it yet.
+                # The SDK's id for the session this exchange belonged to. It is
+                # what a resume reads: a chat reopened from disk connects with it
+                # (`exchange.open_from_disk`, `CHAT_SESSIONS.md` §3.3).
                 "session_id": getattr(message, "session_id", None),
             },
         )
@@ -203,9 +202,9 @@ def approval_result_event(
     genuinely knows.
 
     That is not `at` moving into `data` (`runlog.write`, and `CLAUDE.md` →
-    `runlog.py`). ``at`` stays this module's non-business: *when portia wrote the
-    record*. How long the loop sat waiting is a fact about what the loop did,
-    the same kind of fact as ``allowed``.
+    *Durable artifacts*). ``at`` stays this module's non-business: *when portia
+    wrote the record*. How long the loop sat waiting is a fact about what the
+    loop did, the same kind of fact as ``allowed``.
 
     ``None`` means nobody measured — every log written before this existed —
     and never zero, for `summary`'s ``wall_seconds`` reason: a made-up zero

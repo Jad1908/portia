@@ -34,7 +34,7 @@ special case elsewhere:**
   (`prompts/backend/bigquery.md`) is where the copilot is told to name
   columns. What this module does is **label** every job ``application:
   portia``, which is BigQuery's own query tag and costs nothing — the thing
-  `CONNECTOR.md` §8 deferred on Snowflake, free here.
+  `CONNECTORS.md` §6 deferred on Snowflake, free here.
 - **Types are GoogleSQL's names.** The API reports legacy names
   (``INTEGER``, ``FLOAT``, ``BOOLEAN``, ``RECORD``); `type_name` renders the
   names the console shows (``INT64``, ``FLOAT64``, ``BOOL``, ``STRUCT``) and

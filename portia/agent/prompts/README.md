@@ -18,7 +18,7 @@ go use dbt instead. That sentence was buried in a decorator argument.
 | `brief/template.md` | **L1** — the project brief's shape; `{project}`, `{groups}`, `{sources}` are filled by `agent/context.py` | every request |
 | `brief/no_context.md` | what L1 says when the project is undescribed | when `project.yaml` is empty |
 | `brief/no_sources.md` | what L1 says when nothing is indexed | when no source is indexed |
-| `backend/<kind>.md` | the tail of L1 — **where the data lives**: which engine, which dialect, what a question costs, what the role and the scope allow (`docs/CONNECTOR.md` §2.9). One file per backend; `agent/context.py` picks by `core.backend.active()` | every request |
+| `backend/<kind>.md` | the tail of L1 — **where the data lives**: which engine, which dialect, what a question costs, what the role and the scope allow (`docs/CONNECTORS.md` §2.9). One file per backend; `agent/context.py` picks by `core.backend.active()` | every request |
 | `tools/<tool>.md` | one tool's description — what it does **and when to reach for it** | in the tool list |
 | `tasks/<task>.md` | the opening instruction a CLI command sends | once, per invocation |
 | `errors/<name>.md` | what a **refused** tool call says back — and what a held reply is told (`review_before_reply.md`, via the `Stop` hook in `agent/session.py`), and the note an answer carries when it is not the whole of it (`result_shortened.md`), and the receipt a write sends when its report does not fit (`step_receipt.md`) | when the engine blocks a write, holds a reply, or sends part of an answer |

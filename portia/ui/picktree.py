@@ -7,7 +7,7 @@ engine import, the status `tree.py`, `state.py` and `graph.py` have, so the
 roll-up is tested without a browser.
 
 **It replaced a browser that drew one level at a time** *(2026-09-18,
-`CONNECTOR.md` §2.5.1)*. Ticks survived a trip into another schema and nothing
+`CONNECTORS.md` §2.5.1)*. Ticks survived a trip into another schema and nothing
 drew them on the way back: the only trace of a tick made elsewhere was the
 number on the Index button. And only a table row carried a box, so a schema of
 forty tables was forty clicks.

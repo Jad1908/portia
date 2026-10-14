@@ -99,7 +99,7 @@ class DuckDBBackend:
     null tokens were always the same ones — only the materialization differed.
 
     The pandas backend that used to sit beside this one is gone with the
-    implementations it called (`docs/DUCKDB_MIGRATION.md` §8, step 10). The class
+    implementations it called (`docs/DUCKDB_MIGRATION.md` §8). The class
     stays because it is the seam a second tier plugs into — Snowflake is the
     stated next one — and because `EXCEPTIONS` is keyed on its name.
     """

@@ -786,7 +786,7 @@ body.p-rail-dragging * {
 }
 
 /* segmented control — the selected segment is a soft accent wash, not a solid
- * fill; the solid one belongs to the single primary action per view. */
+ * fill; the solid one belongs to the single primary action per pane. */
 .btn.seg-active,
 .btn.q-btn.seg-active {
   background: var(--accent-soft);
@@ -3785,8 +3785,8 @@ body.body--dark .p-panel {
  * A callout in the flow of the chat, not a boxed form (2026-09-27). One accent
  * rule down the left edge is the whole of its chrome: it keeps the job the
  * card's border had, the one live accent edge on screen, at a fraction of the
- * ink. The boxed card it replaced, and why each part of it went, is kept in
- * DESIGN.md beside the reversal. Never a modal. */
+ * ink. The boxed card it replaced, and why each part of it went, is in
+ * DESIGN.md's history. Never a modal. */
 .question-form {
   display: flex;
   flex-direction: column;
@@ -4125,8 +4125,9 @@ body.body--dark .p-panel {
  * place to type. The box is the control here: the textarea is borderless inside
  * it and the settings and the send sit on a bar along its foot.
  *
- * The focus wash lands on the box rather than the field — one of the accent's
- * three jobs, and the whole composer is what is focused.
+ * The focus wash lands on the box rather than the field: the focus ring is one
+ * of the accent's uses (DESIGN.md → Tokens), and the whole composer is what is
+ * focused.
  *
  * **Rounder, with no rule above it** *(2026-10-06, the user: "clunky and
  * awkward")*. `{rounded.xl}`, the strong hairline the pinned row takes on this
@@ -4195,8 +4196,8 @@ body.body--dark .p-panel {
   font-size: 13px;
   line-height: 1.5;
   padding: 0;
-  /* Two lines at rest, because a goal is a paragraph (§7.1's reason for Enter
-   * writing a newline), and long enough to be worth typing into; capped short
+  /* Two lines at rest, because a goal is a paragraph (`CONVERSATION.md` §7.1's
+   * reason for Enter writing a newline), and long enough to be worth typing into; capped short
    * enough to leave the transcript the pane. `autogrow` goes between the two. */
   min-height: 3em;
   max-height: 200px;
@@ -4663,8 +4664,8 @@ body.body--dark .p-knowledge div.vis-tooltip {
  * The middle pane's tab strip (docs/VISUALIZATION.md §3).
  *
  * It reuses `.pane-tabs` and `.pane-tab` from the transcript rather than
- * growing a third tab style — §3.1 turned down the narrower design partly for
- * introducing one. What is added here is what a *chart* tab has that a
+ * growing a third tab style, one cost of the narrower design §3.1 turned
+ * down. What is added here is what a *chart* tab has that a
  * transcript tab does not: an icon saying which kind of tab it is, a name that
  * can be long enough to need truncating, and a close control.
  *
@@ -5248,7 +5249,7 @@ body.tab-dragging .tab-drop {
   flex: 0 0 auto;
 }
 
-/* --- Fields, alerts and choice cards (docs/CONNECTOR.md, 2026-09-04) --------
+/* --- Fields, alerts and choice cards (docs/CONNECTORS.md, 2026-09-04) -------
  *
  * `field` is a labelled input that says up front whether it is required. The
  * box is `p-input`: 30px, otherwise the `p-field` box — Quasar's 56px default
@@ -5586,8 +5587,8 @@ body.tab-dragging .tab-drop {
  * nothing about it grows, counts or sorts a row.
  *
  *   live     work going on right now. Blue, and the one light that moves.
- *   waiting  a chat stopped on you (§3.5). The accent, still, because it is
- *            asking for you and not because it is worse.
+ *   waiting  a chat stopped on you (`CHAT_SESSIONS.md` §3.5). The accent,
+ *            still, because it is asking for you and not because it is worse.
  *   on       a session that is open. Green, still.
  *   off      one that is not. Grey, still.
  *

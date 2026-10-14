@@ -30,7 +30,7 @@ can see.
 
 :func:`connect` is the other half of that: a table needs a connection to be read
 on, and with no store to open there is one obvious kind — a fresh in-memory
-database that reads the repo's files. Since `docs/CONNECTOR.md` there is a second
+database that reads the repo's files. Since `docs/CONNECTORS.md` there is a second
 kind, a warehouse session, and :func:`connect` asks `core/backend.py` which one
 the project is on. A spec's ``sources:`` entry can name a **table** as well as a
 file (:func:`source_table`), and that is the whole of what the seam needed.
@@ -138,12 +138,12 @@ def write_table(table: Table, path: str | Path) -> Path:
     """
     if backend.is_remote(table.con):
         # The one write that would be a pull. On a warehouse project the model
-        # tables are what Build created there (`docs/CONNECTOR.md` §2.7), and a
+        # tables are what Build created there (`docs/CONNECTORS.md` §2.7), and a
         # file on this laptop is exactly the second copy that mode exists to
         # not make. Refused with the reason, rather than with COPY's own error.
         raise ValueError(
-            f"{table.name} lives in the warehouse and is not written to a file — "
-            "Build creates the model tables there instead (docs/CONNECTOR.md §2.7)"
+            f"{table.name} lives in the warehouse and is not written to a file; "
+            "Build creates the model tables there instead."
         )
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -168,7 +168,7 @@ def connect() -> Any:
     DuckDB's default external access, because reading the project's files is its
     whole job — the agent's SQL hatch opens its own restricted connection and
     always did (`ops/sql.py`). On a project that names a warehouse connection it
-    is a session there instead (`core/backend.py`, `docs/CONNECTOR.md`), and the
+    is a session there instead (`core/backend.py`, `docs/CONNECTORS.md`), and the
     caller cannot tell: a `Table` is the same handle either way.
 
     **Not thread-safe.** A thread that runs a query takes its own handle with
@@ -207,7 +207,7 @@ def load_table(path: str | Path, con: Any, *, name: str | None = None) -> Table:
 
 #: A source reference that names a **table** rather than a file:
 #: ``{table: DATABASE.SCHEMA.NAME}``. What a spec's ``sources:`` block holds on a
-#: warehouse project (`docs/CONNECTOR.md` §2.5), and what a catalog entry with a
+#: warehouse project (`docs/CONNECTORS.md` §2.5), and what a catalog entry with a
 #: ``remote`` block resolves to. The dict shape rather than a ``snowflake://``
 #: string, because a spec is read in a diff and a key says what the value is.
 TABLE_REF = "table"

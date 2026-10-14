@@ -110,7 +110,7 @@ class Model:
     #: Whether the vendor's own picker files it under *legacy*: still served,
     #: no longer what it offers first. The vendor's word, never portia's
     #: judgment of the model, and a picker folds these away rather than ranks
-    #: them (`docs/PROVIDERS.md` §5.1).
+    #: them (`docs/PROVIDERS.md` §5).
     legacy: bool = False
 
     @property
@@ -411,7 +411,7 @@ class Provider(ABC):
     #: local provider. A picker may draw these in a render, where `models` is
     #: a network call and may not be (`docs/PROVIDERS.md` §4.3). Written in the
     #: order the vendor's own picker offers them, current first, and read off
-    #: the binary portia runs (§5.1).
+    #: the binary portia runs (§5).
     static_models: tuple[Model, ...] = ()
 
     @abstractmethod

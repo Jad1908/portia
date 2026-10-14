@@ -1,4 +1,4 @@
-"""A warehouse table in the catalog (`docs/CONNECTOR.md` §2.5, §2.6, §2.11, §2.12).
+"""A warehouse table in the catalog (`docs/CONNECTORS.md` §2.5, §2.6, §2.11, §2.12).
 
 Driven on DuckDB wearing a remote badge: `_Warehouse` answers the two metadata
 questions the catalog asks a session — columns and table facts — off DuckDB's
@@ -309,7 +309,7 @@ def test_a_remote_build_creates_the_table_in_the_target(project, warehouse):
 
 
 def test_each_spec_names_where_its_table_goes_and_the_build_creates_the_schema(project, warehouse):
-    """`CONNECTOR.md` §2.7.1, the user's call: different tables go different
+    """`CONNECTORS.md` §2.7.1, the user's call: different tables go different
     places. The target is the spec's own; a schema it names that does not exist
     is created on the way; no project setting is consulted."""
     root = _spec_dir(project, warehouse)
@@ -380,7 +380,7 @@ def test_on_the_hand_off_recording_a_step_creates_the_table_where_the_spec_says(
 def test_a_written_table_is_on_the_model_entry_and_a_read_of_the_model_goes_there(
     project, warehouse
 ):
-    """`CONNECTOR.md` §2.7.2: the entry says where the table is and which spec
+    """`CONNECTORS.md` §2.7.2: the entry says where the table is and which spec
     built it; profiling the model then scans that table rather than re-running
     the spec. Decisive check: with the source table gone, the profile still
     answers, because it never touched the source."""

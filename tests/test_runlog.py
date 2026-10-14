@@ -144,8 +144,8 @@ def test_an_empty_prompts_record_has_no_digest():
 
 
 def test_what_makes_two_chats_comparable_is_recorded(tmp_path):
-    """Run 6 is only comparable to Run 5 because they differ in model and effort
-    and nothing else — a fact that until now survived only in prose."""
+    """Two runs are comparable only when exactly one pin, model or effort
+    differs, so the header records each of them rather than leaving it to prose."""
     log = _chat(tmp_path, prompt="p", model="m", effort="high", cwd=tmp_path)
     logged = runlog.read(log.path)
     facts = runlog.summary(logged)
@@ -382,7 +382,7 @@ def test_a_turn_that_never_finished_summarizes_anyway(tmp_path):
 
 
 def test_the_summary_states_no_verdict(tmp_path):
-    """`CLAUDE.md` → facts vs judgment. A run log that scored runs would break
+    """`CLAUDE.md` → Facts versus judgment. A run log that scored runs would break
     the line in the one place it would be least visible."""
     log = _chat(tmp_path, prompt="p", model="m")
     _turn(log, _call("profile_source"))
@@ -515,7 +515,7 @@ def test_the_prompts_the_run_read_are_kept_beside_it(tmp_path):
 
 def test_a_log_that_could_not_compose_the_prompts_is_still_written(monkeypatch, tmp_path):
     """Best-effort, like the graph writes: a record *about* the run must never
-    stop the run (`CLAUDE.md` → knowledge/)."""
+    stop the run (`CLAUDE.md` → *Every refresh is best-effort*)."""
     monkeypatch.setattr(runlog, "prompts_read", lambda *_a, **_k: {})
     log = _chat(tmp_path, events.Event(events.TEXT, {"text": "on it"}), cwd=tmp_path)
     run = runlog.read(log.path)
@@ -601,7 +601,7 @@ def test_how_the_chat_ended_is_the_last_exchange_not_an_interrupted_one(tmp_path
 
 
 def test_the_session_id_is_read_off_the_results(tmp_path):
-    """§4 wanted this in the header; it cannot be, because the SDK hands it back
+    """The header was the first plan for this; it cannot be, because the SDK hands it back
     with the result. Off the events is strictly better — a header could not show
     a session changing."""
     log = runlog.start(tmp_path)

@@ -7,7 +7,7 @@ worked that out unaided, said there was no op for it, and stopped
 (docs/EVALUATION.md, Run 6). Verification turns wrong answers into blocks; this
 is what unblocks them.
 
-**Why SQL and not captured Python** (decided 2026-07-25, docs/BACKLOG.md): the
+**Why SQL and not captured Python** (decided 2026-07-25): the
 spec's whole claim is being reviewable in a pull request, and a 40-line pandas
 function embedded in YAML is not. Arbitrary Python also hands back the filesystem
 and network that `agent/session.py` deliberately withholds. SQL's semantics are
@@ -24,7 +24,7 @@ other op, and is a *step* rather than a hidden reasoning act. So the rule
 tightens rather than bends: **the agent may author a transform; it may never
 author a number.**
 
-**Two paths since 2026-09-04** (`docs/CONNECTOR.md` §2.8). On a local
+**Two paths since 2026-09-04** (`docs/CONNECTORS.md` §2.8). On a local
 connection the declared inputs are copied into a locked in-memory database,
 because that is the one isolation that does not depend on reading the query
 correctly (§6.1 of the migration doc). On a warehouse connection that copy is
@@ -79,7 +79,7 @@ FORBIDDEN = (
     "read_json",
     "read_parquet",
     "set",
-    # Snowflake's spellings of the same refusals (`docs/CONNECTOR.md` §2.8):
+    # Snowflake's spellings of the same refusals (`docs/CONNECTORS.md` §2.8):
     # a stage read or write, a procedure, and every statement that changes
     # something. None can occur inside a SELECT except as an identifier, and
     # an identifier spelled like a verb is a name worth quoting anyway.
@@ -185,7 +185,7 @@ def check_sql(sql: str) -> None:
         )
 
 
-# --- the remote path: the role holds, the parser explains (`CONNECTOR.md` §2.8) --
+# --- the remote path: the role holds, the parser explains (`CONNECTORS.md` §2.8) --
 
 
 def referenced_tables(sql: str, *, dialect: str = "duckdb") -> set[str]:
@@ -250,7 +250,7 @@ def quote_declared(sql: str, inputs: dict[str, Table], *, dialect: str = "duckdb
     :func:`compose` binds it — quoted, case kept.
 
     **This is where chaining on a warehouse was broken** *(2026-09-06, the first
-    real Snowflake drive, `CONNECTOR.md` §2.8.1)*. `compose` binds a CTE under
+    real Snowflake drive, `CONNECTORS.md` §2.8.1)*. `compose` binds a CTE under
     the quoted declared name (``"chicago_clean"``) and the agent's SQL reads it
     unquoted (``FROM chicago_clean``). DuckDB compares an unquoted identifier
     case-insensitively, so every fixture passed; Snowflake **folds** it to upper
@@ -467,13 +467,13 @@ def apply_sql(inputs: dict[str, Table], sql: str, *, name: str = "sql") -> OpRes
     else, which is the one arrangement where the guarantee does not depend on
     reading the query correctly. This is the single place in the engine where a
     whole relation leaves the database, and it is deliberate rather than
-    overlooked (§13 of the migration doc).
+    overlooked (`docs/DUCKDB_MIGRATION.md` §6.1).
     """
     import duckdb
 
     check_sql(sql)
 
-    # Where the data cannot be copied, it is not (`docs/CONNECTOR.md` §2.8).
+    # Where the data cannot be copied, it is not (`docs/CONNECTORS.md` §2.8).
     first = next(iter(inputs.values()), None)
     if first is not None and backend.is_remote(first.con):
         return _apply_remote(inputs, sql, name=name, con=first.con)

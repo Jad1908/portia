@@ -5,7 +5,7 @@ data: a 1,579-column table described one record per column, sixty sources were
 sixty entries in the index, thirty questions were thirty answers resent. Past
 `tools.RESULT_BUDGET` each was refused or summarised in a way that lost the fact
 that mattered, "4 columns are constant" without the four names. The rule the
-revamp settled on (`sandbox/limits/REVAMP_SPEC.md`) is that an answer's shape
+revamp settled on (`docs/TOOL_SURFACE.md` §3) is that an answer's shape
 does not grow with the data: a list is cut at a fixed size, the cut is always
 announced, and the announcement says how to ask a narrower question. This
 module is the shape; the sentence that announces the cut is prose, so it comes

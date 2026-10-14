@@ -52,7 +52,7 @@ which part failed.
    composite is a ranking that hides which trap fell out.
 5. **Pinned and comparable.** Every run records model, effort, the portia commit, a digest of the
    prompts, the Agent SDK version and the data seed. Two runs are comparable only if exactly one
-   of those differs, and the report refuses to put them side by side otherwise.
+   pin, the model or the effort differs; no report compares runs yet.
 6. **Repeated.** N runs per cell, k of N reported, pass^k where it applies.
 7. **Limits stated.** The scripted user is cooperative, so the numbers are a best case. Simulator
    mistakes are reported as their own count and never charged to the copilot.
@@ -216,7 +216,7 @@ python -m devtools.bench invariants path/to/.portia --strict --json
 
 # a case: whether it can run, then one run through portia or through plain Claude Code
 python -m devtools.bench check devtools/bench/cases/hotel.yaml
-python -m devtools.bench run devtools/bench/cases/hotel.yaml --variant B --model claude-haiku-4-5
+python -m devtools.bench run devtools/bench/cases/hotel.yaml --variant B --model claude-sonnet-5-5
 python -m devtools.bench run devtools/bench/cases/hotel.yaml --arm baseline-diligent
 
 # one judgement, ten runs on fresh copies, the outcomes counted
@@ -224,9 +224,9 @@ python -m devtools.bench point devtools/bench/points/hotel-join.yaml --runs 10
 ```
 
 A run leaves a folder with the project as it ended, one log per thread with the pins in its
-header, and a `result.json` naming the case, the pins, each thread's counts and every routing
-decision. Everything runs on the user's own Claude subscription through the Agent SDK's bundled
-binary; a local model through the llama.cpp provider costs nothing and is the free shakedown.
+header, and a `result.json` naming the case, the model, effort, seed and portia sha, each
+thread's counts and every routing decision. Everything runs on the user's own Claude subscription
+through the Agent SDK's bundled binary.
 
 Not built yet: the damage generator and the first forty-table case, which start from a taxonomy of
 causes written down from real work; the graders over a case's true table; the first run.

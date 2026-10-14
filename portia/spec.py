@@ -70,7 +70,7 @@ class StepResult:
     #: so an override is a visible, reviewable act rather than a silent one.
     acknowledged: list[str] = field(default_factory=list)
     #: This step's SELECT, reading its inputs **by name** — the CTE body it
-    #: compiles to (`portia/compile.py`, `docs/PIPELINE.md` §3). Produced by the
+    #: compiles to (`pipeline.compile_spec`, `docs/PIPELINE.md` §3). Produced by the
     #: same builder that produced `table.query`, not a second rendering of it.
     compiled: str = ""
 
@@ -227,7 +227,7 @@ def validate_layer(layer: Any) -> None:
 def validate_target(target: Any) -> None:
     """Where a spec's table is created on a warehouse, ``DATABASE.SCHEMA``; none is fine.
 
-    **A spec-level claim, chosen per table** (`docs/CONNECTOR.md` §2.7.1, the
+    **A spec-level claim, chosen per table** (`docs/CONNECTORS.md` §2.7.1, the
     user's call): different tables go different places, so there is no project
     setting for it and nothing in the engine that defaults it. A spec on a
     warehouse without one is refused at build time, naming the spec.
@@ -446,7 +446,7 @@ def run_spec(
     base = Path(base_dir)
     con = con or connect()
     # A source is a path relative to the project, or `{table: …}` naming a table
-    # the connection can already see (`core/io.source_table`, `CONNECTOR.md` §2.5).
+    # the connection can already see (`core/io.source_table`, `CONNECTORS.md` §2.5).
     tables: dict[str, Table] = {
         name: source_table(ref, con, base=base, name=name)
         for name, ref in (spec.get("sources") or {}).items()
@@ -484,7 +484,7 @@ def model_table(
     The result is a lazy handle like any other, so an upstream model costs a query
     string here rather than a materialized frame — but it *is* re-executed per
     reference, and caching unchanged models is deliberately out of scope
-    (`docs/BACKLOG.md` → Spec, run caching).
+    (`docs/BACKLOG_NEXT.md` §4, run caching).
     """
     if not models or ref not in models:
         # The closest few and a count, never every model (`core/listing.near_misses`).

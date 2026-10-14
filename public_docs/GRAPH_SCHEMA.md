@@ -114,18 +114,18 @@ for example `source:data/orders.csv::customer_id` or `model:mart_orders::note_x`
 | `table` | string | the parent's key, for reading; the parent is reachable by `HAS_COLUMN` | never |
 | `position` | int | `knowledge.build` — its place in its table from 1: the catalog's column order for a file, the output order for a model | the graph was built before 2026-10-08 |
 | `role` | string | `set_interpretation` — **the agent's judgment** | nobody assigned one |
-| `inferred` | string | `checks.profiling` | it is a model's column |
-| `null_rate` | float | `checks.profiling` | it is a model's column |
-| `n_distinct` | int | `checks.profiling` | it is a model's column |
-| `flags` | list of string | `checks.profiling` | it is a model's column |
-| `min`, `max` | number | `checks.profiling` | the column is not numeric, or it is a model's |
-| `top`, `top_freq` | value, int | `checks.profiling` | the column is numeric or boolean, or it is a model's |
+| `inferred` | string | `checks.profiling` | the model has not been built |
+| `null_rate` | float | `checks.profiling` | the model has not been built |
+| `n_distinct` | int | `checks.profiling` | the model has not been built |
+| `flags` | list of string | `checks.profiling` | the model has not been built |
+| `min`, `max` | number | `checks.profiling` | the column is not numeric, or the model has not been built |
+| `top`, `top_freq` | value, int | `checks.profiling` | the column is numeric or boolean, or the model has not been built |
 | `derivation` | `"unknown"` | `knowledge.build` — see below | almost always; only a model's column ever carries it |
 | `_build` | string | see *Rebuilds* | never |
 
 **The shape facts are split by kind and you never get both halves** (`schema.SHAPE_FACTS`). A
 numeric column carries its range; everything else carries its commonest value and how often that
-value occurs. `checks.profiling._column` already makes exactly this split when it measures, and the
+value occurs. `checks.profiling._table_column` already makes exactly this split when it measures, and the
 graph restates it rather than re-deriving it. Absent means *not applicable to this kind*, not
 *unmeasured*.
 
@@ -133,7 +133,7 @@ graph restates it rather than re-deriving it. Absent means *not applicable to th
 restated from the same files as `HAS_COLUMN`, so the order is a fact about the table and never a
 measurement. Absent on an older graph, where the picture falls back to the key.
 
-A modal value on a Column node is not the samples §4.4 keeps off an `OVERLAPS` **edge**. That rule
+A modal value on a Column node is not the samples kept off an `OVERLAPS` **edge**. That rule
 stops a *measurement* carrying a copy of the data it measured. This is one value describing the
 column it sits on, the same restatement of the catalog as `null_rate` beside it — and it is there
 because pair-picking is the agent's job and it used to be done from names and roles alone.

@@ -293,7 +293,7 @@ def test_a_misspelled_function_or_type_is_not_called_an_undeclared_input(events,
     assert "inputs" not in str(raised.value)
 
 
-# --- the remote path (`docs/CONNECTOR.md` §2.8) ---------------------------------
+# --- the remote path (`docs/CONNECTORS.md` §2.8) ---------------------------------
 
 
 class _RemoteDuckDB:
@@ -378,7 +378,7 @@ def test_the_parse_check_reads_through_ctes_quotes_and_case():
 
 
 def test_a_remote_reference_is_quoted_to_the_exact_cte_spelling(con):
-    """The composed statement agrees with itself about case (`CONNECTOR.md` §2.8.1).
+    """The composed statement agrees with itself about case (`CONNECTORS.md` §2.8.1).
 
     `compose` binds ``"orders"`` quoted; an unquoted ``FROM orders`` folds to
     ``ORDERS`` on Snowflake and misses it — the 2026-09-06 run's death loop, 18

@@ -1269,9 +1269,10 @@ def refresh_spend() -> None:
 def _mode_changed() -> None:
     """The mode picker moved: the settings panel's copy follows, if it is up.
 
-    Two places show one setting (`CLAUDE.md` → `ui/settings.py`), and §14.4 is
-    what happens when one of them is left showing yesterday's value. The
-    picker pressed shows its own value already, so nothing here is redrawn.
+    Two places show one setting (`CONVENTIONS.md` → Window), and
+    `CONVERSATION.md` §14.4 is what happens when one of them is left showing
+    yesterday's value. The picker pressed shows its own value already, so
+    nothing here is redrawn.
     """
     from portia.ui import settings
 
@@ -1290,7 +1291,7 @@ def _chat_footer(chat) -> None:
     """What the chat has cost and how full it is. Counted, never judged.
 
     Both are measured facts, which is the only reason they may be on screen at
-    all (`CLAUDE.md` → facts vs judgment). Nothing here says a chat is too long
+    all (`CLAUDE.md` → *Facts versus judgment*). Nothing here says a chat is too long
     or too expensive: that needs a goal, and this panel has no way to know one.
     `CONVERSATION.md` §13 is why no policy sits on top of the context number.
     """
@@ -1402,7 +1403,8 @@ def _spend_alert(reason: str, remedy: str) -> None:
     """A refused preflight: the provider's reason, and the one thing to do.
 
     In the composer, above the bar, because it is about the message that did
-    not go; not a transcript row, because no exchange happened (§5).
+    not go; not a transcript row, because no exchange happened
+    (`PROVIDERS.md` §5).
     """
     with ui.element("div").classes("composer-alert"):
         c.alert(f"{reason} {remedy}".strip(), kind="warning")
@@ -2794,8 +2796,8 @@ def _allow_always(decision: Decision) -> None:
 
     The same setting `ui/settings.py` holds, changed from where the question is
     being asked — which is where anyone actually decides they are tired of it.
-    Two places to change one setting, and never two settings (`CLAUDE.md` →
-    `ui/settings.py`).
+    Two places to change one setting, and never two settings (`CONVENTIONS.md`
+    → Window).
 
     It does **not** reach back and auto-allow anything already on screen. The
     writes above this one were decisions somebody made, and rewriting them as

@@ -55,7 +55,7 @@ class Field:
     label: str
     required: bool = False
     #: The example the empty box shows; the one explanation a field gets
-    #: (`CONNECTOR.md` §2.12a, revised: no line under the label).
+    #: (`CONNECTORS.md` §2.13, revised: no line under the label).
     placeholder: str = ""
     #: Drawn in the mono face: an identifier rather than a name.
     mono: bool = True
@@ -292,7 +292,7 @@ def suggestions() -> list[Connection]:
     return out
 
 
-# --- Snowflake (`docs/CONNECTOR.md`) ---------------------------------------------
+# --- Snowflake (`docs/CONNECTORS.md`) ---------------------------------------------
 
 #: How a Snowflake session is opened. ``browser`` is SSO through the account's
 #: identity provider, and it is the default because it stores nothing anywhere.
@@ -319,7 +319,7 @@ BROWSER, PASSWORD, TOKEN = "browser", "password", "token"
 FILE = "file"
 AUTH_METHODS = (BROWSER, PASSWORD, TOKEN, FILE)
 
-#: What a Snowflake connection must say (`CONNECTOR.md` §2.4). ``user`` is
+#: What a Snowflake connection must say (`CONNECTORS.md` §2.4). ``user`` is
 #: required because browser SSO still wants the login name — the connector
 #: refuses an empty one unless the authenticator is OAuth, a PAT or workload
 #: identity, and ``externalbrowser`` is none of those.

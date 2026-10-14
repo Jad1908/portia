@@ -1,4 +1,4 @@
-"""Where the engine's compute runs — the seam `docs/CONNECTOR.md` §3 names.
+"""Where the engine's compute runs — the seam `docs/CONNECTORS.md` §7 names.
 
 A `Backend` is three things: a **kind** (``duckdb``, ``snowflake``), a
 **dialect** for the few expressions the checks spell differently
@@ -50,10 +50,10 @@ class Backend:
     open: Callable[[], Any]
     #: Whether the data lives somewhere portia cannot copy it from. Decides the
     #: SQL hatch's path (`ops/sql.py`), whether Build writes a table, and whether
-    #: `write_outputs` is refused (`CONNECTOR.md` §2.7, §2.8).
+    #: `write_outputs` is refused (`CONNECTORS.md` §2.7, §2.8).
     remote: bool = False
     #: Whether `record_step` creates a model's table where the spec says as it
-    #: records (`CONNECTOR.md` §2.7.1) — the hand-off. Off, only Run and Build
+    #: records (`CONNECTORS.md` §2.7.1) — the hand-off. Off, only Run and Build
     #: write. **There is no target here**: where a table goes is each spec's
     #: own ``target``, chosen per table, and nothing in the process defaults it.
     agent_writes: bool = False
@@ -72,7 +72,7 @@ def _open_duckdb() -> Any:
 
 
 #: DuckDB in memory, reading files in place. What every project was before
-#: `docs/CONNECTOR.md`, and what every project without a ``connection:`` still is.
+#: `docs/CONNECTORS.md`, and what every project without a ``connection:`` still is.
 LOCAL = Backend(kind="duckdb", dialect=dialects.DUCKDB, open=_open_duckdb)
 
 _active: Backend = LOCAL

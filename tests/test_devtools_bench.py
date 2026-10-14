@@ -274,7 +274,7 @@ def test_a_zero_acknowledged_with_nobody_asked_is_a_flag(tmp_path):
 
 
 def test_autopilot_acknowledgements_are_counted_apart_and_never_flagged(tmp_path):
-    """§10.3 — switching autopilot on is the user trusting the copilot's
+    """§9 — switching autopilot on is the user trusting the copilot's
     judgement, a zero it judges fine included."""
     run = _log(tmp_path, *_recorded(["empty_output"], auto=True, asked=False))
     report = invariants.check(run)

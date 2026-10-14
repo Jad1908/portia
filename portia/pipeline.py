@@ -107,7 +107,7 @@ def compile_spec(
     """
     if not results:
         raise ValueError(f"nothing to compile: {name!r} has no steps")
-    # The deliverable runs where it was written for (`CONNECTOR.md` §2.9), so
+    # The deliverable runs where it was written for (`CONNECTORS.md` §2.9), so
     # its names are quoted the way that engine reads them. The process's
     # backend, because a compile holds no connection.
     q = (dialect or backend.active().dialect).quote
@@ -197,7 +197,7 @@ class BuiltModel:
     layer: str | None
     results: list[StepResult]
     sql_path: Path
-    #: The qualified table a remote build created (`docs/CONNECTOR.md` §2.7).
+    #: The qualified table a remote build created (`docs/CONNECTORS.md` §2.7).
     #: ``None`` on a local build, whose deliverable is the ``.sql`` alone.
     written_to: str | None = None
 
@@ -377,7 +377,8 @@ def _index(
 
     **Best-effort, and it may not fail a build.** The `.sql` is already written
     and the table is already correct; a profile is a description of it. This is
-    the same call `knowledge.sync` makes for the same reason (§6.6) — a
+    the same call `knowledge.sync` makes for the same reason
+    (`docs/KNOWLEDGE_GRAPH.md` §6.6) — a
     by-product that cannot be allowed to take the thing it is a by-product of
     down with it.
     """
@@ -389,7 +390,7 @@ def _index(
             name,
             table,
             portia_dir=root / catalog.DEFAULT_DIR,
-            # Shape only on a warehouse (`docs/CONNECTOR.md` §2.6): "free" here
+            # Shape only on a warehouse (`docs/CONNECTORS.md` §2.6): "free" here
             # meant no file to re-read, and a scan on a meter is not that.
             metadata_only=backend.is_remote(table.con),
             written_to=written_to,
@@ -403,7 +404,7 @@ def _index(
 def table_home(target: str, dialect: dialects.Dialect) -> list[str]:
     """``[database, schema]`` a model is created in, spelled as the engine folds them.
 
-    The target is the spec's own (`docs/CONNECTOR.md` §2.7.1): the copilot chose
+    The target is the spec's own (`docs/CONNECTORS.md` §2.7.1): the copilot chose
     it when it recorded the spec's first step, and it may differ from the spec
     next to it. Each part is spelled as the engine folds an unquoted identifier
     and then quoted, so the object is the one the team reaches unquoted and a
@@ -436,7 +437,7 @@ def write_into_warehouse(name: str, results: list[StepResult], *, target: str | 
 def _write_into_warehouse(name: str, results: list[StepResult], con: Any, target: str) -> str:
     """``CREATE OR REPLACE TABLE <target>.<name> AS …`` — the remote deliverable.
 
-    `docs/CONNECTOR.md` §2.7, on the user's call: a mart is checked by querying
+    `docs/CONNECTORS.md` §2.7, on the user's call: a mart is checked by querying
     the staging and intermediate tables it reads, where they are, so a build has
     to leave them there. The compiled ``.sql`` is untouched by this — it names the
     table bare, as a dbt model does — and the target is the spec's rather than

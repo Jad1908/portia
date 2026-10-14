@@ -2,7 +2,7 @@
 
 DuckDB's spellings are **executed**, because that is the engine the tests have;
 Snowflake's are checked as text, because a stub that answered them would be a
-second, wrong Snowflake (`docs/CONNECTOR.md` §6). What matters is that both
+second, wrong Snowflake (`docs/CONNECTORS.md` §4). What matters is that both
 dialects answer the same five questions and that a connection which says
 nothing is DuckDB.
 """

@@ -60,7 +60,7 @@ graph = [
     # and the build says which columns that cost. Pure python, no dependencies.
     "sqlglot>=25.0",
 ]
-# The Snowflake connector (docs/CONNECTOR.md). Optional like the graph, and for
+# The Snowflake connector (docs/CONNECTORS.md). Optional like the graph, and for
 # the same reason: nothing outside `portia/connectors/` imports the driver, so a
 # local project never pays for it. `secure-local-storage` is the keyring the
 # connector caches the SSO token in, which is what makes the browser popup

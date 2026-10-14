@@ -1,12 +1,13 @@
 """What a chat's questions returned, kept beside its log.
 
-**Why it exists** *(2026-10-13, the tool revamp, `sandbox/limits/REVAMP_SPEC.md` §D)*.
-A `query_data` answer is cut to fit the conversation: twenty rows, fifty
-columns. Until this module the rest of the result was nowhere. Seeing row 21
-meant running the query again, which on a warehouse is a second bill for the
-same answer; a finding could copy only what the agent had been shown; and
-`review_queries` resent every logged answer word for word, which a chat of
-fourteen questions took past `tools.RESULT_BUDGET` (30,741 characters, refused).
+**Why it exists** *(2026-10-13, the tool revamp, `docs/TOOL_SURFACE.md` §4,
+"Results are stored")*. A `query_data` answer is cut to fit the conversation:
+twenty rows, fifty columns. Until this module the rest of the result was
+nowhere. Seeing row 21 meant running the query again, which on a warehouse is a
+second bill for the same answer; a finding could copy only what the agent had
+been shown; and `review_queries` resent every logged answer word for word,
+which a chat of fourteen questions took past `tools.RESULT_BUDGET` (30,741
+characters, refused).
 
 So each data question's **whole result is kept**, as a Parquet file under the
 chat's own folder (`runlog.companion`), with a short **handle** the answer

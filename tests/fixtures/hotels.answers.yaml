@@ -2,7 +2,7 @@
 #
 # This file is the asset. The harness around it is cheap; deciding what "right"
 # means is the expensive part, and it has to be written by a human who knows the
-# domain — there is no free oracle for any of it (see docs/BACKLOG.md).
+# domain — there is no free oracle for any of it.
 #
 # `brief` is the ONLY context the copilot gets. It states the domain and the
 # goal and says nothing about keys, join paths, or granularity. If a brief ever

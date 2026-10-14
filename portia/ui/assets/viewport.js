@@ -1,7 +1,7 @@
 // Tell Python how wide the window is.
 //
-// `DESIGN.md` → Width behaviour specifies three bands, and none of it could be
-// done in CSS once the panes moved inside Quasar splitters: a splitter sets an
+// `DESIGN.md` → Width behaviour: three bands, and none of it could be done
+// in CSS once the panes moved inside Quasar splitters: a splitter sets an
 // inline pixel width on its panel, so restyling the pane inside it changes
 // nothing about the space the panel reserves. The stylesheet had media queries
 // that read correctly and did nothing at all — below 1024 the left pane went

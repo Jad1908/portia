@@ -744,9 +744,10 @@ def test_a_writes_outcome_is_never_read_off_the_next_write():
 
 
 def test_runs_chats_and_indexing_are_three_different_lists(tmp_path):
-    """Three artifacts, three lists (`docs/CONVERSATION.md` §3): a *run* executed
-    a spec, a *chat* was a conversation about what it should say, an *indexing*
-    was a job the app ran. The pane must not merge any of them."""
+    """Three artifacts, three folders, never merged (`docs/CONVERSATION.md` §3): a
+    *run* executed a spec, a *chat* was a conversation about what it should say,
+    an *indexing* was a job the app ran. The left-pane lists are gone; chats and
+    jobs are read back as one list and told apart by kind."""
     from portia import runlog
     from portia.ui import engine
 
@@ -1367,7 +1368,7 @@ def test_switching_projects_refuses_while_a_message_is_in_flight(monkeypatch):
 
 
 def test_switching_projects_closes_the_chat_it_leaves(monkeypatch):
-    """A chat holds a live SDK subprocess (`CONVERSATION.md` §4). Leaving a
+    """A chat holds a live SDK subprocess (`CHAT_SESSIONS.md` §3.3). Leaving a
     project without closing it leaks one for as long as the window lives."""
     import asyncio
 
@@ -2180,7 +2181,7 @@ def test_unticking_survives_the_list_being_rebuilt(tmp_path):
 
 
 def test_the_screen_offers_exactly_one_accented_action(tmp_path):
-    """`DESIGN.md` allows one solid accent fill per view, and here it does real
+    """`DESIGN.md` allows one solid accent fill per pane, and here it does real
     work: while there are files to profile the accent is on profiling them, and
     the moment there are none it moves to the way out. Both at once is a screen
     asking you to guess which one it meant."""
@@ -2488,7 +2489,7 @@ def test_a_question_in_another_chat_badges_and_never_switches(loop):
 
 
 def test_an_open_chat_sitting_idle_is_not_busy():
-    """§9 — if `busy` meant "a client exists", an open chat would block indexing
+    """§7 — if `busy` meant "a client exists", an open chat would block indexing
     for as long as it stayed open."""
     from portia.ui.state import App
 
@@ -4254,7 +4255,8 @@ def test_a_group_is_keyed_on_the_first_call_so_it_survives_the_run_growing():
 
 def test_a_replayed_log_folds_the_same_way_the_live_pane_does():
     """One set of renderers, live and replayed — or the window ends up with a
-    second opinion about something already written down (`CLAUDE.md` → ui/)."""
+    second opinion about something already written down (`CLAUDE.md` → *Reuse
+    before you add*)."""
     from portia import runlog
     from portia.ui import transcript
     from portia.ui.state import App
@@ -5941,7 +5943,7 @@ def test_index_on_the_tab_scans_a_ticked_metadata_only_table(tmp_path, monkeypat
 
 
 def test_adding_warehouse_tables_scans_them_only_when_the_switch_says_so(tmp_path, monkeypatch):
-    """`CONNECTOR.md` §2.6, revised: metadata is still the default, and the
+    """`CONNECTORS.md` §2.6, revised: metadata is still the default, and the
     profile is asked for on the add-data screen before the press rather than
     from the inspector after it. Off, no scan; on, every scoped table."""
     import asyncio

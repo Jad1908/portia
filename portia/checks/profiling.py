@@ -321,7 +321,7 @@ def _stat_exprs(kinds: dict[str, str], dialect: Dialect = dialects.DUCKDB) -> di
             # one list-valued aggregate on DuckDB, three ordered-set aggregates
             # on Snowflake (`core/dialect.py`). This is the single most expensive
             # thing in a profile and it is still O(n) — `docs/DUCKDB_MIGRATION.md`
-            # §12's exact-vs-approximate question is really about this line.
+            # §13's exact-vs-approximate question is really about this line.
             for suffix, expr in dialect.quartile_exprs(q).items():
                 exprs[f"c{i}_{suffix}"] = expr
         elif kind == STRING:

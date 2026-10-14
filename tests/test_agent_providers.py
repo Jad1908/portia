@@ -5,7 +5,7 @@ worth pinning is portia's side of the seam, namely that the Anthropic provider
 sets nothing, that Ollama's sets exactly the two variables its documentation
 asks for, and that a preflight refuses for the four reasons it can and reports
 the facts it read either way. The server's own behaviour was measured once
-(§3 of the doc: a 4,096-token context on a 16 GB machine) and is not
+(§6 of the doc: a 4,096-token context on a 16 GB machine) and is not
 re-asserted here.
 """
 
@@ -416,7 +416,7 @@ def test_a_name_the_server_does_not_serve_is_refused_with_the_command_that_would
 
 
 def test_a_slot_smaller_than_the_instructions_is_refused_with_both_numbers(llama):
-    """`-c 32768 -np 2` is 16,384 a slot (measured, §6.2)."""
+    """`-c 32768 -np 2` is 16,384 a slot (measured, `PROVIDERS.md` §4.9)."""
     llama(n_ctx=4096, slots=1)
     check = llamacpp.PROVIDER.preflight(llamacpp.SERVED, prompt_chars=lambda: 60_000)
     assert not check.ok

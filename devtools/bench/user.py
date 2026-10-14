@@ -1,4 +1,4 @@
-"""The scripted user: the person's information, fixed, so the model is the only variable (`docs/BENCHMARK_EVAL.md` §2.2, §8).
+"""The scripted user: the person's information, fixed, so the model is the only variable (`docs/BENCHMARK_EVAL.md` §8).
 
 It stands in for one thing a human brings to a session, the facts only a
 person knows, and for nothing else. It answers a question from the case's

@@ -23,8 +23,10 @@ chat actually asked and :func:`record` keeps the few that earned it.
 rule here that is not negotiable. Forty tool calls later, possibly across a
 compaction, an agent writing ``26% coverage`` from memory is *authoring a
 number*, which is the line this project exists to hold (CLAUDE.md). So a finding
-names the `query_data` calls it came from and this module copies their SQL and
-their results out of the chat JSONL. The agent authors prose and nothing else.
+names the `query_data` calls it came from, and their SQL and results are copied
+in: the rows from the chat's kept result when there is one
+(`agent/handlers._with_kept_rows`), else the answer as the chat JSONL logged it.
+The agent authors prose and nothing else.
 
 **They live in ``findings/`` at the project root, committed**, beside `specs/`
 and `models/` rather than inside `.portia/`. The journal is a *human* surface
@@ -116,8 +118,9 @@ def record(
         # **Which queries this rests on, by chat and position.** Not decoration:
         # `review` reads it back so a query already kept is shown as kept. The
         # agent reviews before each reply rather than at the end of a chat
-        # (§5.2), so without this it would meet the same nine queries again on
-        # the next turn with no way to tell which it had already used.
+        # (`FINDINGS.md` §5.2), so without this it would meet the same nine
+        # queries again on the next turn with no way to tell which it had
+        # already used.
         "queries": [_cited(q) for q in queries],
     }
     path = _free_path(root / FINDINGS_DIR, slug(question))
@@ -151,11 +154,12 @@ def _cited(query: dict) -> dict:
 def _answer_only(query: dict) -> str:
     """The tool result with the fields this record already carries dropped.
 
-    `query_data` echoes the ``question``, the ``sql`` and the ``inputs`` back in
-    its result, which is right for the model — it is reading one payload — and
-    wrong in a file where those three sit two lines above. Left whole, a finding
-    states its question three times and its SQL twice, in a YAML somebody reads
-    in a diff.
+    `query_data` used to echo the ``question``, the ``sql`` and the ``inputs``
+    back in its result, and a log written before 2026-10-13 still holds that
+    echo. Right for the model, which was reading one payload, and wrong in a
+    file where those three sit two lines above. Left whole, a finding states
+    its question three times and its SQL twice, in a YAML somebody reads in a
+    diff.
 
     **This is not a softening of the never-retype rule.** It removes keys, in
     code, that are stored verbatim elsewhere on the same record; it touches no
@@ -271,11 +275,10 @@ def for_table(
 ) -> dict:
     """Findings that touch ``table``, grouped by the table on the other side.
 
-    **Grouped rather than filtered**, and the default matters. `graph_lookup`
-    went unused across four runs because it required knowing what you were
-    looking for; a group per neighbour answers *what has anyone learned about
-    this table* without the caller supplying a second name. ``with_table``
-    narrows it when they have one.
+    **Grouped rather than filtered**, and the default matters: a group per
+    neighbour answers *what has anyone learned about this table* without the
+    caller supplying a second name. ``with_table`` narrows it when they have
+    one.
 
     Each group is capped and states its own total, so a short list never reads as
     a short history — the rule `knowledge/query.py` already follows.
@@ -525,9 +528,6 @@ def render_table(grouped: dict) -> str:
 
 # --- reading a chat back ----------------------------------------------------
 
-#: The tool whose calls a curation pass reads back. One name in one place: the
-#: journal is about questions asked, and `query_data` is the only tool that asks
-#: one without also writing something.
 #: The tools whose calls a review numbers. **Both doors, not just the text one**
 #: *(2026-09-02, `docs/VISUALIZATION.md` §6)*. `plot_data` runs the same
 #: ``SELECT`` in the same sandbox and differs only in where its answer went, so a
@@ -536,9 +536,10 @@ def render_table(grouped: dict) -> str:
 #: the two drift apart.
 #:
 #: What lands in a finding is the SQL and the tool's **result**, which for a
-#: chart is its receipt: the tab, the row count, the encoding and the span of
-#: each axis. The rows themselves went to the browser and are not evidence in a
-#: file somebody reads in a diff; the query that produced them is.
+#: chart is its receipt: the tab, the row count, the columns, and the encoded
+#: columns' values paired or, past `tools.RECEIPT_ROWS`, the span of each. The
+#: rows themselves went to the browser and are not evidence in a file somebody
+#: reads in a diff; the query that produced them is.
 QUERY_TOOLS = ("query_data", "plot_data")
 #: The text door, kept as its own name because the plotting half asks about it.
 QUERY_TOOL = QUERY_TOOLS[0]
@@ -600,7 +601,8 @@ def review(
                 "tool": tool,
                 # Which tab it drew, for a `plot_data` call and empty otherwise.
                 # It is how a chart on screen finds its own call in the log — the
-                # tab name is the chart's identity everywhere else too (§3.3).
+                # tab name is the chart's identity everywhere else too
+                # (`VISUALIZATION.md` §3.3).
                 "tab": sent.get("tab", "") if tool == PLOT_TOOL else "",
                 "question": sent.get("question", ""),
                 "sql": sent.get("sql", ""),

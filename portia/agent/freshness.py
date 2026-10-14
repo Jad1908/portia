@@ -1,6 +1,6 @@
 """Whether the tables a tool call names changed since portia indexed them, said first.
 
-**Stale is loud** *(2026-10-13, `sandbox/limits/REVAMP_SPEC.md`, rule 6)*. The
+**Stale is loud** *(2026-10-13, `docs/TOOL_SURFACE.md` §3, rule 6)*. The
 catalog's facts about a table (its row count, its columns, their flags and
 profile) are what it looked like when it was indexed. A file edited since, or
 a warehouse table reloaded, leaves every one of those describing something

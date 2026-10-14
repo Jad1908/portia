@@ -1,6 +1,6 @@
 """The adapter against a real account — skips without ``PORTIA_TEST_CONNECTION``.
 
-`docs/CONNECTOR.md` §6: the seam worth testing live is whether the questions
+`docs/CONNECTORS.md` §4: the seam worth testing live is whether the questions
 the adapter asks are the ones Snowflake answers. Everything here spends the
 named connection's credits and may open a browser, which is why the fixture is
 opt-in. Nothing here reads a table of the user's: the data is ``SELECT 1``.

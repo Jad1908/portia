@@ -1,7 +1,7 @@
 """The knowledge graph's answers as the agent reads them: bounded cards, every cut said.
 
 **Why a module of its own** *(2026-10-13, the tool revamp,
-`sandbox/limits/REVAMP_SPEC.md` §E)*. `knowledge/query.py` answers a question
+`docs/TOOL_SURFACE.md` §6)*. `knowledge/query.py` answers a question
 about the graph whole, because the terminal can print all of it and because a
 cap is not a fact about the graph. A cap is a decision about what an answer may
 cost a context window, and the sentence saying how to ask for the rest is
@@ -17,7 +17,8 @@ ones a neighbour is linked by; the user called the old answer's list of every
 connected column a naive dump, and it was gone before this module was written
 (`query.py`).
 
-**Every cut here is by size, in an order that carries no claim** (§6.1).
+**Every cut here is by size, in an order that carries no claim**
+(`KNOWLEDGE_GRAPH.md` §6.1).
 Neighbours are cut in name order, a neighbour's pairs in column order, and
 when the pairs of every neighbour together are more than a card holds, each
 neighbour shows the same number of them, the most that fits (`query.fair_share`,
@@ -99,7 +100,8 @@ PAIR_FIELDS = (
 )
 
 #: Between two tables, each pair carries what both columns look like
-#: (`query.PAIR_FACTS`): a zero is unreadable without them (§9.1).
+#: (`query.PAIR_FACTS`): a zero is unreadable without them
+#: (`KNOWLEDGE_GRAPH.md` §4.4).
 BETWEEN_FIELDS = (*PAIR_FIELDS, "column_facts", "other_facts")
 
 GROUP_FIELDS = ("name", "context", "n_members")

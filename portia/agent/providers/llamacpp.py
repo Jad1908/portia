@@ -4,7 +4,7 @@
 is the second provider of the shape `ollama.py` has: two variables in the
 binary's environment (:meth:`env`) and nothing in the loop changed. It exists
 for what the server lets you set that Ollama's does not (`docs/PROVIDERS.md`
-§6.2): the context is a flag rather than a menu-bar slider, the prompt cache
+§6): the context is a flag rather than a menu-bar slider, the prompt cache
 is per slot and survives a changed middle (``--cache-reuse``), and the same
 weights measured 1.7× Ollama's prefill on the 2026-09-14 benchmark.
 
@@ -19,7 +19,7 @@ instructions will not fit the slot or the name picked is not the one being
 served, with the command that starts the server the right way as the remedy.
 
 **The context is per slot, and ``-c`` is split across slots.** A server
-started with ``-c 32768 -np 2`` gives each slot 16,384 tokens (measured, §6.2),
+started with ``-c 32768 -np 2`` gives each slot 16,384 tokens (measured, §4.9),
 which is under portia's instructions plus one turn of tool results. The start
 command this module builds says ``-np 1`` for that reason; with the binary's
 title request off (`session.BINARY_ENV`) nothing else runs beside the chat.

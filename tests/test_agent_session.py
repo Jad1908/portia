@@ -136,7 +136,8 @@ def test_the_exchange_opens_with_the_humans_message():
 
 
 def test_the_session_id_is_recorded_off_the_result():
-    """§4 — one field, kept from day one so reopening a chat stays an addition."""
+    """`CHAT_SESSIONS.md` §3.3 — one field, kept from day one so reopening a chat
+    stays an addition."""
     chat, _ = _chat([[FakeResult(session_id="abc123")]])
     stream = _drain(chat, "hello")
 
@@ -183,7 +184,7 @@ def test_a_second_message_is_refused_rather_than_queued():
 
 
 def test_busy_means_a_message_is_in_flight_not_that_a_chat_exists():
-    """§9's rework depends on this: an idle open chat must not block indexing."""
+    """§7's busy rule depends on this: an idle open chat must not block indexing."""
     chat, _ = _chat([[FakeResult()]])
 
     async def go():

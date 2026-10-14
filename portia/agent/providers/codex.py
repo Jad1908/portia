@@ -85,7 +85,7 @@ ACCOUNT_DEFAULT = "account default"
 
 #: Every model Codex's own picker lists, in its order, split the way T3 Code's
 #: splits them: the current family first, the rest folded under *legacy*
-#: (`docs/PROVIDERS.md` §5.1). Read off the model list compiled into
+#: (`docs/PROVIDERS.md` §5). Read off the model list compiled into
 #: ``codex-cli`` 0.160.1, the binary ``openai-codex`` 0.160.1 pins; the entries
 #: that binary hides (the Daybreak pair, GPT-5.4, its own review model) are not
 #: here, as they are not in its picker. On an account the list is the

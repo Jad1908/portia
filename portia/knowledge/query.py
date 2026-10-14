@@ -1,12 +1,11 @@
 """Reading the graph — a fixed set of questions, not a query language.
 
-`docs/KNOWLEDGE_GRAPH.md` §9.4 phase B: *one tool, fixed queries.* The whole
-stack was chosen so the agent **can** write its own Cypher (§3.4), and §7 leaves
-open whether it should; that is a separate decision from whether traversal helps
-at all, and this is the half that answers the second question first.
+`docs/KNOWLEDGE_GRAPH.md` §9.4 phase B: *one tool, fixed questions.* The agent
+never writes Cypher (§3.4); fixed questions are what make an answer boundable
+as a card.
 
 **What the graph is for is navigation between tables** (§9.1, and the tool
-revamp of 2026-10-13, `sandbox/limits/REVAMP_SPEC.md`). The disclosure ladder
+revamp of 2026-10-13, `docs/TOOL_SURFACE.md` §6). The disclosure ladder
 is depth on one source — `describe_source` → `profile_source` →
 `join_findings`, every rung answering *tell me more about this table*. The
 graph answers *which* table, how to get from one to another, and where a

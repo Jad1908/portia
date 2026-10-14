@@ -74,8 +74,8 @@ def strip(group: str) -> None:
     """One group's tabs, canvas first if it lives here.
 
     **Two strips, one per half** (§3.7). Each is a `pane-tabs`, the transcript's
-    own tab style, rather than a third one — §3.1 turned the narrow design down
-    partly for introducing one and that argument did not stop applying when the
+    own tab style, rather than a third one: a third style was one cost of the
+    narrower design §3.1 turned down, and it did not stop applying when the
     pane split.
 
     **Drawn only once there is a chart.** A one-tab strip is chrome that says
@@ -771,7 +771,7 @@ def render_failed(key: str, message: str) -> None:
 
     Three readers, and this hands the fact to each of them. **The chart** gets
     it as its `error`, so the tab and the gallery row agree with what the figure
-    has been saying on its own since §8 — a failure the middle pane knew about
+    says on its own (§11.1) — a failure the middle pane knew about
     and the left pane did not was the same silence one pane further out.
     **The log** gets it because `runlog` tees at the edges and a reply written
     over a chart nobody saw is exactly what `devtools.traces` exists to make
@@ -817,7 +817,7 @@ def pictured(key: str, data_url: str, width: int, height: int) -> None:
     nothing in portia saves automatically, and a paint is not something the
     copilot did. Anything that is not the PNG `chart.js` sends is dropped
     without a word, because a stale or foreign client is not an error here
-    either (§11.3).
+    either.
     """
     from portia.agent import drawn
 

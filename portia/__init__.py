@@ -1,6 +1,6 @@
 """portia — agent-assisted data harmonization. Deterministic engine first.
 
-Package layout (see CLAUDE.md "Code conventions"):
+Package layout (see CLAUDE.md "Package map"):
 - portia.core     — shared seams: loading (`load_table`) + serialization
 - portia.checks   — the deterministic checks layer (profiling, join, …)
 - portia.fixtures — kept mock data

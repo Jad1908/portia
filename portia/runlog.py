@@ -8,13 +8,12 @@ internal module name is a generic engineering term and is in nobody's
 vocabulary; churning it for symmetry would be rename for its own sake.
 
 
-Every result in `docs/EVALUATION.md` was scored by hand off a terminal
-transcript: some of it pasted twice, some lost to a `^C`, two runs conflated
-while being written up. Run 7's write-up says outright that only its last 90
-lines survived and that a finding degraded because of it. A prompt change is
-evaluated today by reading two walls of text side by side and trusting memory,
-which is not a measurement — and it is the thing that makes tuning the loop feel
-impossible.
+Every run in `docs/EVALUATION.md` before this module was written up by hand off
+a terminal transcript: some of it pasted twice, some lost to a `^C`, two runs
+conflated while being written up. Run 7's write-up says outright that only its
+last 90 lines survived. A prompt change was evaluated by reading two walls of
+text side by side and trusting memory, which is not a measurement — and it is
+the thing that made tuning the loop feel impossible.
 
 The seam already existed. `agent/events.py` normalizes every SDK message into
 `Event(kind, data)` precisely so something other than a terminal can consume it;
@@ -33,11 +32,11 @@ central store, no index, and nothing written outside the project — a turn is
 only interpretable beside the catalog it read and the spec it wrote, so a
 global folder of transcripts referring to tables you would have to go find is
 worse than no folder. The consequences are worth stating plainly rather than
-discovering: **deleting a project deletes its history**, there is no retention,
-rotation or delete path (logs accumulate; tool results are the bulk), and
-nothing aggregates across projects. Reading another project's log needs no
-copying — every reader here takes a path, and `cli.history --dir <proj>/.portia`
-works from anywhere.
+discovering: **deleting a project deletes its history**, there is no retention
+or rotation (logs accumulate until someone deletes one, :func:`delete`; tool
+results are the bulk), and nothing aggregates across projects. Reading another
+project's log needs no copying — every reader here takes a path, and
+`cli.history --dir <proj>/.portia` works from anywhere.
 
 Nothing here judges anything. `summary` counts what happened — rungs pulled and
 in what order, how often it asked, which ops it chose, what it cost — and every
@@ -180,9 +179,9 @@ HARNESS = "harness"
 
 #: The header fields that **pin** a run: what has to be equal for two logs to be
 #: about the same thing (`docs/BENCHMARK_EVAL.md` §4, principle 5). Two runs are
-#: comparable only if exactly one of model, effort and these differs, and a
-#: report that puts them side by side checks that first. ``portia_sha`` says
-#: which engine; :data:`PROMPTS_SHA` says which words the model read, because
+#: comparable only if exactly one of model, effort and these differs;
+#: :func:`pins` lists them, and no report compares two runs yet. ``portia_sha``
+#: says which engine; :data:`PROMPTS_SHA` says which words the model read, because
 #: the prompts are the least stable thing in the repo and a sha of the code
 #: does not cover the brief, which is built from `.portia/`; :data:`SDK` says
 #: which Agent SDK drove the binary; :data:`SEED` says which data, for a run
@@ -294,7 +293,7 @@ def start(
     `portia_sha` is what makes two logs comparable at all — which build of the
     prompts and the engine this one was talking to.
 
-    **The session id is not here**, though §4 first said it would be: the SDK
+    **The session id is not here**, though the first design put it there: the SDK
     hands it back with the *result*, so it does not exist when this line is
     written. It rides on every `RESULT` event instead, which is strictly better —
     a header could not have shown a session changing, and this can.
@@ -370,16 +369,17 @@ def prompts_read(
     tools (`tools.BUILD_TOOLS`), and this record has to list what its model
     read and not what a chat's would have.
 
-    **Best-effort, like the graph writes** (`CLAUDE.md` → `knowledge/`): this is
-    a record *about* the run, so failing to take it must never stop the run. The
-    import is local and guarded because `agent/session.py` reaches the SDK
-    through `agent/tools.py`, and this module is imported by surfaces that have
-    no `agent` extra installed — a log with no prompts block is exactly as
-    readable as every log written before this existed.
+    **Best-effort, like the graph writes** (`CLAUDE.md` → *Durable artifacts*,
+    "Every refresh is best-effort"): this is a record *about* the run, so
+    failing to take it must never stop the run. The import is local and guarded
+    because `agent/session.py` reaches the SDK through `agent/tools.py`, and
+    this module is imported by surfaces that have no `agent` extra installed — a
+    log with no prompts block is exactly as readable as every log written before
+    this existed.
 
-    Composed at `start`, which is when it is true: `CONVERSATION.md` §4 holds one
-    client for the whole chat, so the system prompt is fixed for the file even
-    though the model and the brief behind it could otherwise move.
+    Composed at `start`, which is when it is true: the system prompt is fixed
+    for one process, and a resume writes a fresh `PROMPTS` record
+    (`CHAT_SESSIONS.md` §3.9).
 
     ``provider`` decides which tools were offered (`tools.offered`): a model
     that cannot take a picture never read `view_chart`'s description, and a log
@@ -838,8 +838,9 @@ def pins(run: Transcript) -> dict[str, Any]:
     facts `docs/BENCHMARK_EVAL.md` §4 says two runs may differ in by exactly
     one. A fact the log never recorded is ``None``, and a comparison treats
     ``None`` against a value as a difference, because an unknown pin is not a
-    matching one. This lists; deciding whether two runs may sit side by side
-    is the report's job, in `devtools/`, and never a verdict on either run.
+    matching one. This lists, and is never a verdict on either run; no report
+    compares two runs yet, so nothing decides whether two may sit side by
+    side.
     """
     prompts = _of(run, events.PROMPT)
     return {
@@ -854,10 +855,10 @@ def summary(run: Transcript) -> dict[str, Any]:
 
     Every field here is something the stream states outright. There is no
     ranking, no "quality", and no derived signal that implies one chat went
-    better than another — see this module's docstring, and `CLAUDE.md` → facts
-    vs judgment. `exchanges` is a count of messages sent, not a score: a long
-    conversation is neither better nor worse than a short one without knowing
-    what it was for.
+    better than another — see this module's docstring, and `CLAUDE.md` →
+    *Facts versus judgment*. `exchanges` is a count of messages sent, not a
+    score: a long conversation is neither better nor worse than a short one
+    without knowing what it was for.
 
     The totals are sums across exchanges rather than the last one's. A chat that
     spent four cents over six messages spent four cents, and reporting the last
@@ -1200,9 +1201,9 @@ def _tally(names: list[str]) -> dict[str, int]:
     """Counts per tool, most-called first — the `join`/`normalize`/`sql` mix.
 
     Ordering by count is a reading convenience over facts of the same kind, not
-    a ranking of importance: `BACKLOG.md` wants to know which op the copilot
-    reaches for before promoting one out of the SQL hatch, and that question is
-    answered by the counts themselves.
+    a ranking of importance: `BACKLOG_NEXT.md` §4 wants to know which op the
+    copilot reaches for before promoting one out of the SQL hatch, and that
+    question is answered by the counts themselves.
     """
     counts: dict[str, int] = {}
     for name in names:

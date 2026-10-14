@@ -3,7 +3,7 @@
 python -m devtools.bench invariants sandbox/            # every log under a root
 python -m devtools.bench invariants some/.portia --strict --json
 python -m devtools.bench check devtools/bench/cases/hotel.yaml
-python -m devtools.bench run devtools/bench/cases/hotel.yaml --variant B --model claude-haiku-4-5
+python -m devtools.bench run devtools/bench/cases/hotel.yaml --variant B --model claude-sonnet-5-5
 python -m devtools.bench run devtools/bench/cases/hotel.yaml --arm baseline-diligent
 python -m devtools.bench point devtools/bench/points/hotel-join.yaml --runs 10
 """

@@ -654,7 +654,7 @@ async def _list_models(kind: str) -> None:
 async def _switch_project() -> None:
     """Back to the picker — closing any chat on the way out.
 
-    A chat holds a live SDK subprocess (`docs/CONVERSATION.md` §4), so leaving a
+    A chat holds a live SDK subprocess (`docs/CHAT_SESSIONS.md` §3.3), so leaving a
     project without closing it leaks one for as long as the window lives. That
     is `KNOWLEDGE_GRAPH.md` §6.6's shape of bug, and this is the one place a
     project is left on purpose.

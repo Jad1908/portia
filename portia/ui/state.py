@@ -185,7 +185,7 @@ CONNECTION_STATES = (NOT_CONNECTED, CONNECTING, CONNECTED)
 
 #: Where a project's data is, as the first-run screen asks it: files in the
 #: repo, or a warehouse. **One or the other**, never both on one screen — a
-#: project reads from one place (`docs/CONNECTOR.md` §2.2), and the screen that
+#: project reads from one place (`docs/CONNECTORS.md` §2.2), and the screen that
 #: offered both at once read as two half-forms. Derived from the project when it
 #: has said (a connection, or a data folder); asked when it has not.
 LOCAL_DATA = "local"
@@ -409,11 +409,12 @@ class Chat:
     #: the next send resumes it.
     conversation: Any = None
     #: The `runlog.Log` this chat is being written to, opened once and reused by
-    #: every exchange — the file *is* the chat (§5).
+    #: every exchange — the file *is* the chat (`CONVERSATION.md` §5).
     log: Any = None
     #: The one-shot `Conversation` an indexing job is running on, for as long as
     #: it runs, so Stop can reach it. Apart from ``conversation`` because that
-    #: field means *a chat is open* (`open`), and a job is not one (§6).
+    #: field means *a chat is open* (`open`), and a job is not one
+    #: (`CONVERSATION.md` §6).
     job: Any = None
     #: `Timing` by SDK call id — how long each tool call has been running, or
     #: took. Kept beside the rows rather than on them: the rows are the engine's
@@ -454,7 +455,7 @@ class Chat:
         """A message is **in flight** — not that a chat exists.
 
         An open chat sitting idle is not busy, or it would block indexing for as
-        long as it stays open (`docs/CONVERSATION.md` §9).
+        long as it stays open (`docs/CONVERSATION.md` §7).
         """
         return self.exchange is not None and self.exchange.running
 
@@ -558,7 +559,7 @@ class Progress:
 #: names `App.auto_allow` will accept. Both write **catalog prose** — a summary,
 #: a column role, a group and its context — which is judgment you can correct in
 #: place afterwards and which the catalog's update rule preserves when facts
-#: refresh (`CLAUDE.md` → `portia/catalog.py`).
+#: refresh (`CLAUDE.md` → Durable artifacts).
 #:
 #: **`record_step` is deliberately absent and this is the whole point of the
 #: set.** It is not that a spec step is more important prose; it is that
@@ -678,16 +679,16 @@ class Chart:
     #: file; a chart nobody has kept has neither.
     notes: str = ""
     at: str = ""
-    #: Which `query_data` call this replots, if it reuses one (§2.6).
+    #: Unused: nothing writes or reads it (`BACKLOG_NEXT.md` §4, Window).
     from_query: int | None = None
     #: What the browser said when it could not draw the chart (`charts.render_failed`,
     #: its only writer). A failed drawing is a failed tab that says so and stays
     #: open — there is no retry (§8). A failed query never reaches a tab:
     #: `plot_data` refuses it before anything is published.
     error: str | None = None
-    #: True between the press and the rows arriving. The tab draws in one pass and
-    #: the query does not (§3.6), so a chart is on screen as a pending tab before
-    #: it is a chart.
+    #: Meant to be true between the press and the rows arriving, but nothing sets
+    #: it true: a chart reaches the window with its rows (§3.6, and
+    #: `BACKLOG_NEXT.md` §4, Window).
     pending: bool = False
     #: Whether the Keep form is open on this chart, and what has been typed into
     #: it (`docs/VISUALIZATION.md` §6). Held on the chart rather than in one
@@ -974,7 +975,7 @@ class App:
     #: The source whose removal is waiting on a confirmation.
     removing: str | None = None
 
-    # --- the warehouse (`docs/CONNECTOR.md`) ---------------------------------------
+    # --- the warehouse (`docs/CONNECTORS.md`) --------------------------------------
 
     #: Where the project's connection stands, as the word the pane draws:
     #: ``""`` when the project names none, else one of `CONNECTION_STATES` or
@@ -1006,7 +1007,7 @@ class App:
     scope_ticks: frozenset[str] = frozenset()
     scope_filter: str = ""
     scope_loading: str | None = None
-    #: The connect dialog's project half (`CONNECTOR.md` §2.7.1): whether the
+    #: The connect dialog's project half (`CONNECTORS.md` §2.7.1): whether the
     #: copilot may write, as a draft until Connect saves it, and the sentence
     #: the dialog opens with when an action sent you there.
     connect_agent_writes: bool = False
@@ -1213,9 +1214,9 @@ class App:
     #: Every chart the copilot has drawn this session, open tabs and closed ones
     #: alike (`Chart.closed`, `docs/VISUALIZATION.md` §3.5).
     #:
-    #: **Session state, deliberately** (§6). In memory, gone on restart, not
-    #: persisted — the durable half is the journal, and the chat log holds every
-    #: `plot_data` call regardless, which is `FINDINGS.md` §5.1's point again:
+    #: **An unsaved chart is session state** (§6). It lives in memory only and is
+    #: gone on restart; a saved figure's tab is restored (`PREFERENCES.md` §2.7),
+    #: and the chat log holds every `plot_data` call regardless, which is `FINDINGS.md` §5.1's point again:
     #: there is no staging area because the log already is one.
     charts: list[Chart] = field(default_factory=list)
     #: Which tab is showing in each group, by `Chart.key`. `CANVAS` is tab zero.
@@ -1281,7 +1282,7 @@ class App:
     server_status: str = ""
     server_error: str = ""
     interpret: bool = True
-    #: Whether adding a warehouse table also scans it (`CONNECTOR.md` §2.6,
+    #: Whether adding a warehouse table also scans it (`CONNECTORS.md` §2.6,
     #: revised 2026-09-07). Off, a table arrives as metadata for nothing; on,
     #: each one is profiled on the meter before the read. The add-data screen
     #: draws the switch beside the interpret one, because they are the two
@@ -1299,7 +1300,7 @@ class App:
     #: for. So the two are not one decision.
     #:
     #: **`record_step` is not in `AUTO_ALLOWABLE` and cannot be put here.** It
-    #: runs the op and *then* writes the spec (`CLAUDE.md` → `record_step`), so
+    #: runs the op and *then* writes the spec (`CONVERSATION.md` §8), so
     #: skipping its confirmation is skipping the only look anyone gets at a step
     #: before it exists. A catalog write is prose you can correct in place, and
     #: the update rule already preserves corrections.
@@ -1328,7 +1329,7 @@ class App:
     #: unexecuted payload. In the 2026-09-04 session **8 of 14 approved
     #: `record_step` calls then errored**, which is fourteen interruptions buying
     #: six looks at something real. Moving the gate to after the run is a
-    #: different and larger change (`BACKLOG.md` → Agent), and autopilot does not
+    #: different and larger change (`BACKLOG_NEXT.md` §4, Agent loop), and autopilot does not
     #: make it and must not be read as having made it.
     #:
     #: **Removes the pause, not the consequence.** `record_step` runs the op
@@ -1436,7 +1437,7 @@ class App:
         through — and ``False`` means they are already there and it is on screen
         anyway.
 
-        A rule rather than two lines inside `turn._stop` because it is worth
+        A rule rather than two lines inside `exchange._stop` because it is worth
         stating, and because stating it makes it testable without a browser.
         """
         if not self.on_add_data:
@@ -1800,7 +1801,7 @@ class App:
 
     @property
     def live(self) -> Chat | None:
-        """The one chat with a message in flight, if any (§3.1)."""
+        """The one chat with a message in flight, if any (`CHAT_SESSIONS.md` §3.1)."""
         return next((chat for chat in self.chats if chat.busy), None)
 
     @property
@@ -1811,7 +1812,7 @@ class App:
 
     @property
     def waiting(self) -> list[Chat]:
-        """Every chat stopped on a decision — what the badges draw (§3.5)."""
+        """Every chat stopped on a decision — what the badges draw (`CHAT_SESSIONS.md` §3.5)."""
         return [chat for chat in self.chats if chat.pending is not None]
 
     @property

@@ -103,7 +103,7 @@ def source_ref(data_path: str | Path, *, portia_dir: str | Path = DEFAULT_DIR) -
 
 #: A source entry's block saying it is a warehouse table rather than a file:
 #: ``{database, schema, table, kind}``, with ``source`` above it holding the
-#: qualified name (`docs/CONNECTOR.md` §2.6). Absent on every file source.
+#: qualified name (`docs/CONNECTORS.md` §2.6). Absent on every file source.
 REMOTE = "remote"
 
 
@@ -203,7 +203,7 @@ def source_name(recorded: str, *, portia_dir: str | Path = DEFAULT_DIR) -> str:
 
     A source is named by its file's stem or its table's name, and two folders can
     both hold ``orders.csv`` as two schemas can both hold ``ORDERS``
-    (`docs/CONNECTOR.md` §2.12). Locally the second used to overwrite the first's
+    (`docs/CONNECTORS.md` §2.12). Locally the second used to overwrite the first's
     entry, silently. Now the short name is kept when it is free **or already
     this source's**, and on a collision the parent is prepended with dbt's
     double underscore: ``raw__orders``, ``SALES__ORDERS``, then one more parent.
@@ -262,7 +262,7 @@ def _file_suffixes() -> tuple[str, ...]:
     return tuple(s.lstrip(".") for s in supported_suffixes())
 
 
-# --- a warehouse table in scope (`docs/CONNECTOR.md` §2.5, §2.6) ----------------
+# --- a warehouse table in scope (`docs/CONNECTORS.md` §2.5, §2.6) ----------------
 
 
 def scope_table(qualified: str, con: Any, *, portia_dir: str | Path = DEFAULT_DIR) -> Path:
@@ -341,7 +341,7 @@ def profile_remote(name: str, con: Any, *, portia_dir: str | Path = DEFAULT_DIR)
 
     **A model with a written table goes through here too** *(2026-09-07)*. On a
     warehouse a build indexes a model as metadata for the reason scoping does
-    (`CONNECTOR.md` §2.6), and until this the opt-in half existed for sources
+    (`CONNECTORS.md` §2.6), and until this the opt-in half existed for sources
     only: the window's *Profile now* refused a model's name, and the agent's
     `profile_source` scanned the written table and threw the facts away, so
     seven tables built into BigQuery stayed at ``profiled: null`` however often
@@ -533,10 +533,10 @@ def set_connection(
 
     ``None`` clears it, which makes the project local again; the scope stays,
     because forgetting which tables were the study is a separate act. The
-    connection is a *name* (`docs/CONNECTOR.md` §2.3): the account behind it is
+    connection is a *name* (`docs/CONNECTORS.md` §2.3): the account behind it is
     the reader's own entry, outside the repo.
 
-    ``agent_writes`` is the hand-off (`CONNECTOR.md` §2.7.1): on, `record_step`
+    ``agent_writes`` is the hand-off (`CONNECTORS.md` §2.7.1): on, `record_step`
     creates each model's table in the warehouse the moment the step is measured,
     where the spec's own ``target`` says, creating the schema if missing. Off is
     the default and the absent key — the role is the security boundary, and this
@@ -623,7 +623,7 @@ def index_model(
     itself produced.
 
     ``written_to`` is the qualified table this build created in the warehouse
-    (`docs/CONNECTOR.md` §2.7.2), with the spec ``fingerprint`` it was built
+    (`docs/CONNECTORS.md` §2.7.2), with the spec ``fingerprint`` it was built
     from. Both are on the entry or neither is: a build that wrote nothing
     leaves no ``table`` behind, because one from an earlier build would name a
     table this spec no longer describes. The pinned Warehouse section draws
@@ -644,7 +644,7 @@ def index_model(
     existing = _read(path) if path.exists() else {}
     if metadata_only:
         # On a warehouse the "2% on top of the run" is a scan on someone's
-        # meter, per recorded step (`docs/CONNECTOR.md` §2.6). The columns and
+        # meter, per recorded step (`docs/CONNECTORS.md` §2.6). The columns and
         # types are free from a describe; the facts wait for a profile that was
         # asked for (:func:`profile_remote`, which takes a model's name too).
         profile = _shape_only(table)
@@ -1034,7 +1034,7 @@ def set_group(
 
 
 #: The three fields a warehouse project adds to ``project.yaml``
-#: (`docs/CONNECTOR.md` §2.3, §2.5, §2.7.1): which of the user's connections it
+#: (`docs/CONNECTORS.md` §2.3, §2.5, §2.7.1): which of the user's connections it
 #: runs on, which tables are in scope, and whether the copilot writes to it as
 #: it records. Absent on a local project, and their absence is what "local"
 #: means. Where a table goes is not here: it is each spec's own ``target``.
@@ -1260,7 +1260,7 @@ def remote_changed(entry: dict, con: Any, *, within: float = 0.0) -> bool:
     """Whether a scoped table has changed since it was indexed — one query, on request.
 
     The same two keys :data:`STALENESS_FACTS` names, which a remote entry
-    records as bytes and ``LAST_ALTERED`` (`docs/CONNECTOR.md` §2.11).
+    records as bytes and ``LAST_ALTERED`` (`docs/CONNECTORS.md` §2.11).
 
     ``within`` is how many seconds old an answer the warehouse already gave
     may be and still stand for now (:func:`warehouse_facts`); ``0`` asks.
@@ -1276,7 +1276,7 @@ def remote_changed(entry: dict, con: Any, *, within: float = 0.0) -> bool:
 # --- has it changed since it was indexed (2026-10-13) --------------------------------
 #
 # **Every answer touching a table that changed since portia indexed it says so
-# first** (`sandbox/limits/REVAMP_SPEC.md`, rule 6). `is_stale` has answered that
+# first** (`docs/TOOL_SURFACE.md` §3, rule 6). `is_stale` has answered that
 # for a file since 2026-08-03, for the window's left pane; `remote_changed` was
 # written for a warehouse table with the reason it could not be on a render, a
 # query, and was then called by nothing. `freshness` is the one question both
@@ -1289,7 +1289,7 @@ def remote_changed(entry: dict, con: Any, *, within: float = 0.0) -> bool:
 #: describes eighteen of them and then queries each, and every answer has to
 #: say whether its tables changed. Asking the warehouse each time is a
 #: metadata query per table per call, about two seconds each on BigQuery
-#: (`CONNECTOR.md` §2.6.1). A minute is long enough that a burst asks once and
+#: (`CONNECTORS.md` §8.3). A minute is long enough that a burst asks once and
 #: short enough that a table reloaded mid-chat is noticed within the next few
 #: answers. Every `table_facts` portia asks for anyway (scoping, a profile, a
 #: build) refreshes it, so a re-index is never contradicted by an older answer.

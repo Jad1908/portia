@@ -16,7 +16,7 @@ finding resting on it is prose with nothing underneath.
 
 So: everything passes except the compute surface, which is refused by name with a
 message saying to put it in the SQL. That is not a hedge between the two options
-§2.8 recorded. It is the whole of the first one — the vocabulary is Vega-Lite's,
+§2.9 recorded. It is the whole of the first one — the vocabulary is Vega-Lite's,
 not a list portia maintains and keeps having to widen — with the second one's
 single rule kept.
 

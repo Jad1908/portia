@@ -225,7 +225,7 @@ def page() -> None:
     # so (`exchange.watch_project`). One stat walk a tick when nothing moved.
     ui.timer(WATCH_SECONDS, exchange.watch_project)
     # A project opened from `--project` names its warehouse before the loop
-    # exists; the session is opened once it does (`docs/CONNECTOR.md` §2.4).
+    # exists; the session is opened once it does (`docs/CONNECTORS.md` §2.4).
     ui.timer(0.2, artifacts.connect_in_background, once=True)
     # What each local provider serves, read once off the loop so the picker
     # has the list the moment someone switches to it (`docs/PROVIDERS.md` §5).
@@ -558,9 +558,8 @@ def _splitter(
     """A draggable pane edge that closes the pane when you drag past its floor.
 
     The floor is the width at which a pane stops being worth having, so it was
-    also the honest place to close it — `DESIGN.md` says as much ("the honest
-    move at that point is to close it rather than to squeeze it") and the
-    splitter used to simply refuse to go further, which left the toolbar toggle
+    also the honest place to close it — `DESIGN.md` says as much (the floor is
+    a threshold, not a wall) — and the splitter used to simply refuse to go further, which left the toolbar toggle
     as the only way to get rid of a pane.
 
     So the splitter's own lower limit drops to zero and the floor becomes a
@@ -797,7 +796,7 @@ def _where(progress: state.Progress) -> str:
     parts.append(present.duration(progress.elapsed))
     if APP.connection:
         # A run on a warehouse is a run on someone's meter, and the mark is the
-        # one place that says so while it is happening (`CONNECTOR.md` §2.7.1).
+        # one place that says so while it is happening (`CONNECTORS.md` §2.13).
         parts.append(f"on {APP.connection}")
     return " · ".join(parts)
 

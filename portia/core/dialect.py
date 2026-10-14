@@ -10,12 +10,12 @@ checks layer.
 name, a query and a connection (`core/table.py`), and the connection is the one
 thing that knows what engine will parse the query. `of` asks it; a connection
 that says nothing is DuckDB, which is what every connection was before
-`docs/CONNECTOR.md`. So a check never has to be told which warehouse it is on,
+`docs/CONNECTORS.md`. So a check never has to be told which warehouse it is on,
 and a test that profiles a DuckDB table while a Snowflake backend is active
 still profiles it correctly.
 
 **An instance per engine, no registry.** A new engine adds a subclass here and
-one prompt file (`prompts/backend/`); that is the whole of what `CONNECTOR.md`
+one prompt file (`prompts/backend/`); that is the whole of what `CONNECTORS.md`
 §2.9 asks of it.
 """
 
@@ -218,7 +218,7 @@ class BigQuery(Dialect):
     function, one value per call, and cannot sit beside ``count(*)`` in one
     scan. ``APPROX_QUANTILES(x, 1000)`` is one list-valued aggregate, the shape
     DuckDB's answer already has, read back at the 250th, 500th and 750th
-    boundaries. An approximate number reported as a fact is `PLAN.md`'s fourth
+    boundaries. An approximate number reported as a fact is `PLAN.md`'s fifth
     non-negotiable broken quietly, so `approximate_quartiles` is set and the
     profiler writes ``approximate`` on the column naming which keys are.
     """
@@ -383,7 +383,7 @@ def resolve_columns(names: Iterable[str], columns: Iterable[str]) -> list[str]:
     sessions on 2026-09-06 lost recorded steps to exactly that: the grain check
     said the column was missing, the profile refused the same name, and the
     copilot concluded its columns were "being dropped somewhere" and rewrote a
-    correct step four times (`CONNECTOR.md` §2.8.2). Nothing local could see it,
+    correct step four times (`CONNECTORS.md` §2.8.2). Nothing local could see it,
     because every fixture in this repo is lower case.
 
     The rule: an exact match wins; otherwise a name that matches **exactly one**
