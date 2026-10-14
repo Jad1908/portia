@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
 
@@ -646,25 +647,52 @@ def test_what_a_join_check_does_not_keep_it_says(sales, recorded, left, right, k
     assert recorded["edges"] == []
 
 
-def test_a_join_check_on_a_steps_table_is_measured_and_not_kept(sales, recorded):
+_FIRST = {
+    "id": "first",
+    "op": "join",
+    "left": "orders",
+    "right": "customers",
+    "keys": ["customer_id"],
+    "how": "left",
+}
+
+
+def test_a_join_check_on_an_earlier_steps_table_is_measured_and_not_kept(sales, recorded):
+    """A step before the spec's last is a table no build made: no node to keep it on."""
+    handlers.record_step("specs/chain.yaml", dict(_FIRST), portia_dir=sales)
     handlers.record_step(
         "specs/chain.yaml",
-        {
-            "id": "first",
-            "op": "join",
-            "left": "orders",
-            "right": "customers",
-            "keys": ["customer_id"],
-            "how": "left",
-        },
+        {"id": "second", "op": "sql", "inputs": ["first"], "sql": "SELECT * FROM first"},
         portia_dir=sales,
     )
     found = handlers.join_findings(
         "specs/chain.yaml#first", "customers", keys=["customer_id"], portia_dir=sales, reason="r"
     )
     assert found["report"]["left"]["n_rows"] == 10
-    assert found["graph"]["kept"] is False and "step produced" in found["graph"]["why"]
+    assert found["graph"]["kept"] is False and "earlier step" in found["graph"]["why"]
     assert recorded["edges"] == []
+
+
+def test_a_join_check_on_a_built_specs_last_step_is_kept_against_its_model(sales, recorded):
+    """The case a real session found (2026-10-14): the copilot named the unpivot staging
+    table it had just built by its step reference, and the measurement never reached the
+    graph. The last step of a spec built as it stands is the model's table."""
+    handlers.record_step("specs/chain.yaml", dict(_FIRST), portia_dir=sales)
+    found = handlers.join_findings(
+        "specs/chain.yaml#first", "customers", keys=["customer_id"], portia_dir=sales, reason="r"
+    )
+    assert found["graph"] == {"kept": True}
+    (edge,) = recorded["edges"]
+    assert "chain" in str(edge)
+
+
+def test_a_spec_edited_since_its_build_is_not_its_model(sales, recorded):
+    handlers.record_step("specs/chain.yaml", dict(_FIRST), portia_dir=sales)
+    path = Path(sales).parent / "specs" / "chain.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("how: left", "how: inner"), encoding="utf-8"
+    )
+    assert handlers._built_model_of("specs/chain.yaml#first", sales) is None
 
 
 def test_a_join_check_never_fails_because_the_graph_is_down(sales, graph_down):

@@ -2489,7 +2489,12 @@ def _keep_join(left: str, right: str, report: dict, reason: str, portia_dir: str
       single columns measures it;
     - a ``<spec>#<step>`` side is a table no build has made, so it has no node,
       and its key may be one the step transformed (`join_findings` names
-      columns, so a transformed key only ever arrives this way);
+      columns, so a transformed key only ever arrives this way) — **unless it is
+      the spec's last step and its model is built from the spec as it stands**
+      (:func:`_built_model_of`), when it *is* the model's table and the
+      measurement is kept against the model (2026-10-14: the copilot named an
+      unpivot staging step by its reference instead of its model's name, and
+      the route it had just built never reached the graph);
     - a table against itself is not a link between tables.
 
     **Connected before the graph is built.** Building reads the whole catalog
@@ -2502,6 +2507,7 @@ def _keep_join(left: str, right: str, report: dict, reason: str, portia_dir: str
     lkeys, rkeys = report["keys"]["left"], report["keys"]["right"]
     if len(lkeys) != 1 or len(rkeys) != 1:
         return _graph_not_kept(prompts.notice("join_not_kept_composite"))
+    left, right = (_built_model_of(side, portia_dir) or side for side in (left, right))
     if STEP_REF in left or STEP_REF in right:
         return _graph_not_kept(prompts.notice("join_not_kept_step"))
     left, right = _known_name(left, portia_dir), _known_name(right, portia_dir)
@@ -2539,6 +2545,33 @@ def _keep_join(left: str, right: str, report: dict, reason: str, portia_dir: str
 
 def _graph_not_kept(why: str) -> dict:
     return {"kept": False, "why": why}
+
+
+def _built_model_of(ref: str, portia_dir: str) -> str | None:
+    """The model a ``<spec>#<step>`` reference is, or ``None`` when it is not one.
+
+    It is one when the step is the spec's **last** (one spec builds one table,
+    the last step's, `spec.model_table`) and the model's catalog entry was built
+    from the spec **as it stands** (its `catalog.BUILT_FROM` fingerprint is the
+    spec's now). Then the step's table and the model are the same table, and the
+    graph has a node for it. Anything else stays a step's table: an earlier step,
+    a spec edited since its last build, a spec never built. A plain name is not
+    a step reference and is answered ``None`` too.
+    """
+    if STEP_REF not in ref:
+        return None
+    spec_path, _, step_id = ref.partition(STEP_REF)
+    root = _project_root(portia_dir)
+    try:
+        name, path = _resolve_spec(spec_path, spec.discover_specs(root), root)
+        doc = spec.load_spec(path)
+    except (ValueError, OSError):
+        return None
+    steps = doc.get("steps") or []
+    if not steps or steps[-1].get("id") != step_id:
+        return None
+    built = (catalog.load_models(portia_dir).get(name) or {}).get("built") or {}
+    return name if built.get(catalog.BUILT_FROM) == pipeline.fingerprint(doc) else None
 
 
 def record_step(
