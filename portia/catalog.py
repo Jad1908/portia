@@ -362,8 +362,6 @@ def profile_remote(name: str, con: Any, *, portia_dir: str | Path = DEFAULT_DIR)
     entry = _source_entry(qualified, profile, existing, facts)
     entry[REMOTE] = {**existing[REMOTE], **({"kind": kind} if kind else {})}
     entry["profiled"] = {"at": facts["at"]}
-    for col, measured in zip(entry["columns"], profile["columns"], strict=True):
-        col["dtype"] = measured["dtype"]
     # `_source_entry` puts the keys in a file source's order; a remote entry
     # reads better with its location block beside its name.
     ordered = {
@@ -1451,11 +1449,20 @@ LATER_FACTS = ("mean", "q25", "q75", "samples")
 
 
 def _column_facts(col: dict) -> dict:
-    """A compact, token-lean slice of the column profile for the catalog."""
+    """A compact, token-lean slice of the column profile for the catalog.
+
+    ``dtype`` is the engine's storage type, kept on a measured column too since
+    2026-10-14, beside ``inferred``, which is portia's reading of the values.
+    They differ where it matters: a column with no value in it is ``empty`` to
+    portia and ``VARCHAR`` to DuckDB, and an ``UNPIVOT`` over it beside
+    ``DOUBLE`` columns fails on the storage type. The copilot asked
+    ``portia_columns`` for it by the name ``data_type`` and it was not there.
+    """
     if "inferred" not in col:
         # Shape only (`_shape_only`): a name and a type, no measurement behind it.
         return {"dtype": col.get("dtype")}
     facts = {
+        "dtype": col.get("dtype"),
         "inferred": col["inferred"],
         "null_rate": col["null_rate"],
         "n_distinct": col["n_distinct"],

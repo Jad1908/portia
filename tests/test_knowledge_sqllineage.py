@@ -102,6 +102,16 @@ def test_unparseable_and_unresolvable_are_told_apart():
         column_origins("SELECT nope FROM orders", INPUTS)
 
 
+def test_a_statement_that_is_not_a_select_is_unreadable_rather_than_a_crash():
+    """DuckDB's ``WITH … UNPIVOT`` passes the hatch and parses as a `Pivot`, with no select list."""
+    sql = (
+        "WITH c AS (SELECT * FROM orders) "
+        "UNPIVOT c ON COLUMNS(* EXCLUDE (order_id)) INTO NAME k VALUE v"
+    )
+    with pytest.raises(LineageUnreadable, match="PIVOT statement"):
+        column_origins(sql, INPUTS)
+
+
 def test_a_star_over_a_table_the_schema_does_not_hold_is_refused():
     """It expands to a column literally called `*`, which is worse than a refusal."""
     with pytest.raises(LineageUnreadable, match=r"\*"):

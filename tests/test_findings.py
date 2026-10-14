@@ -233,8 +233,65 @@ def test_describe_source_carries_them_without_being_asked(sales):
         portia_dir=sales,
     )
     got = handlers.describe_source("orders", portia_dir=sales)
-    assert got["findings"]["n_findings"] == 1
+    assert got["findings"]["n"] == 1
     json.dumps(got)
+
+
+def _card_rows(listed: dict) -> list[dict]:
+    return [dict(zip(listed["fields"], row, strict=True)) for row in listed["rows"]]
+
+
+def test_a_finding_about_eight_tables_is_on_the_card_once(sales, tmp_path):
+    """The card grouped findings by the other table, so this one was printed eight
+    times: on a public energy dataset, three findings were twelve entries (2026-10-14)."""
+    fuels = [f"fuel_{i}" for i in range(8)]
+    findings.record(
+        question="which fuels does each site report?",
+        answer="all eight, in two units",
+        so="convert before stacking them",
+        about=["orders.customer_id", *fuels],
+        queries=[],
+        root=tmp_path,
+        portia_dir=sales,
+    )
+    card = handlers.describe_source("orders", portia_dir=sales)
+
+    (row,) = _card_rows(card["findings"])
+    assert card["findings"]["n"] == 1
+    assert row["tables"] == ["orders", *fuels]
+    assert row["so"] == "convert before stacking them" and row["path"].startswith("findings/")
+    assert json.dumps(card).count("which fuels does each site report?") == 1
+    assert "findings_by_table" not in card, "every finding is listed, so nothing to narrow"
+
+    pair = handlers.describe_source("orders", portia_dir=sales, findings_with="FUEL_3")
+    assert pair["findings"]["with_table"] == "fuel_3"
+    assert [r["tables"] for r in _card_rows(pair["findings"]["findings"])] == [["orders", *fuels]]
+
+
+def test_past_its_cap_a_card_names_the_tables_the_rest_are_about(sales, tmp_path):
+    for i in range(handlers.CARD_FINDINGS + 2):
+        findings.record(
+            question=f"question {i}",
+            answer="a",
+            so="b",
+            about=["orders", "customers" if i % 2 else "returns"],
+            queries=[],
+            root=tmp_path,
+            portia_dir=sales,
+        )
+    card = handlers.describe_source("orders", portia_dir=sales)
+
+    listed = card["findings"]
+    assert listed["n"] == handlers.CARD_FINDINGS + 2
+    assert len(listed["rows"]) == handlers.CARD_FINDINGS
+    assert "2 older findings" in listed["more"] and "findings_with" in listed["more"]
+    half = (handlers.CARD_FINDINGS + 2) // 2
+    assert card["findings_by_table"]["rows"] == [["customers", half], ["returns", half]]
+
+    pair = handlers.describe_source("orders", portia_dir=sales, findings_with="customers")
+    rows = _card_rows(pair["findings"]["findings"])
+    assert pair["findings"]["findings"]["n"] == half == len(rows)
+    assert all(r["tables"] == ["orders", "customers"] for r in rows)
 
 
 def test_the_journal_for_a_spec_is_chronological(sales, tmp_path):

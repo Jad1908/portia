@@ -504,6 +504,91 @@ def test_a_later_step_keeps_walking_through_a_sql_step(project):
     assert list(_sql_derives(result.graph, "enriched", "name")) == [CUSTOMERS.column("name").key]
 
 
+#: An unpivot the parser cannot read: the shape of the real case, a wide table
+#: turned long, and the one that left a measured join out of the graph.
+UNPIVOT = (
+    "SELECT order_id, field, value FROM (UNPIVOT (SELECT order_id, customer_id, note "
+    "FROM orders) ON COLUMNS(* EXCLUDE (order_id)) INTO NAME field VALUE value)"
+)
+
+
+def _model_columns(graph, model: str) -> list[str]:
+    return [e.end.key for e in graph.edges_of(HAS_COLUMN) if e.start == Ref(MODEL, model)]
+
+
+def test_a_built_model_the_parser_cannot_read_takes_its_columns_from_the_catalog(project):
+    """The table was built and profiled, so its columns are known; their lineage is not.
+
+    Each one is a node with its facts, in the built table's order, marked
+    *derivation unknown* with no edge underneath, and the model stays in the
+    report saying so, because what is missing is the lineage and not the table.
+    """
+    from portia import pipeline
+
+    _sql_spec(project, UNPIVOT, name="long_orders", step="unpivot")
+    assert _model_columns(build_graph(project).graph, "long_orders") == []
+
+    pipeline.build_project(project)
+    result = build_graph(project)
+
+    model = Ref(MODEL, "long_orders")
+    assert _model_columns(result.graph, "long_orders") == [
+        model.column(c).key for c in ("order_id", "field", "value")
+    ]
+    for position, name in enumerate(("order_id", "field", "value"), start=1):
+        column = result.graph.node(COLUMN, model.column(name).key)
+        assert column is not None
+        assert column.properties[DERIVATION] == DERIVATION_UNKNOWN
+        assert column.properties[POSITION] == position
+    field = result.graph.node(COLUMN, model.column("field").key)
+    assert field is not None and field.properties["n_distinct"] == 2
+    assert _sql_derives(result.graph, "long_orders", "order_id") == {}
+    assert "could not be resolved" in result.unresolved["long_orders"]
+    assert "from the catalog" in result.unresolved["long_orders"]
+
+
+def test_a_catalog_entry_built_from_another_version_of_the_spec_names_no_columns(project):
+    """Edited since it was built, the spec describes a table nobody has made yet."""
+    from portia import pipeline
+
+    _sql_spec(project, UNPIVOT, name="long_orders", step="unpivot")
+    pipeline.build_project(project)
+    _sql_spec(project, UNPIVOT.replace("customer_id, note", "note"), name="long_orders")
+
+    result = build_graph(project)
+    assert _model_columns(result.graph, "long_orders") == []
+    assert "from the catalog" not in result.unresolved["long_orders"]
+
+
+def test_a_model_reading_one_built_from_unreadable_sql_gets_its_lineage(project):
+    """The catalog's names are enough for the parser to read the next spec down."""
+    from portia import pipeline
+
+    _sql_spec(project, UNPIVOT, name="long_orders", step="unpivot")
+    _write_spec(
+        project,
+        "fields",
+        {
+            "version": 1,
+            "steps": [
+                {
+                    "id": "count",
+                    "op": "sql",
+                    "inputs": ["long_orders"],
+                    "sql": "SELECT field, count(*) AS n FROM long_orders GROUP BY field",
+                }
+            ],
+        },
+    )
+    pipeline.build_project(project)
+    result = build_graph(project)
+
+    assert _sql_derives(result.graph, "fields", "field") == {
+        Ref(MODEL, "long_orders").column("field").key: {"via": "sql", "step": "fields#count"}
+    }
+    assert "fields" not in result.unresolved
+
+
 def test_an_unindexed_source_is_a_node_with_no_columns(project):
     """A spec may name a file nobody indexed. The path is true; the columns are
     unknown, and unknown is said rather than guessed."""

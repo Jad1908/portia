@@ -478,10 +478,10 @@ def test_a_card_with_findings_from_a_hundred_tables_names_them_all(crowded):
         pair = _answer(_call("describe_source", {"source": "hub", "findings_with": "PARTNER_050"}))
     _says_how_to_get_the_rest(answer)
     block = answer["findings"]
-    assert block["n_findings"] == 300 and block["more"]
-    assert len(block["with"]) == handlers.CARD_FINDING_TABLES
-    assert block["also_with"]["n"] == 100 - handlers.CARD_FINDING_TABLES
-    assert block["also_with"]["rows"][0] == [f"partner_{handlers.CARD_FINDING_TABLES:03d}", 3]
+    assert block["n"] == 300 and len(block["rows"]) == handlers.CARD_FINDINGS and block["more"]
+    tables = answer["findings_by_table"]
+    assert tables["n"] == 100 and len(tables["rows"]) == 100 and "more" not in tables
+    assert tables["rows"][0] == ["partner_000", 3]
     assert set(pair) == {"source", "findings"}
     assert pair["findings"]["with_table"] == "partner_050"
     assert pair["findings"]["findings"]["n"] == 3 and len(pair["findings"]["findings"]["rows"]) == 3

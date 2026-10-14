@@ -142,8 +142,10 @@ because pair-picking is the agent's job and it used to be done from names and ro
 produce **two** nodes. Whether they are the same thing is exactly what `OVERLAPS` exists to answer,
 so merging them would assume the answer to the question the graph is being built to ask.
 
-**A model's columns carry no facts.** Nothing has profiled the table portia *would* build, and
-inventing numbers for it would be the one thing this project forbids.
+**A model's columns carry facts once it is built** (since 2026-09-01: `catalog.index_model`
+profiles the table a build or a recorded step produced). Before that, nothing has profiled the
+table portia *would* build, and inventing numbers for it would be the one thing this project
+forbids.
 
 **`derivation: "unknown"` means the trail stops here and portia could not read past it** — a
 `count(*)`, a literal, anything a `sql` step produced with no input column underneath it. It exists
@@ -216,7 +218,10 @@ what the step did.
 
 It needs `sqlglot`, from the `graph` extra. **Without it the step is unresolved**, and so is any
 model downstream: `Model` node, true `READS` edges, no `Column` nodes. Same when the SQL cannot be
-parsed or cannot be resolved against its inputs. `python -m portia.cli.knowledge` prints what could
+parsed or cannot be resolved against its inputs — **unless the model has been built from the spec
+as it stands** (2026-10-14): then its columns come from its catalog entry, with their facts and
+`derivation: "unknown"`, so a join or an overlap can attach to them (an `UNPIVOT` staging step
+is the case that found it). Lineage is still reported missing. `python -m portia.cli.knowledge` prints what could
 not be read and why — per model when the whole spec stalled, per column when only one did.
 
 ### Measured — costs a query, and is nobody's to delete

@@ -673,6 +673,20 @@ def test_reading_one_entry_opens_no_other_entry(tmp_path, monkeypatch):
 # --- the row count is a fact on every entry (2026-10-13) --------------------------
 
 
+def test_a_measured_column_keeps_the_engines_storage_type_beside_portias_reading(tmp_path):
+    """`dtype` on every column since 2026-10-14: numbers stored as text are VARCHAR
+    to the engine whatever portia reads in them, and a cast or an UNPIVOT sees that."""
+    d = tmp_path / ".portia"
+    index_source(_write_source(tmp_path), portia_dir=d)
+    col = next(
+        c
+        for c in load_catalog(d)["sources"]["customers"]["columns"]
+        if c["name"] == "signup_amount"
+    )
+    assert col["dtype"] == "VARCHAR"
+    assert "numeric_stored_as_text" in col["flags"]
+
+
 def test_indexing_a_file_records_its_row_count_as_a_fact(tmp_path):
     from portia import catalog
 

@@ -266,15 +266,15 @@ def _add_models(
     outputs: dict[str, _Relation] = {}
     for name in spec.run_order(models, base_dir=root):
         doc = docs[name]
+        fingerprint = pipeline.fingerprint(doc)
         # `spec` and `fingerprint` are **pointers** into the pipeline — where to
         # read what this table does, and what it looked like when something was
         # measured against it (§4.5). The pipeline's own vocabulary is not here:
         # `layer` (staging/intermediate/mart) groups and orders the project
         # canvas and says nothing about what a table *is to* another table,
         # which is the only question this graph answers.
-        node = graph.add_node(
-            MODEL, name, spec=str(models[name]), fingerprint=pipeline.fingerprint(doc)
-        )
+        node = graph.add_node(MODEL, name, spec=str(models[name]), fingerprint=fingerprint)
+        entry = measured.get(name) or {}
         outputs[name] = _add_model(
             graph,
             result,
@@ -283,7 +283,8 @@ def _add_models(
             models,
             outputs,
             source_columns,
-            {c["name"]: c for c in (measured.get(name) or {}).get("columns") or []},
+            {c["name"]: c for c in entry.get("columns") or []},
+            built=(entry.get("built") or {}).get(catalog.BUILT_FROM) == fingerprint,
         )
 
 
@@ -296,8 +297,15 @@ def _add_model(
     outputs: dict[str, _Relation],
     source_columns: dict[str, list[str]],
     measured: dict[str, dict],
+    *,
+    built: bool = False,
 ) -> _Relation:
-    """One spec: its `READS` edges, its output columns, and their lineage."""
+    """One spec: its `READS` edges, its output columns, and their lineage.
+
+    ``built`` says ``measured`` was profiled from this spec as it stands
+    (`catalog.BUILT_FROM`), which is when its column list may stand in for one
+    the spec cannot give (:func:`_built_columns`).
+    """
     # A source is a path, or `{table: …}` on a warehouse project — and the
     # catalog's Source node is keyed by the qualified name in that case, which
     # is exactly what the dict holds (`catalog.source_ref_of`). Read through
@@ -331,8 +339,11 @@ def _add_model(
     # `spec.model_table` applies when another spec reads this one.
     produced = relations[steps[-1]["id"]]
     if produced.columns is None:
-        result.unresolved[node.key] = produced.reason
-        return produced
+        if not (built and measured):
+            result.unresolved[node.key] = produced.reason
+            return produced
+        result.unresolved[node.key] = f"{produced.reason}; {_FROM_CATALOG}"
+        return _built_columns(graph, node, measured)
 
     # In the order the last step outputs them, which is the built table's order.
     for position, name in enumerate(produced.columns, start=1):
@@ -363,6 +374,38 @@ def _add_model(
 _UNBUILT = "reads a model whose own columns could not be resolved"
 _NO_STEPS = "the spec has no steps, so it produces no table"
 _UNKNOWN_ORIGIN = "no input column underneath it — a literal, or an aggregate over rows"
+_FROM_CATALOG = "its columns are the built table's, from the catalog, with no lineage"
+
+
+def _built_columns(graph: Graph, node: Ref, measured: dict[str, dict]) -> _Relation:
+    """The built table's columns, from its catalog entry, when the spec cannot name them.
+
+    **A model the parser cannot read is not a model with no columns**
+    *(2026-10-14)*. A `sql` step that unpivots a wide table (``UNPIVOT … ON
+    COLUMNS(* EXCLUDE …)``) is beyond sqlglot, so the walk stops there, and the
+    model used to land in the graph as a bare node: a join checked between it
+    and a source was measured and then not kept, because the graph held no
+    column by that name. Yet `catalog.index_model` had profiled the very table
+    when the step was recorded, and its entry lists every column with its
+    facts. Restating that list is what the catalog half does for a source.
+
+    Only when the entry was profiled from this spec as it stands (the caller's
+    ``built``): a spec edited since describes a table nobody has built, and
+    its old column list would be a claim about the wrong table. Each column is
+    marked :data:`schema.DERIVATION_UNKNOWN` and has no `DERIVES_FROM`, because
+    nothing read its lineage, and the model stays in
+    `BuildResult.unresolved` saying so: the columns are known, where they came
+    from is not. `docs/SQL_LINEAGE.md` §4.4 rejected keeping a run's column
+    list *in the spec*; this keeps none, and a graph built from a fresh clone
+    with no catalog is the bare node it always was.
+
+    The relation it returns carries the names, so a model that reads this one
+    resolves against them rather than inheriting the gap (§1.2's cascade).
+    """
+    for position, (name, facts) in enumerate(measured.items(), start=1):
+        column = _add_column(graph, node, name, facts, position=position, derivation_unknown=True)
+        graph.add_edge(HAS_COLUMN, node, column)
+    return _Relation(list(measured))
 
 
 def _model_relation(model: Ref, produced: _Relation | None) -> _Relation:

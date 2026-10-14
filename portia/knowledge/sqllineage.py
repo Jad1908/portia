@@ -80,6 +80,14 @@ def column_origins(sql: str, inputs: dict[str, list[str]]) -> dict[str, list[Ori
         statement = parse_one(sql, read=_DIALECT)
     except Exception as exc:
         raise LineageUnreadable(f"the sql could not be parsed: {_short(exc)}") from exc
+    if not isinstance(statement, exp.Query):
+        # DuckDB's own ``WITH c AS (…) UNPIVOT c ON …`` passes the hatch's
+        # check (it starts with WITH) and parses as a `Pivot`, which has no
+        # select list. Read as one, it raised `AttributeError` out of the
+        # graph build, and every graph refresh of the project with it.
+        raise LineageUnreadable(
+            f"the sql is a {statement.key.upper()} statement, which the parser cannot trace"
+        )
     # **Read before qualifying.** `qualify` folds identifiers to lower case *in
     # place* and returns the same tree, so a select list read afterwards has
     # already lost the spelling the author wrote (see :func:`_as_written`).

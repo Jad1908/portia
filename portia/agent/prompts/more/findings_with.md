@@ -1,4 +1,4 @@
-<!-- placeholders: {source}, {cap}. Filled from agent/handlers._findings_card, when a card shows some of a table's findings. -->
-Not every finding is shown: each table above shows its latest few, and also_with names the tables
-past them with a count each. describe_source on '{source}' with findings_with naming a table
-shows the findings about the two, up to {cap}.
+<!-- placeholders: {left}, {source}, {cap}. Filled from agent/handlers._findings_card, when a card lists the latest of a table's findings. -->
+{left} older findings are not shown. findings_by_table counts this table's findings by each other
+table they are about. describe_source on '{source}' with findings_with naming one of those tables
+lists the findings about the two, latest first, up to {cap}.
