@@ -17,6 +17,7 @@ import pytest
 
 from portia import catalog
 from portia.agent import handlers, prompts, reserved, tools
+from portia.ops import sql as sql_op
 
 
 @pytest.fixture
@@ -56,12 +57,12 @@ def _records(answer: dict) -> list[dict]:
 
 def test_portia_columns_is_one_row_per_column_with_its_facts(shop):
     answer = _ask(
-        "SELECT name, type, flags, null_rate, n_distinct, min, max, top, top_freq "
+        "SELECT column_name, type, flags, null_rate, n_distinct, min, max, top, top_freq "
         "FROM portia_columns WHERE table_name = 'orders' ORDER BY position",
         ["portia_columns"],
         shop,
     )
-    rows = {row["name"]: row for row in _records(answer)}
+    rows = {row["column_name"]: row for row in _records(answer)}
     assert list(rows) == ["ORDER_ID", "amount", "shop"]
     assert rows["ORDER_ID"]["type"] == "integer" and rows["ORDER_ID"]["max"] == 4
     assert rows["amount"]["null_rate"] == 0.25 and rows["amount"]["min"] == 1.5
@@ -71,12 +72,12 @@ def test_portia_columns_is_one_row_per_column_with_its_facts(shop):
 
 def test_a_flag_is_asked_with_list_contains_across_every_table(shop):
     answer = _ask(
-        "SELECT table_name, kind, name FROM portia_columns "
+        "SELECT table_name, kind, column_name FROM portia_columns "
         "WHERE list_contains(flags, 'constant') ORDER BY table_name, position",
         ["portia_columns"],
         shop,
     )
-    assert [(r["table_name"], r["kind"], r["name"]) for r in _records(answer)] == [
+    assert [(r["table_name"], r["kind"], r["column_name"]) for r in _records(answer)] == [
         ("big_orders", "model", "shop"),
         ("orders", "source", "shop"),
     ]
@@ -84,8 +85,10 @@ def test_a_flag_is_asked_with_list_contains_across_every_table(shop):
 
 def test_portia_tables_is_one_row_per_source_and_model(shop):
     catalog.set_interpretation("customers", summary="One row per customer.", portia_dir=shop)
-    answer = _ask("SELECT * FROM portia_tables ORDER BY kind DESC, name", ["portia_tables"], shop)
-    rows = {row["name"]: row for row in _records(answer)}
+    answer = _ask(
+        "SELECT * FROM portia_tables ORDER BY kind DESC, table_name", ["portia_tables"], shop
+    )
+    rows = {row["table_name"]: row for row in _records(answer)}
     assert answer["fields"] == [name for name, _ in reserved.TABLE_FIELDS]
     assert rows["orders"]["kind"] == "source" and rows["orders"]["path"] == "orders.csv"
     assert rows["orders"]["n_rows"] == 4 and rows["orders"]["n_columns"] == 3
@@ -100,13 +103,28 @@ def test_portia_tables_is_one_row_per_source_and_model(shop):
     assert rows["orders"]["indexed_at"]
 
 
+def test_they_name_things_as_information_schema_does(shop):
+    """`table_name` and `column_name`, which a model already knows (2026-10-13).
+
+    With `name` in both, two Haiku drives guessed `source` and then
+    `column_name`, a failed query each time.
+    """
+    answer = _ask(
+        "SELECT t.kind, count(c.column_name) AS n FROM portia_tables t "
+        "JOIN portia_columns c USING (table_name) GROUP BY ALL ORDER BY 1",
+        ["portia_tables", "portia_columns"],
+        shop,
+    )
+    assert _records(answer) == [{"kind": "model", "n": 3}, {"kind": "source", "n": 3 + 2}]
+
+
 def test_a_changed_file_is_stale_and_so_is_what_is_built_from_it(shop):
     with open("orders.csv", "a", encoding="utf-8") as f:
         f.write("5,9.0,a\n")
     later = os.stat("orders.csv").st_mtime + 5
     os.utime("orders.csv", (later, later))
-    answer = _ask("SELECT name, stale FROM portia_tables ORDER BY name", ["portia_tables"], shop)
-    assert {r["name"]: r["stale"] for r in _records(answer)} == {
+    answer = _ask("SELECT table_name, stale FROM portia_tables ORDER BY 1", ["portia_tables"], shop)
+    assert {r["table_name"]: r["stale"] for r in _records(answer)} == {
         "big_orders": True,
         "customers": False,
         "orders": True,
@@ -116,7 +134,7 @@ def test_a_changed_file_is_stale_and_so_is_what_is_built_from_it(shop):
 def test_the_catalog_and_the_data_meet_in_one_query_locally(shop):
     answer = _ask(
         "SELECT t.n_rows AS recorded, (SELECT count(*) FROM orders) AS counted "
-        "FROM portia_tables t WHERE t.name = 'orders'",
+        "FROM portia_tables t WHERE t.table_name = 'orders'",
         ["portia_tables", "orders"],
         shop,
     )
@@ -130,11 +148,11 @@ def test_a_reserved_name_is_matched_the_way_the_engine_folds_it(shop):
 
 def test_a_chart_reads_them_too(shop):
     chart = handlers.plot_data(
-        "SELECT name, n_columns FROM portia_tables",
+        "SELECT table_name, n_columns FROM portia_tables",
         ["portia_tables"],
         "how wide is each table?",
         "widths",
-        {"mark": "bar", "encoding": {"x": {"field": "name"}, "y": {"field": "n_columns"}}},
+        {"mark": "bar", "encoding": {"x": {"field": "table_name"}, "y": {"field": "n_columns"}}},
         portia_dir=shop,
     )
     assert chart["n_rows"] == 3
@@ -154,6 +172,36 @@ def test_a_table_nobody_profiled_has_its_type_and_no_flags(shop):
     assert _records(answer) == [{"type": "VARCHAR", "flags": None, "null_rate": None}] * 2
 
 
+# --- named where a source belongs, or read and not declared -------------------------
+
+
+@pytest.mark.parametrize("name", ["portia_columns", "PORTIA_TABLES", "portia_result_bcdf"])
+def test_one_of_portias_own_tables_is_not_a_source_and_says_where_it_is_read(shop, name):
+    """A Haiku drive described `portia_columns` and was told every source's name (2026-10-13)."""
+    with pytest.raises(ValueError) as described:
+        handlers.describe_source(name, shop)
+    with pytest.raises(ValueError) as read:
+        handlers._table(name, shop)
+    for refused in (described, read):
+        assert str(refused.value) == prompts.error("reserved_is_not_a_source", table=name)
+
+
+@pytest.mark.parametrize("name", ["Portia_Columns", "portia_result_bcdf"])
+def test_one_of_portias_tables_read_and_not_declared_is_told_to_declare_it(shop, name):
+    """The same Haiku drive failed twice on the sandbox's generic words.
+
+    Never added to 'inputs' for it: a query reads exactly what it declares.
+    """
+    with pytest.raises(ValueError) as refused:
+        _ask(f"SELECT count(*) AS n FROM orders, {name}", ["orders"], shop)
+    assert str(refused.value) == prompts.error("reserved_not_declared", table=name)
+
+
+def test_any_other_undeclared_table_keeps_the_sandboxs_own_words(shop):
+    with pytest.raises(ValueError, match="reads only what it declares in 'inputs'"):
+        _ask("SELECT count(*) AS n FROM orders, customers", ["orders"], shop)
+
+
 # --- a warehouse project --------------------------------------------------------------
 
 
@@ -170,6 +218,22 @@ def test_on_a_warehouse_portias_records_and_the_warehouse_are_never_one_query(sh
     monkeypatch.setattr(handlers, "connect", lambda: _Remote())
     with pytest.raises(ValueError) as refused:
         _ask("SELECT * FROM portia_tables, orders", ["portia_tables", "orders"], shop)
+    assert str(refused.value) == prompts.error(
+        "reserved_with_warehouse", reserved="portia_tables", tables="orders"
+    )
+
+
+def test_on_a_warehouse_a_record_read_and_not_declared_is_told_to_ask_alone(shop, monkeypatch):
+    """Adding it to 'inputs' would only meet the refusal above, so this says what that says."""
+    monkeypatch.setattr(handlers, "connect", lambda: _Remote())
+    monkeypatch.setattr(handlers, "_table", lambda name, portia_dir, con: object())
+
+    def undeclared(tables, sql, *, name):
+        raise sql_op.SqlTableUnknown("the sandbox's own words", ["portia_tables"])
+
+    monkeypatch.setattr(sql_op, "apply_sql", undeclared)
+    with pytest.raises(ValueError) as refused:
+        _ask("SELECT * FROM portia_tables, orders", ["orders"], shop)
     assert str(refused.value) == prompts.error(
         "reserved_with_warehouse", reserved="portia_tables", tables="orders"
     )
@@ -260,7 +324,7 @@ def test_portia_tables_holds_every_note_a_card_leaves_out(shop):
     con = reserved.connection()
     (table,) = reserved.tables(["portia_tables"], shop, con).values()
     ((texts,),) = table.sql(
-        f"SELECT list_transform(notes, n -> n.text) FROM {table.ref} WHERE name = 'orders'"
+        f"SELECT list_transform(notes, n -> n.text) FROM {table.ref} WHERE table_name = 'orders'"
     ).rows(1)
     assert texts == [f"note {i}" for i in range(handlers.CARD_NOTES + 2)], "oldest first"
     card = handlers.describe_source("orders", shop)
@@ -274,6 +338,6 @@ def test_portia_columns_holds_the_mean_and_the_quartiles(shop):
     (table,) = reserved.tables(["portia_columns"], shop, con).values()
     ((q25, median, q75, mean),) = table.sql(
         f"SELECT q25, median, q75, mean FROM {table.ref} "
-        "WHERE table_name = 'orders' AND name = 'amount'"
+        "WHERE table_name = 'orders' AND column_name = 'amount'"
     ).rows(1)
     assert (q25, median, q75, mean) == (2.0, 2.5, 3.25, 2.6667), "rounded as the profile rounds"

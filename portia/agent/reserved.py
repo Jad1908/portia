@@ -178,12 +178,18 @@ def create(con: Any, name: str, fields: Sequence[tuple[str, str]], rows: list[di
 #: One row per column of every source and model. ``table_name`` and not ``table``,
 #: which DuckDB will not read unquoted: ``WHERE table = 'x'`` is a syntax error,
 #: and it is the first query anyone writes against this.
+#:
+#: **The two names are `information_schema`'s** *(2026-10-13)*: ``table_name``
+#: and ``column_name``, here and ``table_name`` in :data:`TABLES`, because a
+#: model already knows them from every SQL engine it has read about. With
+#: ``name`` for both, two Haiku drives guessed ``source`` and then
+#: ``column_name``, and each guess was a failed query.
 COLUMNS = "portia_columns"
 COLUMN_FIELDS: tuple[tuple[str, str], ...] = (
     ("table_name", "VARCHAR"),
     ("kind", "VARCHAR"),
     ("position", "INTEGER"),
-    ("name", "VARCHAR"),
+    ("column_name", "VARCHAR"),
     ("type", "VARCHAR"),
     ("role", "VARCHAR"),
     ("flags", "VARCHAR[]"),
@@ -204,7 +210,7 @@ COLUMN_FIELDS: tuple[tuple[str, str], ...] = (
 #: One row per source and model.
 TABLES = "portia_tables"
 TABLE_FIELDS: tuple[tuple[str, str], ...] = (
-    ("name", "VARCHAR"),
+    ("table_name", "VARCHAR"),
     ("kind", "VARCHAR"),
     ("path", "VARCHAR"),
     ("n_rows", "BIGINT"),
@@ -268,7 +274,7 @@ def _column_rows(request: Request) -> list[dict]:
                     "table_name": table,
                     "kind": kind,
                     "position": position,
-                    "name": _text(column.get("name")),
+                    "column_name": _text(column.get("name")),
                     "type": _text(column.get("inferred") or column.get("dtype")),
                     "role": _text(column.get("role")),
                     # Absent on a column nobody measured, which is not the same
@@ -308,7 +314,7 @@ def _table_rows(request: Request) -> list[dict]:
             path = found.as_posix() if found is not None else None
         rows.append(
             {
-                "name": name,
+                "table_name": name,
                 "kind": kind,
                 "path": path,
                 "n_rows": catalog.row_count(entry),

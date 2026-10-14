@@ -151,7 +151,7 @@ def test_the_three_sentences_are_required(sales):
 def test_about_is_a_closed_vocabulary(sales):
     """`KNOWLEDGE_GRAPH.md` §4.8 applied to the journal — a free tag has no list to read."""
     _chat_with_queries(sales, "q")
-    with pytest.raises(ValueError, match="no table 'the orders table'"):
+    with pytest.raises(ValueError, match="is named 'the orders table'"):
         handlers.record_finding("q", "a", "b", ["the orders table"], [1], portia_dir=sales)
     with pytest.raises(ValueError, match="no column 'custmer_id'"):
         handlers.record_finding("q", "a", "b", ["orders.custmer_id"], [1], portia_dir=sales)
@@ -169,6 +169,13 @@ def test_a_query_number_that_is_not_there_is_refused(sales):
     _chat_with_queries(sales, "q")
     with pytest.raises(ValueError, match="#4"):
         handlers.record_finding("q", "a", "b", ["orders"], [4], portia_dir=sales)
+
+
+def test_a_finding_citing_no_query_is_refused_in_words(sales):
+    """It raised ``KeyError: '"from"'`` once, from a literal brace in the refusal."""
+    _chat_with_queries(sales, "q")
+    with pytest.raises(ValueError, match="has to name the queries"):
+        handlers.record_finding("q", "a", "b", ["orders"], [], portia_dir=sales)
 
 
 # --- the read path ----------------------------------------------------------

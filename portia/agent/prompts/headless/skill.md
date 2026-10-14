@@ -27,7 +27,7 @@ you read off a file.
 `figures/` and `.portia/` are not edited by hand, by you, through any tool. A step is
 in a spec because `record_step` ran it and measured the result. To change one, call
 `record_step` with `supersedes`. Reading these files is fine and often useful: a spec
-is a short YAML, and `read_spec` returns it with its journal.
+is a short YAML, and `read_spec` returns it as a card with its findings.
 
 **The brief is pulled, not given.** Call `get_context` before any other portia tool,
 every session. It returns what the app puts in its copilot's system prompt: the

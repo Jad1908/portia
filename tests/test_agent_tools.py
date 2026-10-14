@@ -519,22 +519,20 @@ _WIDE_STEP = {
 }
 
 
-def test_a_step_over_a_wide_table_comes_back_shortened_not_refused(wide_project, tmp_path):
-    from portia.agent import handlers
-
-    full = handlers.record_step("specs/wide_a.yaml", dict(_WIDE_STEP), portia_dir=wide_project)
-    assert len(to_json_compact(full)) > tools.RESULT_BUDGET, "the fixture is not wide enough"
-
+def test_a_step_over_a_wide_table_comes_back_as_a_card_not_shortened(wide_project, tmp_path):
+    """The outcome named every column twice; the card names the exceptions (2026-10-13)."""
     result = _call(
         "record_step",
         {"spec_path": "specs/wide.yaml", "step": dict(_WIDE_STEP), "portia_dir": wide_project},
     )
 
     assert "is_error" not in result, _text(result)[:300]
+    assert len(_text(result)) < tools.RESULT_BUDGET // 10
     answer = json.loads(_text(result))
-    assert list(answer)[0] == "shortened"
+    assert "shortened" not in answer and "receipt" not in answer
     assert answer["step_id"] == "all_meters" and answer["outcome"]["n_cols"] == 400
-    assert answer["outcome"]["null_rates"]["count"] == 400
+    (meters,) = answer["outcome"]["inputs"]["rows"]
+    assert meters[:4] == ["meters", 400, True, 0]
     assert (tmp_path / "specs" / "wide.yaml").exists()
 
 
@@ -591,27 +589,21 @@ def test_a_read_too_large_even_shortened_is_still_refused(monkeypatch):
     assert result["is_error"] is True and "NOT sent" in _text(result)
 
 
-def test_a_wide_built_table_reads_back_grouped(monkeypatch):
-    columns = [
-        {
-            "name": f"meter_{i:04d}",
-            "inferred": "float",
-            "null_rate": 0.01,
-            "n_distinct": 9,
-            "flags": [],
-        }
-        for i in range(2000)
-    ]
-    payload = {"spec": "specs/wide.yaml", "model": "wide", "measured": {"columns": columns}}
-    monkeypatch.setattr(tools.handlers, "read_spec", lambda *a, **k: payload)
+def test_a_wide_built_table_reads_back_as_its_shape_and_where_to_read_it(wide_project):
+    """`measured` no longer sends the built table's columns: the model is an indexed table."""
+    from portia.agent import handlers
 
-    result = _call("read_spec", {"spec": "wide", "measured": True})
+    handlers.record_step("specs/wide.yaml", dict(_WIDE_STEP), portia_dir=wide_project)
+
+    result = _call("read_spec", {"spec": "wide", "measured": True, "portia_dir": wide_project})
 
     assert "is_error" not in result, _text(result)[:300]
     answer = json.loads(_text(result))
-    assert list(answer)[0] == "shortened"
-    (floats,) = answer["measured"]["columns_by_type"]
-    assert floats["n_columns"] == 2000 and floats["first"][0] == "meter_0000"
+    assert "shortened" not in answer and len(_text(result)) < tools.RESULT_BUDGET // 4
+    measured = answer["measured"]
+    assert measured["n_columns"] == 400 and "columns" not in measured
+    assert sum(t["n"] for t in measured["types"].values()) == 400
+    assert "describe_source" in measured["more"] and "'wide'" in measured["more"]
 
 
 # --- the graph tools' arguments (2026-10-13) --------------------------------------------

@@ -34,6 +34,7 @@ marked `unknown` is a table portia cannot check, such as a warehouse view.
 ask a narrower question. A list with no `more` is whole. Never read the rows you
 were shown as all there are. What portia knows about every column and every table
 is also two tables, `portia_columns` and `portia_tables`, which `query_data` reads.
+They name things as `information_schema` does: `table_name`, `column_name`.
 
 ## The four moves
 
@@ -130,7 +131,8 @@ reads them instead of re-deriving. The user reviews them in a diff.
   Written from `review_queries` before a reply.
 - **The spec** says what we *did* to the data: steps, each with an `expect` block, a
   `rationale`, and a `grain` where the table has one. Written with `record_step`,
-  read with `read_spec`, re-run with `run_spec`. One spec builds one table.
+  read with `read_spec`, re-run with `run_spec`. One spec builds one table. Its
+  card lists a row per step; `step` reads one in full.
 - **The pipeline** is the spec compiled: one `.sql` per spec under `models/`, the
   thing a data team is handed.
 

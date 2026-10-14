@@ -28,7 +28,8 @@ thing this module may look at. Which flag *matters* is the reader's call
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
+from difflib import get_close_matches
 from typing import Any
 
 from portia.core.serialize import to_jsonable_nested
@@ -47,6 +48,9 @@ PER_FLAG_NAMES = 100
 #: longest list becomes a count, then the next longest, until the rest fit.
 #: **A placeholder**, as `PER_FLAG_NAMES` is.
 CARD_NAMES = 300
+
+#: How many near misses a refusal of an unknown name gives (:func:`near_misses`).
+CLOSE_MATCHES = 3
 
 #: The keys a flag's entry uses, named once so a reader of the answer and a
 #: test agree on them.
@@ -165,3 +169,21 @@ def flagged(columns: Sequence[Mapping[str, Any]], *, order: Sequence[str] = ()) 
         listed -= names_by_flag[flag]
         out[flag] = {"n": out[flag]["n"], LISTED: False}
     return out
+
+
+def near_misses(name: str, names: Iterable[str], *, n: int = CLOSE_MATCHES) -> list[str]:
+    """The few ``names`` closest to ``name``, for a refusal of a name that is not there.
+
+    **The closest few, never every name** *(2026-10-13)*. A refusal that listed
+    every candidate grew with the project: an unknown table at 80 sources was
+    1,694 characters of names, and a miss on a 1,579-column table's column was
+    longer than a harness passes whole. The names that differ from ``name``
+    only in case come first, because a name typed in the other case is the
+    commonest miss; `difflib`'s closest follow, at most ``n`` in all. Closeness
+    of spelling is all this measures. An empty list means nothing is close, and
+    the caller's sentence says how many there are and where they are listed.
+    """
+    pool = list(names)
+    folded = [other for other in pool if other.lower() == name.lower()]
+    close = [*folded, *get_close_matches(name, pool, n=n)]
+    return list(dict.fromkeys(close))[:n]

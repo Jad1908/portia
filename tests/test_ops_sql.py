@@ -271,6 +271,7 @@ def test_an_undeclared_table_is_portias_error_not_duckdbs(events, table):
     assert "Declared: city_events" in message
     assert "bare id" in message
     assert "__portia_raw" not in message
+    assert raised.value.names == ("events",), "as typed, for a caller that knows more about it"
 
 
 # --- the remote path (`docs/CONNECTOR.md` §2.8) ---------------------------------
@@ -342,9 +343,10 @@ def test_a_remote_step_naming_an_undeclared_table_is_refused_before_it_runs(con)
 
     remote, inputs = _remote_inputs(con)
     before = len(remote.executed)
-    with pytest.raises(SqlTableUnknown, match="names other, which is not a declared input"):
+    with pytest.raises(SqlTableUnknown, match="names other, which is not a declared input") as e:
         apply_sql(inputs, "SELECT * FROM orders JOIN other USING (id)")
     assert len(remote.executed) == before, "refused by the parser, never by the warehouse"
+    assert e.value.names == ("other",)
 
 
 def test_the_parse_check_reads_through_ctes_quotes_and_case():

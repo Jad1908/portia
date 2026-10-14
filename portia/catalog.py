@@ -601,6 +601,7 @@ def index_model(
     metadata_only: bool = False,
     written_to: str | None = None,
     fingerprint: str | None = None,
+    steps: list[dict] | None = None,
 ) -> Path:
     """Profile a table a spec just built, and write its entry.
 
@@ -628,6 +629,14 @@ def index_model(
     table this spec no longer describes. The pinned Warehouse section draws
     the entries that carry one, and a read of the model goes to that table
     while the fingerprint still matches the spec.
+
+    ``steps`` is each step's shape as the run that built this table measured
+    it (`spec.step_shapes`), kept under ``built`` beside the fingerprint of
+    the spec that run executed (:data:`BUILT_FROM`, the same marker
+    :func:`freshness` reads): ``built`` says what the last run was, and a
+    profile that rewrites the entry later keeps it whole. `read_spec` lists
+    the shapes without running anything, while the spec still has that
+    fingerprint.
     """
     d = Path(portia_dir)
     (d / MODELS_DIR).mkdir(parents=True, exist_ok=True)
@@ -645,6 +654,8 @@ def index_model(
         profile = profiling.profile(table)
         entry = _model_entry(name, profile, existing)
         profiled = {"at": entry["built"]["at"]}
+    if steps is not None:
+        entry["built"] = {**entry["built"], "steps": steps}
     indexed = _written_facts(table, written_to)
     if profile["n_rows"] is not None:
         indexed = _counted(indexed or {}, profile["n_rows"])

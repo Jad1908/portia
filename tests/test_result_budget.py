@@ -38,6 +38,7 @@ import pytest
 
 from portia import catalog, findings
 from portia.agent import tools
+from portia.core import listing
 
 #: Claude Code passes an error result whole up to this many characters and cuts
 #: the middle out of anything longer (both binaries, both paths, 2026-10-10).
@@ -435,6 +436,23 @@ def test_the_index_of_sixty_tables_lists_them_all_or_says_how_many_more(estate):
     assert [row[0] for row in narrowed["sources"]["rows"]] == [f"t00{i}" for i in range(10)]
 
 
+@pytest.mark.parametrize(
+    ("tool", "args"),
+    [
+        ("describe_source", {"source": "t07"}),
+        ("query_data", {"sql": "SELECT 1", "inputs": ["t07"], "question": "is it there?"}),
+    ],
+)
+def test_an_unknown_name_among_sixty_tables_names_the_closest_few(estate, tool, args):
+    """It named every source and model: 1,694 characters at 80 sources (2026-10-13)."""
+    with _inside(estate):
+        result = _call(tool, args)
+    text = " ".join(result["content"][0]["text"].split())
+    assert result.get("is_error") and "Sources in this project: 60" in text
+    named = [f"t{i:03d}" for i in range(60) if f"t{i:03d}" in text]
+    assert 0 < len(named) <= listing.CLOSE_MATCHES, named
+
+
 @pytest.fixture(scope="module")
 def crowded(tmp_path_factory) -> Path:
     """A hub that a hundred other tables have three findings each with."""
@@ -548,3 +566,99 @@ def test_fifty_columns_of_two_thousand_character_values(deep):
                 {"question": "q", "sql": f"SELECT {values} FROM hub", "inputs": ["hub"]},
             )
         )
+
+
+# --- spec cards: a read and a write that do not grow with the table (2026-10-13) ---
+#
+# `read_spec` sent every step verbatim and `record_step` an outcome naming every
+# column twice; both were shortened past the budget. Their cards list a row per
+# step and name a step's exceptions, so these hold them to the same rule as the
+# source cards: every cut says how to get the rest.
+
+
+def test_the_card_of_a_24_step_spec_lists_every_step_with_its_shape(deep, long_spec):
+    with _inside(deep):
+        answer = _answer(_call("read_spec", {"spec": long_spec}))
+    _says_how_to_get_the_rest(answer)
+    steps = answer["steps"]
+    assert answer["n_steps"] == 24 == steps["n"] == len(steps["rows"])
+    last = dict(zip(steps["fields"], steps["rows"][-1], strict=True))
+    assert last["n_cols"] == 60 + 24 and last["n_rows"] == 40 and answer["steps_measured"]
+
+
+def test_a_step_that_keeps_two_of_800_columns_counts_the_798_it_dropped(deep):
+    step = {
+        "id": "kept",
+        "op": "sql",
+        "inputs": ["sparse"],
+        "sql": "SELECT id, region_code FROM sparse",
+        "rationale": "m",
+    }
+    with _inside(deep):
+        answer = _answer(_call("record_step", {"spec_path": "specs/kept_two.yaml", "step": step}))
+    _says_how_to_get_the_rest(answer)
+    (row,) = answer["outcome"]["inputs"]["rows"]
+    assert row == ["sparse", 2, True, 798, None] and answer["outcome"]["more"]
+
+
+def test_a_step_that_keeps_all_800_columns_is_a_card_well_under_the_budget(deep):
+    step = {
+        "id": "every",
+        "op": "sql",
+        "inputs": ["sparse"],
+        "sql": "SELECT * FROM sparse",
+        "rationale": "m",
+    }
+    with _inside(deep):
+        result = _call("record_step", {"spec_path": "specs/every.yaml", "step": step})
+    answer = _answer(result)
+    _says_how_to_get_the_rest(answer)
+    assert len(result["content"][0]["text"]) < tools.RESULT_BUDGET // 5
+    assert "shortened" not in answer and "receipt" not in answer
+    high = answer["outcome"]["flagged"]["high_null"]
+    assert "all_but" in high or "columns" in high, "the rarer side is named"
+
+
+class _Columns:
+    """A table as `handlers._outcome_card` reads one: its column names."""
+
+    def __init__(self, columns: list[str]) -> None:
+        self.columns = columns
+
+
+def test_a_1579_column_outcome_makes_a_card_well_under_the_budget():
+    """The 1,579-column `SELECT *` without its forty seconds of profiling: the card
+    from a report of that width, with flags past their caps and inputs past theirs."""
+    from portia.agent import handlers
+    from portia.core.serialize import to_json_compact
+
+    names = [f"{_WORDS[i % 10]}_{_WORDS[i % 7]}_attribute_{i:04d}" for i in range(1579)]
+    empty = [n for i, n in enumerate(names) if i % 10 == 0]
+    outcome = {
+        "n_rows": 17544,
+        "n_cols": len(names),
+        "empty": False,
+        "null_rates": {
+            n: 1.0 if i % 10 == 0 else 0.9 if i % 3 else 0.1 for i, n in enumerate(names)
+        },
+        "all_null_columns": empty,
+        "newly_all_null_columns": empty[::2],
+        "contribution": {
+            f"part_{k}": {
+                "columns_in_output": names[k * 300 : (k + 1) * 300],
+                "n_columns": 300,
+                "contributed": True,
+                "columns_dropped": names[(k + 1) * 300 :],
+            }
+            for k in range(5)
+        },
+        "grain": None,
+        "flags": ["all_null_column"],
+    }
+
+    card = handlers._outcome_card(outcome, _Columns(names), read_at="widest")
+
+    assert len(to_json_compact(card)) < tools.RESULT_BUDGET // 5
+    _says_how_to_get_the_rest(card)
+    assert card["flagged"]["newly_all_null"]["columns"] == empty[::2]
+    assert card["flagged"]["all_null"]["listed"] is False and card["more"]

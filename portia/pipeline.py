@@ -394,6 +394,7 @@ def _index(
             metadata_only=backend.is_remote(table.con),
             written_to=written_to,
             fingerprint=fingerprint,
+            steps=spec.step_shapes(results),
         )
     except Exception as exc:  # noqa: BLE001 - a description must not fail a build
         print(f"note: could not record what {name} looks like: {exc}")

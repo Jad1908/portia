@@ -10,6 +10,7 @@ string the model still gets offered.
 import ast
 import pathlib
 import re
+import string
 
 import pytest
 
@@ -120,6 +121,34 @@ def test_editor_notes_never_reach_the_model():
     for kind in ("tools", "tasks", "notices", "more"):
         for name in prompts.names(kind):
             assert "<!--" not in prompts.load(f"{kind}/{name}"), f"{kind}/{name}"
+
+
+#: The folders whose every file goes through ``str.format``, placeholders or not:
+#: `prompts.error`, `notice`, `more` and `task` format unconditionally.
+FORMATTED = ("errors", "notices", "more", "tasks")
+
+
+@pytest.mark.parametrize("kind", FORMATTED)
+def test_a_formatted_prompt_holds_no_literal_brace(kind):
+    """Every replacement field is a plain name; a brace meant literally is doubled.
+
+    `errors/finding_needs_a_query.md` showed the call it asks for,
+    ``{"from": [7, 9], ...}``, and ``.format()`` read ``"from"`` as a field:
+    `record_finding` with an empty ``from`` raised ``KeyError: '"from"'``
+    (2026-10-13, a Haiku drive) where it should have said what was missing.
+    A refusal that crashes is worse than none, because it is read at the moment
+    the model decides what to do next.
+    """
+    wrong = []
+    for name in sorted(prompts.names(kind)):
+        text = prompts.load(f"{kind}/{name}")
+        try:
+            fields = [f for _, f, _, _ in string.Formatter().parse(text) if f is not None]
+        except ValueError as exc:  # a lone `{` or `}`
+            wrong.append(f"{kind}/{name}.md: {exc}")
+            continue
+        wrong += [f"{kind}/{name}.md: {{{f}}}" for f in fields if not f.isidentifier()]
+    assert not wrong, "\n".join(wrong)
 
 
 @pytest.mark.parametrize(
