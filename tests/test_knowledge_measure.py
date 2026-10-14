@@ -470,6 +470,46 @@ def test_a_join_check_lands_in_the_graph_with_its_origin(neo4j_session, project,
     assert pair["stale"] is False
 
 
+def test_a_join_check_on_a_model_the_parser_cannot_read_is_kept_and_routed(
+    neo4j_session, project, monkeypatch
+):
+    """The real case: a recorded unpivot, then a join check between it and a source.
+
+    sqlglot cannot read the unpivot, so the model's columns used to be missing
+    from the graph and the measurement was not kept. They come from the
+    catalog entry the step wrote, and the route then runs through the pair.
+    """
+    monkeypatch.chdir(project)
+    handlers.record_step(
+        "specs/long_orders.yaml",
+        {
+            "id": "unpivot",
+            "op": "sql",
+            "inputs": ["orders"],
+            "sql": "SELECT order_id, field, value FROM (UNPIVOT (SELECT * FROM orders) "
+            "ON COLUMNS(* EXCLUDE (order_id)) INTO NAME field VALUE value)",
+            "rationale": "One row per order and field.",
+        },
+    )
+    found = handlers.join_findings(
+        "long_orders",
+        "customers",
+        left_on=["value"],
+        right_on=["customer_id"],
+        reason="the long table's values include each order's customer",
+    )
+    assert found["graph"] == {"kept": True}
+
+    routes = handlers.graph_lookup("long_orders", to="customers")["routes"]
+    direct = [row for row in routes["rows"] if row[0] == 1]
+    assert [row[1] for row in direct] == [["long_orders", "customers"]]
+    (step,) = direct[0][2]
+    fields = handlers.graphcards.ROUTE_PAIR_FIELDS
+    (pair,) = [dict(zip(fields, row, strict=True)) for row in step["pairs"]]
+    assert (pair["column"], pair["other_column"]) == ("value", "customer_id")
+    assert pair["n_shared_values"] == found["report"]["overlap"]["n_shared_keys"] == 2
+
+
 def test_a_join_checks_measurement_is_reused_by_measure_overlaps(
     neo4j_session, project, monkeypatch
 ):
