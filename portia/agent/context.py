@@ -210,12 +210,12 @@ def _render_sources(sources: dict) -> list[str]:
     what the fuller change looks like and what would have to be true to take it.
     """
     return [
-        f"- **{name}** — {_first_sentence(entry.get('summary') or '')}"
+        f"- **{name}** — {first_sentence(entry.get('summary') or '')}"
         for name, entry in sources.items()
     ]
 
 
-def _first_sentence(summary: str) -> str:
+def first_sentence(summary: str) -> str:
     """One line per source, so the index stays cheap however long a summary grows.
 
     The full stop is added only when the split took one off. This used to append

@@ -12,10 +12,11 @@ So every answer whose arguments name a table that changed starts with a
 ``stale`` list (`tools._evidence`, one place for every tool, like the size
 guard). The arguments are read generically (:data:`NAMING`): a source, a model,
 a ``<spec>#<step>``, or a spec. **A model is as fresh as what it is built
-from**: a model built locally keeps no change marker of its own
-(`catalog.freshness`), so naming one checks every source its spec reads,
-through the models it reads (`spec.sources_read`), and a source reached that
-way says which named table led to it (``read_by``).
+from**, its spec and its sources: a model built locally is stale when its spec
+changed since its facts were stored (`catalog.freshness`, 2026-10-13), and
+naming one also checks every source its spec reads, through the models it
+reads (`spec.sources_read`), and a source reached that way says which named
+table led to it (``read_by``).
 
 `catalog.freshness` answers in codes; this module is where they become the
 sentences the model reads, out of `prompts/notices/`, and where a code becomes
@@ -187,6 +188,9 @@ def word(fresh: dict, *, read_by: list[str] | None = None) -> dict:
     elif code == catalog.TABLE_GONE:
         out["changed"] = prompts.notice("stale_table_gone", table=fresh.get("table"), indexed=at)
         out["do"] = prompts.notice("stale_do_gone")
+    elif code == catalog.SPEC_CHANGED:
+        out["changed"] = prompts.notice("stale_spec_changed", spec=fresh.get("spec"), indexed=at)
+        out["do"] = prompts.notice("stale_do_rebuild")
     else:
         out["changed"] = prompts.notice("stale_table_changed", table=fresh.get("table"), indexed=at)
         out["do"] = prompts.notice("stale_do")

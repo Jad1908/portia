@@ -22,19 +22,20 @@ turns them into a tool result the agent can react to.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from difflib import get_close_matches
+from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
 
 from portia import catalog, findings, knowledge, pipeline, spec
-from portia.agent import chartspec, context, drawn, prompts, reserved
+from portia.agent import chartspec, context, drawn, freshness, prompts, reserved
 from portia.checks import profiling, sql_joins
 from portia.checks.join import column_overlap
 from portia.checks.join import join_findings as _join_findings
 from portia.checks.outcome import BLOCKING_FLAGS, REPORT_KEYS
-from portia.checks.profiling import profile_path
-from portia.core import backend, cancel
+from portia.core import backend, cancel, listing
 from portia.core import dialect as dialects
 from portia.core.io import connect, relative, source_table
 from portia.core.serialize import to_json, to_jsonable_nested
@@ -111,45 +112,271 @@ def step_vocabulary() -> dict[str, str]:
     }
 
 
-def get_context(portia_dir: str = catalog.DEFAULT_DIR) -> dict:
-    """Re-read the project's L1 context: prose, groups, and the source index.
+# --- the source cards (2026-10-13, the tool revamp) --------------------------------
+#
+# `get_context`, `describe_source` and `profile_source` answer with a card whose
+# size does not grow with the data (`core/listing.py`): every list is cut at a
+# fixed length and the cut says how to ask a narrower question, every flagged
+# column is named by the flag rule, and anything else about the columns is one
+# `query_data` on `portia_columns` (`agent/reserved.py`). The grouped forms they
+# replaced (`tools._by_type`) counted a flag without naming its columns, and an
+# auto-drafted summary naming every mostly-null column rode along on all three,
+# so a sparse 800-column table was over the budget however it was grouped.
 
-    You already have this — it is in your system prompt. Call it only to pick up
-    changes made *during* this session, e.g. after indexing or interpreting a
-    source. Per-source detail is deliberately absent; climb to ``describe_source``
-    for that.
+#: Up to this many columns a card lists every one, with its type, role and
+#: flags; past it the card counts them by type and names every flagged one
+#: (:func:`_overview`). **A placeholder**, tuned by the scale test: two hundred
+#: rows of ordinary names and short roles are 11,000 to 17,000 characters, about
+#: half of `tools.RESULT_BUDGET`, and a card that does not fit anyway is sent as
+#: its overview (:func:`overview_of`).
+CARD_LISTS_ALL = 200
+
+#: Names one type gives on a wide card: every one up to this many, else the
+#: first this many in table order, as examples. Table order is the one order
+#: that makes no choice about which columns are worth a look.
+TYPE_EXAMPLES = 20
+
+#: Columns one filtered `describe_source` lists before it says how many more match.
+MATCH_CAP = 200
+
+#: Columns one `profile_source` call gives facts for. A table no wider than this
+#: comes back whole; a wider one, asked without a filter, comes back as its card.
+PROFILE_CAP = 50
+
+#: Notes a card carries: the latest this many, with how many there are in all.
+CARD_NOTES = 10
+
+#: Tables whose findings with this one a card shows, in name order, each with
+#: its latest `findings.PER_NEIGHBOUR`. The rest are named and counted
+#: (`FINDING_TABLES_NAMED`), and ``findings_with`` reads any one of them. A
+#: card of a table forty others had findings with was 19,317 characters,
+#: three-quarters of it findings (the scale test, 2026-10-13).
+CARD_FINDING_TABLES = 10
+
+#: Tables past `CARD_FINDING_TABLES` a card names, with how many findings each.
+FINDING_TABLES_NAMED = 100
+
+#: Findings ``describe_source(findings_with=…)`` shows about two tables, latest first.
+FINDINGS_WITH = 20
+
+#: Sources, and models, one `get_context` lists before it says how many more there are.
+CONTEXT_ROWS = 100
+
+#: What a card says about each column. Meaning only: L2 measures nothing.
+DESCRIBE_FIELDS = ("name", "type", "role", "flags")
+
+#: What `profile_source` says about each column: the facts indexing stores
+#: (`catalog._SHAPE`, `catalog.LATER_FACTS`), so a stored answer and a measured
+#: one read the same.
+PROFILE_FIELDS = (
+    "name",
+    "type",
+    "null_rate",
+    "n_distinct",
+    "min",
+    "q25",
+    "median",
+    "q75",
+    "max",
+    "mean",
+    "std",
+    "top",
+    "top_freq",
+    "samples",
+    "flags",
+)
+
+#: What `get_context` says about each table.
+INDEX_FIELDS = ("name", "n_rows", "n_columns", "read", "about", "stale")
+GROUP_FIELDS = ("name", "n_sources", "context")
+NOTE_FIELDS = ("at", "text")
+
+#: Where `profile_source`'s numbers come from, as its ``facts`` field says it:
+#: what indexing stored, or a profile run for this call because nothing was stored.
+STORED = "stored"
+MEASURED_NOW = "measured now"
+
+#: A column's type on a card when its entry records none (a hand edit).
+UNTYPED = "untyped"
+
+
+def card_vocabulary() -> dict[str, str]:
+    """The caps and the flag names the card tools' descriptions state, from the code.
+
+    For `step_vocabulary`'s reason: the caps are placeholders the scale test
+    tunes, and a description that retyped them would go on saying 200 after
+    the constant moved. One mapping for all three descriptions; each file uses
+    the fields it needs.
     """
-    cat = catalog.load_catalog(portia_dir)
-    try:
-        models: dict = context.model_index(_project_root(portia_dir))
-    except ValueError as exc:
-        models = {"error": str(exc)}
     return {
-        "project": cat["project"],
-        "groups": cat["groups"],
-        "models": models,
-        "sources": {
-            name: {
-                "summary": entry.get("summary", ""),
-                "n_columns": len(entry.get("columns", [])),
-                "interpreted": _is_interpreted(entry),
-            }
-            for name, entry in cat["sources"].items()
-        },
+        "card": str(CARD_LISTS_ALL),
+        "examples": str(TYPE_EXAMPLES),
+        "notes": str(CARD_NOTES),
+        "finding_tables": str(CARD_FINDING_TABLES),
+        "match_cap": str(MATCH_CAP),
+        "profile_cap": str(PROFILE_CAP),
+        "rows": str(CONTEXT_ROWS),
+        "flags": ", ".join(profiling.FLAGS),
     }
 
 
-def describe_source(source: str, portia_dir: str = catalog.DEFAULT_DIR) -> dict:
-    """L2 — one source's *semantic* map: what it is and what its columns mean.
+def get_context(
+    portia_dir: str = catalog.DEFAULT_DIR, *, match: str | None = None, group: str | None = None
+) -> dict:
+    """L1 again, as the project card: what the project is, its groups, and its tables by name.
 
-    Summary, column names, the role recorded for each, and its quality flags —
-    but no statistics. This is usually enough to decide whether a source is
-    relevant, which columns could be keys, and how two sources might relate.
-    Reach for ``profile_source`` only when you need the numbers themselves.
+    You already have this: it is in your system prompt. Call it only to pick up
+    changes made *during* this session, e.g. after indexing or interpreting a
+    source. Per-source detail is deliberately absent; climb to ``describe_source``
+    for that.
+
+    **One line per table, and only what a person wrote** *(2026-10-13)*. This
+    sent every source's ``summary`` whole, and an auto-drafted summary names
+    every mostly-null column: one sparse table put the index of a forty-table
+    project over `tools.RESULT_BUDGET`, and sixty ordinary ones did it alone.
+    Now a source is its name, its row and column counts, whether anyone has
+    read it, the first sentence of what they wrote (``about``) and whether its
+    file changed since (``stale``, `freshness.statuses`, which asks no
+    warehouse). Models are listed the same way beside the sources, because the
+    card is every table the project has, a spec nobody has built included,
+    with no counts. Each list is cut at `CONTEXT_ROWS`, in name order, with
+    ``more`` pointing at the filters and at ``portia_tables``, which holds the
+    same facts for every table.
+
+    ``match`` narrows both lists to names matching a shell-style pattern,
+    without case; ``group`` to that group's members. Either one answers the
+    lists alone.
+    """
+    match, group = match or None, group or None
+    cat = catalog.load_catalog(portia_dir)
+    sources = cat["sources"]
+    built = catalog.load_models(portia_dir)
+    groups = list(cat.get("groups") or [])
+    members = _members(groups, group) if group is not None else None
+    try:
+        specs = spec.discover_specs(_project_root(portia_dir))
+        stale = freshness.statuses(portia_dir, sources, built)
+    except ValueError:
+        # Two specs sharing a name: `cli/build`'s to report. The built models
+        # are still listed; their freshness cannot be traced (``null``).
+        specs = {}
+        stale = freshness.statuses(portia_dir, sources, {})
+    # Every model the project has: built, or a spec nobody has recorded a step
+    # through yet, which has no entry and so no counts.
+    models = {name: built.get(name, {}) for name in sorted({*built, *specs})}
+
+    def index(entries: dict[str, dict], more: Callable[[int], str]) -> dict:
+        names = [
+            name
+            for name in sorted(entries)
+            if _matches(name, match) and (members is None or name in members)
+        ]
+        shown = names[:CONTEXT_ROWS]
+        rows = [_index_row(name, entries[name], stale.get(name)) for name in shown]
+        return listing.listing(INDEX_FIELDS, rows, n=len(names), more=more(len(names) - len(shown)))
+
+    tables = {
+        "sources": index(sources, lambda left: prompts.more("context_sources", left=left)),
+        "models": index(models, lambda left: prompts.more("context_models", left=left)),
+    }
+    if match is not None or group is not None:
+        return tables
+    shown_groups = groups[:CONTEXT_ROWS]
+    return {
+        "project": cat["project"],
+        "n_sources": len(sources),
+        "n_models": len(models),
+        "n_groups": len(groups),
+        "groups": listing.listing(
+            GROUP_FIELDS,
+            [
+                [g.get("name"), len(g.get("sources") or []), g.get("context") or None]
+                for g in shown_groups
+            ],
+            n=len(groups),
+            more=prompts.more("context_groups", left=len(groups) - len(shown_groups)),
+        ),
+        **tables,
+    }
+
+
+def _index_row(name: str, entry: dict, stale: bool | None) -> list:
+    """One table as `get_context` lists it: `INDEX_FIELDS`, from its entry alone."""
+    written = catalog.written_summary(entry)
+    return [
+        name,
+        catalog.row_count(entry),
+        len(entry["columns"] or []) if "columns" in entry else None,
+        written is not None,
+        context.first_sentence(written) if written else None,
+        stale,
+    ]
+
+
+def _members(groups: list[dict], group: str) -> set[str]:
+    """The sources in ``group``, matched as a table name is; an unknown group is refused."""
+    names = [str(g.get("name")) for g in groups]
+    (wanted,) = dialects.resolve_columns([group], names)
+    found = next((g for g in groups if str(g.get("name")) == wanted), None)
+    if found is None:
+        raise ValueError(
+            prompts.error("unknown_group", group=group, groups=", ".join(names) or "(none)")
+        )
+    return {str(s) for s in found.get("sources") or []}
+
+
+def _matches(name: str, pattern: str | None) -> bool:
+    """Whether ``name`` matches a shell-style ``pattern``, without case.
+
+    Without case because every engine portia runs on folds an unquoted name
+    (`core/dialect.resolve_columns`): ``meter_*`` is the pattern a copilot
+    types for ``METER_01`` on a warehouse. ``fnmatchcase`` on both lowered,
+    because ``fnmatch`` itself folds or not by operating system.
+    """
+    return not pattern or fnmatchcase(name.lower(), pattern.strip().lower())
+
+
+def describe_source(
+    source: str,
+    portia_dir: str = catalog.DEFAULT_DIR,
+    *,
+    columns: list[str] | None = None,
+    match: str | None = None,
+    type_: str | None = None,
+    flag: str | None = None,
+    findings_with: str | None = None,
+) -> dict:
+    """L2 — one table's card: what it is, what its columns mean, what anyone wrote about it.
+
+    Its written summary, its row and column counts, each column's type, role
+    and quality flags, and no statistics. This is usually enough to decide
+    whether a source is relevant, which columns could be keys, and how two
+    sources might relate. Reach for ``profile_source`` only when you need the
+    numbers themselves.
+
+    **The card never grows with the data** *(2026-10-13)*. Up to
+    `CARD_LISTS_ALL` columns it lists every one (``fields`` once, a row each).
+    Past it, it counts them by type with a few names each, names every flagged
+    column by the flag rule (`core/listing.flagged`: the rarer side of each
+    flag, a count only past a cap), counts the rest, and says in ``more`` how
+    to list any of them. Its filters are that narrower question: ``columns``
+    (exact names), ``match`` (a shell-style pattern, without case), ``type_``
+    and ``flag``, together an *and*; they answer the matching columns alone,
+    `MATCH_CAP` at a time. The grouped form this replaced counted flags without
+    naming a column, and it carried the auto-drafted summary, which on a
+    sparse table named every mostly-null column and made the description of
+    an 800-column table too big to send in any form. ``summary`` is now only
+    what somebody wrote (`catalog.written_summary`), else ``null``: the draft's
+    facts are the flags and the row count, said where they belong. Worth
+    remembering why size here matters: in the AQN build run this rung was 31
+    calls and 101,601 characters, 40% of every tool result, and no single call
+    was ever refused, so nothing flagged it.
 
     **It also carries what anyone has already learned about this table**
     (`portia/findings.py`), grouped by the table on the other side, capped, with
-    the total stated. That is here rather than behind a tool of its own for one
+    the total stated: the first `CARD_FINDING_TABLES` tables in full, the rest
+    named and counted, and ``findings_with`` reads the findings about this
+    table and one other. That is here rather than behind a tool of its own for one
     measured reason: `graph_lookup` was called **zero times across four runs**
     while this rung was called 23 times in one of them. A surface the agent has
     to *think to* consult does not get consulted, and there is no reason to test
@@ -157,54 +384,261 @@ def describe_source(source: str, portia_dir: str = catalog.DEFAULT_DIR) -> dict:
 
     **And the notes, for the same reason** *(2026-09-05, `docs/COPILOT.md` §2)*.
     A note is what a chat learned about this table that a summary cannot hold
-    and a finding cannot either, because nothing was queried. They ride here,
-    in the order they were written, so the read that precedes every build sees
-    them without anyone remembering to ask.
+    and a finding cannot either, because nothing was queried. The latest
+    `CARD_NOTES` ride here in the order they were written, counted against all
+    of them (2026-10-13: a table with 140 notes sent all 140), and
+    ``portia_tables`` holds every one.
 
     **A model's name works here too.** A built table has a catalog entry from
     the moment a step is recorded on its spec (`catalog.index_model`), and the
     audit that follows a build starts by describing what was just built.
     """
-    entry = _entry(source, portia_dir)
-    journal = findings.for_table(source, root=_project_root(portia_dir))
+    name = _known_name(source, portia_dir)
+    entry = _entry(name, portia_dir)
     profiled = catalog.is_profiled(entry)
-    return {
-        "source": entry.get("source") or entry["model"],
-        "summary": entry.get("summary") or "",
-        # A scoped warehouse table nobody has profiled says so as a **field**,
-        # with the one number the information schema gave for free. A silence
-        # here would read as *nothing to report* (`docs/CONNECTOR.md` §2.6).
-        **(
-            {}
-            if profiled
-            else {
-                "profiled": False,
-                "n_rows": (entry.get("indexed") or {}).get("rows"),
-                # The planner's estimate on PostgreSQL. A field, because a bare
-                # number reads as a count.
-                **(
-                    {"approximate": ["n_rows"]}
-                    if catalog.rows_estimated(entry.get("indexed"))
-                    else {}
-                ),
-            }
-        ),
-        "columns": [
-            {
-                "name": col["name"],
-                "role": col.get("role"),
-                **({"inferred": col.get("inferred")} if profiled else {"dtype": col.get("dtype")}),
-                "flags": col.get("flags", []),
-            }
-            for col in entry.get("columns", [])
-        ],
-        # Absent when there are none, rather than an empty block: this rung is
-        # 40% of a session's tool-result volume already (`tools.py`), and a line
-        # saying *nobody has learned anything about this yet* would be paid for
-        # on every source of every project that has never curated a chat.
-        **({"findings": journal} if journal["n_findings"] else {}),
-        **({catalog.NOTES: entry[catalog.NOTES]} if entry.get(catalog.NOTES) else {}),
+    # A scoped warehouse table nobody has profiled says so as a **field**: its
+    # types are the warehouse's and it has no flags yet. A silence here would
+    # read as *nothing to report* (`docs/CONNECTOR.md` §2.6).
+    unprofiled = {} if profiled else {"profiled": False}
+    cols = list(entry.get("columns") or [])
+    filtering = _filtering(columns, match, type_, flag)
+    if filtering or findings_with:
+        narrowed: dict[str, Any] = {"source": name}
+        if filtering:
+            picked = _matching(cols, name, columns=columns, match=match, type_=type_, flag=flag)
+            shown = picked[:MATCH_CAP]
+            narrowed.update(unprofiled)
+            narrowed["n_columns"] = len(cols)
+            narrowed["columns"] = listing.listing(
+                DESCRIBE_FIELDS,
+                [_row(col, DESCRIBE_FIELDS) for col in shown],
+                n=len(picked),
+                more=prompts.more("described_columns", left=len(picked) - len(shown)),
+            )
+        if findings_with:
+            narrowed["findings"] = _findings_with(name, findings_with, portia_dir)
+        return narrowed
+    card: dict[str, Any] = {
+        "source": name,
+        "path": _path_of(name, entry, portia_dir),
+        "summary": catalog.written_summary(entry),
+        **unprofiled,
+        **row_facts(entry),
+        "n_columns": len(cols),
     }
+    if len(cols) <= CARD_LISTS_ALL:
+        card["columns"] = listing.listing(
+            DESCRIBE_FIELDS, [_row(col, DESCRIBE_FIELDS) for col in cols], n=len(cols)
+        )
+    else:
+        card.update(_overview(cols, name, measured=profiled, more=_card_more(name)))
+    # Absent when there are none, rather than an empty block: this rung is
+    # called for every table a session reads, and a line saying *nobody has
+    # learned anything about this yet* would be paid for on every source of
+    # every project that has never curated a chat.
+    journal = findings.for_table(name, root=_project_root(portia_dir))
+    if journal["n_findings"]:
+        card["findings"] = _findings_card(journal, name)
+    notes = list(entry.get(catalog.NOTES) or [])
+    if notes:
+        latest = notes[-CARD_NOTES:]
+        card[catalog.NOTES] = listing.listing(
+            NOTE_FIELDS,
+            [[note.get("at"), note.get("text")] for note in latest],
+            n=len(notes),
+            start=len(notes) - len(latest),
+            more=prompts.more("notes_earlier", left=len(notes) - len(latest), source=name),
+        )
+    return card
+
+
+def _findings_card(journal: dict, source: str) -> dict:
+    """`findings.for_table`'s answer with a cap on the tables, the rest named and counted.
+
+    Each table already showed its latest `findings.PER_NEIGHBOUR` findings with
+    its total; the number of tables was the part that grew. The first
+    `CARD_FINDING_TABLES`, in `for_table`'s name order (findings about this
+    table alone first), stay as they were. The rest are a list of name and
+    count, and ``more`` says that ``findings_with`` reads any of them. The
+    ``table`` key is dropped: it is the name the call gave.
+    """
+    groups = list(journal["with"].items())
+    out: dict[str, Any] = {
+        "n_findings": journal["n_findings"],
+        "with": dict(groups[:CARD_FINDING_TABLES]),
+    }
+    rest = groups[CARD_FINDING_TABLES:]
+    if rest:
+        named = rest[:FINDING_TABLES_NAMED]
+        out["also_with"] = listing.listing(
+            ("table", "n"),
+            [[table, group["n"]] for table, group in named],
+            n=len(rest),
+            more=prompts.more("findings_tables", left=len(rest) - len(named)),
+        )
+    if rest or any(len(group["findings"]) < group["n"] for _, group in groups):
+        out["more"] = prompts.more("findings_with", source=source, cap=FINDINGS_WITH)
+    return out
+
+
+def _findings_with(source: str, other: str, portia_dir: str) -> dict:
+    """The findings about ``source`` and ``other`` together, latest first, up to `FINDINGS_WITH`.
+
+    ``other`` is matched against the tables the findings name, the way a column
+    name is matched (`core/dialect.resolve_columns`): exactly, else one match
+    without case. A table nothing has findings with answers none, which is a
+    fact rather than a refusal.
+    """
+    journal = findings.for_table(
+        source, root=_project_root(portia_dir), per_neighbour=FINDINGS_WITH
+    )
+    (other,) = dialects.resolve_columns([other], list(journal["with"]))
+    group = journal["with"].get(other) or {"n": 0, "findings": []}
+    briefs = group["findings"]
+    return {
+        "with_table": other,
+        "findings": listing.listing(
+            ("question", "answer", "so", "path"),
+            [[b["question"], b["answer"], b["so"], b["path"]] for b in briefs],
+            n=group["n"],
+            more=prompts.more("findings_older", left=group["n"] - len(briefs)),
+        ),
+    }
+
+
+def overview_of(card: dict) -> dict:
+    """A card whose every-column list is over the budget, sent as the wide card instead.
+
+    `tools.describe_source`'s ``coarser``: tried only when the card as built
+    does not fit `tools.RESULT_BUDGET`, which two hundred columns with long
+    names and long roles can manage. The overview is built from the listed
+    rows, so nothing is read again, and it is the shape every card past
+    `CARD_LISTS_ALL` already has: bounded whatever the names are. A filtered
+    answer is the narrower question already and is returned as it came.
+    """
+    listed = card.get("columns")
+    if "path" not in card or not isinstance(listed, dict) or "rows" not in listed:
+        return card
+    measured = card.get("profiled") is not False
+    cols = [_unrow(dict(zip(listed["fields"], row, strict=True))) for row in listed["rows"]]
+    out: dict[str, Any] = {}
+    for key, value in card.items():
+        if key == "columns":
+            out.update(
+                _overview(
+                    cols, str(card["source"]), measured=measured, more=_card_more(card["source"])
+                )
+            )
+        else:
+            out[key] = value
+    return out
+
+
+def _card_more(source: str) -> str:
+    """What a wide card says last: every column is counted, and how to list any of them."""
+    return prompts.more("card_columns", source=source)
+
+
+def _overview(columns: list[dict], source: str, *, measured: bool, more: str) -> dict:
+    """A table too wide to list, as counts by type and every flagged column named.
+
+    ``types`` is each type in the order it first appears in the table, with its
+    count and its names, or its first `TYPE_EXAMPLES` names when it has more.
+    ``flagged`` is `core/listing.flagged` over the columns, in the profiler's
+    flag order; a flag given as a count says how to list it (``more``), and
+    ``unflagged`` counts the columns that carry none. Neither is given for a
+    table nobody measured, whose columns have no flags to read. Nothing is
+    ordered by a measurement.
+    """
+    types: dict[str, list[str]] = {}
+    for col in columns:
+        types.setdefault(_type_of(col) or UNTYPED, []).append(str(col["name"]))
+    out: dict[str, Any] = {
+        "types": {
+            kind: {"n": len(names), "columns": names}
+            if len(names) <= TYPE_EXAMPLES
+            else {"n": len(names), "examples": names[:TYPE_EXAMPLES]}
+            for kind, names in types.items()
+        }
+    }
+    if measured:
+        flagged = listing.flagged(columns, order=profiling.FLAGS)
+        for flag, named in flagged.items():
+            if named.get(listing.LISTED) is False:
+                named["more"] = prompts.more("flag_unlisted", flag=flag, source=source)
+        out["flagged"] = flagged
+        out["unflagged"] = sum(1 for col in columns if not col.get("flags"))
+    out["more"] = more
+    return out
+
+
+def _type_of(col: dict) -> str | None:
+    """A column's type as a card names it: the profiler's, else the engine's."""
+    found = col.get("inferred") or col.get("dtype")
+    return None if found is None else str(found)
+
+
+def _flags_of(col: dict) -> list[str] | None:
+    """A column's flags, or ``None`` when nobody measured it: not the same as none raised."""
+    return [str(f) for f in col.get("flags") or []] if "inferred" in col else None
+
+
+def _row(col: dict, fields: tuple[str, ...]) -> list:
+    """One column as a list row: ``type`` and ``flags`` read as a card reads them."""
+    derived = {"type": _type_of(col), "flags": _flags_of(col)}
+    return [derived[f] if f in derived else col.get(f) for f in fields]
+
+
+def _unrow(row: dict) -> dict:
+    """A listed row back into a column as the catalog holds one, for `_overview`."""
+    kind = "inferred" if row.get("flags") is not None else "dtype"
+    return {"name": row["name"], kind: row.get("type"), "flags": row.get("flags")}
+
+
+def _path_of(name: str, entry: dict, portia_dir: str) -> str | None:
+    """Where a table is: a source's file or warehouse table, a model's spec."""
+    if "source" in entry:
+        return str(entry["source"])
+    found = spec.discover_specs(_project_root(portia_dir)).get(name)
+    return found.as_posix() if found is not None else None
+
+
+def _filtering(*filters: Any) -> bool:
+    """Whether a call narrowed its columns at all: an empty filter is no filter."""
+    return any(f is not None and f != [] and f != "" for f in filters)
+
+
+def _matching(
+    cols: list[dict],
+    source: str,
+    *,
+    columns: list[str] | None,
+    match: str | None,
+    type_: str | None,
+    flag: str | None,
+) -> list[dict]:
+    """The columns that pass every filter given: named ones in the order named, else table order.
+
+    An unknown name is refused (:func:`_requested`); an unknown flag too,
+    because the flags are a closed vocabulary (`profiling.FLAGS`) and a typo
+    would otherwise read as *no column carries it*. A type nothing has, or a
+    pattern nothing matches, is an empty list: zero is an answer there, and
+    the card already says which types the table has.
+    """
+    picked = _requested(cols, columns, source) if columns else list(cols)
+    if match:
+        picked = [col for col in picked if _matches(str(col["name"]), match)]
+    if type_:
+        wanted = type_.strip().lower()
+        picked = [col for col in picked if (_type_of(col) or UNTYPED).lower() == wanted]
+    if flag:
+        wanted = flag.strip().lower()
+        if wanted not in profiling.FLAGS:
+            raise ValueError(
+                prompts.error("unknown_flag", flag=flag, flags=", ".join(profiling.FLAGS))
+            )
+        picked = [col for col in picked if wanted in (_flags_of(col) or [])]
+    return picked
 
 
 def graph_lookup(
@@ -849,8 +1283,8 @@ def _known_refs(about: list[str], portia_dir: str, root: Path) -> list[str]:
                 hint = f" — closest: {', '.join(close)}" if close else ""
                 raise ValueError(
                     f"no column {column!r} in {table!r}{hint}. "
-                    f"describe_source lists all {len(names)}, "
-                    "or groups them by type if they do not fit."
+                    f"describe_source lists its {len(names)} columns, "
+                    "and finds one by part of its name with match."
                 )
         checked.append(f"{table}.{column}" if column else table)
     return checked
@@ -1003,88 +1437,116 @@ def profile_source(
     portia_dir: str = catalog.DEFAULT_DIR,
     *,
     columns: list[str] | None = None,
+    match: str | None = None,
+    type_: str | None = None,
+    flag: str | None = None,
 ) -> dict:
-    """L3 — everything the checks measured about one source, plus any read of it.
+    """L3 — the measured facts about a table's columns: what indexing stored, filtered and capped.
 
-    Facts come **fresh from the profiling check**, not from the catalog's stored
-    slice. The catalog trims what it keeps (median/std/top) because it's storage;
-    the agent needs the full picture — min, max, quartiles, sample values — or it
-    starts *deriving* the numbers it wasn't given. Surface evidence generously
-    (CLAUDE.md); a derived figure is exactly what this project exists to prevent.
+    Per column, its type, null rate, distinct count, min, quartiles, max, mean
+    and standard deviation, its commonest value and how often it occurs, three
+    sample values and its flags (`PROFILE_FIELDS`), `PROFILE_CAP` columns at a time. The filters are
+    `describe_source`'s: ``columns`` (exact names, in the order named),
+    ``match``, ``type_`` and ``flag``. A table no wider than `PROFILE_CAP`
+    comes back whole without one; a wider one, asked without a filter, comes
+    back as its card's counts and flagged names, with ``more`` saying how to
+    ask for the columns. Never a dump, and never a refusal for size.
 
-    ``summary`` and each column's ``role`` come from the catalog: whatever
-    judgment has been recorded so far, empty until someone writes it.
+    **Stored facts, not a fresh profile** *(2026-10-13, reversing 2026-07)*. This
+    profiled the table again on every call, on the argument that the catalog
+    trims what it keeps and the agent needs the whole picture, quartiles and
+    sample values included, or it derives the numbers it was not given. The
+    derivation that argument rested on was a min-max range made up from a
+    median and a standard deviation; min and max have been stored since, and
+    a scan per call is what the copilot paid for a fact indexing had already
+    measured: on a warehouse every `profile_source` was a full scan on
+    someone's meter. So the answer is the catalog's slice (`catalog._SHAPE`),
+    which keeps the mean, the quartiles and the sample values too
+    (`catalog.LATER_FACTS`): they were the reason for the old argument, and
+    storing them answers it. An entry indexed before they were stored says so,
+    as ``not_stored`` and a note, rather than measuring again or leaving a null
+    to be read as *no mean*. ``facts`` says which kind of answer this is: ``stored``, or ``measured now`` where nothing was
+    stored to read: a ``<spec>#<step id>``, a spec nobody has recorded a step
+    through, a warehouse table or model nobody has profiled. The warehouse's
+    are written back (`catalog.profile_remote`), so the next call reads them.
 
     ``source`` may also name a table an earlier step produced
     (``<spec>#<step id>``). There is no catalog entry for one, so it comes back
-    with no summary and no roles — only measurements, which is the whole point of
-    asking: what do this table's columns look like *now*, after the step ran.
+    with measurements only, which is the whole point of asking: what do this
+    table's columns look like *now*, after the step ran.
 
-    ``columns`` narrows **the answer, not the measurement**. Everything is still
-    profiled, so ``n_rows`` and ``n_cols`` remain statements about the whole
-    table rather than about the subset. Measuring only the named columns would
-    save 1.7 s on the AQN stations extract (191 columns, 1.79 s against 0.05 s for
-    ten) and 6 s on its 11.4M-row event table. The payload saving is identical
-    either way: 28,086 characters to 2,856 for ten columns.
+    ``approximate`` names the fields that are an engine's estimate, as
+    `row_facts` does for a row count: BigQuery's median is a sketch.
 
-    **Retiring ``candidate_keys`` took A2's stated reason with it**, and that is
-    recorded here rather than acted on. The argument was that narrowing the
-    measurement would make the key list unanswerable, because uniqueness is one
-    ``count(DISTINCT)`` per column and those are exactly the queries a narrowed
-    profile skips. There is no key list now, so the ban on narrowing rests on
-    less than it did. Whether to narrow is its own decision with its own
-    trade-off (`BACKLOG.md` → Checks), not a consequence of this one.
+    The summary and the notes are the card's (`describe_source`), not this
+    rung's. This rung is for numbers.
+    """
+    name, cols, rows, facts = _measured(source, portia_dir)
+    head = {"source": name, "facts": facts, **rows, "n_columns": len(cols)}
+    if _filtering(columns, match, type_, flag):
+        picked = _matching(cols, name, columns=columns, match=match, type_=type_, flag=flag)
+    elif len(cols) > PROFILE_CAP:
+        more = prompts.more("profile_wide", n=len(cols), cap=PROFILE_CAP, source=name)
+        return {**head, **_overview(cols, name, measured=True, more=more)}
+    else:
+        picked = cols
+    shown = picked[:PROFILE_CAP]
+    answer = {
+        **head,
+        "columns": listing.listing(
+            PROFILE_FIELDS,
+            [_row(col, PROFILE_FIELDS) for col in shown],
+            n=len(picked),
+            more=prompts.more("profiled_columns", left=len(picked) - len(shown), cap=PROFILE_CAP),
+        ),
+    }
+    estimated = [f for f in PROFILE_FIELDS if any(f in (c.get("approximate") or []) for c in shown)]
+    if estimated:
+        # Beside a row count the warehouse estimated, when `row_facts` said so.
+        answer["approximate"] = [*answer.get("approximate", []), *estimated]
+    if any("inferred" in col and "samples" not in col for col in shown):
+        # An entry indexed before these were stored: their nulls are not the
+        # null of a text column's mean, and the copilot must not fill them in.
+        answer["not_stored"] = list(catalog.LATER_FACTS)
+        answer["not_stored_note"] = prompts.notice("facts_not_stored")
+    return answer
+
+
+def _measured(source: str, portia_dir: str) -> tuple[str, list[dict], dict, str]:
+    """``(name, columns, row facts, facts)``: a table's stored facts, or a profile run now.
+
+    Measured now only where nothing is stored (see `profile_source`). A
+    warehouse table or model profiled here has its facts written back by
+    `catalog.profile_remote`, and the entry read again for the roles kept on
+    it; a spec run locally writes nothing, as it never did.
     """
     if STEP_REF in source:
         profile = profiling.profile(_step_table(source, portia_dir))
-        return {
-            "source": source,
-            "summary": "",
-            "n_rows": profile["n_rows"],
-            "n_cols": profile["n_cols"],
-            "columns": _requested(
-                [{**col, "role": None} for col in profile["columns"]], columns, source
-            ),
-        }
-
+        return source, profile["columns"], {"n_rows": profile["n_rows"]}, MEASURED_NOW
+    name = _known_name(source, portia_dir)
     try:
-        entry = _entry(source, portia_dir)
+        entry = _entry(name, portia_dir)
     except ValueError:
         # A spec nobody has recorded a step on or built has no entry yet, and
         # is still a table this project can produce.
-        if source not in spec.discover_specs(_project_root(portia_dir)):
+        if name not in spec.discover_specs(_project_root(portia_dir)):
             raise
         entry = {}
-    if "source" not in entry:
-        # A model. Its table is reached by running its spec, which is what the
-        # description has promised since 2026-08-31 and the handler refused
-        # until 2026-09-05 (`BACKLOG.md` → Agent, closed with `docs/COPILOT.md`
-        # §3): the audit after a build profiles what was just built. **On a
-        # warehouse, the written table, and the facts are written back**
-        # (2026-09-07): the scan used to run and leave the entry at
-        # ``profiled: null``, so every audit paid for it again and the window
-        # never showed a number for a table portia built.
-        profile = _profile_model(source, portia_dir)
-    elif entry.get(catalog.REMOTE):
+    if entry and catalog.is_profiled(entry):
+        return name, list(entry.get("columns") or []), row_facts(entry), STORED
+    if "source" in entry:
         # The opt-in scan (`docs/CONNECTOR.md` §2.6): a scoped table was
         # indexed as metadata, and this is the moment somebody asked for the
         # numbers. The facts are written back, so the second ask is free.
-        profile = catalog.profile_remote(source, connect(), portia_dir=portia_dir)
+        profile = catalog.profile_remote(name, connect(), portia_dir=portia_dir)
     else:
-        profile = profile_path(_project_root(portia_dir) / entry["source"])
-    roles = {c["name"]: c.get("role") for c in entry.get("columns", [])}
-    return {
-        "source": entry.get("source") or source,
-        "summary": entry.get("summary") or "",
-        "n_rows": profile["n_rows"],
-        "n_cols": profile["n_cols"],
-        "columns": _requested(
-            [{**col, "role": roles.get(col["name"])} for col in profile["columns"]],
-            columns,
-            source,
-        ),
-        **({catalog.NOTES: entry[catalog.NOTES]} if entry.get(catalog.NOTES) else {}),
-    }
+        # A model. **On a warehouse, the written table, and the facts are
+        # written back** (2026-09-07): the scan used to run and leave the
+        # entry at ``profiled: null``, so every audit paid for it again and
+        # the window never showed a number for a table portia built. Locally,
+        # a spec with no entry is run, which is what a model costs.
+        profile = _profile_model(name, portia_dir)
+    return name, profile["columns"], {"n_rows": profile["n_rows"]}, MEASURED_NOW
 
 
 def _requested(profiled: list[dict], columns: list[str] | None, source: str) -> list[dict]:
@@ -1096,10 +1558,11 @@ def _requested(profiled: list[dict], columns: list[str] | None, source: str) -> 
     deliverable without ever obtaining its main source's numbers, and nothing in
     the transcript reads as though the copilot knew it was missing them.
 
-    The near miss is named instead of the column list. Listing all of them is
+    The near misses are named instead of the column list. Listing all of them is
     what `catalog.py` does and it is right there on a narrow table; on the 191
     column source it makes the error 5,000 characters, which is the payload
-    problem wearing a different hat.
+    problem wearing a different hat. ``match`` is the way to a name known in
+    part, and the refusal says so.
     """
     if columns is None:
         return profiled
@@ -1109,12 +1572,15 @@ def _requested(profiled: list[dict], columns: list[str] | None, source: str) -> 
     missing = [c for c in columns if c not in by_name]
     if missing:
         close = get_close_matches(missing[0], by_name, n=3)
-        suggestion = f" — closest: {', '.join(close)}" if close else ""
         raise ValueError(
-            f"no column {missing[0]!r} in {source!r}{suggestion}. "
-            f"{len(missing)} of {len(columns)} requested are not there; "
-            f"describe_source lists all {len(profiled)}, "
-            "or groups them by type if they do not fit."
+            prompts.error(
+                "unknown_column",
+                column=missing[0],
+                source=source,
+                missing=len(missing),
+                asked=len(columns),
+                closest=", ".join(close) or "(none close)",
+            )
         )
 
     # Deduplicated, because asking twice is a typo rather than a request for two
@@ -2084,8 +2550,3 @@ def _bare_step_id(ref: str, *, field: str, spec_path: str) -> str:
 def _source_refs(step: dict, *, known_steps: set[str]) -> list[str]:
     """Source names the step reads, minus anything produced by an earlier step."""
     return [ref for ref in spec.step_inputs(step) if ref not in known_steps]
-
-
-def _is_interpreted(entry: dict) -> bool:
-    """Whether a source still carries the auto-drafted placeholder read."""
-    return catalog.is_interpreted(entry)

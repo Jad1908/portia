@@ -186,8 +186,11 @@ COLUMN_FIELDS: tuple[tuple[str, str], ...] = (
     ("null_rate", "DOUBLE"),
     ("n_distinct", "BIGINT"),
     ("min", "DOUBLE"),
-    ("max", "DOUBLE"),
+    ("q25", "DOUBLE"),
     ("median", "DOUBLE"),
+    ("q75", "DOUBLE"),
+    ("max", "DOUBLE"),
+    ("mean", "DOUBLE"),
     ("std", "DOUBLE"),
     ("top", "VARCHAR"),
     ("top_freq", "BIGINT"),
@@ -204,6 +207,8 @@ TABLE_FIELDS: tuple[tuple[str, str], ...] = (
     ("n_columns", "INTEGER"),
     ("read", "BOOLEAN"),
     ("summary", "VARCHAR"),
+    # Every note, oldest first: a card carries the latest few (`handlers.CARD_NOTES`).
+    ("notes", 'STRUCT("at" VARCHAR, "text" VARCHAR)[]'),
     ("groups", "VARCHAR[]"),
     ("stale", "BOOLEAN"),
     ("indexed_at", "VARCHAR"),
@@ -268,8 +273,11 @@ def _column_rows(request: Request) -> list[dict]:
                     "null_rate": _number(column.get("null_rate")),
                     "n_distinct": _count(column.get("n_distinct")),
                     "min": _number(column.get("min")),
-                    "max": _number(column.get("max")),
+                    "q25": _number(column.get("q25")),
                     "median": _number(column.get("median")),
+                    "q75": _number(column.get("q75")),
+                    "max": _number(column.get("max")),
+                    "mean": _number(column.get("mean")),
                     "std": _number(column.get("std")),
                     "top": _text(column.get("top")),
                     "top_freq": _count(column.get("top_freq")),
@@ -303,6 +311,10 @@ def _table_rows(request: Request) -> list[dict]:
                 "n_columns": len(entry.get("columns") or []),
                 "read": written is not None,
                 "summary": written,
+                "notes": [
+                    {"at": _text(note.get("at")), "text": _text(note.get("text"))}
+                    for note in entry.get(catalog.NOTES) or []
+                ],
                 "groups": groups.get(name, []),
                 "stale": request.stale.get(name),
                 "indexed_at": _text(

@@ -158,7 +158,15 @@ def test_describe_source_says_not_profiled_as_a_field(project, warehouse, monkey
     monkeypatch.chdir(project.parent)
     described = handlers.describe_source("orders", portia_dir=str(project))
     assert described["profiled"] is False and described["n_rows"] == 3
-    assert described["columns"][0]["dtype"] and "inferred" not in described["columns"][0]
+    # The warehouse's type, and no flags: nobody measured it, which is not none raised.
+    (name, kind, _, flags) = described["columns"]["rows"][0]
+    assert name == "id" and kind == "BIGINT" and flags is None
+
+
+def _row(answer: dict, name: str) -> dict:
+    listed = answer["columns"]
+    row = next(r for r in listed["rows"] if r[0] == name)
+    return dict(zip(listed["fields"], row, strict=True))
 
 
 def test_profile_source_on_a_scoped_table_scans_once_and_remembers(project, warehouse, monkeypatch):
@@ -167,7 +175,13 @@ def test_profile_source_on_a_scoped_table_scans_once_and_remembers(project, ware
     fake = backend.Backend(kind="test", dialect=dialect.DUCKDB, open=lambda: warehouse, remote=True)
     with backend.using(fake):
         answer = handlers.profile_source("orders", portia_dir=str(project))
-    assert answer["n_rows"] == 3 and answer["columns"][1]["top"] == "FR"
+        scans = warehouse.scans
+        again = handlers.profile_source("orders", portia_dir=str(project))
+    assert answer["n_rows"] == 3 and _row(answer, "country")["top"] == "FR"
+    assert answer["facts"] == handlers.MEASURED_NOW
+    # The second ask reads what the first wrote back, and scans nothing (2026-10-13).
+    assert again["facts"] == handlers.STORED and warehouse.scans == scans
+    assert _row(again, "country") == _row(answer, "country")
     described = handlers.describe_source("orders", portia_dir=str(project))
     assert "profiled" not in described, "once profiled, the field is not repeated"
 
@@ -392,7 +406,7 @@ def test_a_written_table_is_on_the_model_entry_and_a_read_of_the_model_goes_ther
         assert profile["n_rows"] == 2
         # And typed as the warehouse shows it, the name still finds the model.
         described = handlers.describe_source("FR_ORDERS", str(project))
-        assert [c["name"] for c in described["columns"]] == ["id", "country", "amount"]
+        assert [r[0] for r in described["columns"]["rows"]] == ["id", "country", "amount"]
 
 
 def test_a_build_that_wrote_nothing_leaves_no_table_on_the_entry(project, warehouse):
@@ -578,7 +592,7 @@ def test_a_warehouse_build_indexes_a_model_as_metadata_that_says_so(project, war
     with backend.using(_hand_off(warehouse, on=True)):
         described = handlers.describe_source("fr_orders", str(project))
     assert described["profiled"] is False and described["n_rows"] == 2
-    assert described["columns"][0]["dtype"] and "inferred" not in described["columns"][0]
+    assert "types" not in described and described["columns"]["rows"][0][3] is None
 
 
 def test_profiling_a_built_table_writes_the_facts_back_and_keeps_everything_else(
@@ -619,10 +633,11 @@ def test_the_agents_profile_of_a_built_table_lands_in_the_catalog(project, wareh
         scans = warehouse.scans
         profile = handlers.profile_source("fr_orders", str(project))
         assert profile["n_rows"] == 2 and warehouse.scans > scans
+        assert profile["facts"] == handlers.MEASURED_NOW
         entry = catalog.load_models(project)["fr_orders"]
         assert catalog.is_profiled(entry)
         described = handlers.describe_source("fr_orders", str(project))
-    assert "profiled" not in described and described["columns"][0]["inferred"]
+    assert "profiled" not in described and described["columns"]["rows"][0][3] == []
 
 
 def test_a_table_the_project_built_is_known_by_its_model_and_never_scoped_twice(project, warehouse):

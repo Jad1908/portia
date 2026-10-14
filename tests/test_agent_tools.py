@@ -15,6 +15,7 @@ import json
 import pytest
 
 from portia.agent import tools
+from portia.core import listing
 from portia.core.serialize import to_json_compact
 
 
@@ -27,46 +28,22 @@ def _text(result: dict) -> str:
     return result["content"][0]["text"]
 
 
-def test_a_per_column_payload_reaches_the_model_as_a_table(monkeypatch):
+@pytest.mark.parametrize("name", ["describe_source", "profile_source"])
+def test_the_column_rungs_answer_in_compact_json_with_their_fields_once(monkeypatch, name):
+    """The tab-separated table these two sent (`core/columnar.render`) went with
+    the cards (2026-10-13): a list is ``fields`` once and a row of values each
+    (`core/listing.py`), which is JSON and as lean."""
     payload = {
-        "source": "golden.csv",
+        "source": "golden",
         "n_rows": 2,
-        "columns": [{"name": "a", "top": "x"}, {"name": "b", "min": 1, "max": 9}],
+        "columns": listing.listing(("name", "top"), [["a", "x"], ["b", None]], n=2),
     }
-    monkeypatch.setattr(tools.handlers, "profile_source", lambda *a, **k: payload)
+    monkeypatch.setattr(tools.handlers, name, lambda *a, **k: payload)
 
-    text = _text(_call("profile_source", {"source": "golden.csv"}))
+    text = _text(_call(name, {"source": "golden"}))
 
-    assert "## 1 of 2 columns" in text
-    assert "name\ttop" in text and "name\tmin\tmax" in text
-    assert json.loads(text.splitlines()[0]) == {"source": "golden.csv", "n_rows": 2}
-
-
-def test_the_other_rung_that_returns_columns_is_a_table_too(monkeypatch):
-    """`describe_source` was the larger consumer of the two, by a whole session.
-
-    31 calls and 101,601 characters in the AQN build run, against
-    `profile_source`'s 40,247 — and no single call was ever refused, which is why
-    it took counting the log to notice.
-    """
-    payload = {
-        "source": "golden.csv",
-        "summary": "hotels",
-        "columns": [
-            {"name": "code", "role": "identifier", "inferred": "text", "flags": []},
-            {"name": "city", "role": "attribute", "inferred": "categorical", "flags": []},
-        ],
-    }
-    monkeypatch.setattr(tools.handlers, "describe_source", lambda *a, **k: payload)
-
-    text = _text(_call("describe_source", {"source": "golden.csv"}))
-
-    assert "## 2 of 2 columns" in text
-    assert "name\trole\tinferred\tflags" in text
-    assert json.loads(text.splitlines()[0]) == {
-        "source": "golden.csv",
-        "summary": "hotels",
-    }
+    assert json.loads(text) == payload
+    assert text.count('"name"') == 1
 
 
 def test_a_tool_that_returns_no_column_list_still_hands_back_json(monkeypatch):
@@ -178,15 +155,18 @@ def test_a_result_inside_the_budget_is_untouched():
 
 
 def test_the_guard_measures_the_encoded_text_not_the_dict():
-    """`columnar` and compact JSON do not cost the same per record, so the
-    payload has to be encoded before it can be judged."""
+    """Two encodings of one dict do not cost the same, so the payload has to be
+    encoded before it can be judged."""
     records = {"columns": [{"name": f"col_{i:04d}", "blob": "x" * 20} for i in range(800)]}
 
+    def leaner(payload: dict) -> str:
+        return "\n".join(c["name"] for c in payload["columns"])
+
     as_json = _evidence(lambda: records)  # 40,013 characters
-    as_table = _evidence(lambda: records, encode=tools._as_columns)  # 24,035
+    as_names = _evidence(lambda: records, encode=leaner)  # 8,799
 
     assert as_json["is_error"] is True
-    assert "is_error" not in as_table, "the same dict fits through the cheaper encoder"
+    assert "is_error" not in as_names, "the same dict fits through the cheaper encoder"
 
 
 # --- Stop reaches a running tool -----------------------------------------------
@@ -339,126 +319,16 @@ def test_an_indexing_job_is_offered_every_tool_but_the_build_half():
     assert "record_step" not in tools.descriptions(builds=False)
 
 
-# --- a table too wide to list comes back grouped (2026-10-08) -------------------------
-
-#: A datetime, 2,000 numeric columns, two text columns and three empty ones: the
-#: shape of a wide meter export, where `describe_source` and `profile_source`
-#: both used to be refused and the copilot could only name columns blind.
-_N_WIDE = 2006
-
-
-def _wide(*, profiled: bool) -> dict:
-    """A wide table as `describe_source` (``profiled=False``) or `profile_source` sends it."""
-
-    def column(name: str, inferred: str, flags: list[str], **facts) -> dict:
-        measured = facts if profiled else {}
-        return {"name": name, "role": None, "inferred": inferred, "flags": flags, **measured}
-
-    columns = [column("read_at", "datetime", [], null_rate=0.0, n_distinct=8760, samples=[])]
-    columns += [
-        column(
-            f"meter_{i:04d}",
-            "float",
-            ["high_null"] if i % 25 == 0 else [],
-            null_rate=0.6 if i % 25 == 0 else 0.01,
-            n_distinct=900 + i,
-            min=0.0,
-            max=float(i),
-            mean=1.5,
-            samples=[0.1, 0.2, 0.3],
-        )
-        for i in range(2000)
-    ]
-    columns += [
-        column(f"site_{i}", "categorical", [], null_rate=0.0, n_distinct=4, top="north")
-        for i in (1, 2)
-    ]
-    columns += [column(f"spare_{i}", "empty", ["all_null"], null_rate=1.0) for i in (1, 2, 3)]
-    head = {"source": "data/meters.csv", "summary": "hourly readings"}
-    if profiled:
-        head |= {"n_rows": 8760, "n_cols": len(columns)}
-    return {**head, "columns": columns}
-
-
-def _grouped(result: dict) -> dict:
-    assert "is_error" not in result, _text(result)[:300]
-    assert len(_text(result)) <= tools.RESULT_BUDGET
-    return json.loads(_text(result))
-
-
-def test_a_table_too_wide_to_describe_comes_back_grouped(monkeypatch):
-    payload = _wide(profiled=False)
-    assert len(tools._as_columns(payload)) > tools.RESULT_BUDGET, "the fixture is not wide enough"
-    monkeypatch.setattr(tools.handlers, "describe_source", lambda *a, **k: payload)
-
-    answer = _grouped(_call("describe_source", {"source": "meters"}))
-
-    assert list(answer)[0] == "grouped", "the answer says it is grouped before anything else"
-    assert f"{_N_WIDE:,} columns" in answer["grouped"]
-    assert answer["summary"] == "hourly readings"
-    groups = answer["columns_by_type"]
-    assert sum(g["n_columns"] for g in groups) == _N_WIDE
-    assert [g["inferred"] for g in groups] == ["datetime", "float", "categorical", "empty"]
-
-
-def test_a_grouped_description_carries_no_statistics(monkeypatch):
-    """L2 is the rung of meaning: roles and flags are tallied, nothing is measured."""
-    monkeypatch.setattr(tools.handlers, "describe_source", lambda *a, **k: _wide(profiled=False))
-
-    groups = _grouped(_call("describe_source", {"source": "meters"}))["columns_by_type"]
-    floats = next(g for g in groups if g["inferred"] == "float")
-
-    assert floats["flags"] == {"high_null": 80}
-    assert floats["role"] == {}
-    assert not {"null_rate", "n_distinct", "min", "max"} & set(floats)
-
-
-def test_a_table_too_wide_to_profile_comes_back_grouped_with_its_spreads(monkeypatch):
-    monkeypatch.setattr(tools.handlers, "profile_source", lambda *a, **k: _wide(profiled=True))
-
-    answer = _grouped(_call("profile_source", {"source": "meters"}))
-
-    assert answer["n_cols"] == _N_WIDE
-    groups = answer["columns_by_type"]
-    assert sum(g["n_columns"] for g in groups) == _N_WIDE
-    floats = next(g for g in groups if g["inferred"] == "float")
-    assert floats["null_rate"]["max"] == 0.6 and floats["null_rate"]["median"] == 0.01
-    assert floats["n_distinct"]["min"] == 900 and floats["n_distinct"]["max"] == 2899
-    assert (floats["min"], floats["max"]) == (0.0, 1999.0)
-    assert floats["first"][0] == "meter_0000" and floats["last"][-1] == "meter_1999"
-    # A type with a few columns is listed in the tool's own per-column shape.
-    sites = next(g for g in groups if g["inferred"] == "categorical")
-    assert [c["name"] for c in sites["columns"]] == ["site_1", "site_2"]
-    assert sites["columns"][0]["top"] == "north"
-
-
-def test_named_columns_too_many_to_send_are_refused_not_grouped(monkeypatch):
-    """Naming columns is already the narrower question; past the budget it is
-    refused as it always was."""
-    monkeypatch.setattr(tools.handlers, "profile_source", lambda *a, **k: _wide(profiled=True))
-
-    named = [f"meter_{i:04d}" for i in range(2000)]
-    result = _call("profile_source", {"source": "meters", "columns": named})
-
-    assert result["is_error"] is True
-    assert "NOT sent" in _text(result)
-
-
-def test_a_grouped_answer_still_over_the_budget_is_refused_with_the_full_size():
-    """The grouped form is a coarser answer, not a truncation: if it does not fit
-    either, the refusal is the one there always was."""
-    payload = {**_wide(profiled=False), "summary": "x" * (tools.RESULT_BUDGET + 1)}
-    full = len(tools._as_columns(payload))
-
-    result = _evidence(lambda: payload, encode=tools._as_columns, coarser=tools._described_by_type)
-
-    assert result["is_error"] is True
-    assert f"{full:,} characters" in _text(result)
+# --- a table too wide to list comes back as its card (2026-10-13) -----------------------
+#
+# It came back grouped by type from 2026-10-08 (`_by_type`), every column counted
+# and no flagged column named. The card names them (`core/listing.flagged`) and
+# a filter lists any of them.
 
 
 @pytest.fixture
 def meters(tmp_path):
-    """A real indexed table with a type big enough to be summarised when grouped."""
+    """A real indexed table: a timestamp, twelve readings, a site and an empty column."""
     import pandas as pd
 
     from portia.catalog import index_source, init_project
@@ -476,7 +346,32 @@ def meters(tmp_path):
     return str(portia_dir)
 
 
-def test_a_table_that_fits_is_sent_exactly_as_before(meters):
+@pytest.fixture
+def wide_meters(tmp_path):
+    """A real indexed table wider than a card lists and a profile gives: 260 readings."""
+    import duckdb
+
+    from portia.catalog import index_source, init_project
+
+    readings = [
+        f"CASE WHEN i % 4 = 0 THEN i * {k} END AS meter_{k:03d}"
+        if k % 20 == 0
+        else f"i * {k} AS meter_{k:03d}"
+        for k in range(260)
+    ]
+    path = tmp_path / "wide.csv"
+    con = duckdb.connect()
+    con.execute(
+        f"COPY (SELECT i AS reading, {', '.join(readings)} FROM range(12) t(i)) TO '{path}' (HEADER)"
+    )
+    con.close()
+    portia_dir = tmp_path / ".portia"
+    init_project("one column per meter", portia_dir=portia_dir)
+    index_source(path, portia_dir=portia_dir)
+    return str(portia_dir)
+
+
+def test_a_table_that_fits_is_sent_exactly_as_the_handler_built_it(meters):
     from portia.agent import handlers
 
     for name, handler in (
@@ -484,25 +379,109 @@ def test_a_table_that_fits_is_sent_exactly_as_before(meters):
         ("profile_source", handlers.profile_source),
     ):
         result = _call(name, {"source": "meters", "portia_dir": meters})
-        assert _text(result) == tools._as_columns(handler("meters", meters))
+        assert _text(result) == to_json_compact(handler("meters", meters))
 
 
-def test_the_grouped_forms_read_the_fields_the_handlers_send(meters):
-    """The two partials name fields; a renamed field in a handler would leave a
-    group silently without it, so this reads real handler output."""
+def test_a_table_too_wide_to_list_comes_back_as_its_card(wide_meters):
     from portia.agent import handlers
 
-    described = tools._described_by_type(handlers.describe_source("meters", meters))
-    profiled = tools._profiled_by_type(handlers.profile_source("meters", meters))
+    for name in ("describe_source", "profile_source"):
+        answer = json.loads(_text(_call(name, {"source": "wide", "portia_dir": wide_meters})))
+        assert answer["n_columns"] == 261 > handlers.CARD_LISTS_ALL
+        assert "columns" not in answer and answer["more"], name
+        assert sum(t["n"] for t in answer["types"].values()) == 261
+        integers = answer["types"]["integer"]
+        assert integers["n"] > handlers.TYPE_EXAMPLES
+        assert integers["examples"][:2] == ["reading", "meter_000"]
+        # Every flagged column is named, by the rarer side of its flag.
+        assert answer["flagged"]["high_null"] == {
+            "n": 13,
+            "columns": [f"meter_{k:03d}" for k in range(0, 260, 20)],
+        }
+        # meter_000 is every reading times zero: constant, and named under both.
+        assert answer["flagged"]["constant"] == {"n": 1, "columns": ["meter_000"]}
+        assert answer["unflagged"] == 261 - 13
 
-    def floats(answer: dict) -> dict:
-        return next(g for g in answer["columns_by_type"] if g["inferred"] == "float")
 
-    assert {"n_columns", "first", "last", "role", "flags"} == set(floats(described)) - {"inferred"}
-    assert {"null_rate", "n_distinct", "min", "max"} <= set(floats(profiled))
-    assert floats(profiled)["n_columns"] == 12
-    for answer in (described, profiled):
-        assert sum(g["n_columns"] for g in answer["columns_by_type"]) == 15
+def test_a_filter_lists_the_columns_it_matches_and_counts_the_rest(wide_meters):
+    from portia.agent import handlers
+
+    args = {"source": "wide", "match": "METER_1*", "portia_dir": wide_meters}
+    described = json.loads(_text(_call("describe_source", args)))
+    profiled = json.loads(_text(_call("profile_source", args)))
+
+    assert described["columns"]["n"] == profiled["columns"]["n"] == 100
+    assert described["columns"]["fields"] == list(handlers.DESCRIBE_FIELDS)
+    assert len(described["columns"]["rows"]) == 100 and "more" not in described["columns"]
+    assert len(profiled["columns"]["rows"]) == handlers.PROFILE_CAP
+    assert profiled["columns"]["shown"] == f"1-{handlers.PROFILE_CAP}"
+    assert "50 more" in profiled["columns"]["more"]
+
+
+def test_a_flag_too_common_to_name_says_how_to_list_it(monkeypatch):
+    """The flag rule's count is never the last word: the card says which call names them."""
+    from portia.agent import handlers
+    from portia.core import listing as listing_module
+
+    monkeypatch.setattr(listing_module, "PER_FLAG_NAMES", 3)
+    columns = [
+        {"name": f"m{i}", "inferred": "float", "flags": ["high_null"] if i < 10 else []}
+        for i in range(30)
+    ]
+    card = handlers._overview(columns, "meters", measured=True, more="m")
+
+    assert card["flagged"]["high_null"]["n"] == 10
+    assert card["flagged"]["high_null"]["listed"] is False
+    assert "flag 'high_null'" in card["flagged"]["high_null"]["more"]
+
+
+def test_a_card_whose_list_does_not_fit_is_sent_as_its_overview(monkeypatch):
+    """Two hundred long names with long roles can pass the budget; the overview cannot."""
+    from portia.agent import handlers
+
+    names = [f"reading_of_the_building_meter_number_{i:04d}_in_kilowatt_hours" for i in range(200)]
+    rows = [
+        [n, "float", "measure: " + "x" * 80, ["high_null"] if i < 3 else []]
+        for i, n in enumerate(names)
+    ]
+    card = {
+        "source": "meters",
+        "path": "data/meters.csv",
+        "summary": None,
+        "n_rows": 24,
+        "n_columns": 200,
+        "columns": listing.listing(handlers.DESCRIBE_FIELDS, rows, n=200),
+        "notes": listing.listing(("at", "text"), [["2026-10-13", "kept"]], n=1),
+    }
+    assert len(to_json_compact(card)) > tools.RESULT_BUDGET, "the fixture is not big enough"
+    monkeypatch.setattr(tools.handlers, "describe_source", lambda *a, **k: card)
+
+    result = _call("describe_source", {"source": "meters"})
+
+    assert "is_error" not in result, _text(result)[:300]
+    answer = json.loads(_text(result))
+    assert list(answer) == [
+        "source",
+        "path",
+        "summary",
+        "n_rows",
+        "n_columns",
+        "types",
+        "flagged",
+        "unflagged",
+        "more",
+        "notes",
+    ]
+    assert answer["types"]["float"]["n"] == 200
+    assert answer["flagged"]["high_null"] == {"n": 3, "columns": names[:3]}
+    assert answer["unflagged"] == 197
+
+
+def test_a_filtered_answer_is_not_coarsened():
+    from portia.agent import handlers
+
+    filtered = {"source": "meters", "n_columns": 2, "columns": {"n": 0, "rows": []}}
+    assert handlers.overview_of(filtered) is filtered
 
 
 # --- a step over a wide table, shortened, and a write never refused (2026-10-08) ---

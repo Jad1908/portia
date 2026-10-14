@@ -7,4 +7,5 @@ This project's sources are **files in the repo**, read in place by DuckDB. Every
   reads the tables it declares in `inputs` and nothing else.
 - A source name is its file's stem. Two files with one stem are told apart by their folder, as
   `raw__orders`; the index above names them as they are known.
-- Indexing a source profiled it. `describe_source` always has facts behind it here.
+- Indexing a source profiled it. `describe_source` always has facts behind it here, and
+  `profile_source` reads them without scanning again.

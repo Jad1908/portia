@@ -46,44 +46,93 @@ def sales(tmp_path, monkeypatch):
     return str(d)
 
 
+def _by_name(listed: dict) -> dict[str, dict]:
+    """A `core.listing` list as one dict per row, keyed by the row's first field."""
+    return {row[0]: dict(zip(listed["fields"], row, strict=True)) for row in listed["rows"]}
+
+
+def _names(listed: dict) -> list:
+    return [row[0] for row in listed["rows"]]
+
+
 def test_get_context_is_compact_and_jsonable(project):
     ctx = handlers.get_context(project)
     json.dumps(ctx)  # must not raise
 
     assert ctx["project"].startswith("we run EU events")
-    entry = ctx["sources"]["customers"]
-    assert entry["n_columns"] > 0
+    assert ctx["n_sources"] == 1 and ctx["n_models"] == 0
+    entry = _by_name(ctx["sources"])["customers"]
+    assert entry["n_columns"] > 0 and entry["n_rows"] == 40
     # compact by design: the source index carries no per-column detail
-    assert "columns" not in entry
-    # freshly indexed sources still carry the auto-drafted placeholder read
-    assert entry["interpreted"] is False
+    assert set(entry) == set(handlers.INDEX_FIELDS)
+    # freshly indexed: nobody has read it, and the drafted placeholder is never sent
+    assert entry["read"] is False and entry["about"] is None
+    assert entry["stale"] is False
 
 
-def test_profile_source_returns_facts_and_role_slots(project):
-    entry = handlers.profile_source("customers", project)
-    json.dumps(entry)
+def test_get_context_says_what_was_written_and_narrows_by_name(project):
+    handlers.set_interpretation(
+        "customers", summary="Vendor signups. One row per customer.", portia_dir=project
+    )
+    entry = _by_name(handlers.get_context(project)["sources"])["customers"]
+    assert entry["read"] is True and entry["about"] == "Vendor signups."
+    narrowed = handlers.get_context(project, match="CUST*")
+    assert set(narrowed) == {"sources", "models"} and _names(narrowed["sources"]) == ["customers"]
+    assert handlers.get_context(project, match="orders*")["sources"]["n"] == 0
 
-    col = next(c for c in entry["columns"] if c["name"] == "signup_amount")
+
+def test_profile_source_returns_facts_unranked(project):
+    answer = handlers.profile_source("customers", project)
+    json.dumps(answer)
+
+    col = _by_name(answer["columns"])["signup_amount"]
     assert "numeric_stored_as_text" in col["flags"]  # a fact
-    assert col["role"] is None  # judgment, not yet written
+    # the checks hand over facts unranked — no scoring/priority sneaking in, and
+    # no judgment either: a role is the card's (`describe_source`)
+    assert not {"score", "priority", "impact", "severity", "role"} & set(col)
 
-    # the checks hand over facts unranked — no scoring/priority sneaking in
-    assert not {"score", "priority", "impact", "severity"} & set(col)
 
+def test_profile_source_answers_from_the_stored_facts_and_says_so(project, monkeypatch):
+    """The stored slice, not a fresh profile per call (2026-10-13), and still everything.
 
-def test_profile_source_gives_the_full_check_facts_not_the_stored_slice(project):
-    """The catalog trims what it stores; the agent must get everything.
-
-    Regression: with only median/std in hand the model *derived* a min-max range
-    it had never been given. Anything it can't measure it will estimate, so the
-    fix is more evidence, not a sterner prompt.
+    The old regression was the model *deriving* a min-max range it had never
+    been given, from a median and a standard deviation. Anything it can't
+    measure it will estimate, so the fix stays more evidence: the catalog keeps
+    the mean, the quartiles and the samples now, and a profile serves them
+    without scanning again.
     """
-    entry = handlers.profile_source("customers", project)
-    key = next(c for c in entry["columns"] if c["name"] == "customer_id")
+
+    def no_scan(*a, **k):
+        raise AssertionError("profile_source profiled a table whose facts are stored")
+
+    monkeypatch.setattr(handlers.profiling, "profile", no_scan)
+    answer = handlers.profile_source("customers", project)
+    key = _by_name(answer["columns"])["customer_id"]
 
     for fact in ("min", "max", "q25", "median", "q75", "mean", "std", "samples"):
-        assert fact in key, f"{fact} missing — the agent would have to guess it"
-    assert entry["n_rows"] == 40
+        assert key[fact] is not None, f"{fact} missing — the agent would have to guess it"
+    assert len(key["samples"]) == 3
+    assert answer["n_rows"] == 40 and answer["facts"] == handlers.STORED
+    assert "not_stored" not in answer
+
+
+def test_an_entry_indexed_before_means_were_stored_says_so(project):
+    """Old entries have no mean, quartiles or samples: said as a field, never guessed."""
+    from pathlib import Path
+
+    path = Path(project) / "sources" / "customers.yaml"
+    entry = yaml.safe_load(path.read_text(encoding="utf-8"))
+    for col in entry["columns"]:
+        for fact in catalog.LATER_FACTS:
+            col.pop(fact, None)
+    path.write_text(yaml.safe_dump(entry), encoding="utf-8")
+
+    answer = handlers.profile_source("customers", project, columns=["customer_id"])
+    key = _by_name(answer["columns"])["customer_id"]
+    assert key["mean"] is None and key["samples"] is None and key["median"] is not None
+    assert answer["not_stored"] == list(catalog.LATER_FACTS)
+    assert "re-index" in answer["not_stored_note"].lower()
+    assert answer["facts"] == handlers.STORED, "nothing was measured to fill them in"
 
 
 def test_profile_source_names_what_is_available_when_missing(project):
@@ -100,19 +149,21 @@ def test_profile_source_columns_returns_only_what_was_asked_for(project):
     full = handlers.profile_source("customers", project)
     subset = handlers.profile_source("customers", project, columns=["signup_amount"])
 
-    assert [c["name"] for c in subset["columns"]] == ["signup_amount"]
-    assert subset["n_cols"] == full["n_cols"]
+    assert _names(subset["columns"]) == ["signup_amount"]
+    assert subset["n_columns"] == full["n_columns"]
     assert subset["n_rows"] == full["n_rows"]
 
     # and the facts on the column that came back are the same ones as always
-    assert next(c for c in full["columns"] if c["name"] == "signup_amount") == subset["columns"][0]
+    assert (
+        _by_name(full["columns"])["signup_amount"] == _by_name(subset["columns"])["signup_amount"]
+    )
 
 
 def test_profile_source_columns_keeps_the_order_asked_for_and_dedupes(project):
     out = handlers.profile_source(
         "customers", project, columns=["signup_amount", "customer_id", "signup_amount"]
     )
-    assert [c["name"] for c in out["columns"]] == ["signup_amount", "customer_id"]
+    assert _names(out["columns"]) == ["signup_amount", "customer_id"]
 
 
 def test_profile_source_refuses_a_column_that_is_not_there(project):
@@ -136,8 +187,10 @@ def test_profile_source_columns_matches_the_case_the_engine_reports(project, mon
     — what every warehouse column looks like — is that column, not a refusal."""
     full = handlers.profile_source("customers", project)
     named = handlers.profile_source("customers", project, columns=["SIGNUP_AMOUNT"])
-    assert [c["name"] for c in named["columns"]] == ["signup_amount"]
-    assert named["columns"][0] == next(c for c in full["columns"] if c["name"] == "signup_amount")
+    assert _names(named["columns"]) == ["signup_amount"]
+    assert _by_name(named["columns"]) == {
+        "signup_amount": _by_name(full["columns"])["signup_amount"]
+    }
 
 
 def test_profile_source_columns_works_on_a_step_output(sales):
@@ -153,8 +206,9 @@ def test_profile_source_columns_works_on_a_step_output(sales):
         portia_dir=sales,
     )
     out = handlers.profile_source("specs/chain.yaml#cleaned", sales, columns=["name"])
-    assert [c["name"] for c in out["columns"]] == ["name"]
-    assert out["n_cols"] > 1, "still the whole table's width"
+    assert _names(out["columns"]) == ["name"]
+    assert out["n_columns"] > 1, "still the whole table's width"
+    assert out["facts"] == handlers.MEASURED_NOW, "a step's table has nothing stored"
 
 
 def test_set_interpretation_records_judgment(project):
@@ -168,10 +222,10 @@ def test_set_interpretation_records_judgment(project):
     assert out["summary_written"] is True
     assert out["roles_written"] == ["customer_id"]
 
-    after = handlers.profile_source("customers", project)
+    after = handlers.describe_source("customers", project)
     assert after["summary"].startswith("Vendor signups")
-    assert next(c for c in after["columns"] if c["name"] == "customer_id")["role"] == "identifier"
-    assert handlers.get_context(project)["sources"]["customers"]["interpreted"] is True
+    assert _by_name(after["columns"])["customer_id"]["role"] == "identifier"
+    assert _by_name(handlers.get_context(project)["sources"])["customers"]["read"] is True
 
 
 def test_set_interpretation_rejects_an_empty_write(project):
@@ -369,16 +423,15 @@ def test_describe_source_is_the_cheap_semantic_rung(project):
     described = h.describe_source("customers", project)
     json.dumps(described)
 
-    col = next(c for c in described["columns"] if c["name"] == "signup_amount")
-    assert set(col) == {"name", "role", "inferred", "flags"}
+    col = _by_name(described["columns"])["signup_amount"]
+    assert set(col) == {"name", "type", "role", "flags"}
     assert "numeric_stored_as_text" in col["flags"]
 
-    # L3 is strictly richer — the rungs must actually differ, or the ladder is theatre
-    profiled = next(
-        c for c in h.profile_source("customers", project)["columns"] if c["name"] == "signup_amount"
-    )
-    assert set(col) < set(profiled)
-    assert "samples" in profiled and "samples" not in col
+    # L3 carries the numbers L2 does not — the rungs must actually differ, or the
+    # ladder is theatre
+    profiled = _by_name(h.profile_source("customers", project)["columns"])["signup_amount"]
+    assert {"name", "type", "flags"} < set(profiled)
+    assert "null_rate" in profiled and "null_rate" not in col
 
 
 def test_set_group_records_shared_context_and_membership(project):
@@ -391,10 +444,13 @@ def test_set_group_records_shared_context_and_membership(project):
     json.dumps(out)
 
     ctx = handlers.get_context(project)
-    group = ctx["groups"][0]
-    assert group["name"] == "vendor_feed"
-    assert group["sources"] == ["customers"]
+    group = _by_name(ctx["groups"])["vendor_feed"]
+    assert group["n_sources"] == 1
     assert "export quirks" in group["context"]
+    members = handlers.get_context(project, group="VENDOR_FEED")
+    assert _names(members["sources"]) == ["customers"]
+    with pytest.raises(ValueError, match="vendor_feed"):
+        handlers.get_context(project, group="nope")
 
 
 def test_set_group_rejects_an_unindexed_source(project):
@@ -681,11 +737,11 @@ def test_profile_source_measures_a_table_an_earlier_step_produced(sales):
     out = handlers.profile_source("specs/chain.yaml#cleaned", sales)
     json.dumps(out)
 
-    name = next(c for c in out["columns"] if c["name"] == "name")
-    assert all(v == v.lower() for v in name["samples"])  # the transform, visible
-    # no catalog entry exists for an intermediate, so no judgment is invented for it
-    assert out["summary"] == ""
-    assert name["role"] is None
+    name = _by_name(out["columns"])["name"]
+    assert name["top"] == name["top"].lower()  # the transform, visible
+    # no catalog entry exists for an intermediate: measured now, and nothing stored
+    assert out["facts"] == handlers.MEASURED_NOW
+    assert "summary" not in out
 
 
 def test_a_step_reference_reaches_a_spec_in_a_layer_folder(sales):
@@ -1504,8 +1560,17 @@ def test_get_context_lists_the_models_beside_the_sources(sales, tmp_path):
     _write_spec(tmp_path, "specs/staging/stg_orders.yaml", _STG)
     ctx = handlers.get_context(sales)
     json.dumps(ctx)
-    assert ctx["models"] == {
-        "stg_orders": {"layer": "staging", "target": None, "n_steps": 1, "reads": []}
+    # A spec nobody has recorded a step through is listed, with no counts.
+    assert ctx["n_models"] == 1
+    assert _by_name(ctx["models"]) == {
+        "stg_orders": {
+            "name": "stg_orders",
+            "n_rows": None,
+            "n_columns": None,
+            "read": False,
+            "about": None,
+            "stale": None,
+        }
     }
 
 
@@ -1527,12 +1592,11 @@ def test_a_note_is_written_alone_and_read_back_on_both_rungs(project):
     assert out["note_written"] is True and out["summary_written"] is False
 
     described = handlers.describe_source("customers", project)
-    assert [n["text"] for n in described["notes"]] == [
-        "signup_amount is in cents; divide by 100 before summing."
-    ]
-    assert described["notes"][0]["at"]
-    profiled = handlers.profile_source("customers", project)
-    assert profiled["notes"] == described["notes"]
+    assert described["notes"]["fields"] == ["at", "text"]
+    ((at, text),) = described["notes"]["rows"]
+    assert text == "signup_amount is in cents; divide by 100 before summing." and at
+    # The card's, not the numbers' rung (2026-10-13).
+    assert "notes" not in handlers.profile_source("customers", project)
 
 
 def test_a_source_without_notes_says_nothing_about_them(project):
@@ -1560,16 +1624,17 @@ def test_describe_and_profile_open_a_built_model_by_name(sales):
     described = handlers.describe_source("per_customer", sales)
     json.dumps(described)
     assert described["source"] == "per_customer"
+    assert described["path"] == "specs/per_customer.yaml"
     assert described["summary"].startswith("One row per customer")
-    assert [c["name"] for c in described["columns"]] == ["customer_id", "n_orders"]
-    assert described["notes"][0]["text"].startswith("customer_id 0")
+    assert _names(described["columns"]) == ["customer_id", "n_orders"]
+    assert described["notes"]["rows"][0][1].startswith("customer_id 0")
 
     profiled = handlers.profile_source("per_customer", sales)
     json.dumps(profiled)
-    assert profiled["source"] == "per_customer" and profiled["n_cols"] == 2
-    assert {c["name"] for c in profiled["columns"]} == {"customer_id", "n_orders"}
-    assert "samples" in profiled["columns"][0], "a full profile, not the catalog's slice"
-    assert profiled["notes"] == described["notes"]
+    assert profiled["source"] == "per_customer" and profiled["n_columns"] == 2
+    assert _names(profiled["columns"]) == ["customer_id", "n_orders"]
+    # A local build profiled it, so its facts are stored.
+    assert profiled["facts"] == handlers.STORED and profiled["n_rows"] == 6
 
 
 def test_profile_opens_a_model_nobody_has_recorded_a_step_through(sales, tmp_path):
@@ -1581,7 +1646,8 @@ def test_profile_opens_a_model_nobody_has_recorded_a_step_through(sales, tmp_pat
         encoding="utf-8",
     )
     out = handlers.profile_source("orders_only", sales)
-    assert out["source"] == "orders_only" and out["n_rows"] > 0 and out["summary"] == ""
+    assert out["source"] == "orders_only" and out["n_rows"] > 0
+    assert out["facts"] == handlers.MEASURED_NOW
 
 
 def test_a_role_lands_on_the_column_the_engine_named(project):
@@ -1591,7 +1657,7 @@ def test_a_role_lands_on_the_column_the_engine_named(project):
         "customers", roles={"CUSTOMER_ID": "identifier"}, portia_dir=project
     )
     entry = handlers.describe_source("customers", project)
-    assert next(c for c in entry["columns"] if c["name"] == "customer_id")["role"] == "identifier"
+    assert _by_name(entry["columns"])["customer_id"]["role"] == "identifier"
 
 
 def test_naming_a_table_reads_its_entry_and_no_other(sales, monkeypatch):
@@ -1641,6 +1707,62 @@ def test_a_local_build_profiles_the_model_and_the_entry_says_so(sales):
     # build measured (2026-10-13).
     assert entry["indexed"] == {"rows": 6} and "table" not in entry
     described = handlers.describe_source("per_customer", portia_dir=sales)
-    assert "profiled" not in described and described["columns"][0]["inferred"]
+    first = described["columns"]["rows"][0]
+    assert "profiled" not in described and first[1] == entry["columns"][0]["inferred"]
     # An entry written before the field existed still reads as profiled.
     assert catalog.is_profiled({"model": "old", "columns": []})
+
+
+# --- the source cards' filters and stored facts (2026-10-13) ---------------------
+
+
+def test_the_card_filters_narrow_together_and_keep_table_order(project):
+    def names(**filters) -> list:
+        return _names(handlers.describe_source("customers", project, **filters)["columns"])
+
+    assert names(match="*_*") == ["customer_id", "signup_amount", "legacy_col", "mixed_ref"]
+    assert names(match="*_*", flag="all_null") == ["legacy_col"]
+    card = _by_name(handlers.describe_source("customers", project)["columns"])
+    categorical = [name for name, col in card.items() if col["type"] == "categorical"]
+    assert categorical and names(type_="CATEGORICAL") == categorical
+    assert names(flag="constant") == ["source"]
+    assert names(match="nothing_*") == []
+    # Named columns come back in the order named, and every filter still applies.
+    assert names(columns=["source", "customer_id"]) == ["source", "customer_id"]
+    assert names(columns=["source", "customer_id"], flag="constant") == ["source"]
+
+
+def test_an_unknown_flag_is_refused_with_the_vocabulary(project):
+    with pytest.raises(ValueError, match="high_null") as exc:
+        handlers.profile_source("customers", project, flag="mostly_null")
+    assert "mostly_null" in str(exc.value)
+
+
+def test_a_filtered_card_is_the_columns_alone(project):
+    answer = handlers.describe_source("customers", project, flag="high_null")
+    assert set(answer) == {"source", "n_columns", "columns"}
+    assert answer["n_columns"] == 8 and _names(answer["columns"]) == ["notes"]
+
+
+def test_an_estimated_median_says_so_when_read_back(project):
+    """BigQuery's quartiles are a sketch; the catalog keeps the mark beside the
+    median it stores, so the stored answer says what the measured one said."""
+    from pathlib import Path
+
+    path = Path(project) / "sources" / "customers.yaml"
+    entry = yaml.safe_load(path.read_text(encoding="utf-8"))
+    measured = {**entry["columns"][0], "approximate": ["q25", "median", "q75"]}
+    kept = catalog._column_facts(measured)
+    assert kept["approximate"] == ["q25", "median", "q75"]
+    entry["columns"][0] = {"name": measured["name"], "role": None, **kept}
+    path.write_text(yaml.safe_dump(entry), encoding="utf-8")
+
+    answer = handlers.profile_source("customers", project, columns=["customer_id"])
+    assert answer["approximate"] == ["q25", "median", "q75"]
+    assert "approximate" not in handlers.profile_source("customers", project, columns=["name"])
+
+    # Beside a row count that is itself an estimate, both are named.
+    entry["indexed"]["approximate"] = ["rows"]
+    path.write_text(yaml.safe_dump(entry), encoding="utf-8")
+    answer = handlers.profile_source("customers", project, columns=["customer_id"])
+    assert answer["approximate"] == ["n_rows", "q25", "median", "q75"]

@@ -246,3 +246,29 @@ def test_an_interrupted_query_counts_a_reserved_input_too(shop):
         "query_data", {"sql": "SELECT * FROM portia_tables", "inputs": ["portia_tables"]}, shop
     )
     assert facts["inputs"] == {"portia_tables": {"rows": 3, "from": handlers.COUNTED}}
+
+
+def test_portia_tables_holds_every_note_a_card_leaves_out(shop):
+    """A card carries the latest notes (`handlers.CARD_NOTES`); the rest are here (2026-10-13)."""
+    for i in range(handlers.CARD_NOTES + 2):
+        catalog.set_interpretation("orders", note=f"note {i}", portia_dir=shop)
+    con = reserved.connection()
+    (table,) = reserved.tables(["portia_tables"], shop, con).values()
+    ((texts,),) = table.sql(
+        f"SELECT list_transform(notes, n -> n.text) FROM {table.ref} WHERE name = 'orders'"
+    ).rows(1)
+    assert texts == [f"note {i}" for i in range(handlers.CARD_NOTES + 2)], "oldest first"
+    card = handlers.describe_source("orders", shop)
+    assert card["notes"]["n"] == handlers.CARD_NOTES + 2
+    assert card["notes"]["shown"] == f"3-{handlers.CARD_NOTES + 2}" and card["notes"]["more"]
+
+
+def test_portia_columns_holds_the_mean_and_the_quartiles(shop):
+    """Stored at indexing since 2026-10-13 (`catalog.LATER_FACTS`), and a column here."""
+    con = reserved.connection()
+    (table,) = reserved.tables(["portia_columns"], shop, con).values()
+    ((q25, median, q75, mean),) = table.sql(
+        f"SELECT q25, median, q75, mean FROM {table.ref} "
+        "WHERE table_name = 'orders' AND name = 'amount'"
+    ).rows(1)
+    assert (q25, median, q75, mean) == (2.0, 2.5, 3.25, 2.6667), "rounded as the profile rounds"

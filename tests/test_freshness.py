@@ -313,20 +313,25 @@ def test_an_answer_about_fresh_tables_carries_no_stale_key(shop):
 
 
 def test_a_coarsened_answer_still_starts_with_stale(shop, monkeypatch):
+    """A card whose column list is over the budget is sent as its overview (2026-10-13)."""
+    from portia.core import listing
+
     _touch("orders.csv", "4,9.0\n")
+    rows = [[f"c{i:04d}_{'x' * 80}", "integer", "r" * 60, ["constant"]] for i in range(200)]
     wide = {
         "source": "orders",
-        "columns": [
-            {"name": f"c{i:04d}", "role": None, "inferred": "integer", "flags": ["constant"]}
-            for i in range(2000)
-        ],
+        "path": "orders.csv",
+        "summary": None,
+        "n_rows": 3,
+        "n_columns": 200,
+        "columns": listing.listing(("name", "type", "role", "flags"), rows, n=200),
     }
     monkeypatch.setattr(tools.handlers, "describe_source", lambda *a, **k: wide)
     result = _call("describe_source", {"source": "orders", "portia_dir": shop})
     text = result["content"][0]["text"]
     assert "is_error" not in result
     assert text.startswith('{"stale":[{"source":"orders"')
-    assert '"grouped"' in text
+    assert '"types"' in text and '"columns":{' not in text
 
 
 def test_a_check_that_fails_says_so_rather_than_failing_the_answer(shop, monkeypatch):
@@ -357,3 +362,48 @@ def test_moment_reads_both_kinds_of_timestamp():
     assert moment("2026-10-13T09:12:44+02:00") == "2026-10-13 09:12"
     assert moment(None) == "—" and moment("whenever") == "whenever"
     assert len(moment(Path(".").stat().st_mtime)) == len("2026-10-13 09:12")
+
+
+# --- a model built locally is as fresh as its spec (2026-10-13) ----------------------
+
+
+def _edit_spec(old: str, new: str) -> None:
+    path = Path("specs/big_orders.yaml")
+    path.write_text(path.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
+
+
+def test_a_recorded_model_is_fresh_against_its_own_spec(shop):
+    entry = catalog.load_models(shop)["big_orders"]
+    assert entry["built"][catalog.BUILT_FROM] and "table" not in entry
+    assert catalog.freshness("big_orders", entry, portia_dir=shop) is None
+    assert freshness.notices({"source": "big_orders"}, shop) == []
+
+
+def test_a_spec_edited_by_hand_makes_the_model_stale_until_it_is_recorded_again(shop):
+    _edit_spec("amount > 2", "amount > 3")
+    fresh = catalog.freshness(
+        "big_orders", catalog.load_models(shop)["big_orders"], portia_dir=shop
+    )
+    assert fresh is not None and fresh["changed"] == catalog.SPEC_CHANGED
+    assert fresh["spec"] == "specs/big_orders.yaml"
+
+    (notice,) = freshness.notices({"source": "big_orders"}, shop)
+    assert notice["source"] == "big_orders" and "specs/big_orders.yaml" in notice["changed"]
+    assert notice["do"] == prompts.notice("stale_do_rebuild")
+    out = freshness.statuses(shop, catalog.load_catalog(shop)["sources"], catalog.load_models(shop))
+    assert out["big_orders"] is True and out["orders"] is False
+
+    handlers.record_step(
+        "specs/big_orders.yaml",
+        {"id": "big", "op": "sql", "inputs": ["orders"], "sql": "SELECT * FROM orders"},
+        supersedes="big",
+        portia_dir=shop,
+    )
+    assert freshness.notices({"source": "big_orders"}, shop) == []
+
+
+def test_a_model_entry_from_before_the_fingerprint_follows_its_sources_only(shop):
+    entry = catalog.load_models(shop)["big_orders"]
+    entry["built"].pop(catalog.BUILT_FROM)
+    _edit_spec("amount > 2", "amount > 3")
+    assert catalog.freshness("big_orders", entry, portia_dir=shop) is None
