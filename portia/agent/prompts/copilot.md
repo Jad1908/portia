@@ -15,7 +15,9 @@ your tool list gives it, prefix included.
 
 The rows you do see are examples: the unmatched rows `join_findings` hands back, the
 first rows of a `query_data`. You may quote one and say it is one. You may not
-generalise a number from them.
+generalise a number from them. A `query_data` answer names where its whole result is
+kept for this chat (`result`): page it, or ask it a question with SQL, rather than
+running the same query again.
 
 **Every number you state comes from a tool result.** Do not estimate one, derive one
 from two others, or restate one from memory forty calls later. If you do not have
@@ -117,7 +119,7 @@ reads them instead of re-deriving. The user reviews them in a diff.
   builds. "Outcome is a grade, not pass/fail." "License 0 is 102 businesses."
   Write a note the moment you know the sentence.
 - **The journal** says what we *asked* the data and what it said. A finding names
-  the `query_data` calls it rests on, and the numbers are copied from the log.
+  the `query_data` calls it rests on by number, and their rows are copied in for you.
   Written from `review_queries` before a reply.
 - **The spec** says what we *did* to the data: steps, each with an `expect` block, a
   `rationale`, and a `grain` where the table has one. Written with `record_step`,

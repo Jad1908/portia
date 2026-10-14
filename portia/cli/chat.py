@@ -17,7 +17,7 @@ import asyncio
 import sys
 from typing import Any
 
-from portia import runlog
+from portia import results, runlog
 from portia.agent import events, prompts
 
 # --- rendering (formatting lives at the edge, never in the engine) -----------
@@ -143,20 +143,26 @@ async def run_and_render(
     log = runlog.start(portia_dir, cwd=cwd, kind=kind, provider=provider)
     print(f"  [logging to {log.path}]")
 
-    async for event in session.run(
-        prompt,
-        answer=answer_questions,
-        confirm=confirm_write,
-        model=model,
-        effort=effort,
-        cwd=cwd,
-        portia_dir=portia_dir,
-        provider=provider,
-        # `index` is a job that reads: no build tool is offered to it.
-        builds=kind == runlog.CHAT,
-    ):
-        log.event(event)
-        render(event)
+    # The data questions of this run keep their results beside its log
+    # (`portia/results.py`), and the review reads this log, not the newest.
+    previous = results.attach(log.path)
+    try:
+        async for event in session.run(
+            prompt,
+            answer=answer_questions,
+            confirm=confirm_write,
+            model=model,
+            effort=effort,
+            cwd=cwd,
+            portia_dir=portia_dir,
+            provider=provider,
+            # `index` is a job that reads: no build tool is offered to it.
+            builds=kind == runlog.CHAT,
+        ):
+            log.event(event)
+            render(event)
+    finally:
+        results.attach(previous)
 
 
 def run_turn(

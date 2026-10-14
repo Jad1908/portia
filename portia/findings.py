@@ -118,22 +118,34 @@ def record(
         # agent reviews before each reply rather than at the end of a chat
         # (§5.2), so without this it would meet the same nine queries again on
         # the next turn with no way to tell which it had already used.
-        "queries": [
-            {
-                "chat": q.get("chat"),
-                "n": q.get("n"),
-                "question": q["question"],
-                "sql": q["sql"],
-                "result": _answer_only(q),
-            }
-            for q in queries
-        ],
+        "queries": [_cited(q) for q in queries],
     }
     path = _free_path(root / FINDINGS_DIR, slug(question))
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump(doc, f, sort_keys=False, default_flow_style=False, allow_unicode=True)
     return path
+
+
+def _cited(query: dict) -> dict:
+    """One query a finding rests on, as the file keeps it.
+
+    ``stored`` is the handle of the result the chat kept for it
+    (`portia/results.py`), when it kept one: what another chat reads the whole
+    result through, for as long as the chat that asked it exists. The rows the
+    finding rests on are in ``result`` either way, copied, so the finding
+    outlives the chat with its numbers.
+    """
+    cited = {
+        "chat": query.get("chat"),
+        "n": query.get("n"),
+        "question": query["question"],
+        "sql": query["sql"],
+        "result": _answer_only(query),
+    }
+    if query.get("stored"):
+        cited["stored"] = query["stored"]
+    return cited
 
 
 def _answer_only(query: dict) -> str:
@@ -459,7 +471,13 @@ def result_lines(result: str, *, rows: int = GLANCE_ROWS) -> list[str]:
     if not isinstance(payload, dict):
         return [result]
     found = payload.get("rows")
-    counts = {k: v for k, v in payload.items() if k not in ("rows", "columns", "more")}
+    fields = payload.get("fields")
+    if isinstance(found, list) and isinstance(fields, list):
+        # The list shape (`core/listing.py`): the header once, each row a list.
+        found = [
+            dict(zip(fields, row, strict=False)) if isinstance(row, list) else row for row in found
+        ]
+    counts = {k: v for k, v in payload.items() if k not in _NOT_COUNTS}
     lines = [inline(counts)] if counts else []
     if isinstance(found, list):
         lines += [inline(row) for row in found[:rows]]
@@ -469,6 +487,14 @@ def result_lines(result: str, *, rows: int = GLANCE_ROWS) -> list[str]:
 
 
 _MORE_ROWS = "{n} more rows in the file"
+
+#: The keys of a result that are not one of its counts: the rows themselves,
+#: how they are laid out, where the whole result was kept, and the sentences
+#: an answer says about itself.
+_NOT_COUNTS = (
+    *("rows", "columns", "fields", "shown", "n", "columns_shown", "result"),
+    *("more", "more_columns", "not_kept", "paged", "cut", "stale"),
+)
 
 
 def render_table(grouped: dict) -> str:
@@ -558,6 +584,7 @@ def review(
             {
                 "n": len(reviewed) + 1,
                 "chat": path.stem,
+                "log": path,
                 "tool": tool,
                 # Which tab it drew, for a `plot_data` call and empty otherwise.
                 # It is how a chart on screen finds its own call in the log — the
@@ -568,6 +595,11 @@ def review(
                 # Verbatim, as the tool returned it. This is the string a finding
                 # copies; nothing re-encodes it and nothing summarises it.
                 "result": got.get("text", ""),
+                # The handle of the result the chat kept for it, as the answer
+                # named it (`portia/results.py`). Read off the answer rather
+                # than worked out, because the handler that kept it could not
+                # know this call's position: the log is written after it.
+                "stored": _stored(got.get("text", "")) if not got.get("is_error") else None,
                 "failed": bool(got.get("is_error")),
                 # Stated so reviewing before every reply is idempotent: the agent
                 # sees which of these it has already written up, and judges only
@@ -589,12 +621,33 @@ def kept_queries(root: str | Path = ".", *, chat: str | None = None) -> set[int]
 
 
 def _chat_path(portia_dir: str | Path, chat: str | None) -> Path | None:
-    from portia import runlog
+    """The chat by name, else the one this process is logging to, else the newest.
 
-    if chat:
-        return runlog.find(chat, portia_dir)
-    logs = runlog.logs_in(portia_dir, kind=runlog.CHAT)
-    return logs[0] if logs else None
+    The middle case is new *(2026-10-13)* and is `results.log_for`'s: a chat
+    picked up from the list in the window, or an indexing job, is not the
+    newest chat, and its questions were being reviewed against somebody
+    else's. One rule for where a result is kept and where a review reads, so a
+    handle a review lists is one the chat's own SQL reaches.
+    """
+    from portia import results
+
+    return results.log_for(portia_dir, chat)
+
+
+def _stored(text: str) -> str | None:
+    """The handle a data answer named under ``result``, or ``None``."""
+    import json
+
+    from portia import results
+
+    try:
+        payload = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+    handle = payload.get("result") if isinstance(payload, dict) else None
+    if isinstance(handle, str) and results.HANDLE.fullmatch(handle):
+        return handle.lower()
+    return None
 
 
 def render_review(reviewed: list[dict]) -> str:

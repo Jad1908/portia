@@ -15,8 +15,9 @@ each table is the entries portia already wrote, put into rows. The window's
 pane and these tables say the same thing because they read the same files.
 
 **One registry, for every name portia answers for itself** (:func:`register`).
-The two catalog tables are its first entries; a chat's stored query results
-(``q1``, ``q2`` …) are meant to be the next, through the same call. A name
+The two catalog tables are its first entries; a chat's kept query results
+(``portia_result_kxbt`` …, `portia/results.py`) are the next, registered by
+`agent/handlers.py` as a pattern through the same call. A name
 the registry claims is built on a local DuckDB connection of its own
 (:func:`connection`) and handed to the SQL sandbox as one more declared input,
 so `ops/sql.py` copies it in exactly as it copies a source, behind the same
@@ -112,9 +113,12 @@ def register(name: str | re.Pattern[str], build: Builder) -> Reserved:
 
     ``build(name, request)`` receives the name as the query typed it and a
     :class:`Request`, and returns a `Table` on ``request.con``; :func:`create`
-    makes one from rows. Registered once, at import of the module that owns the
-    table. A second registration of the same name replaces the first, so a
-    module reloaded in a session does not answer twice.
+    makes one from rows. A table read from a file portia wrote is on a local
+    connection of its own instead, since ``request.con`` has no file access:
+    the sandbox copies an input in from whatever connection holds it.
+    Registered once, at import of the module that owns the table. A second
+    registration of the same name replaces the first, so a module reloaded in
+    a session does not answer twice.
     """
     entry = Reserved(name, build)
     _registry[:] = [r for r in _registry if r.name != name]

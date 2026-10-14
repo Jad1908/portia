@@ -49,6 +49,11 @@ def _ask(sql: str, inputs: list[str], d: str, **kwargs) -> dict:
     return handlers.query_data(sql, inputs, "what does the catalog hold?", portia_dir=d, **kwargs)
 
 
+def _records(answer: dict) -> list[dict]:
+    """An answer's rows as records: its ``fields`` once, each row a list (`core/listing.py`)."""
+    return [dict(zip(answer["fields"], row, strict=True)) for row in answer["rows"]]
+
+
 def test_portia_columns_is_one_row_per_column_with_its_facts(shop):
     answer = _ask(
         "SELECT name, type, flags, null_rate, n_distinct, min, max, top, top_freq "
@@ -56,7 +61,7 @@ def test_portia_columns_is_one_row_per_column_with_its_facts(shop):
         ["portia_columns"],
         shop,
     )
-    rows = {row["name"]: row for row in answer["rows"]}
+    rows = {row["name"]: row for row in _records(answer)}
     assert list(rows) == ["ORDER_ID", "amount", "shop"]
     assert rows["ORDER_ID"]["type"] == "integer" and rows["ORDER_ID"]["max"] == 4
     assert rows["amount"]["null_rate"] == 0.25 and rows["amount"]["min"] == 1.5
@@ -71,7 +76,7 @@ def test_a_flag_is_asked_with_list_contains_across_every_table(shop):
         ["portia_columns"],
         shop,
     )
-    assert [(r["table_name"], r["kind"], r["name"]) for r in answer["rows"]] == [
+    assert [(r["table_name"], r["kind"], r["name"]) for r in _records(answer)] == [
         ("big_orders", "model", "shop"),
         ("orders", "source", "shop"),
     ]
@@ -80,8 +85,8 @@ def test_a_flag_is_asked_with_list_contains_across_every_table(shop):
 def test_portia_tables_is_one_row_per_source_and_model(shop):
     catalog.set_interpretation("customers", summary="One row per customer.", portia_dir=shop)
     answer = _ask("SELECT * FROM portia_tables ORDER BY kind DESC, name", ["portia_tables"], shop)
-    rows = {row["name"]: row for row in answer["rows"]}
-    assert answer["columns"] == [name for name, _ in reserved.TABLE_FIELDS]
+    rows = {row["name"]: row for row in _records(answer)}
+    assert answer["fields"] == [name for name, _ in reserved.TABLE_FIELDS]
     assert rows["orders"]["kind"] == "source" and rows["orders"]["path"] == "orders.csv"
     assert rows["orders"]["n_rows"] == 4 and rows["orders"]["n_columns"] == 3
     assert rows["orders"]["groups"] == ["sales"] and rows["customers"]["groups"] == []
@@ -101,7 +106,7 @@ def test_a_changed_file_is_stale_and_so_is_what_is_built_from_it(shop):
     later = os.stat("orders.csv").st_mtime + 5
     os.utime("orders.csv", (later, later))
     answer = _ask("SELECT name, stale FROM portia_tables ORDER BY name", ["portia_tables"], shop)
-    assert {r["name"]: r["stale"] for r in answer["rows"]} == {
+    assert {r["name"]: r["stale"] for r in _records(answer)} == {
         "big_orders": True,
         "customers": False,
         "orders": True,
@@ -115,12 +120,12 @@ def test_the_catalog_and_the_data_meet_in_one_query_locally(shop):
         ["portia_tables", "orders"],
         shop,
     )
-    assert answer["rows"] == [{"recorded": 4, "counted": 4}]
+    assert _records(answer) == [{"recorded": 4, "counted": 4}]
 
 
 def test_a_reserved_name_is_matched_the_way_the_engine_folds_it(shop):
     answer = _ask("SELECT count(*) AS n FROM PORTIA_COLUMNS", ["PORTIA_COLUMNS"], shop)
-    assert answer["rows"] == [{"n": 3 + 2 + 3}]
+    assert _records(answer) == [{"n": 3 + 2 + 3}]
 
 
 def test_a_chart_reads_them_too(shop):
@@ -146,7 +151,7 @@ def test_a_table_nobody_profiled_has_its_type_and_no_flags(shop):
         ["portia_columns"],
         shop,
     )
-    assert answer["rows"] == [{"type": "VARCHAR", "flags": None, "null_rate": None}] * 2
+    assert _records(answer) == [{"type": "VARCHAR", "flags": None, "null_rate": None}] * 2
 
 
 # --- a warehouse project --------------------------------------------------------------
@@ -176,14 +181,14 @@ def test_on_a_warehouse_a_query_of_portias_records_alone_runs_here(shop, monkeyp
 
     monkeypatch.setattr(handlers, "connect", no_warehouse)
     answer = _ask("SELECT count(*) AS n FROM portia_tables", ["portia_tables"], shop)
-    assert answer["rows"] == [{"n": 3}]
+    assert _records(answer) == [{"n": 3}]
 
 
 # --- the registry ------------------------------------------------------------------
 
 
 def test_a_name_registered_later_is_an_input_the_same_way(shop, monkeypatch):
-    """The mechanism a chat's stored results (``q1``, ``q2`` …) are meant to use."""
+    """The mechanism a chat's kept results use (`portia/results.py`)."""
     monkeypatch.setattr(reserved, "_registry", list(reserved._registry))
     seen = []
 
@@ -194,7 +199,7 @@ def test_a_name_registered_later_is_an_input_the_same_way(shop, monkeypatch):
 
     reserved.register(re.compile(r"q\d+"), stored)
     answer = _ask("SELECT n, label FROM q7", ["q7"], shop)
-    assert answer["rows"] == [{"n": 7, "label": "kept"}]
+    assert _records(answer) == [{"n": 7, "label": "kept"}]
     assert seen == [("q7", shop)]
     assert reserved.find("q") is None and reserved.find("orders") is None
 
@@ -216,7 +221,7 @@ def test_the_columns_the_description_lists_are_the_tables_columns(shop):
         listed = reserved.vocabulary()[table]
         assert listed in description
         answer = _ask(f"SELECT * FROM {table} LIMIT 0", [table], shop)
-        assert answer["columns"] == [name for name, _ in fields] == listed.split(", ")
+        assert answer["fields"] == [name for name, _ in fields] == listed.split(", ")
 
 
 def test_an_empty_project_has_empty_tables_with_their_columns(tmp_path):
@@ -224,7 +229,7 @@ def test_an_empty_project_has_empty_tables_with_their_columns(tmp_path):
     catalog.init_project("nothing yet", portia_dir=d)
     answer = _ask("SELECT * FROM portia_columns", ["portia_columns"], str(d))
     assert answer["n_rows"] == 0
-    assert answer["columns"] == [name for name, _ in reserved.COLUMN_FIELDS]
+    assert answer["fields"] == [name for name, _ in reserved.COLUMN_FIELDS]
 
 
 def test_through_the_tool_a_reserved_input_carries_no_stale_notice(shop):
@@ -238,7 +243,7 @@ def test_through_the_tool_a_reserved_input_carries_no_stale_notice(shop):
     result = asyncio.run(tool.handler(args))
     assert "is_error" not in result
     payload = json.loads(result["content"][0]["text"])
-    assert "stale" not in payload and payload["rows"] == [{"n": 8}]
+    assert "stale" not in payload and _records(payload) == [{"n": 8}]
 
 
 def test_an_interrupted_query_counts_a_reserved_input_too(shop):

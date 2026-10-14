@@ -54,14 +54,20 @@ def _chat_with_queries(portia_dir, *questions):
 # --- the curation read ------------------------------------------------------
 
 
+def _entries(got: dict) -> list[dict]:
+    """`review_queries`' list as one record per question (`core/listing.py`)."""
+    listed = got["queries"]
+    return [dict(zip(listed["fields"], row, strict=True)) for row in listed["rows"]]
+
+
 def test_review_reads_this_chats_queries_back_numbered(sales):
     _chat_with_queries(sales, "how many orders?", "how many customers?")
 
     got = handlers.review_queries(portia_dir=sales)
 
-    assert got["n_queries"] == 2
-    assert [q["n"] for q in got["queries"]] == [1, 2]
-    assert got["queries"][0]["question"] == "how many orders?"
+    assert got["queries"]["n"] == 2
+    assert [q["n"] for q in _entries(got)] == [1, 2]
+    assert _entries(got)[0]["question"] == "how many orders?"
     json.dumps(got)
 
 
@@ -74,7 +80,7 @@ def test_review_ignores_every_other_tool(sales):
             {"name": f"{events.TOOL_PREFIX}profile_source", "id": "x", "input": {}},
         )
     )
-    assert handlers.review_queries(portia_dir=sales)["n_queries"] == 1
+    assert handlers.review_queries(portia_dir=sales)["queries"]["n"] == 1
 
 
 def test_a_kept_query_stays_in_the_list_and_says_it_was_kept(sales):
@@ -88,7 +94,7 @@ def test_a_kept_query_stays_in_the_list_and_says_it_was_kept(sales):
     """
     _chat_with_queries(sales, "how many orders?", "how many customers?")
     before = handlers.review_queries(portia_dir=sales)
-    assert [q["kept"] for q in before["queries"]] == [False, False]
+    assert [q["kept"] for q in _entries(before)] == [False, False]
     assert before["n_new"] == 2
 
     handlers.record_finding(
@@ -96,10 +102,10 @@ def test_a_kept_query_stays_in_the_list_and_says_it_was_kept(sales):
     )
 
     after = handlers.review_queries(portia_dir=sales)
-    assert after["n_queries"] == 2, "still both there — nothing was consumed"
-    assert [q["kept"] for q in after["queries"]] == [True, False]
+    assert after["queries"]["n"] == 2, "still both there — nothing was consumed"
+    assert [q["kept"] for q in _entries(after)] == [True, False]
     assert after["n_new"] == 1
-    assert after["queries"][0]["result"] == before["queries"][0]["result"]
+    assert _entries(after)[0]["n_rows"] == _entries(before)[0]["n_rows"]
 
 
 def test_an_older_chat_can_be_curated_late(sales):
@@ -107,11 +113,11 @@ def test_an_older_chat_can_be_curated_late(sales):
     old = _chat_with_queries(sales, "the question from three weeks ago")
     _chat_with_queries(sales, "today's question")
 
-    assert handlers.review_queries(portia_dir=sales)["queries"][0]["question"] == (
+    assert _entries(handlers.review_queries(portia_dir=sales))[0]["question"] == (
         "today's question"
     )
     late = handlers.review_queries(old.path.stem, portia_dir=sales)
-    assert late["queries"][0]["question"] == "the question from three weeks ago"
+    assert _entries(late)[0]["question"] == "the question from three weeks ago"
 
 
 # --- writing ----------------------------------------------------------------

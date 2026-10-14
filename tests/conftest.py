@@ -84,6 +84,21 @@ def _never_the_users_window_files(tmp_path_factory, monkeypatch):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _no_chat_attached():
+    """Every test starts with no chat attached for kept results (`portia/results.attach`).
+
+    The slot is process state, and `cli/serve` sets it for its session without
+    ever clearing it, as a server process should: a test that drove one would
+    otherwise decide which chat the next test's queries belong to.
+    """
+    from portia import results
+
+    results.attach(None)
+    yield
+    results.attach(None)
+
+
 @pytest.fixture
 def con():
     """A store with no project behind it, closed when the test ends."""

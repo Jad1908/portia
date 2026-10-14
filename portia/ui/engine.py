@@ -63,7 +63,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from portia import catalog, figures, findings, pipeline, runlog
+from portia import catalog, figures, findings, pipeline, results, runlog
 from portia import spec as spec_module
 from portia.agent import drawn
 from portia.cli.import_data import plan as plan_copy
@@ -1136,6 +1136,11 @@ def artifact_stamp(app: App) -> tuple:
                 # window redraw because it said it was open.
                 continue
             if rel.parts and rel.parts[0] in HISTORY_DIRS:
+                if len(rel.parts) > 2:
+                    # A chat's own folder (`runlog.companion`): the results its
+                    # questions kept. Every `query_data` writes one, and none of
+                    # them is drawn by a pane, so none is a reason to redraw.
+                    continue
                 stamps.append((path.as_posix(), 0, 0))
             else:
                 add(path)
@@ -1730,7 +1735,19 @@ def rename_log(app: App, path: Path, title: str) -> None:
 
 
 def delete_log(app: App, path: Path) -> None:
+    """A chat's log, its name and the results it kept (`runlog.delete`)."""
     runlog.delete(path, app.catalog_dir)
+
+
+def attach_results(path: Path | None) -> Path | None:
+    """The chat whose log a data question's result is kept beside (`results.attach`).
+
+    Set by the window for each exchange, because the copilot's tools run in
+    this process and cannot tell which of the open chats asked: the newest
+    is not the one a chat picked up from the list goes on in. Returns the
+    one it replaced, for the exchange to put back.
+    """
+    return results.attach(path)
 
 
 def read_log(path: Path) -> runlog.Transcript:
