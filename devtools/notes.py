@@ -60,6 +60,8 @@ BRANCH = re.compile(r"`(?:feat|fix|test|try|backlog)/[\w./-]+`")
 
 SECTION_REF = r"(?:\.md)?`?\)?\s*(?:,\s*)?§\s*(\d+(?:\.\d+)*[a-z]?)"
 ARROW_REF = r"\.md`?\s*(?:→|->)\s*`?([^`\n;:)]{3,60})"
+#: The checker and its test quote broken citations on purpose, as examples.
+SELF = ("devtools/notes.py", "tests/test_devtools_notes.py")
 #: File kinds worth reading for citations.
 SUFFIXES = (".py", ".md", ".js", ".css", ".yaml", ".yml", ".toml", ".json", ".txt")
 
@@ -94,7 +96,11 @@ def tracked(root: Path) -> list[str]:
     out = subprocess.run(
         ["git", "-C", str(root), "ls-files"], capture_output=True, text=True, check=True
     ).stdout.splitlines()
-    return [f for f in out if f.endswith(SUFFIXES) and not f.startswith(("docs/", "sandbox/"))]
+    return [
+        f
+        for f in out
+        if f.endswith(SUFFIXES) and not f.startswith(("docs/", "sandbox/")) and f not in SELF
+    ]
 
 
 def cites(root: Path, notes: dict[str, Note]) -> list[str]:
