@@ -1117,7 +1117,12 @@ async def query_data(args: dict[str, Any]) -> dict[str, Any]:
                 "description": "Every table the query reads: source, model, or <spec>#<step id>",
             },
             "vega": {
-                "type": "object",
+                # An object, or the JSON text of one (`handlers._vega_object`):
+                # Haiku sent the text in 4 of 10 calls, and a schema of `object`
+                # alone had the server refuse each before portia saw it. Object
+                # first, so a client that keeps one type of a union keeps the
+                # one the description teaches.
+                "type": ["object", "string"],
                 "description": (
                     "A Vega-Lite spec: mark, encoding, layer, scale, config — "
                     "everything except transforms and data, which are yours to "

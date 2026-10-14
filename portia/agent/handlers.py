@@ -1275,7 +1275,7 @@ def plot_data(
     inputs: list[str],
     question: str,
     tab: str,
-    vega: dict,
+    vega: dict | str,
     portia_dir: str = catalog.DEFAULT_DIR,
 ) -> dict:
     """Draw the answer where the user can see it. Runs a SELECT, writes nothing.
@@ -1326,6 +1326,7 @@ def plot_data(
         raise ValueError(prompts.error("chart_needs_a_tab"))
     if not inputs:
         raise ValueError(prompts.error("query_needs_inputs"))
+    vega = _vega_object(vega)
     chartspec.check(vega)
 
     produced = _select(sql, inputs, portia_dir)
@@ -1386,6 +1387,28 @@ def plot_data(
     if isinstance(outcome, results.NotKept):
         chart["not_kept"] = _not_kept(outcome)
     return chart
+
+
+def _vega_object(vega: Any) -> Any:
+    """The spec as an object, when it arrived as the text of one.
+
+    **A spec sent as a string is read as JSON** *(2026-10-14)*. In a Haiku chat
+    on a public energy dataset, 4 of 10 `plot_data` calls sent ``vega`` as a
+    JSON string, ``"{\"mark\": …}"``, and the server refused each against the
+    declared ``object`` before portia saw it. The schema takes either now
+    (`tools.plot_data`), and a string is parsed here and goes on exactly as an
+    object would, through `chartspec.check` and every refusal after it. Text
+    that is not JSON is refused as itself; anything else that is not an
+    object is `chartspec`'s to refuse.
+    """
+    import json
+
+    if not isinstance(vega, str):
+        return vega
+    try:
+        return json.loads(vega)
+    except json.JSONDecodeError as exc:
+        raise ValueError(prompts.error("chart_spec_not_json", error=str(exc))) from None
 
 
 #: How many columns a chart's query may return and still be named whole when the
