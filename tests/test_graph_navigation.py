@@ -12,6 +12,7 @@ test needs the graph to be up; nothing here answers a query as Neo4j would.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from contextlib import contextmanager
 from pathlib import Path
@@ -724,3 +725,42 @@ def test_graph_lookup_hands_back_a_card(sales, recorded, monkeypatch):
     card = handlers.graph_lookup("orders", to="customers", portia_dir=sales)
     assert seen == {"table": "orders", "to": "customers"}
     assert card["routes"]["n"] == 0
+
+
+# --- a graph read waits for the graph writes of its own message (2026-10-14) ---------------
+
+
+def test_a_graph_read_waits_for_a_join_check_already_running(monkeypatch):
+    """A harness runs one message's read-only calls together, so a route asked beside a join
+    check was read before the check's measurement landed. The read now waits for it."""
+    import threading
+    import time
+
+    from portia.agent import tools
+
+    seen: list[float] = []
+    monkeypatch.setattr(
+        handlers, "graph_lookup", lambda *a, **k: seen.append(time.monotonic()) or {"table": {}}
+    )
+    running = tools._register("join_findings", {"left": "a", "right": "b"})
+    started = time.monotonic()
+
+    def finish() -> None:
+        time.sleep(0.3)
+        tools._retire(running)
+
+    threading.Thread(target=finish).start()
+    result = asyncio.run(tools.graph_lookup.handler({"table": "a", "to": "b"}))
+    assert "is_error" not in result
+    assert seen and seen[0] - started >= 0.25
+
+
+def test_a_graph_read_with_no_write_running_does_not_wait(monkeypatch):
+    import time
+
+    from portia.agent import tools
+
+    monkeypatch.setattr(handlers, "graph_lookup", lambda *a, **k: {"table": {}})
+    started = time.monotonic()
+    asyncio.run(tools.graph_lookup.handler({"table": "a"}))
+    assert time.monotonic() - started < tools.GRAPH_WRITE_POLL_S * 5

@@ -934,6 +934,38 @@ async def describe_source(args: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+#: The tools whose call may write measured pairs into the graph (`join_findings`
+#: keeps its key measurement, `measure_overlaps` its pairs).
+GRAPH_WRITERS = ("join_findings", "measure_overlaps")
+#: The longest a graph read waits for those writes before it reads anyway.
+GRAPH_WRITE_WAIT_S = 120.0
+#: How often it looks again while it waits.
+GRAPH_WRITE_POLL_S = 0.1
+
+
+def _await_graph_writes() -> None:
+    """Hold a graph read until the graph writes already running in this process have answered.
+
+    **A harness runs the read-only calls of one message together** (Claude Code
+    up to ten), and `join_findings` and `measure_overlaps` are read-only by
+    their hint. So a copilot that checks a join and asks for a route in the same
+    message had its route read before the join's measurement was written: a real
+    session asked for `elec_long → weather` in the message that measured
+    `metadata → weather`, and was told there was no route that the graph held a
+    second later (2026-10-14). A read that waits for writes already in flight
+    answers with what the message itself measured. Stop still reaches the wait
+    (`cancel.check`), and a write that never ends costs at most
+    :data:`GRAPH_WRITE_WAIT_S`.
+    """
+    deadline = time.monotonic() + GRAPH_WRITE_WAIT_S
+    while time.monotonic() < deadline:
+        with _calls_lock:
+            if not any(record.tool in GRAPH_WRITERS for record in _calls):
+                return
+        cancel.check()
+        time.sleep(GRAPH_WRITE_POLL_S)
+
+
 @tool(
     "graph_lookup",
     prompts.tool("graph_lookup", **graphcards.vocabulary()),
@@ -953,16 +985,17 @@ async def describe_source(args: dict[str, Any]) -> dict[str, Any]:
     annotations=_READ_ONLY,
 )
 async def graph_lookup(args: dict[str, Any]) -> dict[str, Any]:
-    return await _evidence(
-        lambda: handlers.graph_lookup(
+    def look() -> dict:
+        _await_graph_writes()
+        return handlers.graph_lookup(
             args["table"],
             column=args.get("column"),
             neighbour=args.get("neighbour"),
             to=args.get("to"),
             **_dir(args),
-        ),
-        args=args,
-    )
+        )
+
+    return await _evidence(look, args=args)
 
 
 @tool(
