@@ -582,14 +582,21 @@ def payload(chart: Chart) -> str:
 
 
 def _failed(chart: Chart) -> None:
-    """What broke, in the operator's terms, with the tab left open.
+    """What broke, in the renderer's terms, with the tab left open.
 
-    There is no retry button (§8). Retrying an identical query that failed is a
-    press with one possible outcome; the way forward is to tell the copilot, and
-    it is sitting in the pane to the right.
+    **It is the drawing that failed, never the query** *(2026-10-14)*. The
+    heading said *Query failed* over *Unrecognized signal name "hover"*, which
+    is Vega-Lite refusing a spec: the query had run and its rows were here.
+    `render_failed` is the only thing that sets `Chart.error`. A query that
+    fails never becomes a tab: `plot_data` refuses it to the copilot before
+    anything is published (`VISUALIZATION.md` §2.3).
+
+    There is no retry button (§8). Drawing the same spec again is a press with
+    one possible outcome; the way forward is to tell the copilot, and it is
+    sitting in the pane to the right.
     """
     with ui.element("div").classes("stack-sm"):
-        ui.label(_FAILED).classes("t-heading-sm c-error")
+        ui.label(_NOT_DRAWN).classes("t-heading-sm c-error")
         c.code_block(chart.error or "")
 
 
@@ -908,7 +915,7 @@ _PENDING = "Running the query"
 _RUNNING = "Running the query…"
 _NO_ROWS = "The query returned no rows. Nothing to draw."
 _ROW_COUNT = "{rows} rows"
-_FAILED = "Query failed"
+_NOT_DRAWN = "Chart could not be drawn"
 _QUERY_LABEL = "Query"
 _GRIP_TIP = "Drag to resize the chart"
 _INPUTS = "Reads {inputs}"

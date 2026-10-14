@@ -691,6 +691,29 @@ def test_a_failed_render_marks_the_chart_and_reaches_the_agent(monkeypatch):
     assert drawn.take_failures() == {"Orders": "Invalid specification: unknown mark"}
 
 
+def test_a_chart_the_browser_could_not_draw_says_so_and_not_that_the_query_failed(monkeypatch):
+    """The window said *Query failed* over Vega-Lite's *Unrecognized signal name*.
+
+    The query had run; the browser could not draw the spec. `render_failed` is
+    the only writer of `Chart.error`, so the heading is the drawing's.
+    """
+    from nicegui import ui
+
+    from portia.ui import charts
+
+    app = App()
+    monkeypatch.setattr(charts, "APP", app)
+    monkeypatch.setattr(charts, "_refresh", lambda: None)
+    app.show_chart(a_chart("Orders"))
+    charts.render_failed("Orders", 'Unrecognized signal name: "hover"')
+
+    with ui.element("div") as slot:
+        charts._failed(app.chart("Orders"))
+    labels = [e.text for e in slot.descendants() if isinstance(e, ui.label)]
+    assert labels == ["Chart could not be drawn"]
+    assert not any("Query failed" in text for text in labels)
+
+
 def test_a_failure_is_reported_once():
     """Taken rather than read.
 
