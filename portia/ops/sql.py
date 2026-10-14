@@ -489,9 +489,16 @@ def apply_sql(inputs: dict[str, Table], sql: str, *, name: str = "sql") -> OpRes
             # drawn from `__portia_raw_`, an internal staging name that appears
             # nowhere in portia's vocabulary and cannot be acted on. Same rule
             # as `handlers._table` one layer up: say what the name *could* be.
-            raise SqlTableUnknown(
-                _unknown_table(exc, inputs), _MISSING_TABLE.findall(str(exc))
-            ) from exc
+            #
+            # **Only a missing table** *(2026-10-14)*. A misspelled function or
+            # type is a `CatalogException` too, and was told to declare it in
+            # 'inputs'. That one is the query's own mistake, so it passes
+            # through as DuckDB says it, with the suggestion, which names a
+            # function or a type and never the staging relation.
+            missing = _MISSING_TABLE.findall(str(exc))
+            if not missing:
+                raise
+            raise SqlTableUnknown(_unknown_table(exc, inputs), missing) from exc
         # The types the *query* produced, captured before the trip back out.
         types = dict(zip(result.columns, (str(t) for t in result.types), strict=True))
         out = result.df()

@@ -30,17 +30,19 @@ clobbered. Nothing here is schema-locked; it's plain, hand-editable YAML.
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import yaml
 
 from portia.checks import profiling
 from portia.checks.profiling import profile_path
-from portia.core import backend, cancel
+from portia.core import backend, cancel, listing
 from portia.core import dialect as dialects
 from portia.core.io import relative
 from portia.core.present import format_rate
@@ -751,6 +753,132 @@ def remove_source(name: str, *, portia_dir: str | Path = DEFAULT_DIR) -> Path | 
     return removed
 
 
+class UnknownName(ValueError):
+    """A name the catalog was given that is not there: which, where, and the closest few.
+
+    **The closest few and a count, never every name** *(2026-10-14)*. The
+    refusal of a role on a column that was not there listed every column: on
+    a 1,579-column meter table it was 34,557 characters, cut by the tool's
+    error guard to 10,000, and the name it refused was ``*``. This module sits
+    below the layer that loads prompts (`agent/prompts/`), so its own sentence
+    is short and plain, for the window and the command line, and
+    `agent/handlers` words the copilot's from these fields.
+
+    ``kind`` is :data:`COLUMN`, :data:`PATTERN` or :data:`SOURCE`; ``n`` is how
+    many names there were to choose from, in ``table`` (the project, for a
+    source); ``closest`` is `core/listing.near_misses`' few, empty for a
+    pattern, which is matched rather than spelled.
+    """
+
+    def __init__(
+        self, message: str, *, kind: str, name: str, table: str, n: int, closest: Sequence[str]
+    ) -> None:
+        super().__init__(message)
+        self.kind = kind
+        self.name = name
+        self.table = table
+        self.n = n
+        self.closest = list(closest)
+
+
+#: What an :class:`UnknownName` was given as: a column name, a pattern over
+#: column names, or a source's name.
+COLUMN = "column"
+PATTERN = "pattern"
+SOURCE = "source"
+
+#: A set in a shell-style pattern, ``[abc]`` or ``[!abc]``, with `fnmatch`'s
+#: leading ``]`` taken as a member. It stands for one character, whichever.
+_PATTERN_SET = re.compile(r"\[!?\]?[^\]]*\]")
+
+
+class Written(NamedTuple):
+    """What :func:`set_interpretation` wrote: the entry's file, and how many columns each role key set."""
+
+    path: Path
+    roles: dict[str, int]
+
+
+def _literal_characters(pattern: str) -> int:
+    """How many characters of ``pattern`` match only themselves: its specificity."""
+    return len(_PATTERN_SET.sub("", pattern).replace("*", "").replace("?", ""))
+
+
+def assign_roles(
+    roles: Mapping[str, str], names: Sequence[str], *, table: str
+) -> tuple[dict[str, str], dict[str, int]]:
+    """Which role each column gets from ``roles``, and how many columns each key set.
+
+    **A key may be a pattern** *(2026-10-14)*. Indexing a 1,579-column meter
+    table, the copilot gave one role to every meter column at once with the
+    key ``*``, and was refused for a column literally named ``*``. A key
+    holding ``*``, ``?`` or ``[`` that is not itself a column's name is a
+    shell-style pattern, matched as `describe_source`'s ``match`` filter is
+    (`core/listing.matches`: without case).
+
+    **Which key sets a column**, deterministically and in this order:
+
+    1. A key that **is** the column's name (`dialect.resolve_columns`: exactly,
+       else the one name that differs only in case) wins over every pattern.
+    2. Else, of the patterns that match it, the **most specific**: the one with
+       the most characters that match only themselves, so ``north_*`` beats
+       ``*`` and ``north_office_*`` beats ``north_*``. A set such as ``[ab]``
+       counts as no such character.
+    3. A tie, at either step, goes to the key **given first**.
+
+    Specificity is a property of the text the copilot typed, so nothing here
+    looks at what a column holds; it decides which of the copilot's own
+    statements applies, and the copilot can always say it more exactly.
+
+    A key that names no column and is not a pattern is refused, and so is a
+    pattern that matches no column, before anything is written
+    (:class:`UnknownName`). A pattern that matched only columns another key
+    claimed sets none, and its count says so: that is an answer, not a typo.
+    """
+    present = set(names)
+    exact: dict[str, str] = {}
+    patterns: list[tuple[int, int, str]] = []
+    keys = list(roles)
+    spelled = dialects.resolve_columns(keys, names)
+    for order, (key, column) in enumerate(zip(keys, spelled, strict=True)):
+        if column in present:
+            exact.setdefault(column, key)
+        elif listing.is_pattern(key) and any(listing.matches(name, key) for name in names):
+            patterns.append((-_literal_characters(key), order, key))
+        elif listing.is_pattern(key):
+            raise UnknownName(
+                f"no column of {table!r} matches {key!r}, among its {len(names)}",
+                kind=PATTERN,
+                name=key,
+                table=table,
+                n=len(names),
+                closest=[],
+            )
+        else:
+            closest = listing.near_misses(key, names)
+            raise UnknownName(
+                f"no column {key!r} in {table!r}, which has {len(names)}"
+                + (f"; closest: {', '.join(closest)}" if closest else ""),
+                kind=COLUMN,
+                name=key,
+                table=table,
+                n=len(names),
+                closest=closest,
+            )
+
+    patterns.sort()
+    assigned: dict[str, str] = {}
+    counts = dict.fromkeys(roles, 0)
+    for name in names:
+        winner = exact.get(name) or next(
+            (key for _, _, key in patterns if listing.matches(name, key)), None
+        )
+        if winner is not None:
+            assigned[name] = roles[winner]
+            counts[winner] += 1
+    return assigned, counts
+
+
 def set_interpretation(
     name: str,
     *,
@@ -758,7 +886,7 @@ def set_interpretation(
     roles: dict[str, str] | None = None,
     note: str | None = None,
     portia_dir: str | Path = DEFAULT_DIR,
-) -> Path:
+) -> Written:
     """Author the *judgment* half of an entry: prose ``summary``, column ``role``s, a ``note``.
 
     The mirror of ``index_source``: that one refreshes facts and preserves judgment,
@@ -767,6 +895,10 @@ def set_interpretation(
 
     This is what the agent calls once it has read the facts and the project context
     — the deterministic side has no business deciding what a column *means*.
+
+    **A role key may be a pattern** (:func:`assign_roles`, 2026-10-14): one
+    role for every meter column of a wide table is one key, and what comes back
+    is how many columns each key set, never their names.
 
     **It writes a model's read as well as a source's** *(2026-09-04)*. A model
     entry has the same shape minus a file (:func:`_model_entry`) and its
@@ -799,24 +931,22 @@ def set_interpretation(
         )
 
     entry = _read(entry_file)
+    columns = entry.get("columns", [])
+    # Every key is checked before anything is set, so a refused call writes
+    # nothing: not the summary beside it, not the roles before the bad key.
+    assigned, counts = assign_roles(roles or {}, [c["name"] for c in columns], table=name)
+    if note is not None and not note.strip():
+        raise ValueError("a note has to say something")
     if summary is not None:
         entry["summary"] = summary
-    for col, role in (roles or {}).items():
-        # As the engine spells it (`dialect.resolve_columns`): a role on
-        # `establishment_id` lands on the ESTABLISHMENT_ID a warehouse returned.
-        (col,) = dialects.resolve_columns([col], [c["name"] for c in entry.get("columns", [])])
-        match = next((c for c in entry.get("columns", []) if c["name"] == col), None)
-        if match is None:
-            known = ", ".join(c["name"] for c in entry.get("columns", []))
-            raise ValueError(f"no such column {col!r} in {name!r} (have: {known})")
-        match["role"] = role
+    for column in columns:
+        if column["name"] in assigned:
+            column["role"] = assigned[column["name"]]
     if note is not None:
-        if not note.strip():
-            raise ValueError("a note has to say something")
         entry.setdefault(NOTES, []).append({"text": note.strip(), "at": _now()})
 
     _write(entry_file, entry)
-    return entry_file
+    return Written(entry_file, counts)
 
 
 #: The key under which an entry keeps what was learned about it, in the order it
@@ -877,8 +1007,18 @@ def set_group(
 
     for src in sources or []:
         if src not in data["sources"]:
-            known = ", ".join(data["sources"]) or "(none indexed)"
-            raise ValueError(f"no indexed source {src!r} — have: {known}")
+            # The closest few and a count, never every source (:class:`UnknownName`).
+            indexed = list(data["sources"])
+            closest = listing.near_misses(src, indexed)
+            raise UnknownName(
+                f"no indexed source {src!r} among {len(indexed)}"
+                + (f"; closest: {', '.join(closest)}" if closest else ""),
+                kind=SOURCE,
+                name=src,
+                table="",
+                n=len(indexed),
+                closest=closest,
+            )
 
     group = next((g for g in groups if g.get("name") == name), None)
     if group is None:

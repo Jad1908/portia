@@ -680,8 +680,10 @@ class Chart:
     at: str = ""
     #: Which `query_data` call this replots, if it reuses one (§2.6).
     from_query: int | None = None
-    #: What broke, in the operator's terms. A failed query is a failed tab that
-    #: says so and stays open — there is no retry (§8).
+    #: What the browser said when it could not draw the chart (`charts.render_failed`,
+    #: its only writer). A failed drawing is a failed tab that says so and stays
+    #: open — there is no retry (§8). A failed query never reaches a tab:
+    #: `plot_data` refuses it before anything is published.
     error: str | None = None
     #: True between the press and the rows arriving. The tab draws in one pass and
     #: the query does not (§3.6), so a chart is on screen as a pending tab before

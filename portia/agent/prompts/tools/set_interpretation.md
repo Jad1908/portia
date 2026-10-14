@@ -6,7 +6,12 @@ Three fields, any combination:
 - 'summary' says what the table IS, in the project's own words. One paragraph. A
   later call replaces it whole, so write the whole read, not an addendum.
 - 'roles' maps a column name to what it is for: identifier, measure, timestamp,
-  category, free_text, or a word of your own the project uses.
+  category, free_text, or a word of your own the project uses. A key holding * or
+  ? is a pattern and gives its role to every column it matches, without case:
+  {"timestamp": "timestamp", "*": "measure"} reads every column but timestamp as
+  a measure. A column's own name always wins over a pattern; of two patterns, the
+  one with more plain characters wins ("north_*" over "*"), and a tie goes to the
+  one written first. The answer counts the columns each key set.
 - 'note' is one sentence appended to what is known about this table, dated, kept
   in the order it was learned, never rewritten. Use it mid-chat, the moment you
   learn something a person building on this table has to know first: "outcome is

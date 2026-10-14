@@ -453,6 +453,25 @@ def test_an_unknown_name_among_sixty_tables_names_the_closest_few(estate, tool, 
     assert 0 < len(named) <= listing.CLOSE_MATCHES, named
 
 
+def test_a_role_on_a_misspelled_column_of_a_wide_table_names_the_closest_few(deep):
+    """It listed every column: 34,557 characters on a 1,579-column table (2026-10-14)."""
+    wanted = _source(deep, "sparse")["columns"][5]["name"]
+    with _inside(deep):
+        result = _call("set_interpretation", {"source": "sparse", "roles": {f"{wanted}x": "m"}})
+    text = " ".join(result["content"][0]["text"].split())
+    assert result.get("is_error") and "which has 800 columns" in text and wanted in text
+    assert len(text) < 1_000, len(text)
+
+
+def test_a_group_member_among_sixty_tables_that_is_not_one_names_the_closest_few(estate):
+    with _inside(estate):
+        result = _call("set_group", {"name": "g", "sources": ["t07"]})
+    text = " ".join(result["content"][0]["text"].split())
+    assert result.get("is_error") and "has 60 indexed sources" in text
+    named = [f"t{i:03d}" for i in range(60) if f"t{i:03d}" in text]
+    assert named[0] == "t007" and len(named) <= listing.CLOSE_MATCHES, named
+
+
 @pytest.fixture(scope="module")
 def crowded(tmp_path_factory) -> Path:
     """A hub that a hundred other tables have three findings each with."""

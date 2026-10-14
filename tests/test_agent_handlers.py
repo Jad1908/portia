@@ -220,7 +220,7 @@ def test_set_interpretation_records_judgment(project):
     )
     json.dumps(out)
     assert out["summary_written"] is True
-    assert out["roles_written"] == ["customer_id"]
+    assert out["roles_written"] == {"customer_id": 1}
 
     after = handlers.describe_source("customers", project)
     assert after["summary"].startswith("Vendor signups")
@@ -440,6 +440,24 @@ def test_describe_source_is_the_cheap_semantic_rung(project):
     assert "null_rate" in profiled and "null_rate" not in col
 
 
+def test_one_role_key_may_be_a_pattern_and_the_answer_counts_what_each_key_set(project):
+    out = handlers.set_interpretation(
+        "customers", roles={"customer_id": "identifier", "*": "attribute"}, portia_dir=project
+    )
+    assert out["roles_written"] == {"customer_id": 1, "*": 7}
+    roles = _by_name(handlers.describe_source("customers", project)["columns"])
+    assert roles["customer_id"]["role"] == "identifier"
+    assert {c["role"] for name, c in roles.items() if name != "customer_id"} == {"attribute"}
+
+
+def test_a_role_pattern_that_matches_nothing_says_so_in_the_copilots_terms(project):
+    with pytest.raises(ValueError) as refused:
+        handlers.set_interpretation("customers", roles={"meter_*": "m"}, portia_dir=project)
+    text = str(refused.value)
+    assert "'meter_*' matches none of the 8 columns of 'customers'" in text
+    assert "describe_source with match" in text
+
+
 def test_set_group_records_shared_context_and_membership(project):
     out = handlers.set_group(
         "vendor_feed",
@@ -455,13 +473,20 @@ def test_set_group_records_shared_context_and_membership(project):
     assert "export quirks" in group["context"]
     members = handlers.get_context(project, group="VENDOR_FEED")
     assert _names(members["sources"]) == ["customers"]
-    with pytest.raises(ValueError, match="vendor_feed"):
-        handlers.get_context(project, group="nope")
+    with pytest.raises(ValueError, match="among this project's 1. Closest names: vendor_feed"):
+        handlers.get_context(project, group="vendor_fed")
 
 
 def test_set_group_rejects_an_unindexed_source(project):
-    with pytest.raises(ValueError, match="no indexed source"):
+    with pytest.raises(ValueError, match="No indexed source is named 'nope'"):
         handlers.set_group("g", sources=["nope"], portia_dir=project)
+
+
+def test_set_group_names_the_closest_sources_and_a_count_not_every_source(project):
+    with pytest.raises(ValueError) as refused:
+        handlers.set_group("g", sources=["Customer"], portia_dir=project)
+    assert "Closest names: customers." in str(refused.value)
+    assert "has 1 indexed sources" in str(refused.value)
 
 
 def test_set_group_rejects_an_empty_write(project):
@@ -526,17 +551,20 @@ def test_record_step_names_chainable_steps_when_a_ref_is_unknown(sales):
         },
         portia_dir=sales,
     )
-    with pytest.raises(ValueError, match="Earlier steps in this spec: bridged"):
+    with pytest.raises(ValueError) as refused:
         handlers.record_step(
             "specs/chain.yaml",
             {
                 "id": "x",
                 "op": "normalize",
-                "input": "typo",
+                "input": "bridge",
                 "transforms": [{"column": "name", "op": "strip"}],
             },
             portia_dir=sales,
         )
+    text = " ".join(str(refused.value).split())
+    assert "an earlier step of this spec, which has 1; closest ids: bridged." in text
+    assert "an earlier step of this spec by its bare id" in text
 
 
 def test_join_findings_can_measure_a_table_an_earlier_step_produced(sales):
@@ -808,7 +836,7 @@ def test_an_unknown_step_id_names_the_steps_that_exist(sales):
         },
         portia_dir=sales,
     )
-    with pytest.raises(ValueError, match="no step 'typo' in specs/chain.yaml — have: first"):
+    with pytest.raises(ValueError, match="No step 'typo' in 'chain', which has 1 steps"):
         handlers.join_findings(
             "specs/chain.yaml#typo",
             "customers",
@@ -1638,10 +1666,10 @@ def test_read_spec_takes_a_path_as_well_as_a_name(sales, tmp_path):
     assert out["model"] == "order_totals" and _names(out["reads"]) == ["stg_orders"]
 
 
-def test_read_spec_names_the_known_specs_on_an_unknown_name(sales, tmp_path):
+def test_read_spec_names_the_closest_specs_on_an_unknown_name(sales, tmp_path):
     _write_spec(tmp_path, "specs/staging/stg_orders.yaml", _STG)
-    with pytest.raises(ValueError, match="stg_orders"):
-        handlers.read_spec("ghost", portia_dir=sales)
+    with pytest.raises(ValueError, match="among the project's 1. Closest names: stg_orders"):
+        handlers.read_spec("stg_order", portia_dir=sales)
 
 
 def _two_steps(sales) -> None:

@@ -12,8 +12,10 @@ test needs the graph to be up; nothing here answers a query as Neo4j would.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
 
@@ -646,25 +648,52 @@ def test_what_a_join_check_does_not_keep_it_says(sales, recorded, left, right, k
     assert recorded["edges"] == []
 
 
-def test_a_join_check_on_a_steps_table_is_measured_and_not_kept(sales, recorded):
+_FIRST = {
+    "id": "first",
+    "op": "join",
+    "left": "orders",
+    "right": "customers",
+    "keys": ["customer_id"],
+    "how": "left",
+}
+
+
+def test_a_join_check_on_an_earlier_steps_table_is_measured_and_not_kept(sales, recorded):
+    """A step before the spec's last is a table no build made: no node to keep it on."""
+    handlers.record_step("specs/chain.yaml", dict(_FIRST), portia_dir=sales)
     handlers.record_step(
         "specs/chain.yaml",
-        {
-            "id": "first",
-            "op": "join",
-            "left": "orders",
-            "right": "customers",
-            "keys": ["customer_id"],
-            "how": "left",
-        },
+        {"id": "second", "op": "sql", "inputs": ["first"], "sql": "SELECT * FROM first"},
         portia_dir=sales,
     )
     found = handlers.join_findings(
         "specs/chain.yaml#first", "customers", keys=["customer_id"], portia_dir=sales, reason="r"
     )
     assert found["report"]["left"]["n_rows"] == 10
-    assert found["graph"]["kept"] is False and "step produced" in found["graph"]["why"]
+    assert found["graph"]["kept"] is False and "earlier step" in found["graph"]["why"]
     assert recorded["edges"] == []
+
+
+def test_a_join_check_on_a_built_specs_last_step_is_kept_against_its_model(sales, recorded):
+    """The case a real session found (2026-10-14): the copilot named the unpivot staging
+    table it had just built by its step reference, and the measurement never reached the
+    graph. The last step of a spec built as it stands is the model's table."""
+    handlers.record_step("specs/chain.yaml", dict(_FIRST), portia_dir=sales)
+    found = handlers.join_findings(
+        "specs/chain.yaml#first", "customers", keys=["customer_id"], portia_dir=sales, reason="r"
+    )
+    assert found["graph"] == {"kept": True}
+    (edge,) = recorded["edges"]
+    assert "chain" in str(edge)
+
+
+def test_a_spec_edited_since_its_build_is_not_its_model(sales, recorded):
+    handlers.record_step("specs/chain.yaml", dict(_FIRST), portia_dir=sales)
+    path = Path(sales).parent / "specs" / "chain.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("how: left", "how: inner"), encoding="utf-8"
+    )
+    assert handlers._built_model_of("specs/chain.yaml#first", sales) is None
 
 
 def test_a_join_check_never_fails_because_the_graph_is_down(sales, graph_down):
@@ -696,3 +725,42 @@ def test_graph_lookup_hands_back_a_card(sales, recorded, monkeypatch):
     card = handlers.graph_lookup("orders", to="customers", portia_dir=sales)
     assert seen == {"table": "orders", "to": "customers"}
     assert card["routes"]["n"] == 0
+
+
+# --- a graph read waits for the graph writes of its own message (2026-10-14) ---------------
+
+
+def test_a_graph_read_waits_for_a_join_check_already_running(monkeypatch):
+    """A harness runs one message's read-only calls together, so a route asked beside a join
+    check was read before the check's measurement landed. The read now waits for it."""
+    import threading
+    import time
+
+    from portia.agent import tools
+
+    seen: list[float] = []
+    monkeypatch.setattr(
+        handlers, "graph_lookup", lambda *a, **k: seen.append(time.monotonic()) or {"table": {}}
+    )
+    running = tools._register("join_findings", {"left": "a", "right": "b"})
+    started = time.monotonic()
+
+    def finish() -> None:
+        time.sleep(0.3)
+        tools._retire(running)
+
+    threading.Thread(target=finish).start()
+    result = asyncio.run(tools.graph_lookup.handler({"table": "a", "to": "b"}))
+    assert "is_error" not in result
+    assert seen and seen[0] - started >= 0.25
+
+
+def test_a_graph_read_with_no_write_running_does_not_wait(monkeypatch):
+    import time
+
+    from portia.agent import tools
+
+    monkeypatch.setattr(handlers, "graph_lookup", lambda *a, **k: {"table": {}})
+    started = time.monotonic()
+    asyncio.run(tools.graph_lookup.handler({"table": "a"}))
+    assert time.monotonic() - started < tools.GRAPH_WRITE_POLL_S * 5

@@ -43,7 +43,7 @@ from portia.checks.outcome import (
     outcome_report,
     render_outcome,
 )
-from portia.core import cancel
+from portia.core import cancel, listing
 from portia.core.io import connect, source_table, write_table
 from portia.core.present import format_rate, frame_to_markdown, inline
 from portia.core.serialize import to_jsonable_nested
@@ -487,10 +487,11 @@ def model_table(
     (`docs/BACKLOG.md` → Spec, run caching).
     """
     if not models or ref not in models:
-        known = ", ".join(sorted(models or {})) or "(none)"
+        # The closest few and a count, never every model (`core/listing.near_misses`).
+        close = listing.near_misses(ref, sorted(models or {}))
         raise ValueError(
-            f"{ref!r} is not a source, an earlier step, or a model in this project. "
-            f"Models available: {known}"
+            f"{ref!r} is not a source, an earlier step, or a model in this project, "
+            f"which has {len(models or {})} models. Closest: {', '.join(close) or 'none'}"
         )
     if ref in building:
         cycle = " -> ".join([*building[building.index(ref) :], ref])

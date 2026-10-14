@@ -260,6 +260,20 @@ def test_a_chart_goes_to_disk_and_the_receipt_says_nobody_is_looking(sales, no_l
     assert doc["name"] == CHART["tab"] and doc["rows"], "the rows are what the window draws"
 
 
+def test_a_host_may_send_the_spec_as_json_text(sales, no_listeners):
+    """Haiku sent `vega` as a JSON string in 4 of 10 calls, refused by the schema."""
+    from portia import figures
+
+    async def draw(client, session):
+        result = await client.call_tool("plot_data", {**CHART, "vega": json.dumps(CHART["vega"])})
+        return result.isError, result.content[0].text
+
+    failed, text = drive(sales, draw)
+    assert not failed, text
+    (doc,) = figures.stashed(sales)
+    assert doc["vega"] == CHART["vega"], "the window draws the object, never the text"
+
+
 def test_the_receipt_says_a_window_is_open_when_one_is(sales, no_listeners):
     no_listeners.announce(sales, "http://127.0.0.1:8080")
 

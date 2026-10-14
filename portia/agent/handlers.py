@@ -25,8 +25,6 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
-from difflib import get_close_matches
-from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
 
@@ -332,20 +330,19 @@ def _members(groups: list[dict], group: str) -> set[str]:
     found = next((g for g in groups if str(g.get("name")) == wanted), None)
     if found is None:
         raise ValueError(
-            prompts.error("unknown_group", group=group, groups=", ".join(names) or "(none)")
+            prompts.error(
+                "unknown_group",
+                group=group,
+                n=len(names),
+                closest=", ".join(listing.near_misses(group, names)) or "(none close)",
+            )
         )
     return {str(s) for s in found.get("sources") or []}
 
 
 def _matches(name: str, pattern: str | None) -> bool:
-    """Whether ``name`` matches a shell-style ``pattern``, without case.
-
-    Without case because every engine portia runs on folds an unquoted name
-    (`core/dialect.resolve_columns`): ``meter_*`` is the pattern a copilot
-    types for ``METER_01`` on a warehouse. ``fnmatchcase`` on both lowered,
-    because ``fnmatch`` itself folds or not by operating system.
-    """
-    return not pattern or fnmatchcase(name.lower(), pattern.strip().lower())
+    """Whether ``name`` matches a shell-style ``pattern``, without case: `core/listing.matches`."""
+    return listing.matches(name, pattern)
 
 
 def describe_source(
@@ -1278,7 +1275,7 @@ def plot_data(
     inputs: list[str],
     question: str,
     tab: str,
-    vega: dict,
+    vega: dict | str,
     portia_dir: str = catalog.DEFAULT_DIR,
 ) -> dict:
     """Draw the answer where the user can see it. Runs a SELECT, writes nothing.
@@ -1329,6 +1326,7 @@ def plot_data(
         raise ValueError(prompts.error("chart_needs_a_tab"))
     if not inputs:
         raise ValueError(prompts.error("query_needs_inputs"))
+    vega = _vega_object(vega)
     chartspec.check(vega)
 
     produced = _select(sql, inputs, portia_dir)
@@ -1346,9 +1344,7 @@ def plot_data(
         if field not in columns:
             raise ValueError(
                 prompts.error(
-                    "chart_unknown_column",
-                    field=field,
-                    columns=", ".join(columns),
+                    "chart_unknown_column", field=field, returned=_returned(field, columns)
                 )
             )
 
@@ -1391,6 +1387,43 @@ def plot_data(
     if isinstance(outcome, results.NotKept):
         chart["not_kept"] = _not_kept(outcome)
     return chart
+
+
+def _vega_object(vega: Any) -> Any:
+    """The spec as an object, when it arrived as the text of one.
+
+    **A spec sent as a string is read as JSON** *(2026-10-14)*. In a Haiku chat
+    on a public energy dataset, 4 of 10 `plot_data` calls sent ``vega`` as a
+    JSON string, ``"{\"mark\": …}"``, and the server refused each against the
+    declared ``object`` before portia saw it. The schema takes either now
+    (`tools.plot_data`), and a string is parsed here and goes on exactly as an
+    object would, through `chartspec.check` and every refusal after it. Text
+    that is not JSON is refused as itself; anything else that is not an
+    object is `chartspec`'s to refuse.
+    """
+    import json
+
+    if not isinstance(vega, str):
+        return vega
+    try:
+        return json.loads(vega)
+    except json.JSONDecodeError as exc:
+        raise ValueError(prompts.error("chart_spec_not_json", error=str(exc))) from None
+
+
+#: How many columns a chart's query may return and still be named whole when the
+#: spec encodes one it did not return. A chart's query is the copilot's own
+#: ``SELECT`` of a few columns, and the whole list is then the answer; past this
+#: it is a ``SELECT *`` of a wide table, and the closest few and a count are.
+CHART_COLUMNS_NAMED = 20
+
+
+def _returned(field: str, columns: list[str]) -> str:
+    """What `chart_unknown_column` says the query returned: every column, or the closest few."""
+    if len(columns) <= CHART_COLUMNS_NAMED:
+        return prompts.error("chart_columns_all", columns=", ".join(columns) or "(none)")
+    closest = ", ".join(listing.near_misses(field, columns)) or "(none close)"
+    return prompts.error("chart_columns_closest", n=len(columns), closest=closest)
 
 
 def view_chart(tab: str) -> dict:
@@ -1825,7 +1858,7 @@ def _known_refs(about: list[str], portia_dir: str, root: Path) -> list[str]:
         if column is not None and table in entries:
             names = [c["name"] for c in entries[table].get("columns", [])]
             if column not in names:
-                close = get_close_matches(column, names, n=3)
+                close = listing.near_misses(column, names)
                 hint = f" — closest: {', '.join(close)}" if close else ""
                 raise ValueError(
                     f"no column {column!r} in {table!r}{hint}. "
@@ -2139,12 +2172,15 @@ def _graph_ref(table: str, graph):
             return node.ref
         if node.label == knowledge_schema.MODEL and node.key == table:
             return node.ref
-    known = sorted(
-        n.properties.get("name") or n.key
-        for n in graph.nodes.values()
-        if n.label in (knowledge_schema.SOURCE, knowledge_schema.MODEL)
-    )
-    raise ValueError(f"no table {table!r} in the graph — have: {', '.join(known) or '(none)'}")
+    # The graph is the catalog restated, so a miss is the catalog's miss: the
+    # closest few and a count, never every table (`_no_such_table`).
+    names = {
+        label: [
+            str(n.properties.get("name") or n.key) for n in graph.nodes.values() if n.label == label
+        ]
+        for label in (knowledge_schema.SOURCE, knowledge_schema.MODEL)
+    }
+    raise _no_such_table(table, names[knowledge_schema.SOURCE], names[knowledge_schema.MODEL])
 
 
 def _table_fingerprints(graph) -> dict:
@@ -2295,7 +2331,7 @@ def _requested(profiled: list[dict], columns: list[str] | None, source: str) -> 
     columns = dialects.resolve_columns(columns, by_name)
     missing = [c for c in columns if c not in by_name]
     if missing:
-        close = get_close_matches(missing[0], by_name, n=3)
+        close = listing.near_misses(missing[0], by_name)
         raise ValueError(
             prompts.error(
                 "unknown_column",
@@ -2329,16 +2365,39 @@ def set_interpretation(
     if summary is None and not roles and note is None:
         raise ValueError("nothing to record — pass a summary, roles, a note, or several")
 
-    path = catalog.set_interpretation(
-        source, summary=summary, roles=roles, note=note, portia_dir=portia_dir
-    )
+    try:
+        written = catalog.set_interpretation(
+            source, summary=summary, roles=roles, note=note, portia_dir=portia_dir
+        )
+    except catalog.UnknownName as exc:
+        raise ValueError(_unknown_name(exc)) from None
     return {
         "source": source,
-        "path": str(path),
+        "path": str(written.path),
         "summary_written": summary is not None,
-        "roles_written": sorted(roles or {}),
+        # How many columns each key set, never their names: a pattern given to
+        # 1,578 meter columns is one key and one count (`catalog.assign_roles`).
+        "roles_written": written.roles,
         "note_written": note is not None,
     }
+
+
+def _unknown_name(exc: catalog.UnknownName) -> str:
+    """The copilot's refusal of a name the catalog did not have: the closest few and a count.
+
+    The catalog's own sentence is for the window; this one says what to do
+    next in the copilot's terms, from `agent/prompts/errors/`.
+    """
+    closest = ", ".join(exc.closest) or "(none close)"
+    if exc.kind == catalog.SOURCE:
+        return prompts.error("unknown_group_source", source=exc.name, n=exc.n, closest=closest)
+    if exc.kind == catalog.PATTERN:
+        return prompts.error(
+            "role_pattern_matches_nothing", pattern=exc.name, source=exc.table, n=exc.n
+        )
+    return prompts.error(
+        "unknown_role_column", column=exc.name, source=exc.table, n=exc.n, closest=closest
+    )
 
 
 def set_group(
@@ -2357,7 +2416,10 @@ def set_group(
     if context is None and sources is None:
         raise ValueError("nothing to record — pass a context, sources, or both")
 
-    catalog.set_group(name, context=context, sources=sources, portia_dir=portia_dir)
+    try:
+        catalog.set_group(name, context=context, sources=sources, portia_dir=portia_dir)
+    except catalog.UnknownName as exc:
+        raise ValueError(_unknown_name(exc)) from None
     return {"group": name, "context_written": context is not None, "sources": sources or []}
 
 
@@ -2427,7 +2489,12 @@ def _keep_join(left: str, right: str, report: dict, reason: str, portia_dir: str
       single columns measures it;
     - a ``<spec>#<step>`` side is a table no build has made, so it has no node,
       and its key may be one the step transformed (`join_findings` names
-      columns, so a transformed key only ever arrives this way);
+      columns, so a transformed key only ever arrives this way) — **unless it is
+      the spec's last step and its model is built from the spec as it stands**
+      (:func:`_built_model_of`), when it *is* the model's table and the
+      measurement is kept against the model (2026-10-14: the copilot named an
+      unpivot staging step by its reference instead of its model's name, and
+      the route it had just built never reached the graph);
     - a table against itself is not a link between tables.
 
     **Connected before the graph is built.** Building reads the whole catalog
@@ -2440,6 +2507,7 @@ def _keep_join(left: str, right: str, report: dict, reason: str, portia_dir: str
     lkeys, rkeys = report["keys"]["left"], report["keys"]["right"]
     if len(lkeys) != 1 or len(rkeys) != 1:
         return _graph_not_kept(prompts.notice("join_not_kept_composite"))
+    left, right = (_built_model_of(side, portia_dir) or side for side in (left, right))
     if STEP_REF in left or STEP_REF in right:
         return _graph_not_kept(prompts.notice("join_not_kept_step"))
     left, right = _known_name(left, portia_dir), _known_name(right, portia_dir)
@@ -2477,6 +2545,33 @@ def _keep_join(left: str, right: str, report: dict, reason: str, portia_dir: str
 
 def _graph_not_kept(why: str) -> dict:
     return {"kept": False, "why": why}
+
+
+def _built_model_of(ref: str, portia_dir: str) -> str | None:
+    """The model a ``<spec>#<step>`` reference is, or ``None`` when it is not one.
+
+    It is one when the step is the spec's **last** (one spec builds one table,
+    the last step's, `spec.model_table`) and the model's catalog entry was built
+    from the spec **as it stands** (its `catalog.BUILT_FROM` fingerprint is the
+    spec's now). Then the step's table and the model are the same table, and the
+    graph has a node for it. Anything else stays a step's table: an earlier step,
+    a spec edited since its last build, a spec never built. A plain name is not
+    a step reference and is answered ``None`` too.
+    """
+    if STEP_REF not in ref:
+        return None
+    spec_path, _, step_id = ref.partition(STEP_REF)
+    root = _project_root(portia_dir)
+    try:
+        name, path = _resolve_spec(spec_path, spec.discover_specs(root), root)
+        doc = spec.load_spec(path)
+    except (ValueError, OSError):
+        return None
+    steps = doc.get("steps") or []
+    if not steps or steps[-1].get("id") != step_id:
+        return None
+    built = (catalog.load_models(portia_dir).get(name) or {}).get("built") or {}
+    return name if built.get(catalog.BUILT_FROM) == pipeline.fingerprint(doc) else None
 
 
 def record_step(
@@ -2575,7 +2670,7 @@ def record_step(
     models = {n: p for n, p in spec.discover_specs(root).items() if n != path.stem}
 
     step_ids = {s["id"] for s in steps}
-    at = _superseded_index(steps, supersedes, replacement=step.get("id"))
+    at = _superseded_index(steps, supersedes, replacement=step.get("id"), model=name)
     _normalize_step_refs(step, spec_path=str(path))
     _validate_step(step, existing=steps, replacing=supersedes)
     for ref in _source_refs(step, known_steps=step_ids | set(models)):
@@ -2583,12 +2678,17 @@ def record_step(
             sources[ref] = _source_ref(ref, portia_dir)
         except ValueError as exc:
             # It's none of the three things a name can be. Say all three, or the
-            # caller assumes chaining is unsupported rather than mistyped.
-            known = ", ".join(sorted(step_ids)) or "(none yet)"
-            other = ", ".join(sorted(models)) or "(none)"
+            # caller assumes chaining is unsupported rather than mistyped. The
+            # closest few of each and a count, never every name: the refusal
+            # as a table already names the closest sources and models.
+            ids = [str(s["id"]) for s in steps]
             raise ValueError(
-                f"{exc}. Earlier steps in this spec: {known}. "
-                f"Other models in this project, which you may name directly: {other}"
+                prompts.error(
+                    "unknown_step_input",
+                    refused=str(exc),
+                    n=len(ids),
+                    closest=", ".join(listing.near_misses(ref, ids)) or "(none close)",
+                )
             ) from exc
 
     # Run before writing. An exception here — a missing column, a transform that
@@ -3034,15 +3134,7 @@ def _step_card(
     ids = [str(s.get("id")) for s in steps]
     (found,) = dialects.resolve_columns([wanted], ids)
     if found not in ids:
-        raise ValueError(
-            prompts.error(
-                "unknown_step",
-                step=wanted,
-                model=model,
-                n=len(ids),
-                closest=", ".join(get_close_matches(wanted, ids, n=3)) or "(none close)",
-            )
-        )
+        raise _no_such_step(wanted, ids, model=model)
     at = ids.index(found)
     shape = shapes.get(found) or {}
     readers = [ids[i] for i in range(at + 1, len(steps)) if found in spec.step_inputs(steps[i])]
@@ -3076,7 +3168,7 @@ def _finding_card(ref: str, *, root: Path, portia_dir: str) -> dict:
                 "unknown_finding",
                 finding=ref,
                 n=len(known),
-                closest=", ".join(get_close_matches(stem, known, n=3)) or "(none close)",
+                closest=", ".join(listing.near_misses(stem, known)) or "(none close)",
             )
         )
     where = relative(path, root)
@@ -3191,7 +3283,7 @@ def _grain_facts(grain: dict | None, names: list[str]) -> dict | None:
     if not grain or grain.get("measurable", True):
         return grain
     missing = list(grain.get("missing_columns") or [])
-    return {**grain, "closest": {col: get_close_matches(col, names, n=3) for col in missing}}
+    return {**grain, "closest": {col: listing.near_misses(col, names) for col in missing}}
 
 
 def _flag_unlisted(flag: str, read_at: str | None) -> str:
@@ -3216,10 +3308,13 @@ def _resolve_spec(ref: str, models: dict[str, Path], root: Path) -> tuple[str, P
     given = root / ref
     if given.suffix == ".yaml" and given.is_file():
         return name, given
-    known = ", ".join(sorted(models)) or "(none yet)"
     raise ValueError(
-        f"no spec named {name!r}. Specs in this project: {known}. "
-        "Each is listed under Pipeline in your brief."
+        prompts.error(
+            "unknown_spec",
+            spec=name,
+            n=len(models),
+            closest=", ".join(listing.near_misses(name, sorted(models))) or "(none close)",
+        )
     )
 
 
@@ -3364,15 +3459,27 @@ def _step_table(ref: str, portia_dir: str, con=None):
     spec_path, _, step_id = ref.partition(STEP_REF)
     root = _project_root(portia_dir)
     models = spec.discover_specs(root)
-    _, path = _resolve_spec(spec_path, models, root)
+    name, path = _resolve_spec(spec_path, models, root)
     doc = spec.load_spec(path)
     steps = doc.get("steps") or []
     ids = [s["id"] for s in steps]
     if step_id not in ids:
-        known = ", ".join(ids) or "(no steps yet)"
-        raise ValueError(f"no step {step_id!r} in {spec_path} — have: {known}")
+        raise _no_such_step(step_id, ids, model=name)
     prefix = {**doc, "steps": steps[: ids.index(step_id) + 1]}
     return spec.run_spec(prefix, base_dir=root, con=con or connect(), models=models)[-1].table
+
+
+def _no_such_step(step_id: str, ids: list[str], *, model: str) -> ValueError:
+    """The refusal of a step id a spec does not have: the closest few and a count, never every id."""
+    return ValueError(
+        prompts.error(
+            "unknown_step",
+            step=step_id,
+            model=model,
+            n=len(ids),
+            closest=", ".join(listing.near_misses(step_id, ids)) or "(none close)",
+        )
+    )
 
 
 def _known_name(name: str, portia_dir: str) -> str:
@@ -3458,7 +3565,9 @@ def _source_ref(source: str, portia_dir: str):
     return catalog.source_ref_of(entry)
 
 
-def _superseded_index(steps: list[dict], supersedes: str | None, *, replacement: Any) -> int | None:
+def _superseded_index(
+    steps: list[dict], supersedes: str | None, *, replacement: Any, model: str
+) -> int | None:
     """Where the replaced step sits, or ``None`` when this is an ordinary append.
 
     Refused while **another** step reads the id being retired, which is
@@ -3470,8 +3579,7 @@ def _superseded_index(steps: list[dict], supersedes: str | None, *, replacement:
         return None
     at = next((i for i, s in enumerate(steps) if s.get("id") == supersedes), None)
     if at is None:
-        known = ", ".join(s["id"] for s in steps) or "(none)"
-        raise ValueError(f"no step {supersedes!r} in this spec. Steps: {known}")
+        raise _no_such_step(supersedes, [str(s["id"]) for s in steps], model=model)
 
     if replacement != supersedes:
         readers = [

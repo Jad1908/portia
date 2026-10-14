@@ -194,20 +194,27 @@ def _resolve(session: Any, table: str, project: str) -> dict:
 def _unknown_table(session: Any, table: str, project: str) -> str:
     """The message a miss produces — and it has to distinguish two very different
     misses, because "no such table" and "the graph was never built" ask for
-    completely different next moves."""
+    completely different next moves.
+
+    Every name is read and only the closest few are said *(2026-10-14)*: it
+    listed the first `MAX_ROWS` by name, so the right one past them was never
+    offered, and the count is the project's, not the cap's."""
     known = [
         r["name"]
         for r in _run(
             session,
             f"MATCH (t) WHERE (t:{SOURCE} OR t:{MODEL}) AND t.{PROJECT} = $project "
-            f"RETURN t.name AS name ORDER BY name LIMIT {MAX_ROWS}",
+            "RETURN t.name AS name ORDER BY name",
             project=project,
         )
         if r["name"]
     ]
     if not known:
         return _EMPTY_GRAPH
-    return f"no table {table!r} in the knowledge graph — have: {', '.join(known)}"
+    # The closest few and a count, never every table, as `_unknown_column` says.
+    near = listing.near_misses(table, known)
+    where = f"no table {table!r} in the knowledge graph, which has {len(known)}"
+    return f"{where} — closest: {', '.join(near)}" if near else f"{where}, none named like it"
 
 
 _EMPTY_GRAPH = (

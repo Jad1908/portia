@@ -31,11 +31,11 @@ different reports.
 
 from __future__ import annotations
 
-from difflib import get_close_matches
 from typing import Any
 
 from portia.checks.profiling import BOOLEAN, DATETIME, NUMERIC_KINDS, OTHER, kind_of
 from portia.core import dialect as dialects
+from portia.core import listing
 from portia.core.dialect import Dialect
 from portia.core.serialize import round_float, to_jsonable
 from portia.core.table import Table, subquery
@@ -697,7 +697,7 @@ def example_columns(table: Table, keys: list[str], named: list[str] | None) -> l
         named = dialects.resolve_columns(named, table.columns)
         missing = [c for c in named if c not in table.columns]
         if missing:
-            close = get_close_matches(missing[0], table.columns, n=3)
+            close = listing.near_misses(missing[0], table.columns)
             suggestion = f" — closest: {', '.join(close)}" if close else ""
             raise ValueError(
                 f"no column {missing[0]!r} in {table.name!r}{suggestion}. "

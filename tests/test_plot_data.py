@@ -159,6 +159,23 @@ def test_a_channel_naming_a_column_the_query_did_not_return_is_refused(sales):
     assert "customer_id" in str(exc.value)
 
 
+def test_a_wide_query_names_the_closest_columns_and_a_count_not_every_column(sales):
+    """A `SELECT *` of a 1,579-column table listed every name in the refusal."""
+    wide = ", ".join(f"amount * {i} AS meter_{i:04d}" for i in range(handlers.CHART_COLUMNS_NAMED))
+    with pytest.raises(ValueError) as exc:
+        handlers.plot_data(
+            f"SELECT customer_id, {wide} FROM orders",
+            ["orders"],
+            "one meter per customer?",
+            "Meters",
+            bars(y={"field": "meter_007"}),
+            portia_dir=sales,
+        )
+    text = str(exc.value)
+    assert f"It returned {handlers.CHART_COLUMNS_NAMED + 1} columns" in text
+    assert "meter_0007" in text and "meter_0019" not in text
+
+
 def test_a_field_differing_from_the_column_only_by_case_is_respelled(sales):
     """`count(*) AS count` comes back from a warehouse as COUNT and the spec says
     `count`: six of twelve charts in one session were refused for it. The spec is
@@ -671,3 +688,95 @@ def test_a_saved_figure_needs_nothing_running_to_be_read(tmp_path):
     )
     saved = figures.load(tmp_path / "figures" / "cities.json")
     assert saved["rows"] and saved["vega"] and saved["notes"] == "Paris dominates"
+
+
+# --- a spec sent as the text of one -------------------------------------------
+#
+# A Haiku chat on a public energy dataset sent `vega` as a JSON string in 4 of
+# 10 calls, and the server refused each against the declared `object` before
+# portia saw it (2026-10-14).
+
+
+def test_a_spec_sent_as_json_text_draws_exactly_what_the_object_draws(sales):
+    as_object = by_customer(sales)
+    as_text = by_customer(sales, vega=json.dumps(bars()))
+    assert as_text["vega"] == as_object["vega"] == bars()
+    assert as_text["rows"] == as_object["rows"]
+
+
+def test_text_that_is_not_json_is_refused_as_itself(sales):
+    with pytest.raises(ValueError, match="arrived as text, and the text is not JSON"):
+        by_customer(sales, vega='{"mark": "bar", ')
+
+
+def test_a_spec_sent_as_text_meets_every_refusal_an_object_does(sales):
+    computes = {"mark": "bar", "encoding": {"y": {"field": "n", "aggregate": "sum"}}}
+    with pytest.raises(ValueError) as from_object:
+        by_customer(sales, vega=computes)
+    with pytest.raises(ValueError) as from_text:
+        by_customer(sales, vega=json.dumps(computes))
+    assert str(from_text.value) == str(from_object.value)
+    with pytest.raises(ValueError, match="needs a `vega` object"):
+        by_customer(sales, vega=json.dumps([bars()]))
+
+
+def test_the_schema_takes_an_object_or_a_string_and_nothing_else():
+    import jsonschema
+
+    from portia.agent import tools
+
+    schema = tools.plot_data.input_schema
+    call = {"question": "q", "tab": "t", "sql": "SELECT 1 AS n", "inputs": ["orders"]}
+    jsonschema.validate({**call, "vega": bars()}, schema)
+    jsonschema.validate({**call, "vega": json.dumps(bars())}, schema)
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate({**call, "vega": 3}, schema)
+    assert schema["properties"]["vega"]["type"][0] == "object", "what a one-type client keeps"
+
+
+def _text_spec_call(sales) -> dict:
+    return {
+        "question": "how many orders per customer?",
+        "tab": "Orders per customer",
+        "sql": "SELECT customer_id, count(*) AS n FROM orders GROUP BY 1",
+        "inputs": ["orders"],
+        "vega": json.dumps(bars()),
+        "portia_dir": sales,
+    }
+
+
+def test_the_in_process_server_takes_a_spec_sent_as_text(sales):
+    """The SDK's own server validates every call against the schema first."""
+    from mcp.shared.memory import create_connected_server_and_client_session as connect
+
+    from portia.agent import tools
+
+    async def draw():
+        async with connect(tools.build_server(sees_images=False)["instance"]) as client:
+            return await client.call_tool("plot_data", _text_spec_call(sales))
+
+    result = asyncio.run(draw())
+    assert not result.isError, result.content[0].text
+    assert json.loads(result.content[0].text)["drawn"] == "Orders per customer"
+
+
+def test_the_loopback_server_takes_a_spec_sent_as_text(sales):
+    """The Codex harness reaches the same server over HTTP (`agent/loopback.py`)."""
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamable_http_client
+
+    from portia.agent import loopback, tools
+
+    async def draw():
+        served = await loopback.serve(tools.build_server(sees_images=False)["instance"])
+        try:
+            async with streamable_http_client(served.url) as (read, write, _):
+                async with ClientSession(read, write) as client:
+                    await client.initialize()
+                    return await client.call_tool("plot_data", _text_spec_call(sales))
+        finally:
+            await served.close()
+
+    result = asyncio.run(draw())
+    assert not result.isError, result.content[0].text
+    assert json.loads(result.content[0].text)["drawn"] == "Orders per customer"
