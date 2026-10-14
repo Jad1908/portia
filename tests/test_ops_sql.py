@@ -274,6 +274,25 @@ def test_an_undeclared_table_is_portias_error_not_duckdbs(events, table):
     assert raised.value.names == ("events",), "as typed, for a caller that knows more about it"
 
 
+@pytest.mark.parametrize(
+    ("sql", "said"),
+    [
+        ("SELECT avgg(expected_attendance) AS a FROM city_events", 'Did you mean "avg"'),
+        ("SELECT CAST(expected_attendance AS numbr) AS a FROM city_events", "Type with name numbr"),
+    ],
+)
+def test_a_misspelled_function_or_type_is_not_called_an_undeclared_input(events, table, sql, said):
+    """DuckDB raises a `CatalogException` for those too, and the advice to declare
+    the name in 'inputs' sent the copilot after a table that was never missing."""
+    import duckdb
+
+    with pytest.raises(duckdb.CatalogException) as raised:
+        apply_sql({"city_events": table(events)}, sql)
+    assert not isinstance(raised.value, SqlTableUnknown)
+    assert said in str(raised.value)
+    assert "inputs" not in str(raised.value)
+
+
 # --- the remote path (`docs/CONNECTOR.md` §2.8) ---------------------------------
 
 

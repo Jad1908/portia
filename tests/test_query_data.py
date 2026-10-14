@@ -101,6 +101,15 @@ def test_an_undeclared_table_is_simply_not_there(sales):
         )
 
 
+def test_a_misspelled_function_is_the_querys_mistake_not_an_undeclared_input(sales):
+    with pytest.raises(Exception) as raised:
+        handlers.query_data(
+            "SELECT avgg(amount) AS a FROM orders", ["orders"], "average?", portia_dir=sales
+        )
+    assert 'Did you mean "avg"' in str(raised.value)
+    assert "inputs" not in str(raised.value)
+
+
 def test_it_refuses_a_write(sales):
     """`check_sql` refuses readably before DuckDB is touched; the sandbox is the guarantee."""
     with pytest.raises(SqlNotAllowed, match="COPY"):
