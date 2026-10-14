@@ -29,7 +29,8 @@ thing this module may look at. Which flag *matters* is the reader's call
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from difflib import get_close_matches
+from difflib import SequenceMatcher
+from fnmatch import fnmatchcase
 from typing import Any
 
 from portia.core.serialize import to_jsonable_nested
@@ -51,6 +52,15 @@ CARD_NAMES = 300
 
 #: How many near misses a refusal of an unknown name gives (:func:`near_misses`).
 CLOSE_MATCHES = 3
+
+#: How alike two names must be to count as a near miss: `difflib`'s ratio, at
+#: `difflib.get_close_matches`' own default, which this module used until it
+#: needed its own tie-break (:func:`near_misses`).
+CLOSENESS = 0.6
+
+#: The characters that make a name typed by the copilot a pattern
+#: (:func:`matches`): `fnmatch`'s any-run, any-one, and the opening of a set.
+WILDCARDS = frozenset("*?[")
 
 #: The keys a flag's entry uses, named once so a reader of the answer and a
 #: test agree on them.
@@ -182,8 +192,50 @@ def near_misses(name: str, names: Iterable[str], *, n: int = CLOSE_MATCHES) -> l
     commonest miss; `difflib`'s closest follow, at most ``n`` in all. Closeness
     of spelling is all this measures. An empty list means nothing is close, and
     the caller's sentence says how many there are and where they are listed.
+
+    **A tie goes to the name given first** *(2026-10-14)*. `get_close_matches`
+    breaks a tie by comparing the names themselves and keeps the larger, so a
+    miss of ``t07`` among ``t001`` … ``t100`` offered ``t057`` before ``t007``,
+    both one character away. The caller's order is the table's, the spec's or
+    the project's, which is the order the reader knows them in, and it costs
+    nothing to keep.
     """
-    pool = list(names)
+    pool = list(dict.fromkeys(names))
     folded = [other for other in pool if other.lower() == name.lower()]
-    close = [*folded, *get_close_matches(name, pool, n=n)]
-    return list(dict.fromkeys(close))[:n]
+    matcher = SequenceMatcher(b=name)
+    scored = []
+    for at, other in enumerate(pool):
+        matcher.set_seq1(other)
+        # `get_close_matches`' three gates, cheapest first: the two quick ones
+        # are upper bounds on the ratio, so they only ever skip work.
+        if (
+            matcher.real_quick_ratio() >= CLOSENESS
+            and matcher.quick_ratio() >= CLOSENESS
+            and matcher.ratio() >= CLOSENESS
+        ):
+            scored.append((-matcher.ratio(), at, other))
+    close = [other for _, _, other in sorted(scored)]
+    return list(dict.fromkeys([*folded, *close]))[:n]
+
+
+def is_pattern(name: str) -> bool:
+    """Whether ``name`` holds a wildcard, which makes it a pattern rather than a name."""
+    return not WILDCARDS.isdisjoint(name)
+
+
+def matches(name: str, pattern: str | None) -> bool:
+    """Whether ``name`` matches a shell-style ``pattern``, without case.
+
+    Without case because every engine portia runs on folds an unquoted name
+    (`core/dialect.resolve_columns`): ``meter_*`` is the pattern a copilot
+    types for ``METER_01`` on a warehouse. ``fnmatchcase`` on both lowered,
+    because ``fnmatch`` itself folds or not by operating system. No pattern
+    matches everything.
+
+    **One rule for every pattern the copilot types** *(2026-10-14)*: the
+    filters of `describe_source`, `profile_source`, `get_context` and
+    `read_spec`, and a role given to many columns at once
+    (`catalog.set_interpretation`). It lived in `agent/handlers.py` until the
+    catalog needed it, and the catalog sits below that layer.
+    """
+    return not pattern or fnmatchcase(name.lower(), pattern.strip().lower())

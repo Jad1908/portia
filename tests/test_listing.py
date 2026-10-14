@@ -172,8 +172,34 @@ def test_the_profilers_flags_are_named_in_its_vocabulary_and_in_its_order(table)
 
 def test_a_near_miss_differing_only_in_case_comes_first_and_the_rest_are_capped():
     names = ["ORDERS", "orders_eu", "orders_us", "orders_uk", "customers"]
-    assert listing.near_misses("orders", names) == ["ORDERS", "orders_us", "orders_uk"]
+    assert listing.near_misses("orders", names) == ["ORDERS", "orders_eu", "orders_us"]
     assert len(listing.near_misses("orders", names, n=5)) == 5 - 1, "customers is not close"
+
+
+def test_a_tie_goes_to_the_name_given_first():
+    """`difflib` kept the alphabetically last of two equally close names."""
+    names = [f"t{i:03d}" for i in range(1, 101)]
+    assert listing.near_misses("t07", names)[0] == "t007"
+    assert listing.near_misses("t07", ["t057", "t007"]) == ["t057", "t007"], "equally close"
+
+
+def test_the_closest_still_comes_before_the_first_given():
+    assert listing.near_misses("meter_12", ["meter_1", "meter_12a", "meter_123"]) == [
+        "meter_12a",
+        "meter_123",
+        "meter_1",
+    ]
+
+
+def test_a_pattern_matches_without_case_and_no_pattern_matches_everything():
+    assert listing.matches("METER_01", "meter_*")
+    assert listing.matches("meter_01", " Meter_0? ")
+    assert not listing.matches("site_01", "meter_*")
+    assert listing.matches("anything", None) and listing.matches("anything", "")
+    assert (
+        listing.is_pattern("north_*") and listing.is_pattern("t0?") and listing.is_pattern("[ab]")
+    )
+    assert not listing.is_pattern("timestamp")
 
 
 def test_nothing_close_is_an_empty_list():

@@ -26,7 +26,6 @@ from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 from difflib import get_close_matches
-from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
 
@@ -338,14 +337,8 @@ def _members(groups: list[dict], group: str) -> set[str]:
 
 
 def _matches(name: str, pattern: str | None) -> bool:
-    """Whether ``name`` matches a shell-style ``pattern``, without case.
-
-    Without case because every engine portia runs on folds an unquoted name
-    (`core/dialect.resolve_columns`): ``meter_*`` is the pattern a copilot
-    types for ``METER_01`` on a warehouse. ``fnmatchcase`` on both lowered,
-    because ``fnmatch`` itself folds or not by operating system.
-    """
-    return not pattern or fnmatchcase(name.lower(), pattern.strip().lower())
+    """Whether ``name`` matches a shell-style ``pattern``, without case: `core/listing.matches`."""
+    return listing.matches(name, pattern)
 
 
 def describe_source(
