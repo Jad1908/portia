@@ -932,8 +932,8 @@ def stored_overlaps(session: Any, pairs: list[tuple[str, str]], *, project: str)
     current is the caller's question, against fingerprints it has and this
     module does not.
 
-    Two pairs measured both ways round are two edges; the later measurement
-    is the one returned, as a re-measure in one direction replaces the edge.
+    A pair can hold two edges, one per `origin` (`store.measured_writes`);
+    the later measurement is the one returned.
     """
     if not pairs:
         return {}

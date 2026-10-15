@@ -277,3 +277,64 @@ def test_forget_unscoped_removes_what_predates_the_property(neo4j_session, graph
 
     assert store.forget_unscoped(session) == 1
     assert _counts(session) == {PROJECT_A: 3}
+
+
+def _pair(left: str, right: str, origin: str, reason: str):
+    from portia.knowledge import measure
+    from portia.knowledge.schema import Ref
+
+    table = Ref(SOURCE, "data/orders.csv")
+    return measure.overlap_edge(
+        measure.Pair(table, left, table, right, reason),
+        {"n_shared_values": 1, "left_coverage": 0.5, "right_coverage": 0.25},
+        origin=origin,
+    )
+
+
+def _overlaps(session) -> list[dict]:
+    rows = session.run(
+        f"MATCH (a)-[r:{OVERLAPS}]->(b) RETURN a.name AS start, r.origin AS origin, "
+        "r.asked_because AS reason ORDER BY origin"
+    )
+    return [dict(r) for r in rows]
+
+
+def test_a_join_check_never_replaces_a_comparison_taken_on_purpose(neo4j_session, graph):
+    """It used to: one `MERGE` per direction, so the join check's numbers, reason and
+    origin overwrote the pair the agent had chosen to compare (2026-10-15)."""
+    store.write(graph, neo4j_session)
+    session = neo4j_session
+    session.run(f"MATCH ()-[r:{OVERLAPS}]->() DELETE r")
+    store.write_measured(
+        [_pair("order_id", "customer_id", "measured", "chosen")], session, PROJECT_A
+    )
+    store.write_measured(
+        [_pair("order_id", "customer_id", "join_check", "joining")], session, PROJECT_A
+    )
+    assert [(e["origin"], e["reason"]) for e in _overlaps(session)] == [
+        ("join_check", "joining"),
+        ("measured", "chosen"),
+    ]
+
+
+def test_the_same_tool_measuring_a_pair_again_replaces_it_either_way_round(neo4j_session, graph):
+    """Measured from its other end, a pair used to become a second edge."""
+    store.write(graph, neo4j_session)
+    session = neo4j_session
+    session.run(f"MATCH ()-[r:{OVERLAPS}]->() DELETE r")
+    store.write_measured(
+        [_pair("order_id", "customer_id", "measured", "first")], session, PROJECT_A
+    )
+    store.write_measured(
+        [_pair("customer_id", "order_id", "measured", "again")], session, PROJECT_A
+    )
+    assert _overlaps(session) == [{"start": "customer_id", "origin": "measured", "reason": "again"}]
+
+
+def test_an_edge_from_before_origin_existed_is_replaced_as_a_comparison(neo4j_session, graph):
+    store.write(graph, neo4j_session)
+    session = neo4j_session
+    session.run(f"MATCH ()-[r:{OVERLAPS}]->() DELETE r")
+    _measure(session, PROJECT_A, "order_id", "customer_id")  # no origin, as old edges have
+    store.write_measured([_pair("order_id", "customer_id", "measured", "now")], session, PROJECT_A)
+    assert _overlaps(session) == [{"start": "order_id", "origin": "measured", "reason": "now"}]

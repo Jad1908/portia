@@ -51,6 +51,7 @@ from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
+from portia.knowledge.measure import ORIGIN, ORIGIN_MEASURED
 from portia.knowledge.schema import (
     KEY_PROPERTY,
     LABELS,
@@ -264,6 +265,15 @@ def measured_writes(edges: list[Edge], project: str) -> list[tuple[str, dict]]:
     It carries `PROJECT` like everything else — a measurement is *between two
     columns of one project*, and an unscoped one would be reachable from a
     traversal that started somewhere else.
+
+    **A measurement replaces only the one its own tool took, either way round**
+    (2026-10-15). It used to `MERGE` on the direction alone, so a join check on
+    a pair the agent had compared on purpose replaced the numbers, the reason
+    and the origin, and the same pair measured from its other end became a
+    second edge. Now the edge of the same `origin` between the two columns, in
+    either direction, is deleted and the new one written: a re-measure by the
+    same tool is fresher, and another tool's measurement stays beside it. An
+    edge from before `origin` existed counts as ``measured``, as reads say.
     """
     groups: dict[tuple[str, str, str], list[Edge]] = {}
     for edge in edges:
@@ -278,6 +288,7 @@ def measured_writes(edges: list[Edge], project: str) -> list[tuple[str, dict]]:
             {
                 "start": e.start.key,
                 "end": e.end.key,
+                "origin": e.properties.get(ORIGIN) or ORIGIN_MEASURED,
                 "properties": {**e.properties, PROJECT: project},
             }
             for e in grouped
@@ -287,7 +298,11 @@ def measured_writes(edges: list[Edge], project: str) -> list[tuple[str, dict]]:
                 "UNWIND $rows AS row "
                 f"MATCH (a:{start_label} {{{PROJECT}: $project, {start_key}: row.start}}) "
                 f"MATCH (b:{end_label} {{{PROJECT}: $project, {end_key}: row.end}}) "
-                f"MERGE (a)-[r:{kind}]->(b) SET r = row.properties "
+                f"OPTIONAL MATCH (a)-[old:{kind}]-(b) "
+                f"WHERE coalesce(old.{ORIGIN}, '{ORIGIN_MEASURED}') = row.origin "
+                "WITH a, b, row, collect(old) AS replaced "
+                "FOREACH (o IN replaced | DELETE o) "
+                f"CREATE (a)-[r:{kind}]->(b) SET r = row.properties "
                 # A row whose `MATCH` finds nothing never reaches here, which is
                 # exactly why the caller counts this instead of trusting how
                 # many edges it handed over.

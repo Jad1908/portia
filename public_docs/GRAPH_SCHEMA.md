@@ -257,6 +257,10 @@ each side, between two graph tables). Both require the copilot's reason.
 not symmetric: 98% of orders' customer ids may exist in customers while only 40% of customers appear
 in orders, and both are true.
 
+**One edge per pair of columns per `origin`.** Measuring a pair again with the same tool replaces
+that tool's edge between the two columns, whichever way round either was taken; a measurement by the
+other tool stays beside it, so a join check never erases a comparison the copilot chose.
+
 **A measured zero is written, and it does not mean "unrelated".** `France` against `FRA` shares no
 values and the zero is correct; those two columns are the same thing after a mapping. That is why
 `asked_because` is required in code — without the hypothesis attached, the most important pair in a
