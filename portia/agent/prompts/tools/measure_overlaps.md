@@ -42,5 +42,9 @@ problem from a genuine zero.
 
 Do not use it to fish. A pair you cannot give a reason for is a pair you should not be measuring.
 
+A comparison is not a join. What it keeps is that two columns share values, and `graph_lookup`
+never routes through it. When you mean to join two tables, check the join with `join_findings`:
+that is kept as a join, with its key columns and how each side repeats on them.
+
 If the graph's database is down the numbers still come back. They are just not kept: `stored` is
 false and `not_stored_because` says why.

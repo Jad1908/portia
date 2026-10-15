@@ -899,3 +899,16 @@ def test_a_measurement_on_a_table_new_to_the_graph_rebuilds_once_and_attaches(
     answer = handlers.measure_overlaps(_pairs(("customer_id", "customer_id")), sales)
     assert recorded["writes"] == 1 and tries == [1, 1]
     assert answer["stored"] is True
+
+
+def test_an_empty_graph_is_said_in_the_agents_words_not_as_a_command(sales, recorded, monkeypatch):
+    """It told the agent to run `python -m portia.cli.knowledge`; the agent has no shell."""
+
+    def empty(*args, **kwargs):
+        raise query.GraphEmpty(query._EMPTY_GRAPH)
+
+    monkeypatch.setattr(query, "lookup", empty)
+    with pytest.raises(ValueError) as raised:
+        handlers.graph_lookup("orders", portia_dir=sales)
+    assert "holds nothing for this project" in str(raised.value)
+    assert "python -m" not in str(raised.value)

@@ -8,11 +8,9 @@ system prompt gives: grain, keys, the outcome column and what its values actuall
 are, time coverage, nulls, categories, amounts, duplicates.
 
 Then say how it relates to the rest of the project. Ask `graph_lookup` what is
-already indexed, look for columns here that might be the same thing as a column
-elsewhere, and measure those pairs with `measure_overlaps`, giving the reason you
-picked each one. Pick pairs you can justify and do not sweep. Treat a zero as a
-result: two columns that share no values are often the same thing needing a
-mapping first.
+already there, look for columns here that might be the same thing as a column
+elsewhere, and compare those pairs with `measure_overlaps`, giving the reason you
+picked each one. Pick pairs you can justify and do not sweep.
 
 Indexing reads. This job has no `record_step` and no `run_spec`; a problem you
 find in the source goes in its `note`, not in a step. Ask me only if the project

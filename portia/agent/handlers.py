@@ -709,6 +709,9 @@ def graph_lookup(
         # not the stack but which tools still work. The other refusals in
         # `prompts/errors/` exist for the same reason.
         raise ValueError(prompts.error("graph_unavailable", reason=str(exc))) from None
+    except query.GraphEmpty:
+        # It told the agent to run a command; the agent has no shell (2026-10-15).
+        raise ValueError(prompts.error("graph_empty")) from None
     return graphcards.card(answer)
 
 

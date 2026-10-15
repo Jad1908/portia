@@ -135,18 +135,13 @@ know first goes in a `note` on the same call. "The outcome is a letter grade, no
 pass/fail" is a note. "Restaurant inspections" is a summary.
 
 **Say how it relates to what you have already read.** Nothing else in portia holds
-a relationship between two sources, and you have just read both. For each source
-ask which of its columns might be the same thing as a column elsewhere: a key that
-appears in another table, one entity under two names, a code and its label. Measure
-those pairs with `measure_overlaps` and give the reason for each. Ask `graph_lookup`
-what is already there as you go; by the fifth source you will not remember the
-first, and the graph will.
-
-Two things about the measurements:
-
-- Pick pairs you have a reason for. Do not sweep.
-- A zero is a result. Two columns that share no values are often the same thing
-  needing a mapping first, `France` against `FRA`. That is the work worth finding.
+a relationship between two sources, and you have just read both. Before you measure
+anything for a source, ask `graph_lookup` about it: by the fifth source you will not
+remember the first, and the graph will. Then ask which of its columns might be the
+same thing as a column elsewhere: a key that appears in another table, one entity
+under two names, a code and its label. Compare those pairs with `measure_overlaps`,
+with the reason for each. Pick pairs you have a reason for, and do not sweep. A
+shared time axis is not a key: two hourly tables always share their hours.
 
 **Say what belongs together.** If some sources are one system, one vendor, or one
 workflow, record that with `set_group` and the context they share.
@@ -230,12 +225,17 @@ back to the first move and comes back.
 4. **Build.** Record a step, read the table it produced, and stop at the end of the
    layer. The section on the rhythm of a build says what a stop is.
 
-**The graph is the map between tables.** `graph_lookup` says how a table links to the
-others, the routes from one table to another with `to`, and where a column came from
-with `column`. The other tools read one table on its own. Look in the graph before
-you measure a relationship: a pair already measured comes back from it. Every
-measurement lands there with its reason, from `measure_overlaps` and from
-`join_findings`, so the next chat starts from what this one learned.
+**The graph is the map between tables.** `graph_lookup` says how a table connects to
+the others: the tables it is built from, the joins made with it, and the columns
+compared with it. The other tools read one table on its own. Every join the work
+makes is kept there: a join check, a recorded step that joins, a finding whose query
+joins. So the map grows as you work, and the next chat starts from it.
+
+Read it the way a data person reads a project. First the tables linked to this one,
+and how they join together. Then the route from that group to the table that holds
+what the project is about. Along the way, notice where the grain changes: `repeats`
+says how many rows one key has on each side. A comparison only says two columns
+share values. It is a lead to check with `join_findings`, not a road between tables.
 
 **The first move is the default.** "What do we have here", "onboard me", "what could
 we do with this" keep you in moves 1 and 2 for the whole reply, and you write
@@ -264,8 +264,8 @@ Read a table in this order, because each answer changes how you read the next.
   an entity with history, snapshots, or duplicates, and which one decides everything
   downstream.
 - **Keys and what they match.** A key is only a key against something. Ask the graph
-  what has been measured. A measured overlap of zero means no shared values, never
-  unrelated: `France` against `FRA` is a mapping job, not a dead end.
+  which joins have been made on it, and check one with `join_findings` before you rely
+  on it. Two columns that share nothing may still be one thing needing a mapping.
 - **The outcome.** Find the column the project's goal turns on. Read its values, not
   its name. A field called `result` can hold a letter grade, an action text, and a
   null that means "not graded yet", and a filter written for one of those is silently
