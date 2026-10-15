@@ -19,15 +19,17 @@ connected column a naive dump, and it was gone before this module was written
 
 **Every cut here is by size, in an order that carries no claim**
 (`KNOWLEDGE_GRAPH.md` §6.1).
-Neighbours are cut in name order, a neighbour's pairs in column order, and
-when the pairs of every neighbour together are more than a card holds, each
+Neighbours are cut in the order `query.gather_neighbours` gives (by kind of
+link, then name), a neighbour's joins and comparisons by their columns, and
+when the rows of every neighbour together are more than a card holds, each
 neighbour shows the same number of them, the most that fits (`query.fair_share`,
 the rule the picture already shares its columns by). Nothing is cut by
 coverage or by shared values: that would be deciding which link matters.
 
 **Lists are a header once and rows as lists** (`core/listing.py`). A
-neighbour's measured pairs are rows inside its row, and their fields are named
-once for the whole card, as ``pair_fields``, before the list that uses them.
+neighbour's joins and comparisons are rows inside its row, and their fields are
+named once for the whole card, as ``join_fields`` and ``compared_fields``,
+before the list that uses them.
 """
 
 from __future__ import annotations
@@ -39,38 +41,38 @@ from portia.agent import prompts
 from portia.core import listing
 from portia.knowledge import query
 
-#: Neighbouring tables one card lists, in name order. **A placeholder**, as all
-#: the revamp's caps are. A group puts every member beside every other, so this
-#: is the number that bites first on a project of one big group; a neighbour
-#: with no pairs costs a few dozen characters.
-NEIGHBOURS = 50
+#: Neighbouring tables one card lists. **A placeholder**, as all the revamp's
+#: caps are. No more than :data:`CARD_ROWS`, so every neighbour shown has room
+#: for at least one of its rows: at 50 against 40 rows, a project of one big
+#: group showed no row at all for any neighbour (2026-10-15).
+NEIGHBOURS = 40
 
-#: Measured pairs one neighbour shows on a table's card, before
-#: `graph_lookup(table, neighbour=…)` lists them all. A placeholder.
-NEIGHBOUR_PAIRS = 3
+#: Joins, and separately comparisons, one neighbour shows on a table's card
+#: before `graph_lookup(table, neighbour=…)` lists them all. A placeholder.
+NEIGHBOUR_ROWS = 3
 
-#: Measured pairs one table's card shows in all. When the neighbours' pairs
-#: together are more, each neighbour shows the same number, the most that fits.
-#: A placeholder: 40 rows at their widest, a long reason on each, is about
-#: 13,000 characters.
-CARD_PAIRS = 40
+#: Rows one table's card shows in all, joins and comparisons together. When
+#: the neighbours' rows are more, each neighbour shows the same number, the
+#: most that fits (`query.fair_share`), its joins before its comparisons.
+CARD_ROWS = 40
 
-#: Pairs between two tables that `graph_lookup(table, neighbour=…)` lists, each
-#: with both columns' facts, before pointing at one column. A placeholder.
+#: Joins, and comparisons, between two tables that `graph_lookup(table,
+#: neighbour=…)` lists before pointing at one column. Placeholders.
+JOINS = 50
 PAIRS = 50
-
-#: Pairings this project made elsewhere that a table's card replays. A placeholder.
-PRECEDENTS = 10
 
 #: Groups a table's card names. More than a handful is unusual.
 GROUPS = 10
 
-#: Rows each list of a column's card shows: upstream, downstream, origins, what
-#: it was compared with, precedents. A placeholder.
+#: Rows each list of a column's card shows: upstream, downstream, origins, its
+#: joins, what it was compared with. A placeholder.
 COLUMN_ROWS = 25
 
-#: Measured pairs one step of a route shows. A placeholder.
-STEP_PAIRS = 3
+#: Joins one step of a route shows. A placeholder.
+STEP_JOINS = 3
+
+#: Comparisons a route answer with no route lists, on either table. A placeholder.
+ROUTE_COMPARED = 20
 
 #: Pairs a `measure_overlaps` receipt lists, in the order they were sent. A
 #: placeholder: at their widest, two long names a side, this is under 20,000
@@ -82,16 +84,44 @@ RECEIPT_ROWS = 50
 FROM_GRAPH = "graph"
 FROM_QUERY = "query"
 
-NEIGHBOUR_FIELDS = ("table", "kind", "reads", "read_by", "groups", "n_pairs", "pairs")
+NEIGHBOUR_FIELDS = (
+    "table",
+    "kind",
+    "built_from",
+    "builds",
+    "groups",
+    "n_joins",
+    "joins",
+    "n_compared",
+    "compared",
+)
 
-#: A measured pair as the table asked about sees it: ``coverage`` is the share
-#: of its rows whose value is on the other side, ``other_coverage`` the reverse.
+#: A join as the table asked about sees it: ``columns`` are its key columns and
+#: ``other_columns`` the other table's, matched in order; ``repeats`` is the most
+#: rows one key has here (1: one row per key); ``coverage`` the share of this
+#: table's rows whose key is found on the other side.
+JOIN_FIELDS = (
+    "columns",
+    "other_columns",
+    "relationship",
+    "repeats",
+    "other_repeats",
+    "coverage",
+    "other_coverage",
+    "origin",
+    "asked_because",
+    "stale",
+)
+
+#: A comparison as the table asked about sees it.
 PAIR_FIELDS = (
     "column",
     "other_column",
     "n_shared_values",
     "coverage",
     "other_coverage",
+    "repeats",
+    "other_repeats",
     "comparable_types",
     "origin",
     "asked_because",
@@ -99,22 +129,16 @@ PAIR_FIELDS = (
     "stale",
 )
 
-#: Between two tables, each pair carries what both columns look like
-#: (`query.PAIR_FACTS`): a zero is unreadable without them
-#: (`KNOWLEDGE_GRAPH.md` §4.4).
+#: Between two tables, each join says where it was made, and each comparison
+#: carries what both columns look like (`query.PAIR_FACTS`): a zero is
+#: unreadable without them (`KNOWLEDGE_GRAPH.md` §4.4).
+BETWEEN_JOIN_FIELDS = (*JOIN_FIELDS, "found_in", "measured_at")
 BETWEEN_FIELDS = (*PAIR_FIELDS, "column_facts", "other_facts")
 
 GROUP_FIELDS = ("name", "context", "n_members")
-PRECEDENT_FIELDS = (
-    "column",
-    "against_table",
-    "against_column",
-    "by_table",
-    "n_shared_values",
-    "asked_because",
-)
 LINEAGE_FIELDS = ("hops", "table", "kind", "column", "via", "step")
 ORIGIN_FIELDS = ("table", "kind", "column", "derivation")
+COLUMN_JOIN_FIELDS = ("table", "kind", *JOIN_FIELDS)
 COMPARED_FIELDS = (
     "table",
     "kind",
@@ -122,6 +146,8 @@ COMPARED_FIELDS = (
     "n_shared_values",
     "coverage",
     "other_coverage",
+    "repeats",
+    "other_repeats",
     "comparable_types",
     "origin",
     "asked_because",
@@ -131,9 +157,25 @@ COMPARED_FIELDS = (
 )
 ROUTE_FIELDS = ("n_steps", "tables", "steps")
 
-#: A step's pairs in a route: the link's numbers without its reason, which is
-#: one `neighbour` call away and would be most of a route's size.
-ROUTE_PAIR_FIELDS = ("column", "other_column", *query.LINK_FIELDS)
+#: A step's joins in a route: the join without its reason, which is one
+#: `neighbour` call away and would be most of a route's size.
+ROUTE_JOIN_FIELDS = tuple(f for f in JOIN_FIELDS if f != "asked_because")
+
+#: A comparison on either table of a route that has none.
+ROUTE_COMPARED_FIELDS = (
+    "table",
+    "column",
+    "other_table",
+    "other_column",
+    "n_shared_values",
+    "coverage",
+    "other_coverage",
+    "repeats",
+    "other_repeats",
+    "origin",
+    "asked_because",
+    "stale",
+)
 
 RECEIPT_FIELDS = (
     "left",
@@ -196,31 +238,47 @@ def _listed(
 
 
 def _neighbourhood(answer: dict) -> dict:
-    """Its neighbours, each with how it is linked and a fair share of its pairs."""
+    """Its neighbours, each with how it is built or joined, and a fair share of its rows.
+
+    In the order `query.gather_neighbours` gives: the neighbours a pipeline has
+    gone through first (built from, building, joined), then those only
+    compared or grouped. A neighbour's joins come before its comparisons.
+    """
     table = answer["table"]
     name = table["name"]
     neighbours = answer["neighbours"]
     shown = neighbours[:NEIGHBOURS]
-    share = query.fair_share([min(len(n["pairs"]), NEIGHBOUR_PAIRS) for n in shown], CARD_PAIRS)
+    share = query.fair_share(
+        [
+            min(len(n["joins"]), NEIGHBOUR_ROWS) + min(len(n["pairs"]), NEIGHBOUR_ROWS)
+            for n in shown
+        ],
+        CARD_ROWS,
+    )
     rows, cut = [], 0
     for neighbour in shown:
-        pairs = neighbour["pairs"][: min(NEIGHBOUR_PAIRS, share)]
-        cut += len(pairs) < len(neighbour["pairs"])
+        joins = neighbour["joins"][: min(NEIGHBOUR_ROWS, share)]
+        pairs = neighbour["pairs"][: max(0, min(NEIGHBOUR_ROWS, share - len(joins)))]
+        cut += len(joins) < len(neighbour["joins"]) or len(pairs) < len(neighbour["pairs"])
         rows.append(
             [
                 neighbour["name"],
                 neighbour["kind"],
-                neighbour["reads"],
-                neighbour["read_by"],
+                neighbour["built_from"],
+                neighbour["builds"],
                 neighbour["groups"],
+                len(neighbour["joins"]),
+                _rows(joins, JOIN_FIELDS),
                 len(neighbour["pairs"]),
                 _rows(pairs, PAIR_FIELDS),
             ]
         )
     left_out = len(neighbours) - len(shown)
     out: dict[str, Any] = {"table": table}
+    if any(n["joins"] for n in shown):
+        out["join_fields"] = list(JOIN_FIELDS)
     if any(n["pairs"] for n in shown):
-        out["pair_fields"] = list(PAIR_FIELDS)
+        out["compared_fields"] = list(PAIR_FIELDS)
     out["neighbours"] = listing.listing(
         NEIGHBOUR_FIELDS,
         rows,
@@ -230,20 +288,13 @@ def _neighbourhood(answer: dict) -> dict:
         else None,
     )
     if cut:
-        out["pairs_more"] = prompts.more("graph_pairs", n_cut=cut)
+        out["rows_more"] = prompts.more("graph_pairs", n_cut=cut)
     if answer["groups"]:
         out["groups"] = _listed(
             GROUP_FIELDS,
             answer["groups"],
             GROUPS,
             lambda left, n: prompts.more("graph_groups", left_out=left, n=n),
-        )
-    if answer["precedents"]:
-        out["precedents"] = _listed(
-            PRECEDENT_FIELDS,
-            answer["precedents"],
-            PRECEDENTS,
-            lambda left, n: prompts.more("graph_precedents", left_out=left, n=n, table=name),
         )
     return out
 
@@ -252,15 +303,21 @@ def _neighbourhood(answer: dict) -> dict:
 
 
 def _between(answer: dict) -> dict:
-    """Everything linking two tables, the pairs with both columns' facts."""
+    """Everything linking two tables: built from, joins in full, comparisons with facts."""
     table, neighbour = answer["table"]["name"], answer["neighbour"]["name"]
     return {
         "table": answer["table"],
         "neighbour": answer["neighbour"],
-        "reads": answer["reads"],
-        "read_by": answer["read_by"],
+        "built_from": answer["built_from"],
+        "builds": answer["builds"],
         "groups": answer["groups"],
-        "pairs": _listed(
+        "joins": _listed(
+            BETWEEN_JOIN_FIELDS,
+            answer["joins"],
+            JOINS,
+            lambda left, n: prompts.more("graph_joins", left_out=left, n=n),
+        ),
+        "compared": _listed(
             BETWEEN_FIELDS,
             answer["pairs"],
             PAIRS,
@@ -275,7 +332,7 @@ def _between(answer: dict) -> dict:
 
 
 def _lineage(answer: dict) -> dict:
-    """A column's lineage each way, where it bottoms out, and what it was compared with."""
+    """A column's lineage each way, where it bottoms out, its joins, what it was compared with."""
     column = answer["column"]
     table = column["table"]
 
@@ -287,11 +344,17 @@ def _lineage(answer: dict) -> dict:
             lambda left, n: prompts.more("graph_lineage", left_out=left, n=n),
         )
 
-    out: dict[str, Any] = {
+    return {
         "column": column,
         "upstream": walked("upstream", LINEAGE_FIELDS),
         "downstream": walked("downstream", LINEAGE_FIELDS),
         "origins": walked("origins", ORIGIN_FIELDS),
+        "joins": _listed(
+            COLUMN_JOIN_FIELDS,
+            answer["joins"],
+            COLUMN_ROWS,
+            lambda left, n: prompts.more("graph_joins", left_out=left, n=n),
+        ),
         "compared_with": _listed(
             COMPARED_FIELDS,
             answer["compared_with"],
@@ -299,43 +362,35 @@ def _lineage(answer: dict) -> dict:
             lambda left, n: prompts.more("graph_compared", left_out=left, n=n, table=table),
         ),
     }
-    if answer["precedents"]:
-        out["precedents"] = _listed(
-            PRECEDENT_FIELDS[1:],
-            answer["precedents"],
-            COLUMN_ROWS,
-            lambda left, n: prompts.more("graph_precedents", left_out=left, n=n, table=table),
-        )
-    return out
 
 
 # --- routes -----------------------------------------------------------------
 
 
 def _routes(answer: dict) -> dict:
-    """The routes between two tables, each step with how it links and its pairs."""
-    rows, cut, any_pairs = [], 0, False
+    """The routes between two tables, each step with how it links; or, with none, what was compared."""
+    rows, cut, any_joins = [], 0, False
     for route in answer["routes"]:
         steps = []
         for step in route["steps"]:
             said: dict[str, Any] = {}
-            if step["reads"]:
-                said["reads"] = True
-            if step["read_by"]:
-                said["read_by"] = True
-            if step["pairs"]:
-                any_pairs = True
-                said["n_pairs"] = len(step["pairs"])
-                said["pairs"] = _rows(step["pairs"][:STEP_PAIRS], ROUTE_PAIR_FIELDS)
-                cut += len(step["pairs"]) > STEP_PAIRS
+            if step["built_from"]:
+                said["built_from"] = True
+            if step["builds"]:
+                said["builds"] = True
+            if step["joins"]:
+                any_joins = True
+                said["n_joins"] = len(step["joins"])
+                said["joins"] = _rows(step["joins"][:STEP_JOINS], ROUTE_JOIN_FIELDS)
+                cut += len(step["joins"]) > STEP_JOINS
             steps.append(said)
         rows.append([len(route["steps"]), route["tables"], steps])
 
     n = answer["n_routes"]
     table, to = answer["table"]["name"], answer["to"]["name"]
     out: dict[str, Any] = {"table": answer["table"], "to": answer["to"]}
-    if any_pairs:
-        out["pair_fields"] = list(ROUTE_PAIR_FIELDS)
+    if any_joins:
+        out["join_fields"] = list(ROUTE_JOIN_FIELDS)
     out["routes"] = listing.listing(
         ROUTE_FIELDS,
         rows,
@@ -352,7 +407,14 @@ def _routes(answer: dict) -> dict:
         else None,
     )
     if cut:
-        out["pairs_more"] = prompts.more("graph_pairs", n_cut=cut)
+        out["rows_more"] = prompts.more("graph_pairs", n_cut=cut)
+    if answer.get("compared"):
+        out["compared"] = _listed(
+            ROUTE_COMPARED_FIELDS,
+            answer["compared"],
+            ROUTE_COMPARED,
+            lambda left, n: prompts.more("graph_route_compared", left_out=left, n=n),
+        )
     return out
 
 
