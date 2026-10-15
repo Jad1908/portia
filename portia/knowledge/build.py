@@ -61,12 +61,15 @@ from portia.knowledge.schema import (
     COLUMN,
     COUNT_FACTS,
     DERIVATION,
+    DERIVATION_NOT_TRACED,
     DERIVATION_UNKNOWN,
     DERIVES_FROM,
     FINGERPRINT,
     GROUP,
     HAS_COLUMN,
     IN_GROUP,
+    LINEAGE_UNREAD,
+    LINEAGE_UNREAD_STEP,
     MODEL,
     POSITION,
     READS,
@@ -119,6 +122,10 @@ class _Relation:
     columns: list[str] | None
     traces: dict[str, list[_Trace]] = field(default_factory=dict)
     reason: str = ""
+    #: ``reason`` as a code from a closed list (:data:`UNREAD_CODES`), and the
+    #: step it stopped at: what the graph keeps on the model, for the agent.
+    code: str = ""
+    step: str | None = None
 
 
 @dataclass
@@ -213,7 +220,7 @@ def _add_column(
     facts: dict | None = None,
     *,
     position: int | None = None,
-    derivation_unknown: bool = False,
+    derivation: str | None = None,
 ) -> Ref:
     """One column node. Facts when the catalog has them; a name when it doesn't.
 
@@ -223,8 +230,9 @@ def _add_column(
 
     ``position`` is its place in its table, from 1 (:data:`schema.POSITION`).
 
-    ``derivation_unknown`` is only ever true of a model column, and only when
-    nothing could be named underneath it — see :data:`schema.DERIVATION`.
+    ``derivation`` is only ever set on a model column: :data:`schema.DERIVATION_UNKNOWN`
+    when the step was read and nothing is underneath it, and
+    :data:`schema.DERIVATION_NOT_TRACED` when the step could not be read at all.
 
     The **shape** facts come through :func:`schema.shape_facts`, so which ones a
     column gets is decided in one place and by its kind: a range for a numeric
@@ -240,7 +248,7 @@ def _add_column(
         role=facts.get("role"),
         **{fact: facts.get(fact) for fact in COUNT_FACTS},
         **shape_facts(facts),
-        **{DERIVATION: DERIVATION_UNKNOWN if derivation_unknown else None},
+        **{DERIVATION: derivation},
     )
 
 
@@ -333,12 +341,14 @@ def _add_model(
         relations[step["id"]] = _step_relation(step, relations, node.key)
 
     if not steps:
-        return _Relation(None, reason=_NO_STEPS)
+        _mark_unread(graph, node, NO_STEPS, None)
+        return _Relation(None, reason=_NO_STEPS, code=NO_STEPS)
 
     # One spec produces one table, and it is the last step's — the same rule
     # `spec.model_table` applies when another spec reads this one.
     produced = relations[steps[-1]["id"]]
     if produced.columns is None:
+        _mark_unread(graph, node, produced.code, produced.step)
         if not (built and measured):
             result.unresolved[node.key] = produced.reason
             return produced
@@ -358,7 +368,7 @@ def _add_model(
             name,
             measured.get(name),
             position=position,
-            derivation_unknown=not traces,
+            derivation=None if traces else DERIVATION_UNKNOWN,
         )
         graph.add_edge(HAS_COLUMN, node, column)
         if not traces:
@@ -372,6 +382,33 @@ def _add_model(
 
 
 _UNBUILT = "reads a model whose own columns could not be resolved"
+
+#: Why a model's lineage could not be read, beyond the parser's own codes
+#: (`sqllineage.CODES`). Kept on the Model node as `schema.LINEAGE_UNREAD`.
+INPUT_NOT_INDEXED = "input_not_indexed"
+INPUT_UNREAD = "input_unread"
+INPUT_MISSING = "input_missing"
+UNKNOWN_OP = "unknown_op"
+NO_STEPS = "no_steps"
+UNREAD_CODES = (
+    *sqllineage.CODES,
+    INPUT_NOT_INDEXED,
+    INPUT_UNREAD,
+    INPUT_MISSING,
+    UNKNOWN_OP,
+    NO_STEPS,
+)
+
+
+def _mark_unread(graph: Graph, node: Ref, code: str, step: str | None) -> None:
+    """Say on the model why its lineage stops, and at which step.
+
+    A code, never the parser's sentence: the sentence is for the build report,
+    and what the agent reads about a code lives in its prompts.
+    """
+    graph.add_node(MODEL, node.key, **{LINEAGE_UNREAD: code, LINEAGE_UNREAD_STEP: step})
+
+
 _NO_STEPS = "the spec has no steps, so it produces no table"
 _UNKNOWN_ORIGIN = "no input column underneath it — a literal, or an aggregate over rows"
 _FROM_CATALOG = "its columns are the built table's, from the catalog, with no lineage"
@@ -392,8 +429,10 @@ def _built_columns(graph: Graph, node: Ref, measured: dict[str, dict]) -> _Relat
     Only when the entry was profiled from this spec as it stands (the caller's
     ``built``): a spec edited since describes a table nobody has built, and
     its old column list would be a claim about the wrong table. Each column is
-    marked :data:`schema.DERIVATION_UNKNOWN` and has no `DERIVES_FROM`, because
-    nothing read its lineage, and the model stays in
+    marked :data:`schema.DERIVATION_NOT_TRACED` and has no `DERIVES_FROM`,
+    because nothing read its lineage: not *computed here*, which is what
+    :data:`schema.DERIVATION_UNKNOWN` says and what a carried column is not
+    (2026-10-15). The model stays in
     `BuildResult.unresolved` saying so: the columns are known, where they came
     from is not. `docs/SQL_LINEAGE.md` §4.4 rejected keeping a run's column
     list *in the spec*; this keeps none, and a graph built from a fresh clone
@@ -403,7 +442,9 @@ def _built_columns(graph: Graph, node: Ref, measured: dict[str, dict]) -> _Relat
     resolves against them rather than inheriting the gap (`docs/SQL_LINEAGE.md` §1's cascade).
     """
     for position, (name, facts) in enumerate(measured.items(), start=1):
-        column = _add_column(graph, node, name, facts, position=position, derivation_unknown=True)
+        column = _add_column(
+            graph, node, name, facts, position=position, derivation=DERIVATION_NOT_TRACED
+        )
         graph.add_edge(HAS_COLUMN, node, column)
     return _Relation(list(measured))
 
@@ -418,9 +459,9 @@ def _model_relation(model: Ref, produced: _Relation | None) -> _Relation:
     visible, which is the half of §1 that lineage is for.
     """
     if produced is None:
-        return _Relation(None, reason=_UNBUILT)
+        return _Relation(None, reason=_UNBUILT, code=INPUT_UNREAD)
     if produced.columns is None:
-        return produced
+        return _Relation(None, reason=produced.reason, code=INPUT_UNREAD)
     return _Relation(
         list(produced.columns),
         {name: [_Trace(model, name)] for name in produced.columns},
@@ -432,25 +473,39 @@ def _source_relation(graph: Graph, path: str, source_columns: dict[str, list[str
     table = graph.add_node(SOURCE, path)
     names = source_columns.get(path)
     if names is None:
-        return _Relation(None, reason=f"source {path!r} is not indexed, so its columns are unknown")
+        return _Relation(
+            None,
+            reason=f"source {path!r} is not indexed, so its columns are unknown",
+            code=INPUT_NOT_INDEXED,
+        )
     return _Relation(names, {name: [_Trace(table, name)] for name in names})
 
 
 def _step_relation(step: dict, relations: dict[str, _Relation], model: str) -> _Relation:
-    """What one step produces: its output columns, and each one's traces."""
+    """What one step produces: its output columns, and each one's traces.
+
+    A step that cannot say what it produces is named on the answer, unless an
+    earlier step already stopped the walk: the step to look at is the first.
+    """
     op, pointer = step.get("op"), f"{model}#{step.get('id')}"
     if op == "normalize":
-        return _normalize_relation(step, relations, pointer)
-    if op == "join":
-        return _join_relation(step, relations, pointer)
-    if op == "sql":
-        return _sql_relation(step, relations, pointer)
-    return _Relation(None, reason=f"unknown op {op!r} in step {step.get('id')!r}")
+        produced = _normalize_relation(step, relations, pointer)
+    elif op == "join":
+        produced = _join_relation(step, relations, pointer)
+    elif op == "sql":
+        produced = _sql_relation(step, relations, pointer)
+    else:
+        produced = _Relation(
+            None, reason=f"unknown op {op!r} in step {step.get('id')!r}", code=UNKNOWN_OP
+        )
+    if produced.columns is None and produced.step is None:
+        produced = replace(produced, step=step.get("id"))
+    return produced
 
 
 def _normalize_relation(step: dict, relations: dict[str, _Relation], pointer: str) -> _Relation:
     """`normalize` keeps every column and its name; only the transformed ones change."""
-    source = relations.get(step["input"]) or _Relation(None, reason=_MISSING)
+    source = relations.get(step["input"]) or _Relation(None, reason=_MISSING, code=INPUT_MISSING)
     if source.columns is None:
         return source
 
@@ -467,8 +522,8 @@ def _normalize_relation(step: dict, relations: dict[str, _Relation], pointer: st
 
 def _join_relation(step: dict, relations: dict[str, _Relation], pointer: str) -> _Relation:
     """`join` decides its own output names, so the lineage comes off `join_columns`."""
-    left = relations.get(step["left"]) or _Relation(None, reason=_MISSING)
-    right = relations.get(step["right"]) or _Relation(None, reason=_MISSING)
+    left = relations.get(step["left"]) or _Relation(None, reason=_MISSING, code=INPUT_MISSING)
+    right = relations.get(step["right"]) or _Relation(None, reason=_MISSING, code=INPUT_MISSING)
     if left.columns is None:
         return left
     if right.columns is None:
@@ -509,7 +564,7 @@ def _sql_relation(step: dict, relations: dict[str, _Relation], pointer: str) -> 
     for name in step.get("inputs") or []:
         relation = relations.get(name)
         if relation is None:
-            return _Relation(None, reason=_MISSING)
+            return _Relation(None, reason=_MISSING, code=INPUT_MISSING)
         if relation.columns is None:
             return relation
         inputs[name] = relation.columns
@@ -517,7 +572,7 @@ def _sql_relation(step: dict, relations: dict[str, _Relation], pointer: str) -> 
     try:
         origins = sqllineage.column_origins(step.get("sql") or "", inputs)
     except sqllineage.LineageUnreadable as exc:
-        return _Relation(None, reason=f"step {step.get('id')!r}: {exc}")
+        return _Relation(None, reason=f"step {step.get('id')!r}: {exc}", code=exc.code)
 
     traces = {}
     for name, found in origins.items():
@@ -595,6 +650,11 @@ class Inputs:
 
     tables: tuple[InputTable, ...] = ()
     untraced: tuple[str, ...] = ()
+    #: Why this model's lineage could not be read, and at which step, when it
+    #: could not (`schema.LINEAGE_UNREAD`). Then no column is traced, and a
+    #: card must not tell anyone to index a source that is indexed.
+    unread: str | None = None
+    unread_step: str | None = None
 
 
 def inputs_of(graph: Graph, model: str) -> Inputs:
@@ -646,7 +706,12 @@ def inputs_of(graph: Graph, model: str) -> Inputs:
         InputTable(_table_name(graph, ref), ref.label, tuple(columns))
         for ref, columns in found.items()
     ]
-    return Inputs(tuple(sorted(tables, key=lambda t: t.name)), tuple(untraced))
+    return Inputs(
+        tuple(sorted(tables, key=lambda t: t.name)),
+        tuple(untraced),
+        unread=graph.nodes[(node.label, node.key)].properties.get(LINEAGE_UNREAD),
+        unread_step=graph.nodes[(node.label, node.key)].properties.get(LINEAGE_UNREAD_STEP),
+    )
 
 
 def _table_name(graph: Graph, ref: Ref) -> str:

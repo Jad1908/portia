@@ -407,7 +407,7 @@ def test_a_measurement_that_could_not_be_attached_is_not_reported_as_stored(
 
 
 def _no_parser():
-    raise sqllineage.LineageUnreadable("sqlglot is not installed")
+    raise sqllineage.LineageUnreadable(sqllineage.NO_PARSER, "sqlglot is not installed")
 
 
 def test_write_measured_counts_what_the_database_kept(neo4j_session):

@@ -627,6 +627,7 @@ def _body_rows(docs: dict, reads: dict) -> dict[str, int]:
         # A heading for each half, one row per input, one per step, and one more
         # for the columns nothing could be traced to when there are any.
         count = 2 + (len(names) or 1) + steps + (1 if inputs.untraced else 0)
+        count += 1 if inputs.unread else 0
         if open_model == name:
             # An unfolded input adds a row per column — or one row saying nobody
             # has profiled it, which is what that row draws instead.
@@ -826,18 +827,29 @@ def _reads_section(model: str, doc: dict, docs: dict, inputs) -> None:
         c.caption(_READS_NOTHING)
         return
     columns = {table.name: table for table in (inputs.tables if inputs else ())}
+    unread = inputs.unread if inputs else None
     for name in dict.fromkeys(names):
-        _input_row(model, name, columns.get(name))
+        _input_row(model, name, columns.get(name), unread=bool(unread))
     if inputs is not None and inputs.untraced:
         c.caption(_UNTRACED.format(cols=", ".join(inputs.untraced))).classes("model-note")
+    if inputs is not None and unread:
+        # Said once for the model, never per column: an unpivot of a wide
+        # table has a thousand of them, and every one has the same reason.
+        why = _UNREAD_WHY.get(unread, _UNREAD_OTHER)
+        at = _UNREAD_AT.format(step=inputs.unread_step) if inputs.unread_step else ""
+        c.caption(_UNREAD.format(at=at, why=why)).classes("model-note")
 
 
-def _input_row(model: str, name: str, table) -> None:
+def _input_row(model: str, name: str, table, *, unread: bool = False) -> None:
     """One input table, and its columns when it is the one you asked about.
 
     A row whose columns are unknown still opens and still says so. *Nobody has
     profiled this yet* and *this contributed nothing* are different facts, and a
     row that silently refused to open would be indistinguishable from the second.
+
+    ``unread`` is the third fact: the model's SQL could not be traced, so no
+    input has columns to show, indexed or not. It used to read *Index this
+    source* about a source that was indexed (2026-10-14).
     """
     open_now = APP.open_input == (model, name)
     known = table.columns if table else ()
@@ -845,14 +857,15 @@ def _input_row(model: str, name: str, table) -> None:
         ui.icon("expand_more" if open_now else "chevron_right").classes("model-caret")
         ui.label(name).classes("model-row-name")
         ui.element("div").classes("flex-1")
-        c.caption(c.count(len(known), "column") if known else _COLUMNS_UNKNOWN)
+        empty = _COLUMNS_NOT_TRACED if unread else _COLUMNS_UNKNOWN
+        c.caption(c.count(len(known), "column") if known else empty)
     row.on("click", lambda m=model, n=name: _open_input(m, n))
     if not open_now:
         return
     if known:
         for column in known:
             _lineage_row(column)
-    else:
+    elif not unread:
         c.caption(_COLUMNS_UNKNOWN_WHY).classes("model-note")
 
 
@@ -2603,6 +2616,19 @@ _SELECT_NONE = "Select none"
 _READS_NOTHING = "Reads nothing: no sources and no other tables."
 _COLUMNS_UNKNOWN = "columns not known"
 _COLUMNS_UNKNOWN_WHY = "Index this source to see which of its columns arrived here."
+_COLUMNS_NOT_TRACED = "columns not traced"
+#: Why a model's lineage stops, said once under its inputs. Keyed by
+#: `knowledge.build.UNREAD_CODES`; a code with no words here gets the general one.
+_UNREAD = "Lineage not traced{at}: {why}"
+_UNREAD_AT = " at step {step}"
+_UNREAD_OTHER = "portia could not follow its SQL."
+_UNREAD_WHY = {
+    "pivot": "it pivots or unpivots, so its columns have no single origin.",
+    "columns_pattern": "it picks columns with COLUMNS(...), which depends on the data.",
+    "input_not_indexed": "a table it reads is not indexed.",
+    "input_unread": "a table it reads could not be traced either.",
+    "no_parser": "the SQL reader is not installed (the graph extra).",
+}
 _NO_STEPS_YET = "No steps recorded on this spec yet."
 #: The journal for this model — what was asked on the way to it.
 _JOURNAL = "Journal"

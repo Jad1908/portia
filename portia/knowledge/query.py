@@ -73,11 +73,14 @@ from portia.knowledge.measure import MEASURED, ORIGIN, ORIGIN_MEASURED
 from portia.knowledge.schema import (
     COLUMN,
     DERIVATION,
+    DERIVATION_NOT_TRACED,
     DERIVES_FROM,
     GROUP,
     HAS_COLUMN,
     IN_GROUP,
     KEY_PROPERTY,
+    LINEAGE_UNREAD,
+    LINEAGE_UNREAD_STEP,
     MODEL,
     OVERLAPS,
     POSITION,
@@ -166,7 +169,8 @@ _TABLE_BY_NAME = (
 #: be counted.
 _TABLE_FIELDS = (
     "labels(t)[0] AS kind, t.name AS name, t.path AS path, "
-    f"size([(t)-[:{HAS_COLUMN}]->(c) | c]) AS n_columns"
+    f"size([(t)-[:{HAS_COLUMN}]->(c) | c]) AS n_columns, "
+    f"t.{LINEAGE_UNREAD} AS {LINEAGE_UNREAD}, t.{LINEAGE_UNREAD_STEP} AS {LINEAGE_UNREAD_STEP}"
 )
 
 
@@ -257,9 +261,15 @@ def _header(found: dict) -> dict:
     """A table as an answer names it: its kind, its two names, how wide it is.
 
     ``n_columns`` is there so nobody reads a short list of pairs as a small
-    table.
+    table. A model whose lineage stops says why and at which step
+    (`schema.LINEAGE_UNREAD`), and only then: a key carrying null on every
+    table is tokens spent saying nothing.
     """
-    return {key: found[key] for key in ("kind", "name", "path", "n_columns")}
+    header = {key: found[key] for key in ("kind", "name", "path", "n_columns")}
+    for key in (LINEAGE_UNREAD, LINEAGE_UNREAD_STEP):
+        if found.get(key):
+            header[key] = found[key]
+    return header
 
 
 # --- a measured pair, as a reader on one end sees it ------------------------
@@ -587,7 +597,14 @@ def _column_answer(session: Any, found: dict, column: str, project: str) -> dict
         **args,
     )
     return {
-        "column": {"table": found["name"], "name": column, **dict(facts[0])},
+        "column": {
+            "table": found["name"],
+            "name": column,
+            **{k: v for k, v in dict(facts[0]).items() if k != DERIVATION or v},
+            # Why the trail stops at this model, when it does: a column marked
+            # `not_traced` is read beside the reason.
+            **{k: found[k] for k in (LINEAGE_UNREAD, LINEAGE_UNREAD_STEP) if found.get(k)},
+        },
         "upstream": _walk(session, reached, args, upstream=True),
         "downstream": _walk(session, reached, args, upstream=False),
         # Where it bottoms out: the columns nothing else derives from, which on a
@@ -1041,6 +1058,16 @@ def _numbers(pair: dict) -> str:
     return "  ".join(parts) or "(no numbers on this edge)"
 
 
+def _unread(column: dict) -> str:
+    """Why a column's trail stops, for a human: computed here, or not read at all."""
+    if column.get(DERIVATION) != DERIVATION_NOT_TRACED:
+        return "nothing readable underneath it"
+    why = column.get(LINEAGE_UNREAD)
+    at = column.get(LINEAGE_UNREAD_STEP)
+    detail = f": {why}" + (f" at step {at}" if at else "") if why else ""
+    return f"lineage not read{detail}"
+
+
 def _render_column(answer: dict) -> str:
     column = answer["column"]
     lines = [f"{column['table']}.{column['name']}"]
@@ -1048,7 +1075,7 @@ def _render_column(answer: dict) -> str:
         # Said on the column itself as well as on an origin row, because asking
         # about this column directly is the commoner way to arrive at it — and
         # an empty lineage with no explanation reads as *nobody built this*.
-        lines.append("  (nothing readable underneath it)")
+        lines.append(f"  ({_unread(column)})")
     for heading, key in (("from", "upstream"), ("feeds", "downstream")):
         for row in answer[key]:
             pointer = f"  [{row.get('via')} at {row.get('step')}]" if row.get("via") else ""
@@ -1056,7 +1083,7 @@ def _render_column(answer: dict) -> str:
     for row in answer["origins"]:
         # Said as a trail that stops rather than as an origin, because that is
         # what it is — see the query.
-        unread = "  (nothing readable underneath it)" if row.get(DERIVATION) else ""
+        unread = f"  ({_unread(row)})" if row.get(DERIVATION) else ""
         lines.append(f"  origin: {row['table']}.{row['column']}{unread}")
     for row in answer["compared_with"]:
         lines.append(f"  compared with {row['table']}.{row['other_column']}: {_numbers(row)}")

@@ -687,6 +687,20 @@ def test_a_join_check_on_a_built_specs_last_step_is_kept_against_its_model(sales
     assert "chain" in str(edge)
 
 
+def test_recording_a_step_whose_lineage_cannot_be_read_says_so(sales, recorded):
+    """It answered ``graph: updated`` alone, and the copilot took the columns for traced."""
+    step = {
+        "id": "long",
+        "op": "sql",
+        "inputs": ["orders"],
+        "sql": "SELECT * FROM orders UNPIVOT (v FOR field IN (amount))",
+    }
+    card = handlers.record_step("specs/long.yaml", step, portia_dir=sales)
+    assert card["lineage"] == {"unread": "pivot", "step": "long"}
+    traced = handlers.record_step("specs/chain.yaml", dict(_FIRST), portia_dir=sales)
+    assert "lineage" not in traced
+
+
 def test_a_spec_edited_since_its_build_is_not_its_model(sales, recorded):
     handlers.record_step("specs/chain.yaml", dict(_FIRST), portia_dir=sales)
     path = Path(sales).parent / "specs" / "chain.yaml"

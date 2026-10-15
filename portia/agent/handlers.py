@@ -2741,7 +2741,7 @@ def record_step(
         "model": path.stem,
         "written_to": written_to,
         "catalog": indexed,
-        "graph": _sync_graph(root, portia_dir),
+        **_sync_graph(root, portia_dir, path.stem),
         "outcome": _outcome_card(result.outcome, result.table, read_at=read_at),
         "drift": result.drift,
         "acknowledged": result.acknowledged,
@@ -2826,7 +2826,7 @@ def _index_model(
     return UPDATED
 
 
-def _sync_graph(root: Path, portia_dir: str) -> str:
+def _sync_graph(root: Path, portia_dir: str, model: str) -> dict:
     """Put the table this spec now builds into the graph — best effort, always.
 
     One of `KNOWLEDGE_GRAPH.md` §5's refresh moments, and the one that was
@@ -2842,12 +2842,28 @@ def _sync_graph(root: Path, portia_dir: str) -> str:
     step is already recorded and the spec is already on disk, and failing the
     write because a container is stopped would undo none of that while losing
     the user their step (`KNOWLEDGE_GRAPH.md` §6.6).
+
+    ``{"graph": <state>}``, and ``lineage`` beside it when the model's lineage
+    could not be read: the code and the step it stopped at
+    (`schema.LINEAGE_UNREAD`), read off the build whether or not the database
+    is up. It used to answer ``updated`` alone, and the copilot assumed
+    columns it then found untraced (2026-10-15).
     """
+    result = knowledge.build_graph(root, portia_dir=portia_dir)
     try:
-        knowledge.sync(root, portia_dir=portia_dir)
+        knowledge.sync(root, portia_dir=portia_dir, result=result)
+        state = UPDATED
     except store.GraphUnavailable as exc:
-        return f"not updated — {exc}"
-    return UPDATED
+        state = f"not updated — {exc}"
+    out: dict[str, Any] = {"graph": state}
+    node = result.graph.node(knowledge_schema.MODEL, model)
+    facts = node.properties if node is not None else {}
+    if facts.get(knowledge_schema.LINEAGE_UNREAD):
+        out["lineage"] = {
+            "unread": facts[knowledge_schema.LINEAGE_UNREAD],
+            "step": facts.get(knowledge_schema.LINEAGE_UNREAD_STEP),
+        }
+    return out
 
 
 # --- the spec cards (2026-10-13, the tool revamp) ----------------------------------

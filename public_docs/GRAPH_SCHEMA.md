@@ -95,6 +95,8 @@ unique across a project.
 | `name` | string | the spec's filename stem |
 | `spec` | string | the spec's path, relative to the project root |
 | `fingerprint` | string | `pipeline.fingerprint(doc)` — the digest of the parts that decide its SQL |
+| `lineage_unread` | string | `knowledge.build` — why its column lineage could not be read, as a code from `build.UNREAD_CODES`; absent when it was read |
+| `lineage_unread_step` | string | `knowledge.build` — the step the lineage stopped at; absent with `lineage_unread`, and when the spec has no steps |
 | `_build` | string | see *Rebuilds* |
 
 **`spec` and `fingerprint` are pointers into the pipeline, and none of the pipeline's vocabulary is
@@ -120,7 +122,7 @@ for example `source:data/orders.csv::customer_id` or `model:mart_orders::note_x`
 | `flags` | list of string | `checks.profiling` | the model has not been built |
 | `min`, `max` | number | `checks.profiling` | the column is not numeric, or the model has not been built |
 | `top`, `top_freq` | value, int | `checks.profiling` | the column is numeric or boolean, or the model has not been built |
-| `derivation` | `"unknown"` | `knowledge.build` — see below | almost always; only a model's column ever carries it |
+| `derivation` | `"unknown"` or `"not_traced"` | `knowledge.build` — see below | almost always; only a model's column ever carries it |
 | `_build` | string | see *Rebuilds* | never |
 
 **The shape facts are split by kind and you never get both halves** (`schema.SHAPE_FACTS`). A
@@ -147,12 +149,15 @@ profiles the table a build or a recorded step produced). Before that, nothing ha
 table portia *would* build, and inventing numbers for it would be the one thing this project
 forbids.
 
-**`derivation: "unknown"` means the trail stops here and portia could not read past it** — a
-`count(*)`, a literal, anything a `sql` step produced with no input column underneath it. It exists
-because *no outgoing `DERIVES_FROM`* already means something else: on a file's column it means *this
-is where the data came from*, and without the marker a computed column has the identical shape. Two
-states only, present or absent — a vocabulary of reasons would fragment the way `Entity`'s names
-would, so the reason lives in the build report instead. To ask for the honest terminal columns:
+**`derivation` says why a model column's trail stops, and it has two values.** `"unknown"`: the
+step was read, and nothing is underneath the value — a `count(*)`, a literal, anything a `sql` step
+produced with no input column underneath it. `"not_traced"`: the step could not be read at all, so
+the column may be carried unchanged from an input and nobody can say which; its model says why in
+`lineage_unread`. The marker exists because *no outgoing `DERIVES_FROM`* already means something
+else: on a file's column it means *this is where the data came from*, and without the marker a
+computed column has the identical shape. A closed pair of values, never a vocabulary of reasons:
+the reason is a code on the model, and the parser's own words stay in the build report. To ask for
+the honest terminal columns:
 
 ```cypher
 MATCH (c:Column {name: 'amount'})-[:DERIVES_FROM*]->(o:Column)
@@ -220,8 +225,11 @@ It needs `sqlglot`, from the `graph` extra. **Without it the step is unresolved*
 model downstream: `Model` node, true `READS` edges, no `Column` nodes. Same when the SQL cannot be
 parsed or cannot be resolved against its inputs — **unless the model has been built from the spec
 as it stands** (2026-10-14): then its columns come from its catalog entry, with their facts and
-`derivation: "unknown"`, so a join or an overlap can attach to them (an `UNPIVOT` staging step
-is the case that found it). Lineage is still reported missing. `python -m portia.cli.knowledge` prints what could
+`derivation: "not_traced"`, so a join or an overlap can attach to them (an `UNPIVOT` staging step
+is the case that found it). Lineage is still reported missing, and the model carries
+`lineage_unread`. A `PIVOT`, an `UNPIVOT` or a `COLUMNS(...)` anywhere in the statement is refused
+before it is traced: sqlglot reads the standard `UNPIVOT` and reports its name column as copied
+from the unpivoted columns' values, which is wrong rather than missing. `python -m portia.cli.knowledge` prints what could
 not be read and why — per model when the whole spec stalled, per column when only one did.
 
 ### Measured — costs a query, and is nobody's to delete

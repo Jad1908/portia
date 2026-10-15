@@ -43,8 +43,44 @@ from typing import Any
 MAX_REASON = 160
 
 
+#: Why a step's SQL could not be read, as a code from a closed list. The code
+#: is what reaches the graph (`schema.LINEAGE_UNREAD`) and the agent, which reads
+#: each one in words in `prompts/tools/graph_lookup.md`; the message beside it is
+#: for a human reading the build report. Same split as `checks/sql_joins`.
+NO_PARSER = "no_parser"
+NOT_PARSED = "not_parsed"
+NOT_A_QUERY = "not_a_query"
+#: A `PIVOT` or `UNPIVOT`: its output columns are made from values or from a
+#: list of input columns, so no output column has one origin to point at.
+#: sqlglot reads the standard form without complaint and reports the new name
+#: column as copied from the unpivoted columns (2026-10-15), which is wrong
+#: rather than missing, so the step is refused before it is traced.
+PIVOT = "pivot"
+#: ``COLUMNS(…)``: which columns it stands for depends on the input's schema at
+#: run time. sqlglot reports it as one output column named after the pattern.
+COLUMNS_PATTERN = "columns_pattern"
+NOT_RESOLVED = "not_resolved"
+STAR_UNKNOWN = "star_unknown"
+TRACE_FAILED = "trace_failed"
+CODES = (
+    NO_PARSER,
+    NOT_PARSED,
+    NOT_A_QUERY,
+    PIVOT,
+    COLUMNS_PATTERN,
+    NOT_RESOLVED,
+    STAR_UNKNOWN,
+    TRACE_FAILED,
+)
+
+
 class LineageUnreadable(ValueError):
-    """The SQL could not be read. The message is a reason a human reads."""
+    """The SQL could not be read. ``code`` is one of :data:`CODES`; the message
+    is a reason a human reads."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 @dataclass(frozen=True)
@@ -79,15 +115,17 @@ def column_origins(sql: str, inputs: dict[str, list[str]]) -> dict[str, list[Ori
     try:
         statement = parse_one(sql, read=_DIALECT)
     except Exception as exc:
-        raise LineageUnreadable(f"the sql could not be parsed: {_short(exc)}") from exc
+        raise LineageUnreadable(NOT_PARSED, f"the sql could not be parsed: {_short(exc)}") from exc
     if not isinstance(statement, exp.Query):
         # DuckDB's own ``WITH c AS (…) UNPIVOT c ON …`` passes the hatch's
         # check (it starts with WITH) and parses as a `Pivot`, which has no
         # select list. Read as one, it raised `AttributeError` out of the
         # graph build, and every graph refresh of the project with it.
         raise LineageUnreadable(
-            f"the sql is a {statement.key.upper()} statement, which the parser cannot trace"
+            NOT_A_QUERY,
+            f"the sql is a {statement.key.upper()} statement, which the parser cannot trace",
         )
+    _refuse_untraceable(exp, statement)
     # **Read before qualifying.** `qualify` folds identifiers to lower case *in
     # place* and returns the same tree, so a select list read afterwards has
     # already lost the spelling the author wrote (see :func:`_as_written`).
@@ -96,7 +134,7 @@ def column_origins(sql: str, inputs: dict[str, list[str]]) -> dict[str, list[Ori
         qualified = qualify(statement, schema=schema, dialect=_DIALECT)
     except Exception as exc:
         raise LineageUnreadable(
-            f"the sql could not be resolved against its inputs: {_short(exc)}"
+            NOT_RESOLVED, f"the sql could not be resolved against its inputs: {_short(exc)}"
         ) from exc
 
     names = [select.alias_or_name for select in qualified.selects]
@@ -104,7 +142,9 @@ def column_origins(sql: str, inputs: dict[str, list[str]]) -> dict[str, list[Ori
         # `select *` over a table the schema does not hold expands to nothing,
         # and sqlglot reports the star itself as the output column. Emitting a
         # column called `*` would be worse than saying we could not tell.
-        raise LineageUnreadable("the sql selects '*' from a table whose columns are unknown")
+        raise LineageUnreadable(
+            STAR_UNKNOWN, "the sql selects '*' from a table whose columns are unknown"
+        )
 
     spelling = _spelling(inputs)
     traced = _trace_all(lineage, sql, schema)
@@ -117,9 +157,27 @@ def column_origins(sql: str, inputs: dict[str, list[str]]) -> dict[str, list[Ori
             if root is None:
                 root = lineage(name, sql, schema=schema, dialect=_DIALECT)
         except Exception as exc:
-            raise LineageUnreadable(f"the sql could not be traced: {_short(exc)}") from exc
+            raise LineageUnreadable(
+                TRACE_FAILED, f"the sql could not be traced: {_short(exc)}"
+            ) from exc
         origins[written] = _origins(exp, root, inputs, spelling)
     return origins
+
+
+def _refuse_untraceable(exp: Any, statement: Any) -> None:
+    """Refuse a statement whose output columns no trace can name truthfully.
+
+    Anywhere in it, a CTE or a sub-select included: one unpivot inside a `WITH`
+    decides the columns of everything read from it.
+    """
+    if any(True for _ in statement.find_all(exp.Pivot)):
+        raise LineageUnreadable(
+            PIVOT, "the sql pivots or unpivots, so its columns have no one origin"
+        )
+    if hasattr(exp, "Columns") and any(True for _ in statement.find_all(exp.Columns)):
+        raise LineageUnreadable(
+            COLUMNS_PATTERN, "the sql picks columns with COLUMNS(...), which depends on the schema"
+        )
 
 
 def _trace_all(lineage: Any, sql: str, schema: dict) -> dict | None:
@@ -258,8 +316,9 @@ def _sqlglot():
         from sqlglot.optimizer.qualify import qualify
     except ImportError as exc:  # pragma: no cover - exercised by monkeypatch
         raise LineageUnreadable(
+            NO_PARSER,
             "sqlglot is not installed, and it is what reads columns out of a sql step "
-            "— install portia's 'graph' extra"
+            "— install portia's 'graph' extra",
         ) from exc
     return exp, lineage, qualify, parse_one
 
