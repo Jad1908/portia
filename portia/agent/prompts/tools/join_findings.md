@@ -30,11 +30,12 @@ returns more rows than the left puts in and a total over a left column comes out
 keeping on the left.
 
 'reason' is required: one sentence on why these two tables might join on these keys. The key's
-measurement is kept in the knowledge graph beside it, as a pair with 'origin' 'join_check', so the
-next chat finds it with `graph_lookup` instead of measuring again. 'graph' in the answer says
-whether it was kept. It is kept for a join on one column a side between two indexed sources or
-models. A composite key, a table an earlier step produced and a table joined to itself are not
-kept, and 'graph' says which. A database that is down never stops the check: the numbers are in the
-answer either way.
+check is kept in the knowledge graph as a join between the two tables, with every key column, the
+relationship, how often a key repeats on each side and both coverages, so the next chat finds it
+with `graph_lookup`. 'graph' in the answer says whether it was kept, and when it was not, 'why':
+`side_is_a_step` (a side is a table an earlier step produced, which no build has made),
+`same_table`, `not_in_graph` (a side is no table the graph holds), `graph_unavailable` or
+`measure_failed`, each with the error. A database that is down never stops the check: the numbers
+are in the answer either way.
 
 The findings are unranked: whether a dropped row matters is your call, not the check's.

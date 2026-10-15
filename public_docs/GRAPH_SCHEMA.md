@@ -243,9 +243,9 @@ not be read and why — per model when the whole spec stalled, per column when o
 share values; the copilot asked because it thought they might be the same thing. A *join*
 (`JOINED`) is a join that was actually done, between two tables, on one or more columns a side.
 
-Written by `measure_overlaps`, which the copilot calls with pairs **it** chose, and since
-2026-10-13 by `join_findings`, which keeps the key measurement of a join it checked (one column
-each side, between two graph tables). Both require the copilot's reason.
+An `OVERLAPS` edge is written by `measure_overlaps`, which the copilot calls with pairs **it**
+chose, with its reason. Between 2026-10-13 and 2026-10-15 `join_findings` wrote its key as one too,
+`origin: join_check`; those stay, as comparisons. A join check is now a `JOINED` record.
 
 | property | means |
 |---|---|

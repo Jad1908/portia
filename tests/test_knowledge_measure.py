@@ -455,31 +455,41 @@ def test_a_pair_measured_once_comes_back_from_the_graph_the_second_time(
     assert "one by name and one by code" in pair["asked_because"]
 
 
-def test_a_join_check_lands_in_the_graph_with_its_origin(neo4j_session, project, monkeypatch, pid):
+def _joined(session) -> list[dict]:
+    """Every join record in the graph, as plain rows."""
+    rows = session.run(
+        "MATCH (a)-[r:JOINED]->(b) RETURN a.name AS left, b.name AS right, "
+        "r.left_columns AS left_columns, r.right_columns AS right_columns, "
+        "r.relationship AS relationship, r.origin AS origin, r.asked_because AS reason, "
+        "r.found_in AS found_in, r.n_shared_keys AS n_shared_keys ORDER BY origin, left"
+    )
+    return [dict(r) for r in rows]
+
+
+def test_a_join_check_lands_in_the_graph_as_the_join_it_checked(
+    neo4j_session, project, monkeypatch
+):
     """25 join checks and 5 measurements in the logs, and the join checks kept nothing."""
     monkeypatch.chdir(project)
     found = handlers.join_findings(
         "orders", "customers", keys=["customer_id"], reason="orders should name a customer"
     )
     assert found["graph"] == {"kept": True}
-
-    (neighbour,) = query.lookup(neo4j_session, "orders", project=pid)["neighbours"]
-    (pair,) = neighbour["pairs"]
-    assert (pair["column"], pair["other_column"]) == ("customer_id", "customer_id")
-    assert pair["origin"] == "join_check"
-    assert pair["asked_because"] == "orders should name a customer"
-    assert pair["n_shared_values"] == found["report"]["overlap"]["n_shared_keys"]
-    assert pair["stale"] is False
+    (record,) = _joined(neo4j_session)
+    assert (record["left"], record["right"]) == ("orders", "customers")
+    assert record["left_columns"] == record["right_columns"] == ["customer_id"]
+    assert (record["origin"], record["reason"]) == ("join_check", "orders should name a customer")
+    assert record["n_shared_keys"] == found["report"]["overlap"]["n_shared_keys"]
+    assert record["relationship"] == found["report"]["relationship"]
 
 
-def test_a_join_check_on_a_model_the_parser_cannot_read_is_kept_and_routed(
+def test_a_join_check_on_a_model_the_parser_cannot_read_is_kept(
     neo4j_session, project, monkeypatch
 ):
     """The real case: a recorded unpivot, then a join check between it and a source.
 
-    sqlglot cannot read the unpivot, so the model's columns used to be missing
-    from the graph and the measurement was not kept. They come from the
-    catalog entry the step wrote, and the route then runs through the pair.
+    A join record is between tables, so the model needs no traced columns: it
+    used to need the column node the measurement attached to.
     """
     monkeypatch.chdir(project)
     handlers.record_step(
@@ -501,21 +511,17 @@ def test_a_join_check_on_a_model_the_parser_cannot_read_is_kept_and_routed(
         reason="the long table's values include each order's customer",
     )
     assert found["graph"] == {"kept": True}
-
-    routes = handlers.graph_lookup("long_orders", to="customers")["routes"]
-    direct = [row for row in routes["rows"] if row[0] == 1]
-    assert [row[1] for row in direct] == [["long_orders", "customers"]]
-    (step,) = direct[0][2]
-    fields = handlers.graphcards.ROUTE_PAIR_FIELDS
-    (pair,) = [dict(zip(fields, row, strict=True)) for row in step["pairs"]]
-    assert (pair["column"], pair["other_column"]) == ("value", "customer_id")
-    assert pair["n_shared_values"] == found["report"]["overlap"]["n_shared_keys"] == 2
+    (record,) = _joined(neo4j_session)
+    assert (record["left"], record["right"], record["n_shared_keys"]) == (
+        "long_orders",
+        "customers",
+        2,
+    )
 
 
-def test_a_join_checks_measurement_is_reused_by_measure_overlaps(
-    neo4j_session, project, monkeypatch
-):
-    """One measurement with two occasions: either tool reads the other's."""
+def test_a_join_check_is_not_a_comparison(neo4j_session, project, monkeypatch):
+    """Two kinds of record: a join that was done, and two columns compared. Measuring
+    the pair after a join check measures it, and keeps both."""
     monkeypatch.chdir(project)
     handlers.join_findings("orders", "customers", keys=["customer_id"], reason="the key")
     again = handlers.measure_overlaps(
@@ -529,7 +535,116 @@ def test_a_join_checks_measurement_is_reused_by_measure_overlaps(
             }
         ]
     )
-    assert again["n_from_graph"] == 1
+    assert (again["n_from_graph"], again["n_measured"]) == (0, 1)
+    assert len(_joined(neo4j_session)) == 1
+
+
+# --- joins kept from recorded steps and kept findings (2026-10-15) ---------------------------
+
+
+_JOIN_STEP = {
+    "id": "with_customers",
+    "op": "join",
+    "left": "orders",
+    "right": "customers",
+    "keys": ["customer_id"],
+    "how": "left",
+    "rationale": "Every order with the customer it names.",
+}
+
+
+def test_recording_a_step_that_joins_keeps_the_join(neo4j_session, project, monkeypatch):
+    monkeypatch.chdir(project)
+    card = handlers.record_step("specs/orders_customers.yaml", dict(_JOIN_STEP))
+    assert card["joins"]["kept"] == ["orders JOIN customers ON customer_id"]
+    (record,) = _joined(neo4j_session)
+    assert (record["left"], record["right"], record["origin"]) == ("orders", "customers", "step")
+    assert record["found_in"] == "specs/orders_customers.yaml#with_customers"
+    assert record["reason"] == "Every order with the customer it names."
+
+
+def test_a_step_superseded_by_one_that_no_longer_joins_takes_its_join_with_it(
+    neo4j_session, project, monkeypatch
+):
+    monkeypatch.chdir(project)
+    handlers.record_step("specs/orders_customers.yaml", dict(_JOIN_STEP))
+    replacement = {
+        "id": "orders_only",
+        "op": "sql",
+        "inputs": ["orders"],
+        "sql": "SELECT * FROM orders",
+    }
+    card = handlers.record_step(
+        "specs/orders_customers.yaml", replacement, supersedes="with_customers"
+    )
+    assert "joins" not in card
+    assert _joined(neo4j_session) == []
+
+
+def test_a_sql_step_keeps_a_join_between_its_inputs_and_says_why_not_one_inside_it(
+    neo4j_session, project, monkeypatch
+):
+    monkeypatch.chdir(project)
+    step = {
+        "id": "joined",
+        "op": "sql",
+        "inputs": ["orders", "customers"],
+        "sql": "WITH o AS (SELECT * FROM orders) "
+        "SELECT o.order_id, c.country_code FROM o JOIN customers c ON o.customer_id = c.customer_id",
+    }
+    card = handlers.record_step("specs/inner.yaml", step)
+    assert card["joins"]["kept"] == []
+    (missed,) = card["joins"]["not_kept"]
+    assert missed["why"] == "side_is_a_step"
+
+    step["id"], step["sql"] = (
+        "joined",
+        "SELECT o.order_id, c.country_code FROM orders o "
+        "JOIN customers c ON o.customer_id = c.customer_id",
+    )
+    card = handlers.record_step("specs/direct.yaml", step)
+    assert len(card["joins"]["kept"]) == 1
+    (record,) = _joined(neo4j_session)
+    assert record["found_in"] == "specs/direct.yaml#joined"
+
+
+def test_keeping_a_finding_keeps_the_joins_in_its_queries(neo4j_session, project, monkeypatch):
+    from portia import runlog
+    from portia.agent import events
+
+    monkeypatch.chdir(project)
+    log = runlog.start(kind=runlog.CHAT, portia_dir=str(project / catalog.DEFAULT_DIR))
+    log.event(
+        events.Event(
+            events.TOOL_CALL,
+            {
+                "name": f"{events.TOOL_PREFIX}query_data",
+                "id": "toolu_0",
+                "input": {
+                    "question": "how many orders have a known customer?",
+                    "sql": "SELECT count(*) FROM orders o "
+                    "JOIN customers c ON o.customer_id = c.customer_id",
+                    "inputs": ["orders", "customers"],
+                },
+            },
+        )
+    )
+    log.event(
+        events.Event(
+            events.TOOL_RESULT, {"id": "toolu_0", "text": '{"n_rows":1}', "is_error": False}
+        )
+    )
+    kept = handlers.record_finding(
+        "Do orders name known customers?",
+        "All of them.",
+        "Join on customer_id.",
+        ["orders", "customers"],
+        [1],
+    )
+    assert len(kept["joins"]["kept"]) == 1
+    (record,) = _joined(neo4j_session)
+    assert (record["origin"], record["reason"]) == ("finding", "Do orders name known customers?")
+    assert record["found_in"] == kept["finding"]
 
 
 def _stale(card: dict) -> list:
@@ -608,3 +723,46 @@ def test_a_join_record_read_from_its_other_end_is_turned_whole():
     assert seen["relationship"] == "1:many"
     assert (seen["left_repeats"], seen["right_repeats"]) == (1, 7)
     assert (seen["left_coverage"], seen["right_coverage"]) == (0.98, 1.0)
+
+
+def test_removing_a_spec_forgets_what_was_measured_about_its_model(
+    neo4j_session, project, monkeypatch
+):
+    """A number about a table nobody builds is about nothing: the model's join records
+    and the joins its steps made go with it, and a source's measurements stay."""
+    from portia.cli import remove_spec
+
+    monkeypatch.chdir(project)
+    handlers.record_step("specs/orders_customers.yaml", dict(_JOIN_STEP))
+    handlers.join_findings(
+        "orders_customers", "customers", keys=["customer_id"], reason="back to customers"
+    )
+    handlers.join_findings("orders", "customers", keys=["customer_id"], reason="the key")
+    assert len(_joined(neo4j_session)) == 3
+
+    remove_spec.remove(remove_spec.plan(["orders_customers"], project), project)
+    (left,) = _joined(neo4j_session)
+    assert (left["left"], left["origin"]) == ("orders", "join_check")
+    gone = neo4j_session.run("MATCH (m:Model {name: 'orders_customers'}) RETURN count(m) AS n")
+    assert gone.single()["n"] == 0
+
+
+def test_every_reason_a_join_is_not_kept_is_explained_to_the_agent():
+    from portia.agent import prompts
+    from portia.checks import sql_joins
+
+    tools = Path(prompts.__file__).parent / "tools"
+    said = "".join(
+        (tools / f"{name}.md").read_text(encoding="utf-8")
+        for name in ("join_findings", "record_step")
+    )
+    codes = [
+        *handlers.JOIN_NOT_KEPT,
+        sql_joins.SIDE_NOT_NAMED,
+        sql_joins.CONDITION_NOT_EQUALITIES,
+        sql_joins.COLUMN_SIDE_UNCLEAR,
+        sql_joins.KIND_NOT_MEASURED,
+        sql_joins.NOT_PARSED,
+        sql_joins.NO_PARSER,
+    ]
+    assert [code for code in codes if f"`{code}`" not in said] == []

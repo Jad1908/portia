@@ -35,6 +35,10 @@ anything.
 
 ## YOU DO NOT WRITE THE NUMBERS
 
+A join in those queries between two tables they declared is kept in the knowledge graph as a join,
+with the finding's question as its reason, so the next chat finds it with `graph_lookup`. `joins`
+in the answer lists what was kept and what was not, with the codes `record_step` uses.
+
 The SQL and the rows it returned are copied in for you, from the queries you named in 'from':
 the first rows of the result this chat kept, every column, or the logged answer when the
 result was not kept. A chart keeps its receipt. That is deliberate and it is not bookkeeping.

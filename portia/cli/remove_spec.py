@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from portia import catalog, knowledge, pipeline, spec
+from portia.core.io import relative
 
 
 @dataclass
@@ -34,6 +35,8 @@ class Removal:
 
     names: list[str]
     files: list[Path] = field(default_factory=list)
+    #: Each spec's path relative to the root: where its steps' joins were found.
+    specs: list[str] = field(default_factory=list)
 
     def __bool__(self) -> bool:
         return bool(self.files)
@@ -90,7 +93,8 @@ def plan(names: list[str], root: str | Path = ".") -> Removal:
         ):
             if candidate.exists():
                 files.append(candidate)
-    return Removal(sorted(names), files)
+    specs = sorted(relative(root / models[name], root) for name in names)
+    return Removal(sorted(names), files, specs)
 
 
 def _still_read(blockers: dict[str, set[str]]) -> str:
@@ -110,25 +114,28 @@ def remove(p: Removal, root: str | Path = ".") -> list[Path]:
     """Delete what :func:`plan` found, then tell the graph."""
     for path in p.files:
         path.unlink()
-    _sync(root)
+    _sync(root, p)
     return p.files
 
 
-def _sync(root: str | Path) -> None:
-    """Rebuild the structural graph so the Model nodes go with their specs.
+def _sync(root: str | Path, p: Removal) -> None:
+    """Forget what was measured about these models, then rebuild so their nodes go too.
 
     **Best-effort, exactly like `handlers.record_step`'s sync**
     (`docs/KNOWLEDGE_GRAPH.md` §6.6): the files
     are already gone and a stopped container must not turn that into a failure.
 
-    Nothing here deletes a measurement. A rebuild prunes structural edges and
-    then any node left with no relationships at all, so a Model whose spec is
-    gone goes with it — and a Column of that model carrying an `OVERLAPS` stays,
-    because `OVERLAPS` is never pruned (§4.4, §5.2). That leaves a measured
-    column with no table, live since join checks keep measurements against
-    models (`BACKLOG_NEXT.md` §4, Bugs).
+    **A model's measurements go with its spec** (2026-10-15): a number about a
+    table nobody builds is about nothing. Its join records, the comparisons on
+    its columns, and the joins its steps made (`store.forget_models`). A
+    rebuild then prunes the node, which nothing holds any more. A source's
+    measurements are never touched here: an absent one means *nobody measured*.
     """
     try:
+        from portia.knowledge import schema, store
+
+        with store.session() as live:
+            store.forget_models(live, schema.project_id(Path(root)), p.names, p.specs)
         knowledge.sync(root)
     except Exception as exc:  # noqa: BLE001 - the files are already gone
         print(f"note: the knowledge graph was not updated: {exc}")

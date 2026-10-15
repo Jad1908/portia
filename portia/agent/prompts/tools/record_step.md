@@ -192,7 +192,12 @@ a table, the user edits the file.
 
 A step card. It says where the step was written, the model the spec builds, and whether the catalog
 and the graph took it. `lineage` is there only when portia could not read which input columns the
-model's columns came from: `unread` says why and `step` where, as `graph_lookup` describes. Then comes `outcome`, what the produced table turned out to be: n_rows,
+model's columns came from: `unread` says why and `step` where, as `graph_lookup` describes.
+`joins` is there when the step joins: each join between two tables the spec reads is measured and
+kept in the graph under `kept`, with your `rationale` as its reason. One under `not_kept` says why:
+`side_is_a_step` (a side is an earlier step's table or a part of the query, such as a CTE),
+`no_keys` (a cross join, which matches on nothing), the codes `join_findings` gives, or why the SQL reader could not read it (`side_not_named`,
+`condition_not_equalities`, `column_side_unclear`, `kind_not_measured`, `not_parsed`, `no_parser`). Then comes `outcome`, what the produced table turned out to be: n_rows,
 n_cols, its flags, and the grain claim as measured. Its exceptional columns are named under
 `flagged`: all_null (holds no value), newly_all_null (went in with values and came out with none)
 and high_null (at least {high_null} null). Each flag lists the columns that carry it, or under
