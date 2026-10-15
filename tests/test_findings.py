@@ -448,9 +448,14 @@ def test_stale_marks_takes_the_catalog_a_caller_already_holds(sales, tmp_path, m
     held = catalog.load_catalog(sales)["sources"]
 
     monkeypatch.setattr(catalog, "load_catalog", lambda *a, **k: pytest.fail("read from disk"))
+    monkeypatch.setattr(catalog, "marks", lambda *a, **k: pytest.fail("read from disk"))
     assert findings.stale_marks(records, root=tmp_path, sources=held) == {records[0]["path"]: []}
-    now = {"orders": {"indexed": {"size": 1, "mtime": 2.0}}}
-    assert findings.stale_marks(records, root=tmp_path, sources=now) == {
+    # The file itself, not the catalog's record of it: edited and never re-indexed,
+    # its findings are marked (2026-10-15).
+    data = tmp_path / str(held["orders"]["source"])
+    with open(data, "a", encoding="utf-8") as f:
+        f.write("99,C9,1\n")
+    assert findings.stale_marks(records, root=tmp_path, sources=held) == {
         records[0]["path"]: ["orders"]
     }
 

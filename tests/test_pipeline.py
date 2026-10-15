@@ -731,3 +731,67 @@ def test_a_profile_that_fails_does_not_fail_the_build(project, monkeypatch, caps
     monkeypatch.setattr(pipeline.catalog, "index_model", boom)
     assert len(pipeline.build_project(project)) == 2
     assert "could not record what" in capsys.readouterr().out
+
+
+# --- what each table looks like now (2026-10-15) ----------------------------------------
+
+
+def _indexed(project: Path) -> Path:
+    d = project / ".portia"
+    catalog.init_project("orders and customers", portia_dir=d)
+    for name in ("orders", "customers"):
+        catalog.index_source(project / "data" / f"{name}.csv", portia_dir=d)
+    return d
+
+
+def test_a_source_is_its_file_now_not_the_catalogs_record_of_it(project: Path) -> None:
+    """Edited and never re-indexed, it used to read as unchanged."""
+    d = _indexed(project)
+    before = pipeline.table_fingerprints(project, d)
+    assert before.sources["orders"] and before.sources["customers"]
+    with open(project / "data" / "orders.csv", "a", encoding="utf-8") as f:
+        f.write("5,C1,1\n")
+    after = pipeline.table_fingerprints(project, d)
+    assert after.sources["orders"] != before.sources["orders"]
+    assert after.sources["customers"] == before.sources["customers"]
+    (project / "data" / "orders.csv").unlink()
+    assert pipeline.table_fingerprints(project, d).sources["orders"] == pipeline.GONE
+
+
+def test_a_model_moves_with_its_spec_and_with_what_it_reads(project: Path) -> None:
+    """Rebuilt over a changed file, a model holds other rows though its spec is the same."""
+    d = _indexed(project)
+    _two_layer_project(project)
+    first = pipeline.table_fingerprints(project, d)
+    assert first.models["stg_orders"] and first.models["mart_orders"]
+
+    with open(project / "data" / "orders.csv", "a", encoding="utf-8") as f:
+        f.write("5,C1,1\n")
+    moved = pipeline.table_fingerprints(project, d)
+    # Both: mart reads stg, which reads the file.
+    assert moved.models["stg_orders"] != first.models["stg_orders"]
+    assert moved.models["mart_orders"] != first.models["mart_orders"]
+
+    path = project / "specs" / "mart_orders.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("how: left", "how: inner"), encoding="utf-8"
+    )
+    edited = pipeline.table_fingerprints(project, d)
+    assert edited.models["stg_orders"] == moved.models["stg_orders"]
+    assert edited.models["mart_orders"] != moved.models["mart_orders"]
+
+
+def test_a_model_reading_an_unindexed_file_cannot_tell(project: Path) -> None:
+    d = project / ".portia"
+    catalog.init_project("nothing indexed", portia_dir=d)
+    _two_layer_project(project)
+    assert pipeline.table_fingerprints(project, d).models["stg_orders"] is None
+
+
+def test_a_held_catalog_answers_without_reading_one(project: Path, monkeypatch) -> None:
+    """The window's render pass holds the entries and must not read them again."""
+    d = _indexed(project)
+    held = catalog.load_catalog(d)["sources"]
+    expected = pipeline.table_fingerprints(project, d)
+    monkeypatch.setattr(catalog, "marks", lambda *a, **k: pytest.fail("read from disk"))
+    assert pipeline.table_fingerprints(project, d, sources=held) == expected

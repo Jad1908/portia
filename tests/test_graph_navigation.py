@@ -444,7 +444,7 @@ def recorded(monkeypatch):
 
     ``attach`` is how many measured edges the write claims; by default all.
     """
-    calls: dict = {"edges": [], "writes": 0, "attach": None}
+    calls: dict = {"edges": [], "writes": 0, "attach": None, "fingerprints": []}
 
     @contextmanager
     def session(**_):
@@ -458,9 +458,13 @@ def recorded(monkeypatch):
         calls["edges"].extend(edges)
         return len(edges) if calls["attach"] is None else calls["attach"]
 
+    def write_fingerprints(fingerprints, live, project):
+        calls["fingerprints"].append(fingerprints)
+
     monkeypatch.setattr(store, "session", session)
     monkeypatch.setattr(store, "write", write)
     monkeypatch.setattr(store, "write_measured", write_measured)
+    monkeypatch.setattr(store, "write_fingerprints", write_fingerprints)
     return calls
 
 
@@ -739,6 +743,9 @@ def test_graph_lookup_hands_back_a_card(sales, recorded, monkeypatch):
     card = handlers.graph_lookup("orders", to="customers", portia_dir=sales)
     assert seen == {"table": "orders", "to": "customers"}
     assert card["routes"]["n"] == 0
+    # Every table's fingerprint is set to what it is now before the read.
+    (written,) = recorded["fingerprints"]
+    assert set(written["Source"]) == {"orders", "customers"}
 
 
 # --- a graph read waits for the graph writes of its own message (2026-10-14) ---------------

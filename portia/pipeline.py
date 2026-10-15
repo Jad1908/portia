@@ -72,6 +72,101 @@ def fingerprint(doc: dict) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()[:FINGERPRINT_CHARS]
 
 
+#: What a table that is gone fingerprints as: not *cannot tell* (``None``), a
+#: definite change from whatever was recorded.
+GONE = "gone"
+
+
+@dataclass(frozen=True)
+class Fingerprints:
+    """:func:`table_fingerprints`' answer: sources and models apart, since a model
+    may carry a source's name, and :meth:`get` looks a source up first, as every
+    name resolution in portia does."""
+
+    sources: dict[str, str | None]
+    models: dict[str, str | None]
+
+    def get(self, name: str) -> str | None:
+        if name in self.sources:
+            return self.sources[name]
+        return self.models.get(name)
+
+
+def table_fingerprints(
+    root: str | Path,
+    portia_dir: str | Path = catalog.DEFAULT_DIR,
+    *,
+    sources: dict | None = None,
+) -> Fingerprints:
+    """What every table in the project looks like **now**: sources and models.
+
+    One answer for everything that records what it was measured against: a
+    graph measurement (`knowledge.build`) and a finding (`findings.fingerprints`).
+
+    - **A local source is its file as it is now**: size and mtime off a stat
+      (`catalog.file_facts`), never the catalog's record of them. It was the
+      record, so a file edited and not re-indexed read as unchanged, and a
+      measurement taken against the edited file was stamped with the old
+      fingerprint (2026-10-15). A file that is gone is :data:`GONE`.
+    - **A warehouse source is its catalog facts** (`catalog.STALENESS_FACTS`),
+      which its entry keeps under the same keys; asking the warehouse is
+      `catalog.freshness`'s job, with a connection this does not open.
+    - **A model is its spec and everything it reads**: the spec's own
+      fingerprint, folded with the fingerprints of its sources and of the
+      models it reads. What a model holds is a function of both, so a model
+      rebuilt over a changed file has moved even though its spec has not.
+      ``None`` (*cannot tell*) when anything it reads cannot tell.
+
+    Stat calls and spec files only; each catalog entry is read once per
+    process and then remembered against its own stat (`catalog.marks`).
+    ``sources`` is the catalog's source entries, for a caller that holds them
+    and must not read the catalog at all: the window, in a render pass.
+    """
+    root = Path(root)
+    files: dict[str, str | None] = {}
+    out: dict[str, str | None] = {}
+    by_ref: dict[str, str | None] = {}
+    names = catalog.source_names(portia_dir) if sources is None else list(sources)
+    for name in names:
+        marks = (catalog.marks(name, portia_dir) if sources is None else sources[name]) or {}
+        found = _source_fingerprint(root, marks)
+        files[name] = found
+        ref = marks.get("source")
+        if ref is not None:
+            by_ref[str(ref)] = found
+    models = spec.discover_specs(root)
+    for name in spec.run_order(models, base_dir=root):
+        doc = spec.load_spec(root / models[name])
+        reads: list[str | None] = []
+        for ref in (doc.get("sources") or {}).values():
+            key = str(ref["table"]) if isinstance(ref, dict) else str(ref)
+            reads.append(by_ref.get(key))
+        upstream = {r for step in doc.get("steps") or [] for r in spec.step_inputs(step)}
+        reads += [out.get(model) for model in sorted(upstream & set(models) - {name})]
+        if any(found is None for found in reads):
+            out[name] = None
+            continue
+        material = "|".join([fingerprint(doc), *sorted(str(found) for found in reads)])
+        out[name] = hashlib.sha256(material.encode()).hexdigest()[:FINGERPRINT_CHARS]
+    return Fingerprints(files, out)
+
+
+def _source_fingerprint(root: Path, marks: dict) -> str | None:
+    """One source's fingerprint now, from what its entry says it is."""
+    indexed = marks.get("indexed") or {}
+    if marks.get(catalog.REMOTE):
+        size, mtime = (indexed.get(fact) for fact in catalog.STALENESS_FACTS)
+        return None if size is None or mtime is None else f"{size}:{mtime}"
+    path = marks.get("source")
+    if not path or isinstance(path, dict):
+        return None
+    target = root / str(path)
+    if not target.exists():
+        return GONE
+    now = catalog.file_facts(target)
+    return f"{now['size']}:{now['mtime']}"
+
+
 def model_name(spec_path: str | Path) -> str:
     """The table a spec builds: its filename. One spec, one table, one name."""
     return Path(spec_path).stem

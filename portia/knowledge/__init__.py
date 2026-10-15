@@ -28,7 +28,7 @@ from pathlib import Path
 from portia.knowledge.build import BuildResult, build_graph
 from portia.knowledge.schema import Edge, Graph, Node
 
-__all__ = ["BuildResult", "Edge", "Graph", "Node", "build_graph", "sync"]
+__all__ = ["BuildResult", "Edge", "Graph", "Node", "build_graph", "refresh_fingerprints", "sync"]
 
 
 def sync(
@@ -57,3 +57,21 @@ def sync(
     with store.session() as live:
         store.write(result.graph, live)
     return result
+
+
+def refresh_fingerprints(
+    root: str | Path, session: object, *, portia_dir: str | Path | None = None
+) -> None:
+    """Set every table's fingerprint in the store to what it is now, before a read.
+
+    What makes a read's ``stale`` true of the files as they are, not as they
+    were at the last rebuild (`store.fingerprint_writes`). Stat calls, the
+    specs and one write; no column is touched.
+    """
+    from portia import catalog, pipeline
+    from portia.knowledge import store
+    from portia.knowledge.schema import MODEL, SOURCE, project_id
+
+    root = Path(root)
+    now = pipeline.table_fingerprints(root, portia_dir or root / catalog.DEFAULT_DIR)
+    store.write_fingerprints({SOURCE: now.sources, MODEL: now.models}, session, project_id(root))

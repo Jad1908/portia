@@ -73,7 +73,7 @@ Identified by **`path`**.
 | `summary` | string | `set_interpretation` — **the agent's prose read** | nobody has read it yet (see below) |
 | `size` | int | `catalog.STALENESS_FACTS` | never indexed |
 | `mtime` | float | `catalog.STALENESS_FACTS` | never indexed |
-| `fingerprint` | string | `"{size}:{mtime}"` — the two above, comparable in one go | never indexed |
+| `fingerprint` | string | `pipeline.table_fingerprints` — `"{size}:{mtime}"` of the file **as it is now**, `"gone"` when it is gone; a warehouse table's catalog facts | never indexed |
 | `_build` | string | portia's bookkeeping; see *Rebuilds* | never |
 
 **`summary` is absent unless a person or the copilot actually wrote one.** `catalog._auto_summary`
@@ -94,7 +94,7 @@ unique across a project.
 |---|---|---|
 | `name` | string | the spec's filename stem |
 | `spec` | string | the spec's path, relative to the project root |
-| `fingerprint` | string | `pipeline.fingerprint(doc)` — the digest of the parts that decide its SQL |
+| `fingerprint` | string | `pipeline.table_fingerprints` — a digest of its spec (`pipeline.fingerprint`) and the fingerprints of every table it reads; absent when one of them cannot tell |
 | `lineage_unread` | string | `knowledge.build` — why its column lineage could not be read, as a code from `build.UNREAD_CODES`; absent when it was read |
 | `lineage_unread_step` | string | `knowledge.build` — the step the lineage stopped at; absent with `lineage_unread`, and when the spec has no steps |
 | `_build` | string | see *Rebuilds* |
@@ -284,6 +284,13 @@ MATCH (a)-[r:OVERLAPS]->(b)
 RETURN a.name, b.name, r.n_shared_values,
        r.left_fingerprint <> ta.fingerprint OR r.right_fingerprint <> tb.fingerprint AS stale
 ```
+
+**The tables' fingerprints are what they are now.** A source's is its file's size and mtime off a
+stat, not the catalog's record of them, so a file edited and never re-indexed has moved. A model's
+folds its spec with what it reads, so a model rebuilt over a changed file has moved though its spec
+has not. `graph_lookup` sets every table's fingerprint to its current value before it reads
+(`store.fingerprint_writes`), so `stale` is about the files as they are, not as they were at the last
+rebuild.
 
 **Marked, never deleted.** A deleted edge is indistinguishable from one nobody ever measured, which
 is the ambiguity the whole design exists to remove. `graph_lookup` returns `stale` on every overlap

@@ -331,6 +331,42 @@ def write_measured(edges: list[Edge], session: Any, project: str) -> int:
     return written
 
 
+def fingerprint_writes(
+    fingerprints: dict[str, dict[str, str | None]], project: str
+) -> list[tuple[str, dict]]:
+    """Each table's fingerprint as it is now, set on its node and nothing else.
+
+    ``fingerprints`` is by label, then by the table's **name** (a Source's
+    `name`, a Model's key), as `pipeline.table_fingerprints` answers. A read
+    compares a measurement's recorded fingerprints with its two tables' in
+    Cypher (`query._STALE`), so the tables' have to be current when the
+    question is asked: a file edited since the last rebuild used to leave every
+    measurement on it reading as current (2026-10-15). Cheaper than the
+    rebuild that would also have done it, which rewrites every column.
+    """
+    writes = []
+    for label, by_name in fingerprints.items():
+        rows = [{"name": name, "fingerprint": found} for name, found in by_name.items()]
+        if rows:
+            writes.append(
+                (
+                    f"UNWIND $rows AS row MATCH (n:{label} {{{PROJECT}: $project, name: row.name}}) "
+                    "SET n.fingerprint = row.fingerprint",
+                    {"rows": rows, "project": project},
+                )
+            )
+    return writes
+
+
+def write_fingerprints(
+    fingerprints: dict[str, dict[str, str | None]], session: Any, project: str
+) -> None:
+    """Run :func:`fingerprint_writes`."""
+    with _writing():
+        for statement, params in fingerprint_writes(fingerprints, project):
+            session.run(statement, **params)
+
+
 def prune_writes(build: str, project: str) -> list[tuple[str, dict]]:
     """What this build did not restate, and is therefore no longer true.
 

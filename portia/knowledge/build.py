@@ -79,7 +79,6 @@ from portia.knowledge.schema import (
     column_key,
     project_id,
     shape_facts,
-    source_fingerprint,
 )
 from portia.ops.join import join_columns
 
@@ -154,20 +153,23 @@ def build_graph(root: str | Path = ".", *, portia_dir: str | Path | None = None)
     graph = Graph(project=project_id(root))
     result = BuildResult(graph)
 
-    source_columns = _add_catalog(graph, catalog.load_catalog(portia_dir))
-    _add_models(graph, result, root, source_columns, catalog.load_models(portia_dir))
+    now = pipeline.table_fingerprints(root, portia_dir)
+    source_columns = _add_catalog(graph, catalog.load_catalog(portia_dir), now)
+    _add_models(graph, result, root, source_columns, catalog.load_models(portia_dir), now)
     return result
 
 
 # --- the catalog half -------------------------------------------------------
 
 
-def _add_catalog(graph: Graph, data: dict) -> dict[str, list[str]]:
+def _add_catalog(graph: Graph, data: dict, now: pipeline.Fingerprints) -> dict[str, list[str]]:
     """Sources, their columns and their groups. Returns each source's columns by path.
 
-    The Source node carries the file fingerprint the catalog already records
-    (`catalog.STALENESS_FACTS`), because §4.5 needs a measurement to be able to
-    say what it was taken against, and this is where that number comes from.
+    The Source node carries the fingerprint of its file **as it is now**
+    (``now``, `pipeline.table_fingerprints`), because §4.5 needs a measurement
+    to say what it was taken against, and a measurement is taken against the
+    file, not against the catalog's record of it. The catalog's own two facts
+    stay beside it as what was indexed.
     """
     paths: dict[str, str] = {}
     columns: dict[str, list[str]] = {}
@@ -190,10 +192,10 @@ def _add_catalog(graph: Graph, data: dict) -> dict[str, list[str]]:
             # nobody has read this source, which is a fact worth being able to
             # see. The facts it restated are on the columns, measured.
             summary=entry.get("summary") if catalog.is_interpreted(entry) else None,
-            # The same two numbers, also as one comparable string: a measured
-            # edge records what it was taken against, and comparing that in
-            # Cypher wants one property rather than two (§4.5).
-            **{FINGERPRINT: source_fingerprint(**facts)},
+            # The file now, as one comparable string: a measured edge records
+            # what it was taken against, and comparing that in Cypher wants one
+            # property rather than two (§4.5).
+            **{FINGERPRINT: now.sources.get(name)},
             **facts,
         )
         paths[name] = path
@@ -256,7 +258,12 @@ def _add_column(
 
 
 def _add_models(
-    graph: Graph, result: BuildResult, root: Path, source_columns, measured: dict[str, dict]
+    graph: Graph,
+    result: BuildResult,
+    root: Path,
+    source_columns,
+    measured: dict[str, dict],
+    now: pipeline.Fingerprints,
 ) -> None:
     """Every spec as a Model, in dependency order so an upstream's columns exist.
 
@@ -280,8 +287,9 @@ def _add_models(
         # measured against it (§4.5). The pipeline's own vocabulary is not here:
         # `layer` (staging/intermediate/mart) groups and orders the project
         # canvas and says nothing about what a table *is to* another table,
-        # which is the only question this graph answers.
-        node = graph.add_node(MODEL, name, spec=str(models[name]), fingerprint=fingerprint)
+        # which is the only question this graph answers. The fingerprint is the
+        # table's, not the spec's: the spec and everything it reads (``now``).
+        node = graph.add_node(MODEL, name, spec=str(models[name]), fingerprint=now.models.get(name))
         entry = measured.get(name) or {}
         outputs[name] = _add_model(
             graph,

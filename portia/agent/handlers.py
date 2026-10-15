@@ -696,9 +696,13 @@ def graph_lookup(
     ]
     if len(asked) > 1:
         raise ValueError(prompts.error("graph_one_question", given=_and(asked)))
-    project = knowledge_schema.project_id(_project_root(portia_dir))
+    root = _project_root(portia_dir)
+    project = knowledge_schema.project_id(root)
     try:
         with store.session() as live:
+            # So a measurement on a file edited since the last rebuild reads
+            # stale, as it is (2026-10-15).
+            knowledge.refresh_fingerprints(root, live, portia_dir=portia_dir)
             answer = query.lookup(live, table, column, neighbour=neighbour, to=to, project=project)
     except store.GraphUnavailable as exc:
         # Reframed rather than re-raised: what the model needs at this moment is

@@ -7870,15 +7870,22 @@ def test_a_finding_about_one_table_draws_nothing(tmp_path):
 def test_a_stale_finding_is_drawn_and_says_which_table_moved(tmp_path):
     """Marked, never left out (`KNOWLEDGE_GRAPH.md` §4.5): a finding whose data
     moved is still evidence somebody looked."""
+    import os
+
     _finding_file(
         tmp_path,
         "moved",
         ["orders", "regions"],
         fingerprints={"orders": "10:1.0", "regions": "20:2.0"},
     )
+    # The files as they are now are what a finding is compared with.
+    for name, size, mtime in (("orders", 11, 3.0), ("regions", 20, 2.0)):
+        path = tmp_path / f"{name}.csv"
+        path.write_bytes(b"x" * size)
+        os.utime(path, (mtime, mtime))
     sources = {
-        "orders": {"indexed": {"size": 11, "mtime": 3.0}},
-        "regions": {"indexed": {"size": 20, "mtime": 2.0}},
+        "orders": {"source": "orders.csv", "indexed": {"size": 10, "mtime": 1.0}},
+        "regions": {"source": "regions.csv", "indexed": {"size": 20, "mtime": 2.0}},
     }
     [line] = _finding_lines(tmp_path, _picture()["nodes"], sources)
     assert line["properties"]["stale"] == "measured before orders changed"
