@@ -71,6 +71,11 @@ DEFAULT_USER = "neo4j"
 #: as something about the data.
 BUILD_PROPERTY = "_build"
 
+#: One node per project that a rebuild locks before it writes, so two rebuilds
+#: of one project take turns (:func:`write`). Keyed by ``lock`` rather than by
+#: `PROJECT`, so nothing that reads a project's nodes ever meets it.
+LOCK_LABEL = "PortiaLock"
+
 
 def settings() -> dict[str, str]:
     """Connection details, from the environment. One place, so the CLI and any
@@ -167,13 +172,19 @@ def constraint_statements() -> list[str]:
     no licence the project doesn't already have.
     """
     return [
-        statement
-        for label in LABELS
-        for statement in (
-            _legacy_constraint(label),
-            f"CREATE CONSTRAINT {label.lower()}_project_key IF NOT EXISTS "
-            f"FOR (n:{label}) REQUIRE (n.{PROJECT}, n.{KEY_PROPERTY[label]}) IS UNIQUE",
-        )
+        *(
+            statement
+            for label in LABELS
+            for statement in (
+                _legacy_constraint(label),
+                f"CREATE CONSTRAINT {label.lower()}_project_key IF NOT EXISTS "
+                f"FOR (n:{label}) REQUIRE (n.{PROJECT}, n.{KEY_PROPERTY[label]}) IS UNIQUE",
+            )
+        ),
+        # Without it two first rebuilds could each create a lock node, and
+        # each hold its own (:func:`lock_statement`).
+        f"CREATE CONSTRAINT portia_lock IF NOT EXISTS "
+        f"FOR (n:{LOCK_LABEL}) REQUIRE n.lock IS UNIQUE",
     ]
 
 
@@ -367,6 +378,19 @@ def write_fingerprints(
             session.run(statement, **params)
 
 
+def lock_statement(project: str) -> tuple[str, dict]:
+    """Take the project's write lock, inside a transaction, until it commits.
+
+    Setting a property on a node takes Neo4j's write lock on it and holds it to
+    the end of the transaction, so a second rebuild of the same project waits
+    here for the first to commit, and then sees what it wrote.
+    """
+    return (
+        f"MERGE (l:{LOCK_LABEL} {{lock: $project}}) SET l.held = timestamp()",
+        {"project": project},
+    )
+
+
 def prune_writes(build: str, project: str) -> list[tuple[str, dict]]:
     """What this build did not restate, and is therefore no longer true.
 
@@ -409,7 +433,7 @@ def forget_unscoped_writes() -> list[tuple[str, dict]]:
     path that runs on every index.
     """
     return [
-        (f"MATCH (n) WHERE n.{PROJECT} IS NULL DETACH DELETE n", {}),
+        (f"MATCH (n) WHERE n.{PROJECT} IS NULL AND NOT n:{LOCK_LABEL} DETACH DELETE n", {}),
         (f"MATCH ()-[r]->() WHERE r.{PROJECT} IS NULL DELETE r", {}),
     ]
 
@@ -467,16 +491,28 @@ def write(graph: Graph, session: Any, *, build: str | None = None) -> str:
     if not graph.project:
         raise ValueError("a graph must name its project before it can be stored")
     with _writing():
+        # Schema statements cannot share a transaction with data writes.
         for statement in constraint_statements():
             session.run(statement)
         if not graph.nodes:
             return build
-        for statement, params in [
-            *node_writes(graph, build),
-            *edge_writes(graph, build),
-            *prune_writes(build, graph.project),
-        ]:
-            session.run(statement, **params)
+        # **One transaction, behind the project's lock** (2026-10-15). Each
+        # statement used to commit on its own, so two rebuilds of one project
+        # could interleave: A writes, B restamps everything, A's prune deletes
+        # B's edges. The window's Refresh, a recorded step and a measurement
+        # each rebuild, from threads and processes nothing else orders.
+        tx = session.begin_transaction()
+        try:
+            for statement, params in [
+                lock_statement(graph.project),
+                *node_writes(graph, build),
+                *edge_writes(graph, build),
+                *prune_writes(build, graph.project),
+            ]:
+                tx.run(statement, **params)
+            tx.commit()
+        finally:
+            tx.close()
     return build
 
 

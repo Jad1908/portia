@@ -304,6 +304,11 @@ Every node and every **structural** edge carries `_build`, the id of the write t
 `store.write` merges the new graph in, then deletes structural edges carrying an older stamp — they
 restate files, and the files no longer say them.
 
+**A rebuild is one transaction, behind its project's lock.** It first sets a property on a
+`PortiaLock` node keyed by the project (`lock`, never `project`, so no read of a project's nodes
+meets it), which holds Neo4j's write lock until the rebuild commits. Two rebuilds of one project
+take turns; before this, one rebuild's prune could delete the edges another had just written.
+
 **`OVERLAPS` is never touched.** It cost a query, no file restates it, and Neo4j is a store rather
 than a cache. A `Column` that still carries one survives even after the catalog stops listing it, so
 a measurement never silently loses the thing it was about.

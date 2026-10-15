@@ -136,6 +136,16 @@ class _Recording:
         self.statements.append(statement)
         return [{"written": len(params.get("rows", []))}]
 
+    # A rebuild is one transaction (`store.write`); this one is the session itself.
+    def begin_transaction(self):
+        return self
+
+    def commit(self):
+        self.statements.append("COMMIT")
+
+    def close(self):
+        pass
+
 
 def test_every_write_is_counted_once_it_is_over(graph):
     """What lets the window keep a picture of the graph between renders
@@ -222,7 +232,9 @@ def _measure(session, project: str, left: str, right: str) -> None:
 
 
 def _counts(session) -> dict:
-    rows = session.run(f"MATCH (n) RETURN n.{PROJECT} AS project, count(n) AS n")
+    rows = session.run(
+        f"MATCH (n) WHERE NOT n:{store.LOCK_LABEL} RETURN n.{PROJECT} AS project, count(n) AS n"
+    )
     return {r["project"]: r["n"] for r in rows}
 
 
@@ -338,3 +350,45 @@ def test_an_edge_from_before_origin_existed_is_replaced_as_a_comparison(neo4j_se
     _measure(session, PROJECT_A, "order_id", "customer_id")  # no origin, as old edges have
     store.write_measured([_pair("order_id", "customer_id", "measured", "now")], session, PROJECT_A)
     assert _overlaps(session) == [{"start": "order_id", "origin": "measured", "reason": "now"}]
+
+
+def test_a_rebuild_takes_the_projects_lock_first_and_commits_once(graph):
+    session = _Recording()
+    store.write(graph, session)
+    data = session.statements[len(store.constraint_statements()) :]
+    assert data[0].startswith(f"MERGE (l:{store.LOCK_LABEL}")
+    assert data[-1] == "COMMIT" and data.count("COMMIT") == 1
+
+
+def test_two_rebuilds_of_one_project_at_once_leave_its_structure_whole(neo4j_session, graph):
+    """Each statement used to commit on its own, so one rebuild's prune could delete the
+    edges another had just stamped. Behind the lock they take turns."""
+    import threading
+
+    from portia.knowledge.schema import Ref
+
+    wide = Graph(project=PROJECT_A)
+    table = wide.add_node(SOURCE, "data/orders.csv", name="orders")
+    for i in range(300):
+        name = f"c{i}"
+        wide.add_edge(HAS_COLUMN, table, wide.add_node(*_column(name), name=name))
+    assert Ref(SOURCE, "data/orders.csv") == table
+
+    errors: list[BaseException] = []
+
+    def rebuild() -> None:
+        try:
+            with store.session() as live:
+                for _ in range(3):
+                    store.write(wide, live)
+        except BaseException as exc:  # noqa: BLE001 - reported by the assertion below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=rebuild) for _ in range(3)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert errors == []
+    n = neo4j_session.run(f"MATCH ()-[r:{HAS_COLUMN}]->() RETURN count(r) AS n").single()["n"]
+    assert n == 300
