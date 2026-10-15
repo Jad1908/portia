@@ -53,6 +53,7 @@ from uuid import uuid4
 
 from portia.knowledge.measure import ORIGIN, ORIGIN_MEASURED
 from portia.knowledge.schema import (
+    JOINED,
     KEY_PROPERTY,
     LABELS,
     PROJECT,
@@ -300,6 +301,8 @@ def measured_writes(edges: list[Edge], project: str) -> list[tuple[str, dict]]:
                 "start": e.start.key,
                 "end": e.end.key,
                 "origin": e.properties.get(ORIGIN) or ORIGIN_MEASURED,
+                "lcols": e.properties.get("left_columns"),
+                "rcols": e.properties.get("right_columns"),
                 "properties": {**e.properties, PROJECT: project},
             }
             for e in grouped
@@ -311,6 +314,7 @@ def measured_writes(edges: list[Edge], project: str) -> list[tuple[str, dict]]:
                 f"MATCH (b:{end_label} {{{PROJECT}: $project, {end_key}: row.end}}) "
                 f"OPTIONAL MATCH (a)-[old:{kind}]-(b) "
                 f"WHERE coalesce(old.{ORIGIN}, '{ORIGIN_MEASURED}') = row.origin "
+                f"{_SAME_KEYS if kind == JOINED else ''}"
                 "WITH a, b, row, collect(old) AS replaced "
                 "FOREACH (o IN replaced | DELETE o) "
                 f"CREATE (a)-[r:{kind}]->(b) SET r = row.properties "
@@ -322,6 +326,17 @@ def measured_writes(edges: list[Edge], project: str) -> list[tuple[str, dict]]:
             )
         )
     return writes
+
+
+#: A join record is the same join only on the same key columns, matched side to
+#: side whichever way round it was written: tables joined on ``id`` and on
+#: ``(site_id, hour)`` are two joins.
+_SAME_KEYS = (
+    "AND ((startNode(old) = a AND old.left_columns = row.lcols "
+    "AND old.right_columns = row.rcols) "
+    "OR (startNode(old) = b AND old.left_columns = row.rcols "
+    "AND old.right_columns = row.lcols)) "
+)
 
 
 def write_measured(edges: list[Edge], session: Any, project: str) -> int:

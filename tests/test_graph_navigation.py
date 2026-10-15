@@ -53,16 +53,20 @@ def test_a_stored_measurement_is_current_only_when_both_fingerprints_still_match
     assert measure.still_current({"left_fingerprint": "1:2"}, "1:2", "3:4") is None
 
 
-def test_a_join_report_is_the_same_four_numbers_under_other_names():
+def test_a_join_report_is_the_same_numbers_under_other_names():
     report = {
         "key_dtype_match": False,
         "overlap": {"n_shared_keys": 3, "left_coverage": 0.5, "right_coverage": 0.25},
+        "left": {"max_key_multiplicity": 1},
+        "right": {"max_key_multiplicity": 19},
     }
     assert measure.from_join_report(report) == {
         "n_shared_values": 3,
         "left_coverage": 0.5,
         "right_coverage": 0.25,
         "comparable_types": False,
+        "left_repeats": 1,
+        "right_repeats": 19,
     }
 
 

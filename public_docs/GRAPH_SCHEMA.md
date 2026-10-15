@@ -236,7 +236,12 @@ not be read and why — per model when the whole spec stalled, per column when o
 
 | kind | from → to | properties |
 |---|---|---|
-| `OVERLAPS` | `Column` → `Column` | `n_shared_values`, `left_coverage`, `right_coverage`, `comparable_types`, `asked_because`, `measured_at`, `left_fingerprint`, `right_fingerprint`, `origin` |
+| `OVERLAPS` | `Column` → `Column` | `n_shared_values`, `left_coverage`, `right_coverage`, `comparable_types`, `left_repeats`, `right_repeats`, `asked_because`, `measured_at`, `left_fingerprint`, `right_fingerprint`, `origin` |
+| `JOINED` | `Source`/`Model` → `Source`/`Model` | `left_columns`, `right_columns`, `relationship`, `n_shared_keys`, `left_coverage`, `right_coverage`, `left_repeats`, `right_repeats`, `comparable_types`, `asked_because`, `origin`, `found_in`, `measured_at`, `left_fingerprint`, `right_fingerprint` |
+
+**Two kinds of record, told apart by what made them.** A *comparison* (`OVERLAPS`) says two columns
+share values; the copilot asked because it thought they might be the same thing. A *join*
+(`JOINED`) is a join that was actually done, between two tables, on one or more columns a side.
 
 Written by `measure_overlaps`, which the copilot calls with pairs **it** chose, and since
 2026-10-13 by `join_findings`, which keeps the key measurement of a join it checked (one column
@@ -248,6 +253,7 @@ each side, between two graph tables). Both require the copilot's reason.
 | `left_coverage` | share of the **start** node's rows whose value exists on the other side |
 | `right_coverage` | share of the **end** node's rows whose value exists on the other side |
 | `comparable_types` | `false` means the two columns are different types and can never match, whatever the values say — a different problem from a genuine zero |
+| `left_repeats` / `right_repeats` | the most times one value appears on that side; 1 means every value appears once. What tells a key from a shared axis: two hourly tables cover each other's timestamps fully, and only the repeats say one holds each hour once per site. Absent on an edge measured before 2026-10-15 |
 | `asked_because` | **the agent's own sentence**, saying why it thought the pair was worth comparing |
 | `measured_at` | when |
 | `left_fingerprint` / `right_fingerprint` | what each end looked like at the time — see *Staleness* |
@@ -260,6 +266,29 @@ in orders, and both are true.
 **One edge per pair of columns per `origin`.** Measuring a pair again with the same tool replaces
 that tool's edge between the two columns, whichever way round either was taken; a measurement by the
 other tool stays beside it, so a join check never erases a comparison the copilot chose.
+
+#### `JOINED` — a join that was done
+
+Between two **tables**, because a key of two columns is no pair of single columns. Written when a
+join check runs (`join_findings`), when a step that joins two tables is recorded (`record_step`),
+and when a finding is kept whose queries join two tables (`record_finding`). Each is a join the
+copilot chose to do; code never chooses one. Measured with `checks.join.join_report`.
+
+| property | means |
+|---|---|
+| `left_columns` / `right_columns` | the key columns on each side, in the order they are matched |
+| `relationship` | `1:1`, `1:many`, `many:1` or `many:many`, from whether each side is unique on its key |
+| `n_shared_keys` | how many distinct keys appear on both sides |
+| `left_coverage` / `right_coverage` | share of that side's rows whose key is found on the other |
+| `left_repeats` / `right_repeats` | the most rows one key has on that side; 1 means the side is one row per key |
+| `comparable_types` | `false` when the keys' types can never match |
+| `asked_because` | **the copilot's own words** for why it joined: a join check's reason, a step's rationale, a finding's question |
+| `origin` | `join_check`, `step` or `finding` |
+| `found_in` | the `<spec>#<step>` that joined, or the finding file whose query did; absent for a join check |
+| `measured_at`, `left_fingerprint`, `right_fingerprint` | as on `OVERLAPS` |
+
+**One record per pair of tables, per key, per `origin`.** The same tables joined on another key are
+another join; the same join made again the same way, from either end, replaces the record before.
 
 **A measured zero is written, and it does not mean "unrelated".** `France` against `FRA` shares no
 values and the zero is correct; those two columns are the same thing after a mapping. That is why

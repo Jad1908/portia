@@ -494,6 +494,10 @@ def column_overlap(left: Table, left_column: str, right: Table, right_column: st
         # A false here is why a zero can be meaningless rather than informative:
         # text against a number never matches, whatever the values say.
         "comparable_types": comparable,
+        # The most times one value appears on each side: 1 is a unique column.
+        # What tells a key from a shared axis, which coverage alone cannot.
+        "left_repeats": L["max_mult"],
+        "right_repeats": R["max_mult"],
     }
 
 
