@@ -39,10 +39,10 @@ def sync(
 ) -> BuildResult:
     """Read the project and put its structural half in the store, in one call.
 
-    The write moment §5 asks for, in the one shape that keeps the two halves in
-    step: a measurement can only attach to Column nodes that exist, and the
-    structural half is free to recompute, so refreshing it before measuring is
-    cheaper than working out what changed.
+    The write moment §5 asks for: after indexing, after a recorded step, on
+    Refresh. A measurement no longer calls it first; it rebuilds only when a
+    column it measured is not in the graph yet (`handlers._write_attached`),
+    because on a wide project the rewrite is every column of every table.
 
     Raises `store.GraphUnavailable` if the database is down. **Callers on the
     indexing path must catch that and carry on** — an index that fails because a

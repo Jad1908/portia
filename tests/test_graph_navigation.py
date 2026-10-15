@@ -785,3 +785,33 @@ def test_a_graph_read_with_no_write_running_does_not_wait(monkeypatch):
     started = time.monotonic()
     asyncio.run(tools.graph_lookup.handler({"table": "a"}))
     assert time.monotonic() - started < tools.GRAPH_WRITE_POLL_S * 5
+
+
+# --- a measurement rewrites the structure only when it must (2026-10-15) -------------------
+
+
+def test_a_measurement_that_attaches_rebuilds_nothing(sales, recorded, monkeypatch):
+    """Every measurement used to rewrite the whole project's structure first."""
+    monkeypatch.setattr(query, "stored_overlaps", lambda live, keys, *, project: {})
+    handlers.measure_overlaps(_pairs(("customer_id", "customer_id")), sales)
+    handlers.join_findings(
+        "orders", "customers", keys=["customer_id"], portia_dir=sales, reason="r"
+    )
+    assert recorded["writes"] == 0
+    assert len(recorded["edges"]) == 2
+
+
+def test_a_measurement_on_a_table_new_to_the_graph_rebuilds_once_and_attaches(
+    sales, recorded, monkeypatch
+):
+    tries: list[int] = []
+
+    def write_measured(edges, live, project):
+        tries.append(len(edges))
+        return 0 if len(tries) == 1 else len(edges)
+
+    monkeypatch.setattr(store, "write_measured", write_measured)
+    monkeypatch.setattr(query, "stored_overlaps", lambda live, keys, *, project: {})
+    answer = handlers.measure_overlaps(_pairs(("customer_id", "customer_id")), sales)
+    assert recorded["writes"] == 1 and tries == [1, 1]
+    assert answer["stored"] is True
