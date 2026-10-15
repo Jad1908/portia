@@ -8901,3 +8901,16 @@ def test_the_indexing_tab_starts_nothing_while_a_run_holds_the_stop(tmp_path, mo
     finally:
         held.close()
     assert app.indexing_stop is held and app.indexing_status == ""
+
+
+def test_a_join_is_drawn_as_its_key_with_no_arrow_and_the_hover_hides_the_bookkeeping():
+    """A join record between two tables (2026-10-15) is a solid line labelled with its
+    key, about both tables at once; the hover card showed the project's absolute path."""
+    import re
+
+    js = _knowledge_js()
+    assert re.search(r"const UNDIRECTED = \[.*JOINED.*\];", js)
+    assert "function edgeLabel" in js and "left_columns" in js
+    hidden = re.search(r"const HIDDEN = \[(.*?)\];", js, re.S).group(1)
+    for key in ("project", "fingerprint", "left_fingerprint", "mtime"):
+        assert f'"{key}"' in hidden
