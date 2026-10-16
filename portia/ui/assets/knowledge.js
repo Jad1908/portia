@@ -53,11 +53,13 @@ window.portiaKnowledge = (function () {
   const MORE = "More";
   const FINDING = "FINDING";
 
-  // The dash and the arrowhead say which kind an edge is. An overlap and a
-  // finding are each about two things at once and neither points, so neither
-  // has an arrow, and they are told apart by their dash.
+  // The dash and the arrowhead say which kind an edge is. An overlap, a join
+  // and a finding are each about two things at once and none points, so none
+  // has an arrow: a join is a solid line labelled with its key columns, an
+  // overlap a dash, a finding a dot.
+  const JOINED = "JOINED";
   const EDGE_DASH = { OVERLAPS: [6, 4], [FINDING]: [1, 4] };
-  const UNDIRECTED = ["OVERLAPS", FINDING];
+  const UNDIRECTED = ["OVERLAPS", JOINED, FINDING];
 
   // The event a press on a `More` node sends, at page level (`ui/app.py`).
   const MORE_EVENT = "portia:more-columns";
@@ -181,13 +183,38 @@ window.portiaKnowledge = (function () {
     };
   }
 
+  // What an edge says on its line: how many column pairs were compared between
+  // two tables, or the key a join was made on, as `site_id, hour` or `a = b`.
+  function edgeLabel(e) {
+    const p = e.properties || {};
+    if (e.kind === "OVERLAPS") return String(p.n_measured_pairs || "");
+    if (e.kind !== JOINED) return "";
+    const left = p.left_columns || [];
+    const right = p.right_columns || [];
+    return left.map((c, i) => (c === right[i] ? c : `${c} = ${right[i]}`)).join(", ");
+  }
+
   function label(node) {
     return node.kind === "Column" ? node.label.split("::").pop() : node.label;
   }
 
   // Properties that are portia's bookkeeping or are already on the node's own
-  // label, so repeating them in a tooltip is noise.
-  const HIDDEN = ["_build", "name", "key", "table", "path"];
+  // label, so repeating them in a tooltip is noise. `project` is the project's
+  // absolute path, with the user's home in it, and the fingerprints are opaque
+  // strings nobody can act on (2026-10-15).
+  const HIDDEN = [
+    "_build",
+    "name",
+    "key",
+    "table",
+    "path",
+    "project",
+    "fingerprint",
+    "left_fingerprint",
+    "right_fingerprint",
+    "size",
+    "mtime",
+  ];
 
   // A tooltip is a glance, not a document. Long values — a prose summary, an
   // `asked_because` sentence — are wrapped rather than run off the right edge of
@@ -340,14 +367,14 @@ window.portiaKnowledge = (function () {
           from: e.from,
           to: e.to,
           title: e.kind === FINDING ? findingTip(e) : tooltip(e),
-          label: e.kind === "OVERLAPS" ? String(e.properties.n_measured_pairs || "") : "",
+          label: edgeLabel(e),
           dashes: EDGE_DASH[e.kind] || false,
           arrows: UNDIRECTED.includes(e.kind) ? "" : "to",
         };
-        if (e.kind === FINDING) {
-          // Two findings about one pair of tables are two lines, bowed apart so
-          // each can be hovered. The bow is the order they came in and says
-          // nothing else.
+        if (e.kind === FINDING || e.kind === JOINED) {
+          // Two findings, or two joins, between one pair of tables are two
+          // lines, bowed apart so each can be hovered. The bow is the order
+          // they came in and says nothing else.
           const pair = [e.from, e.to].sort().join("|");
           between[pair] = (between[pair] || 0) + 1;
           edge.smooth = { type: "curvedCW", roundness: 0.15 * between[pair] };

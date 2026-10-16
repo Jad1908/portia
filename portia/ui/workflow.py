@@ -2171,7 +2171,8 @@ def _knowledge_inspector() -> None:
     nothing in the browser holds a database password.
 
     Two views, and the default is the legible one: tables, groups, what reads
-    what, and one edge per pair of tables that share a measured overlap. Columns
+    what, every join made between two tables (labelled with its key), and one
+    edge per pair of tables whose columns were compared. Columns
     are a toggle because at a real project they are several hundred nodes — worth
     seeing, and not worth seeing first.
 
