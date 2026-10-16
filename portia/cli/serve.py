@@ -223,28 +223,23 @@ def build(session: Session) -> Any:
     return server
 
 
-#: The argument every tool takes for where the catalog is.
+#: The argument every tool takes for where the catalog is (`agent/tools.CATALOG_ARG`).
 _CATALOG_ARG = "portia_dir"
 
 
 def _without_the_catalog_argument(schema: Any) -> Any:
-    """A tool's input schema with ``portia_dir`` taken out of what the host is offered.
+    """`agent/tools.without_catalog_argument`, imported late because `tools` loads the SDK.
 
-    **Found by the first real drive, 2026-09-19.** Every tool takes an optional
-    ``portia_dir`` and the app's copilot has never filled it. A host's model
-    knows its working directory, and Haiku passed ``"portia_dir": "."`` on every
-    call, helpfully and wrongly: the catalog was read from the project root,
-    where there is none, the brief said *nothing is indexed* about a project
-    with two sources, and the model went to the shell to index them again. For
-    this process the catalog's place is a fact settled at start-up, so it is not
-    a question a host is asked, and `Session.wrap` overwrites it if it is
-    answered anyway.
+    **Found by the first real drive, 2026-09-19**, in this process first: a host's
+    model knows its working directory, and Haiku passed ``"portia_dir": "."`` on
+    every call, was told nothing was indexed, and went to the shell to index again.
+    The app's copilot did the same a month later, so the taking-out moved to the
+    tools module and every process gets it; `Session.wrap` still overwrites the
+    argument if a host answers it anyway.
     """
-    if not isinstance(schema, dict) or _CATALOG_ARG not in (schema.get("properties") or {}):
-        return schema
-    properties = {k: v for k, v in schema["properties"].items() if k != _CATALOG_ARG}
-    required = [k for k in schema.get("required") or [] if k != _CATALOG_ARG]
-    return {**schema, "properties": properties, "required": required}
+    from portia.agent import tools
+
+    return tools.without_catalog_argument(schema)
 
 
 #: The one tool a host is offered differently from the app's copilot.

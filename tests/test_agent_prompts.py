@@ -94,12 +94,13 @@ def test_the_step_vocabulary_in_the_prompt_is_generated_from_the_ops():
     from portia.agent import handlers
     from portia.ops import join as join_op
     from portia.ops import normalize as normalize_op
-    from portia.ops import sql as sql_op
 
     description = next(t for t in tools.ALL_TOOLS if t.name == "record_step").description
 
-    for field in join_op.PROVENANCE_KEYS | normalize_op.PROVENANCE_KEYS | sql_op.PROVENANCE_KEYS:
-        assert field in description, f"`expect` may name {field!r}, but nothing says so"
+    for fields in handlers._EXPECTABLE.values():
+        for field in fields:
+            assert field in description, f"`expect` may name {field!r}, but nothing says so"
+    assert not (set().union(*handlers._EXPECTABLE.values()) & handlers._EXPECT_ECHOES)
     for how in join_op.HOWS:
         assert how in description, f"'{how}' is a valid join, but nothing says so"
     for op in normalize_op.TRANSFORM_OPS:

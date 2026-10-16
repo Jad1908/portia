@@ -846,13 +846,13 @@ def test_an_unknown_step_id_names_the_steps_that_exist(sales):
         )
 
 
-def test_an_expect_of_the_right_field_but_the_wrong_type_is_refused(sales, tmp_path):
+def test_an_expect_on_a_field_the_op_only_echoes_is_refused(sales, tmp_path):
     """Regression (EVALUATION.md, Run 3): `expect: {transforms: 1}` was written.
 
-    `transforms` is a real normalize field, so the name check passed — but it
-    reports a *list of records*, not a count. `1` can never equal that, so the
-    spec drifted on every run forever. Same disease `_EXPECTABLE` cures, one
-    level down: right field, wrong kind of value.
+    `transforms` is a field the op reports, but it echoes the step rather than
+    measuring its result, so a prediction on it says nothing and never drifts.
+    Echoed fields are not expectable at all (`handlers._EXPECT_ECHOES`), which
+    is the name check refusing it with the fields that are.
     """
     with pytest.raises(ValueError, match="transforms") as exc:
         handlers.record_step(
@@ -866,8 +866,7 @@ def test_an_expect_of_the_right_field_but_the_wrong_type_is_refused(sales, tmp_p
             },
             portia_dir=sales,
         )
-    assert "you predicted a number" in str(exc.value)
-    assert "reports a list" in str(exc.value)
+    assert "input_rows" in str(exc.value)
     assert not (tmp_path / "specs" / "n.yaml").exists()
 
 
@@ -879,7 +878,7 @@ def test_a_correctly_shaped_expect_passes(sales):
             "op": "normalize",
             "input": "customers",
             "transforms": [{"column": "name", "op": "strip"}],
-            "expect": {"input_rows": 6, "flags": []},
+            "expect": {"input_rows": 6},
         },
         portia_dir=sales,
     )
@@ -923,18 +922,20 @@ def test_a_boolean_field_predicted_as_a_number_is_refused(sales):
 
 
 def test_a_structured_field_predicted_flat_is_refused(sales):
-    """join reports `keys` as {left: [...], right: [...]}, not a bare list."""
-    with pytest.raises(ValueError, match="you predicted a list"):
+    """A sql step reports `input_rows` per input, as {name: n}, not a bare count.
+
+    Right field, wrong kind of value: `6` can never equal a record, so the spec
+    would drift on every run forever. The 2026-10-16 drive wrote exactly this.
+    """
+    with pytest.raises(ValueError, match="you predicted a number"):
         handlers.record_step(
-            "specs/j.yaml",
+            "specs/s.yaml",
             {
-                "id": "j",
-                "op": "join",
-                "left": "orders",
-                "right": "customers",
-                "keys": ["customer_id"],
-                "how": "left",
-                "expect": {"keys": ["customer_id"]},
+                "id": "s",
+                "op": "sql",
+                "inputs": ["orders"],
+                "sql": "SELECT * FROM orders",
+                "expect": {"input_rows": 6},
             },
             portia_dir=sales,
         )

@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import json
 import threading
 import time
@@ -49,6 +50,7 @@ from portia import spec
 from portia.agent import ask, chartspec, drawn, freshness, graphcards, handlers, prompts, reserved
 from portia.core import cancel, columnar, present
 from portia.core.serialize import to_json_compact
+from portia.ops import join as join_op
 
 SERVER_NAME = "portia"
 
@@ -1094,7 +1096,7 @@ async def profile_source(args: dict[str, Any]) -> dict[str, Any]:
             "inputs": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "Every table the query reads: source, model, or <spec>#<step id>",
+                "description": "Every table the query reads: a source, a model, <spec>#<step id>, a result this chat kept, portia_columns or portia_tables",
             },
             "limit": {
                 "type": "integer",
@@ -1148,7 +1150,7 @@ async def query_data(args: dict[str, Any]) -> dict[str, Any]:
             "inputs": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "Every table the query reads: source, model, or <spec>#<step id>",
+                "description": "Every table the query reads: a source, a model, <spec>#<step id>, a result this chat kept, portia_columns or portia_tables",
             },
             "vega": {
                 # An object, or the JSON text of one (`handlers._vega_object`):
@@ -1418,7 +1420,6 @@ async def review_queries(args: dict[str, Any]) -> dict[str, Any]:
                 "type": "string",
                 "description": "What you wanted to know, in plain language",
             },
-            "answer": {"type": "string", "description": "What you found out, as a sentence"},
             "so": {"type": "string", "description": "What it changed — required"},
             "about": {
                 "type": "array",
@@ -1435,9 +1436,13 @@ async def review_queries(args: dict[str, Any]) -> dict[str, Any]:
                 "description": "The model this was in service of, if any",
             },
             "chat": {"type": "string", "description": "An older chat, if curating one"},
+            # Last on purpose: the longest free-text field. Haiku closes it with a
+            # wrong tag often enough that whatever follows it is swallowed into it
+            # (`docs/FINDINGS.md` §5); last, a wrong close swallows nothing.
+            "answer": {"type": "string", "description": "What you found out, as a sentence"},
             "portia_dir": {"type": "string"},
         },
-        "required": ["question", "answer", "so", "about", "from"],
+        "required": ["question", "so", "about", "from", "answer"],
     },
 )
 async def record_finding(args: dict[str, Any]) -> dict[str, Any]:
@@ -1590,7 +1595,69 @@ async def join_findings(args: dict[str, Any]) -> dict[str, Any]:
         "type": "object",
         "properties": {
             "spec_path": {"type": "string", "description": "e.g. specs/orders.yaml"},
-            "step": {"type": "object", "description": "The step to append"},
+            "step": {
+                "type": "object",
+                "description": "The step to append: its id, op and the op's fields",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "This step's name; later steps read its table by it",
+                    },
+                    "op": {"type": "string", "enum": list(handlers.STEP_OPS)},
+                    "left": {
+                        "type": "string",
+                        "description": "join: the table whose rows are kept",
+                    },
+                    "right": {"type": "string", "description": "join: the other table"},
+                    "keys": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "join: key columns shared by both sides",
+                    },
+                    "left_on": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "join: left key columns when the names differ",
+                    },
+                    "right_on": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "join: right key columns when the names differ",
+                    },
+                    "how": {"type": "string", "enum": list(join_op.HOWS), "description": "join"},
+                    "input": {"type": "string", "description": "normalize: the table"},
+                    "transforms": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "normalize: [{column, op}]",
+                    },
+                    "inputs": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "sql: every table the query reads",
+                    },
+                    "sql": {"type": "string", "description": "sql: one SELECT over the inputs"},
+                    "grain": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Output columns one row is meant to be",
+                    },
+                    "expect": {
+                        "type": "object",
+                        "description": "Predicted values of the fields the op reports",
+                    },
+                    "rationale": {
+                        "type": "string",
+                        "description": "What was decided and why, for the reviewer",
+                    },
+                    "acknowledge": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "A blocking flag that is intended, with the rationale saying why",
+                    },
+                },
+                "required": ["id", "op"],
+            },
             "layer": {
                 "type": "string",
                 "enum": list(spec.LAYERS),
@@ -1843,10 +1910,32 @@ def build_server(*, sees_images: bool = True, asks: bool = False, builds: bool =
 
     The Claude SDK bridges it to its binary itself; the Codex harness serves the
     same object over a loopback port (`agent/loopback.py`), and asks for
-    `ask_user` in the list.
+    `ask_user` in the list. Every tool is offered without its ``portia_dir``
+    (:func:`without_catalog_argument`): the handlers' default is the project's
+    catalog, and a model that is shown the argument fills it with the project
+    folder (10 of 10 times in the 2026-10 drives) and is told the project has
+    no sources.
     """
     return create_sdk_mcp_server(
         name=SERVER_NAME,
         version="0.1.0",
-        tools=offered(sees_images=sees_images, asks=asks, builds=builds),
+        tools=[
+            dataclasses.replace(t, input_schema=without_catalog_argument(t.input_schema))
+            for t in offered(sees_images=sees_images, asks=asks, builds=builds)
+        ],
     )
+
+
+#: The argument every tool takes for where the catalog is. Never offered to a
+#: model: the window, the terminal and the headless server all settle it at
+#: start-up (`cli/serve.Session.wrap` fills it in on every call).
+CATALOG_ARG = "portia_dir"
+
+
+def without_catalog_argument(schema: Any) -> Any:
+    """A tool's input schema with ``portia_dir`` taken out of what a model is offered."""
+    if not isinstance(schema, dict) or CATALOG_ARG not in (schema.get("properties") or {}):
+        return schema
+    properties = {k: v for k, v in schema["properties"].items() if k != CATALOG_ARG}
+    required = [k for k in schema.get("required") or [] if k != CATALOG_ARG]
+    return {**schema, "properties": properties, "required": required}
