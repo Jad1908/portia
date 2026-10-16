@@ -195,7 +195,9 @@ and the graph took it. `lineage` is there only when portia could not read which 
 model's columns came from: `unread` says why and `step` where, as `graph_lookup` describes.
 `joins` is there when the step joins: each join between two tables the spec reads is measured and
 kept in the graph under `kept`, with your `rationale` as its reason. One under `not_kept` says why:
-`side_is_a_step` (a side is an earlier step's table or a part of the query, such as a CTE),
+`side_is_a_step` (a side is an earlier step's table, or a part of the query that is not one table:
+a CTE or sub-select that joins or computes the key; one that reads one table and passes the key
+through, deduplicated or filtered, counts as that table),
 `no_keys` (a cross join, which matches on nothing), the codes `join_findings` gives, or why the SQL reader could not read it (`side_not_named`,
 `condition_not_equalities`, `column_side_unclear`, `kind_not_measured`, `not_parsed`, `no_parser`). Then comes `outcome`, what the produced table turned out to be: n_rows,
 n_cols, its flags, and the grain claim as measured. Its exceptional columns are named under

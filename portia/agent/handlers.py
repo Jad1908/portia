@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -1833,17 +1833,22 @@ def _finding_joins(
         found, missed = sql_joins.read(cited.get("sql") or "", list(inputs.values()))
         unread += [{"join": u["join"], "why": u["because"]} for u in missed]
         for join in found:
-            sides = [inputs.get(_unquoted(name).lower()) for name in (join.left, join.right)]
+            sides = [
+                inputs.get(base.lower()) if base else None
+                for base in (join.left_base, join.right_base)
+            ]
             joins.append(
                 _JoinToKeep(
                     join.text,
                     sides[0],
                     sides[1],
-                    tuple(_unquoted(k) for k in join.left_on),
-                    tuple(_unquoted(k) for k in join.right_on),
+                    join.left_columns,
+                    join.right_columns,
                     measure.ORIGIN_FINDING,
                     question,
                     found_in=found_in,
+                    left_converted=join.left_converted,
+                    right_converted=join.right_converted,
                 )
             )
     return joins, unread
@@ -2602,6 +2607,49 @@ class _JoinToKeep:
     reason: str | None
     found_in: str | None = None
     report: dict | None = None
+    #: Each key's conversion, where the key is an expression of its column
+    #: (``CAST(DATE AS DATE)``), ``""`` where it is the column itself.
+    left_converted: tuple[str, ...] = ()
+    right_converted: tuple[str, ...] = ()
+
+
+#: What a converted key is called while it is measured. Never seen outside the
+#: measurement: the record names the column under it.
+_KEY_ALIAS = "__portia_key_{}"
+
+
+def _join_measured(join: _JoinToKeep, left: str, right: str, portia_dir: str, con) -> dict:
+    """`checks.join.join_report` for one join, on its keys as the query matched them.
+
+    A converted key is measured on its converted values: a timestamp cast to a
+    date matches a date column, and the bare timestamp would not. Each side is
+    read with its keys added as columns, and the report then names the columns
+    under them, which is what the record keeps beside the conversion.
+    """
+    left_table, right_table = _table(left, portia_dir, con), _table(right, portia_dir, con)
+    if not any(join.left_converted) and not any(join.right_converted):
+        return join_report(
+            left_table, right_table, left_on=list(join.left_on), right_on=list(join.right_on)
+        )
+
+    def keyed(table, columns, converted):
+        d = table.dialect
+        keys = [
+            f"{expr or d.quote(column)} AS {d.quote(_KEY_ALIAS.format(i))}"
+            for i, (column, expr) in enumerate(
+                zip(columns, converted or ("",) * len(columns), strict=True)
+            )
+        ]
+        return replace(table, query=f"SELECT *, {', '.join(keys)} FROM {subquery(table.query)}")
+
+    names = [_KEY_ALIAS.format(i) for i in range(len(join.left_on))]
+    report = join_report(
+        keyed(left_table, join.left_on, join.left_converted),
+        keyed(right_table, join.right_on, join.right_converted),
+        left_on=names,
+        right_on=names,
+    )
+    return {**report, "keys": {"left": list(join.left_on), "right": list(join.right_on)}}
 
 
 def _one_join(a: tuple, b: tuple) -> bool:
@@ -2674,12 +2722,7 @@ def _keep_joins(joins: list[_JoinToKeep], portia_dir: str) -> dict:
                 if report is None:
                     con = con or connect()
                     try:
-                        report = join_report(
-                            _table(left, portia_dir, con),
-                            _table(right, portia_dir, con),
-                            left_on=list(join.left_on),
-                            right_on=list(join.right_on),
-                        )
+                        report = _join_measured(join, left, right, portia_dir, con)
                     except cancel.Cancelled:
                         raise
                     except Exception as exc:  # noqa: BLE001 - one join failing is that join's
@@ -2695,6 +2738,8 @@ def _keep_joins(joins: list[_JoinToKeep], portia_dir: str) -> dict:
                             origin=join.origin,
                             asked_because=join.reason,
                             found_in=join.found_in,
+                            left_converted=join.left_converted,
+                            right_converted=join.right_converted,
                             left_fingerprint=fingerprints.get(left_ref),
                             right_fingerprint=fingerprints.get(right_ref),
                         ),
@@ -3093,24 +3138,17 @@ def _step_joins(
     joins = []
     for join in found:
         sides = []
-        for name in (join.left, join.right):
-            alias = inputs.get(_unquoted(name).lower())
+        for base in (join.left_base, join.right_base):
+            alias = inputs.get(base.lower()) if base else None
             sides.append(side(alias) if alias is not None else None)
         joins.append(
-            kept(
-                join.text,
-                sides[0],
-                sides[1],
-                [_unquoted(k) for k in join.left_on],
-                [_unquoted(k) for k in join.right_on],
+            replace(
+                kept(join.text, sides[0], sides[1], join.left_columns, join.right_columns),
+                left_converted=join.left_converted,
+                right_converted=join.right_converted,
             )
         )
     return joins, [{"join": u["join"], "why": u["because"]} for u in unread]
-
-
-def _unquoted(name: str) -> str:
-    """An identifier as `checks.sql_joins` hands it, without the quotes it was written in."""
-    return name[1:-1] if len(name) > 1 and name[0] == name[-1] and name[0] in '"`' else name
 
 
 def _source_named(ref, portia_dir: str) -> str | None:

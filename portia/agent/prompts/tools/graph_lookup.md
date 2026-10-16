@@ -39,8 +39,10 @@ It answers one of four questions per call.
   so and lists what was compared on either table.
 
 Read a row from the side of the table you asked about. `columns`, `repeats` and `coverage` are this
-table's: the share of its rows whose key or value is found on the other side; `other_columns`,
-`other_repeats` and `other_coverage` the other's. `origin` says what made it: `join_check`, `step`
+table's: the share of this table's rows whose key or value is found on the other side;
+`other_columns`, `other_repeats` and `other_coverage` are the other table's own. `converted` is how a
+key was converted when the join matched an expression of the column, `CAST(started_at AS DATE)` for
+a date, and the numbers are about the converted values. `origin` says what made it: `join_check`, `step`
 or `finding` for a join, `measured` for a comparison (a comparison marked `join_check` was kept by
 a join check before 2026-10-15). `asked_because` is the sentence written when it was made.
 

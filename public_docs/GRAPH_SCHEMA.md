@@ -237,7 +237,7 @@ not be read and why — per model when the whole spec stalled, per column when o
 | kind | from → to | properties |
 |---|---|---|
 | `OVERLAPS` | `Column` → `Column` | `n_shared_values`, `left_coverage`, `right_coverage`, `comparable_types`, `left_repeats`, `right_repeats`, `asked_because`, `measured_at`, `left_fingerprint`, `right_fingerprint`, `origin` |
-| `JOINED` | `Source`/`Model` → `Source`/`Model` | `left_columns`, `right_columns`, `relationship`, `n_shared_keys`, `left_coverage`, `right_coverage`, `left_repeats`, `right_repeats`, `comparable_types`, `asked_because`, `origin`, `found_in`, `measured_at`, `left_fingerprint`, `right_fingerprint` |
+| `JOINED` | `Source`/`Model` → `Source`/`Model` | `left_columns`, `right_columns`, `left_converted`, `right_converted`, `relationship`, `n_shared_keys`, `left_coverage`, `right_coverage`, `left_repeats`, `right_repeats`, `comparable_types`, `asked_because`, `origin`, `found_in`, `measured_at`, `left_fingerprint`, `right_fingerprint` |
 
 **Two kinds of record, told apart by what made them.** A *comparison* (`OVERLAPS`) says two columns
 share values; the copilot asked because it thought they might be the same thing. A *join*
@@ -277,6 +277,7 @@ copilot chose to do; code never chooses one. Measured with `checks.join.join_rep
 | property | means |
 |---|---|
 | `left_columns` / `right_columns` | the key columns on each side, in the order they are matched |
+| `left_converted` / `right_converted` | each key's conversion when a key is an expression of its column (`CAST(DATE AS DATE)`), `""` for a bare one; absent when no key is converted. The join was measured on the converted values |
 | `relationship` | `1:1`, `1:many`, `many:1` or `many:many`, from whether each side is unique on its key |
 | `n_shared_keys` | how many distinct keys appear on both sides |
 | `left_coverage` / `right_coverage` | share of that side's rows whose key is found on the other |
@@ -286,6 +287,12 @@ copilot chose to do; code never chooses one. Measured with `checks.join.join_rep
 | `origin` | `join_check`, `step` or `finding` |
 | `found_in` | the `<spec>#<step>` that joined, or the finding file whose query did; absent for a join check |
 | `measured_at`, `left_fingerprint`, `right_fingerprint` | as on `OVERLAPS` |
+
+**A join is between tables even when the query reached them another way.** A key may be an
+expression of one column (a cast, a date function), and a side may be a CTE or sub-select that reads
+one table, joins nothing and passes the key through, deduplicating or filtering on the way: the
+record names that table and its column, and is measured on the tables themselves
+(`checks.sql_joins.Join`). A side that computes its key or reads two tables is no one table.
 
 **One record per pair of tables, per key, per `origin`.** The same tables joined on another key are
 another join; the same join made again the same way, from either end, replaces the record before.

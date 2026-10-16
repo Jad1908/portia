@@ -381,6 +381,8 @@ def join_from_row(row: dict) -> dict:
     return {
         "columns": seen.get("left_columns"),
         "other_columns": seen.get("right_columns"),
+        "converted": seen.get("left_converted"),
+        "other_converted": seen.get("right_converted"),
         "relationship": seen.get("relationship"),
         "repeats": seen.get("left_repeats"),
         "other_repeats": seen.get("right_repeats"),
@@ -402,6 +404,8 @@ def turned_join(join: dict) -> dict:
         **join,
         "columns": join["other_columns"],
         "other_columns": join["columns"],
+        "converted": join.get("other_converted"),
+        "other_converted": join.get("converted"),
         "relationship": measure.TURNED.get(join["relationship"], join["relationship"]),
         "repeats": join["other_repeats"],
         "other_repeats": join["repeats"],
