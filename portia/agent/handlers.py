@@ -53,6 +53,15 @@ _REQUIRED_FIELDS = {
     "sql": ("inputs", "sql"),
 }
 
+#: The ops a step may be, in the order the schema's enum lists them.
+STEP_OPS = tuple(_REQUIRED_FIELDS)
+
+#: Provenance fields that echo the step rather than measure its result: an
+#: ``expect`` on one of these never drifts and says nothing. Listed in the
+#: prompt as expectable, they drew ``expect: {"flags": []}`` and
+#: ``{"columns": [...]}`` in the 2026-10 drives.
+_EXPECT_ECHOES = frozenset({"op", "how", "keys", "sql", "inputs", "transforms", "columns", "flags"})
+
 #: What each op actually reports, and therefore the only things an ``expect``
 #: block can assert against. An expectation on a field the op never emits drifts
 #: forever — ``_drift`` compares it to ``None`` on every run — which trains
@@ -64,9 +73,9 @@ _REQUIRED_FIELDS = {
 #: once, next to the code that emits them — and each op's tests assert the
 #: declaration still matches a real run.
 _EXPECTABLE = {
-    "join": join_op.PROVENANCE_KEYS,
-    "normalize": normalize_op.PROVENANCE_KEYS,
-    "sql": sql_op.PROVENANCE_KEYS,
+    "join": join_op.PROVENANCE_KEYS - _EXPECT_ECHOES,
+    "normalize": normalize_op.PROVENANCE_KEYS - _EXPECT_ECHOES,
+    "sql": sql_op.PROVENANCE_KEYS - _EXPECT_ECHOES,
 }
 
 #: Separator for naming a table an earlier step produced, rather than an indexed
@@ -1862,12 +1871,30 @@ def _keep_joins_and_unread(joins: tuple[list[_JoinToKeep], list[dict]], portia_d
 
 
 def _finding_prose(fields: dict[str, str]) -> dict[str, str]:
-    """The three sentences, all required. Empty is a refusal, not a default."""
+    """The three sentences, all required. Empty is a refusal, not a default.
+
+    A tool-call tag inside one of them is refused by name. The model's own
+    markup leaking into a field is the one slip behind half the refusals in
+    the 2026-10 drives: a long ``answer`` closed with ``</answer>`` instead of
+    ``</parameter>`` carried the next field inside it, and the harness refused
+    the call for the field it could not see. That refusal says *missing*, the
+    model re-sends the same text, and the loop repeats. Naming the tag is what
+    makes the retry different (`docs/FINDINGS.md` §5).
+    """
     named = {k: str(v or "").strip() for k, v in fields.items()}
+    for field, text in named.items():
+        tag = next((t for t in MARKUP_TAGS if t in text), None)
+        if tag:
+            raise ValueError(prompts.error("finding_markup", field=field, tag=tag))
     missing = [k for k, v in named.items() if not v]
     if missing:
         raise ValueError(prompts.error("finding_needs_prose", missing=", ".join(missing)))
     return named
+
+
+#: Tool-call markup that has no place inside a finding's prose. ``<parameter``
+#: is the harness's own tag; the closes are the ones the model mistypes.
+MARKUP_TAGS = ("<parameter", "</parameter>", "</answer>", "</question>", "</so>")
 
 
 def _known_refs(about: list[str], portia_dir: str, root: Path) -> list[str]:
