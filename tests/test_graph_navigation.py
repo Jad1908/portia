@@ -465,10 +465,14 @@ def recorded(monkeypatch):
     def write_fingerprints(fingerprints, live, project):
         calls["fingerprints"].append(fingerprints)
 
+    def prune_step_joins(live, project, spec_ref, keep):
+        calls.setdefault("pruned", []).append((spec_ref, list(keep)))
+
     monkeypatch.setattr(store, "session", session)
     monkeypatch.setattr(store, "write", write)
     monkeypatch.setattr(store, "write_measured", write_measured)
     monkeypatch.setattr(store, "write_fingerprints", write_fingerprints)
+    monkeypatch.setattr(store, "prune_step_joins", prune_step_joins)
     return calls
 
 
@@ -615,7 +619,13 @@ def test_a_join_check_needs_a_reason(sales):
         )
 
 
-def test_a_join_check_keeps_its_key_measurement_in_the_graph(sales, recorded):
+def _checks(recorded) -> list:
+    """The join records a join check wrote, apart from those a recorded step did."""
+    return [e for e in recorded["edges"] if e.properties.get("origin") == "join_check"]
+
+
+def test_a_join_check_is_kept_whole_as_a_join_between_two_tables(sales, recorded):
+    """It used to be four numbers on a column pair; now it is the join, as checked."""
     found = handlers.join_findings(
         "orders",
         "customers",
@@ -625,34 +635,47 @@ def test_a_join_check_keeps_its_key_measurement_in_the_graph(sales, recorded):
     )
     assert found["graph"] == {"kept": True}
     (edge,) = recorded["edges"]
-    overlap = found["report"]["overlap"]
-    assert edge.start.key == "source:orders.csv::customer_id"
-    assert edge.properties["origin"] == "join_check"
-    assert edge.properties["asked_because"] == "orders name customers"
-    assert edge.properties["n_shared_values"] == overlap["n_shared_keys"]
-    assert edge.properties["left_coverage"] == overlap["left_coverage"]
-    assert edge.properties["right_coverage"] == overlap["right_coverage"]
-    assert edge.properties["left_fingerprint"] and edge.properties["right_fingerprint"]
+    report = found["report"]
+    assert edge.kind == "JOINED"
+    assert (edge.start.key, edge.end.key) == ("orders.csv", "customers.csv")
+    p = edge.properties
+    assert (p["origin"], p["asked_because"]) == ("join_check", "orders name customers")
+    assert (p["left_columns"], p["right_columns"]) == (["customer_id"], ["customer_id"])
+    assert p["relationship"] == report["relationship"]
+    assert p["left_repeats"] == report["left"]["max_key_multiplicity"]
+    assert p["right_repeats"] == report["right"]["max_key_multiplicity"]
+    assert p["n_shared_keys"] == report["overlap"]["n_shared_keys"]
+    assert p["left_fingerprint"] and p["right_fingerprint"]
 
 
-def test_a_join_check_whose_column_the_graph_lacks_says_it_was_not_kept(sales, recorded):
+def test_a_join_check_on_two_columns_a_side_is_kept_too(sales, recorded):
+    """A composite key was not kept at all: no pair of single columns measures it."""
+    found = handlers.join_findings(
+        "orders",
+        "customers",
+        left_on=["customer_id", "customer_id"],
+        right_on=["customer_id", "name"],
+        portia_dir=sales,
+        reason="customer within region",
+    )
+    assert found["graph"] == {"kept": True}
+    (edge,) = recorded["edges"]
+    assert edge.properties["right_columns"] == ["customer_id", "name"]
+
+
+def test_a_join_check_whose_table_the_graph_lacks_says_it_was_not_kept(sales, recorded):
     recorded["attach"] = 0
     found = handlers.join_findings(
         "orders", "customers", keys=["customer_id"], portia_dir=sales, reason="r"
     )
-    assert found["graph"]["kept"] is False and "no column" in found["graph"]["why"]
+    assert found["graph"] == {"kept": False, "why": "not_in_graph"}
 
 
-@pytest.mark.parametrize(
-    ("left", "right", "keys", "says"),
-    [
-        ("orders", "orders", ["order_id", "customer_id"], "more than one column"),
-        ("orders", "orders", ["order_id"], "same table"),
-    ],
-)
-def test_what_a_join_check_does_not_keep_it_says(sales, recorded, left, right, keys, says):
-    found = handlers.join_findings(left, right, keys=keys, portia_dir=sales, reason="r")
-    assert found["graph"]["kept"] is False and says in found["graph"]["why"]
+def test_a_table_joined_to_itself_is_not_kept(sales, recorded):
+    found = handlers.join_findings(
+        "orders", "orders", keys=["order_id"], portia_dir=sales, reason="r"
+    )
+    assert found["graph"] == {"kept": False, "why": "same_table"}
     assert recorded["edges"] == []
 
 
@@ -678,8 +701,8 @@ def test_a_join_check_on_an_earlier_steps_table_is_measured_and_not_kept(sales, 
         "specs/chain.yaml#first", "customers", keys=["customer_id"], portia_dir=sales, reason="r"
     )
     assert found["report"]["left"]["n_rows"] == 10
-    assert found["graph"]["kept"] is False and "earlier step" in found["graph"]["why"]
-    assert recorded["edges"] == []
+    assert found["graph"] == {"kept": False, "why": "side_is_a_step"}
+    assert _checks(recorded) == []
 
 
 def test_a_join_check_on_a_built_specs_last_step_is_kept_against_its_model(sales, recorded):
@@ -691,8 +714,8 @@ def test_a_join_check_on_a_built_specs_last_step_is_kept_against_its_model(sales
         "specs/chain.yaml#first", "customers", keys=["customer_id"], portia_dir=sales, reason="r"
     )
     assert found["graph"] == {"kept": True}
-    (edge,) = recorded["edges"]
-    assert "chain" in str(edge)
+    (edge,) = _checks(recorded)
+    assert edge.start.key == "chain"
 
 
 def test_recording_a_step_whose_lineage_cannot_be_read_says_so(sales, recorded):
@@ -723,7 +746,8 @@ def test_a_join_check_never_fails_because_the_graph_is_down(sales, graph_down):
         "orders", "customers", keys=["customer_id"], portia_dir=sales, reason="r"
     )
     assert found["report"]["overlap"]["n_shared_keys"] == 4
-    assert found["graph"]["kept"] is False and "could not be written" in found["graph"]["why"]
+    assert found["graph"]["kept"] is False and found["graph"]["why"] == "graph_unavailable"
+    assert found["graph"]["error"]
 
 
 def test_graph_lookup_answers_one_question_at_a_time(sales):

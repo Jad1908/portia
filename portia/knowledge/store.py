@@ -53,9 +53,13 @@ from uuid import uuid4
 
 from portia.knowledge.measure import ORIGIN, ORIGIN_MEASURED
 from portia.knowledge.schema import (
+    COLUMN,
+    HAS_COLUMN,
     JOINED,
     KEY_PROPERTY,
     LABELS,
+    MODEL,
+    OVERLAPS,
     PROJECT,
     STRUCTURAL,
     Edge,
@@ -355,6 +359,65 @@ def write_measured(edges: list[Edge], session: Any, project: str) -> int:
             result = session.run(statement, **params)
             written += sum(record["written"] for record in result)
     return written
+
+
+def step_join_prune_writes(project: str, spec_ref: str, keep: list[str]) -> list[tuple[str, dict]]:
+    """Delete the join records a spec's steps made, except those of the steps in ``keep``.
+
+    A step join is the record of a step (`measure.FOUND_IN` is its
+    ``<spec>#<step>``), so it goes when the step does: superseded, renamed, or
+    its spec removed (``keep`` empty). The one place a measurement is deleted,
+    because what it records is a file's content, and the file stopped saying it.
+    """
+    return [
+        (
+            f"MATCH ()-[r:{JOINED}]->() WHERE r.{PROJECT} = $project AND r.{ORIGIN} = 'step' "
+            "AND r.found_in STARTS WITH $prefix "
+            "AND NOT substring(r.found_in, size($prefix)) IN $keep DELETE r",
+            {"project": project, "prefix": f"{spec_ref}#", "keep": list(keep)},
+        )
+    ]
+
+
+def prune_step_joins(session: Any, project: str, spec_ref: str, keep: list[str]) -> None:
+    """Run :func:`step_join_prune_writes`."""
+    with _writing():
+        for statement, params in step_join_prune_writes(project, spec_ref, keep):
+            session.run(statement, **params)
+
+
+def forget_model_writes(project: str, names: list[str], specs: list[str]) -> list[tuple[str, dict]]:
+    """Delete what was measured about models whose specs are being removed.
+
+    Their join records, the comparisons on their columns, and every join their
+    steps made (`measure.FOUND_IN` under one of ``specs``). Measurements about a
+    source are never named here.
+    """
+    params = {"project": project, "names": list(names), "prefixes": [f"{s}#" for s in specs]}
+    return [
+        (
+            f"MATCH (m:{MODEL})-[r:{JOINED}]-() WHERE m.{PROJECT} = $project "
+            "AND m.name IN $names DELETE r",
+            params,
+        ),
+        (
+            f"MATCH (m:{MODEL})-[:{HAS_COLUMN}]->(:{COLUMN})-[r:{OVERLAPS}]-() "
+            f"WHERE m.{PROJECT} = $project AND m.name IN $names DELETE r",
+            params,
+        ),
+        (
+            f"MATCH ()-[r:{JOINED}]->() WHERE r.{PROJECT} = $project AND r.{ORIGIN} = 'step' "
+            "AND any(prefix IN $prefixes WHERE r.found_in STARTS WITH prefix) DELETE r",
+            params,
+        ),
+    ]
+
+
+def forget_models(session: Any, project: str, names: list[str], specs: list[str]) -> None:
+    """Run :func:`forget_model_writes`."""
+    with _writing():
+        for statement, params in forget_model_writes(project, names, specs):
+            session.run(statement, **params)
 
 
 def fingerprint_writes(

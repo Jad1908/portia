@@ -597,6 +597,9 @@ def review(
                 "tab": sent.get("tab", "") if tool == PLOT_TOOL else "",
                 "question": sent.get("question", ""),
                 "sql": sent.get("sql", ""),
+                # What the query declared it read: how a join in its SQL is
+                # told from a join against a part of the query (2026-10-15).
+                "inputs": list(sent.get("inputs") or []),
                 # Verbatim, as the tool returned it. This is the string a finding
                 # copies; nothing re-encodes it and nothing summarises it.
                 "result": got.get("text", ""),

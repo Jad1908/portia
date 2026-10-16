@@ -31,7 +31,7 @@ from typing import Any
 from portia import catalog, findings, knowledge, pipeline, results, spec
 from portia.agent import chartspec, context, drawn, freshness, graphcards, prompts, reserved
 from portia.checks import profiling, sql_joins
-from portia.checks.join import column_overlap
+from portia.checks.join import column_overlap, join_report, resolve_keys
 from portia.checks.join import join_findings as _join_findings
 from portia.checks.outcome import BLOCKING_FLAGS, REPORT_KEYS
 from portia.core import backend, cancel, listing, present
@@ -1802,12 +1802,55 @@ def record_finding(
         root=root,
         portia_dir=portia_dir,
     )
+    joins = _finding_joins(queries, named["question"], relative(path, root))
     return {
         "finding": relative(path, root),
         "about": refs,
         "spec": spec_name,
         "n_queries": len(queries),
+        **({"joins": _keep_joins_and_unread(joins, portia_dir)} if joins[0] or joins[1] else {}),
     }
+
+
+def _finding_joins(
+    queries: list[dict], question: str, found_in: str
+) -> tuple[list[_JoinToKeep], list[dict]]:
+    """The joins in the queries a finding rests on, to keep as `JOINED` records.
+
+    A finding is a query the agent judged worth keeping, so a join in it is a
+    join it found worth keeping too (2026-10-15); the finding's question is
+    the reason. Only a join between two tables the query declared can be kept:
+    a reserved table or a kept result is no table in the graph, and a part of
+    the query is no table at all.
+    """
+    joins: list[_JoinToKeep] = []
+    unread: list[dict] = []
+    for cited in queries:
+        inputs = {str(name).lower(): str(name) for name in cited.get("inputs") or []}
+        found, missed = sql_joins.read(cited.get("sql") or "", list(inputs.values()))
+        unread += [{"join": u["join"], "why": u["because"]} for u in missed]
+        for join in found:
+            sides = [inputs.get(_unquoted(name).lower()) for name in (join.left, join.right)]
+            joins.append(
+                _JoinToKeep(
+                    join.text,
+                    sides[0],
+                    sides[1],
+                    tuple(_unquoted(k) for k in join.left_on),
+                    tuple(_unquoted(k) for k in join.right_on),
+                    measure.ORIGIN_FINDING,
+                    question,
+                    found_in=found_in,
+                )
+            )
+    return joins, unread
+
+
+def _keep_joins_and_unread(joins: tuple[list[_JoinToKeep], list[dict]], portia_dir: str) -> dict:
+    """:func:`_keep_joins`, with the joins the SQL reader could not read beside them."""
+    kept = _keep_joins(joins[0], portia_dir)
+    kept["not_kept"] += joins[1]
+    return kept
 
 
 def _finding_prose(fields: dict[str, str]) -> dict[str, str]:
@@ -2483,71 +2526,185 @@ def join_findings(
 
 
 def _keep_join(left: str, right: str, report: dict, reason: str, portia_dir: str) -> dict:
-    """Put a join check's key measurement in the graph, best-effort, and say what happened.
+    """Put a join check in the graph as the join it is, best-effort, and say what happened.
 
-    ``{"kept": True}``, or ``{"kept": False, "why": <sentence>}``. Kept only
-    when the join is on **one column a side between two tables the graph
-    holds**, sources or models, because that is what an `OVERLAPS` edge is:
-
-    - a composite key is several columns matched together, and no pair of
-      single columns measures it;
-    - a ``<spec>#<step>`` side is a table no build has made, so it has no node,
-      and its key may be one the step transformed (`join_findings` names
-      columns, so a transformed key only ever arrives this way) — **unless it is
-      the spec's last step and its model is built from the spec as it stands**
-      (:func:`_built_model_of`), when it *is* the model's table and the
-      measurement is kept against the model (2026-10-14: the copilot named an
-      unpivot staging step by its reference instead of its model's name, and
-      the route it had just built never reached the graph);
-    - a table against itself is not a link between tables.
-
-    **Connected before the graph is built.** Building reads the whole catalog
-    and every spec, and on a machine with no database, which is the ordinary
-    case, that read would be paid on every join check for nothing. Any failure
-    past that point is reported in the answer, never raised: the join was
-    measured, and a database that is down or a column the graph lacks costs
-    only the keeping (`KNOWLEDGE_GRAPH.md` §6.6).
+    ``{"kept": True}``, or ``{"kept": False, "why": <code>}`` from
+    :data:`JOIN_NOT_KEPT`, with ``error`` beside a failure. Kept whole since
+    2026-10-15, as a `JOINED` record between the two tables: every key column,
+    two or more included, each side's most repeated key, the relationship and
+    both coverages. It used to be four numbers on a column pair, and a key of
+    two columns was not kept at all. The check's own report is what is kept:
+    nothing is measured twice.
     """
     lkeys, rkeys = report["keys"]["left"], report["keys"]["right"]
-    if len(lkeys) != 1 or len(rkeys) != 1:
-        return _graph_not_kept(prompts.notice("join_not_kept_composite"))
-    left, right = (_built_model_of(side, portia_dir) or side for side in (left, right))
-    if STEP_REF in left or STEP_REF in right:
-        return _graph_not_kept(prompts.notice("join_not_kept_step"))
-    left, right = _known_name(left, portia_dir), _known_name(right, portia_dir)
-    if left == right:
-        return _graph_not_kept(prompts.notice("join_not_kept_same_table"))
+    text = _join_text(left, right, lkeys, rkeys)
+    kept = _keep_joins(
+        [
+            _JoinToKeep(
+                text,
+                left,
+                right,
+                tuple(lkeys),
+                tuple(rkeys),
+                measure.ORIGIN_JOIN_CHECK,
+                reason,
+                report=report,
+            )
+        ],
+        portia_dir,
+    )
+    if kept["kept"]:
+        return {"kept": True}
+    (missed,) = kept["not_kept"]
+    return {"kept": False, **{k: v for k, v in missed.items() if k != "join"}}
+
+
+#: Why a join was not kept in the graph, as a code the copilot reads in words in
+#: the tool descriptions that report it (`join_findings`, `record_step`,
+#: `record_finding`). With `checks.sql_joins`' own codes for a join in SQL that
+#: could not be read.
+SIDE_IS_A_STEP = "side_is_a_step"
+SAME_TABLE = "same_table"
+NOT_IN_GRAPH = "not_in_graph"
+NO_KEYS = "no_keys"
+GRAPH_UNAVAILABLE = "graph_unavailable"
+JOIN_MEASURE_FAILED = "measure_failed"
+JOIN_NOT_KEPT = (
+    SIDE_IS_A_STEP,
+    SAME_TABLE,
+    NOT_IN_GRAPH,
+    NO_KEYS,
+    GRAPH_UNAVAILABLE,
+    JOIN_MEASURE_FAILED,
+)
+
+
+@dataclass(frozen=True)
+class _JoinToKeep:
+    """One join the agent made, to keep as a `JOINED` record.
+
+    ``left`` and ``right`` are what the join read: a table the project names,
+    a ``<spec>#<step>`` reference, or ``None`` for a part of a query (a CTE, a
+    sub-select) that no name outside the query stands for. ``report`` is a
+    `checks.join.join_report` already taken, when there is one; otherwise the
+    join is measured here.
+    """
+
+    text: str
+    left: str | None
+    right: str | None
+    left_on: tuple[str, ...]
+    right_on: tuple[str, ...]
+    origin: str
+    reason: str | None
+    found_in: str | None = None
+    report: dict | None = None
+
+
+def _join_text(left: str, right: str, left_on, right_on) -> str:
+    """A join as one short line, for an answer that lists what was kept."""
+    pairs = ", ".join(f"{a} = {b}" if a != b else a for a, b in zip(left_on, right_on, strict=True))
+    return f"{left} JOIN {right} ON {pairs}"
+
+
+def _keep_joins(joins: list[_JoinToKeep], portia_dir: str) -> dict:
+    """Keep each join as a `JOINED` record, measured where it was not, and say what happened.
+
+    ``{"kept": [<join>], "not_kept": [{"join", "why", "error"?}]}``. A join is
+    kept when both its sides are tables the graph holds, sources or built
+    models: a side an earlier step made, or a part of the query, is no table
+    (:data:`SIDE_IS_A_STEP`). **The graph is reached before anything is
+    measured**, so a database that is down costs no query; and nothing here can
+    fail the call that made the join, whose own answer stands.
+    """
+    out: dict[str, list] = {"kept": [], "not_kept": []}
+
+    def miss(join: _JoinToKeep, why: str, error: str | None = None) -> None:
+        out["not_kept"].append(
+            {"join": join.text, "why": why, **({"error": error} if error else {})}
+        )
+
+    todo = []
+    for join in joins:
+        if not join.left_on:
+            miss(join, NO_KEYS)
+            continue
+        if join.left is None or join.right is None:
+            miss(join, SIDE_IS_A_STEP)
+            continue
+        left, right = (
+            _built_model_of(side, portia_dir) or side for side in (join.left, join.right)
+        )
+        if STEP_REF in left or STEP_REF in right:
+            miss(join, SIDE_IS_A_STEP)
+            continue
+        left, right = _known_name(left, portia_dir), _known_name(right, portia_dir)
+        if left == right:
+            miss(join, SAME_TABLE)
+            continue
+        todo.append((join, left, right))
+    if not todo:
+        return out
     try:
         with store.session() as live:
             graph = knowledge.build_graph(_project_root(portia_dir), portia_dir=portia_dir).graph
-            try:
-                left_ref, right_ref = _graph_ref(left, graph), _graph_ref(right, graph)
-            except ValueError:
-                # A table with no node, which reads as its column missing.
-                return _graph_not_kept(prompts.notice("join_not_kept_unattached"))
             fingerprints = _table_fingerprints(graph)
-            edge = measure.overlap_edge(
-                measure.Pair(left_ref, lkeys[0], right_ref, rkeys[0], reason),
-                measure.from_join_report(report),
-                origin=measure.ORIGIN_JOIN_CHECK,
-                left_fingerprint=fingerprints.get(left_ref),
-                right_fingerprint=fingerprints.get(right_ref),
-            )
-            written = _write_attached(graph, [edge], live)
+            con = None
+            edges = []
+            for join, left, right in todo:
+                try:
+                    left_ref, right_ref = _graph_ref(left, graph), _graph_ref(right, graph)
+                except ValueError:
+                    miss(join, NOT_IN_GRAPH)
+                    continue
+                report = join.report
+                if report is None:
+                    con = con or connect()
+                    try:
+                        report = join_report(
+                            _table(left, portia_dir, con),
+                            _table(right, portia_dir, con),
+                            left_on=list(join.left_on),
+                            right_on=list(join.right_on),
+                        )
+                    except cancel.Cancelled:
+                        raise
+                    except Exception as exc:  # noqa: BLE001 - one join failing is that join's
+                        miss(join, JOIN_MEASURE_FAILED, f"{type(exc).__name__}: {exc}")
+                        continue
+                edges.append(
+                    (
+                        join,
+                        measure.join_edge(
+                            left_ref,
+                            right_ref,
+                            report,
+                            origin=join.origin,
+                            asked_because=join.reason,
+                            found_in=join.found_in,
+                            left_fingerprint=fingerprints.get(left_ref),
+                            right_fingerprint=fingerprints.get(right_ref),
+                        ),
+                    )
+                )
+            written = _write_attached(graph, [edge for _, edge in edges], live) if edges else 0
     except cancel.Cancelled:
         raise
     except store.GraphUnavailable as exc:
-        return _graph_not_kept(prompts.notice("join_not_kept_unavailable", reason=str(exc)))
-    except Exception as exc:  # noqa: BLE001 - the join's answer must not fail because of the graph
-        error = f"{type(exc).__name__}: {exc}"
-        return _graph_not_kept(prompts.notice("join_not_kept_unavailable", reason=error))
-    if not written:
-        return _graph_not_kept(prompts.notice("join_not_kept_unattached"))
-    return {"kept": True}
-
-
-def _graph_not_kept(why: str) -> dict:
-    return {"kept": False, "why": why}
+        for join, _, _ in todo:
+            miss(join, GRAPH_UNAVAILABLE, str(exc))
+        return out
+    except Exception as exc:  # noqa: BLE001 - a database that dropped mid-write
+        for join, _, _ in todo:
+            if not any(m["join"] == join.text for m in out["not_kept"]):
+                miss(join, GRAPH_UNAVAILABLE, f"{type(exc).__name__}: {exc}")
+        return out
+    if written < len(edges):
+        for join, _ in edges:
+            miss(join, NOT_IN_GRAPH)
+        return out
+    out["kept"] = [join.text for join, _ in edges]
+    return out
 
 
 def _built_model_of(ref: str, portia_dir: str) -> str | None:
@@ -2763,6 +2920,7 @@ def record_step(
         "written_to": written_to,
         "catalog": indexed,
         **_sync_graph(root, portia_dir, path.stem),
+        **_keep_step_joins(step, doc, path, root, portia_dir, replaced=supersedes),
         "outcome": _outcome_card(result.outcome, result.table, read_at=read_at),
         "drift": result.drift,
         "acknowledged": result.acknowledged,
@@ -2845,6 +3003,120 @@ def _index_model(
     except Exception as exc:  # noqa: BLE001 - a description must not fail a step
         return f"not updated — {exc}"
     return UPDATED
+
+
+def _keep_step_joins(
+    step: dict, doc: dict, path: Path, root: Path, portia_dir: str, *, replaced: str | None
+) -> dict:
+    """Keep the joins this step makes as `JOINED` records, and drop those of steps now gone.
+
+    ``{"joins": {"kept", "not_kept"}}`` when the step joins anything, else
+    nothing. Recording a step that joins is the agent making a join for good
+    (2026-10-15): its keys are in the step, the shape is measured as a join
+    check measures it, and the step's ``rationale`` is the reason. A join
+    between tables the spec declares is kept; one against an earlier step's
+    table or a part of the query is not, and says so.
+
+    The spec's own step joins are pruned first, whatever this step does: a
+    step superseded or renamed takes its join with it, and a join record is
+    never the record of a step nobody would build.
+    """
+    spec_ref = relative(path, root)
+    ids = [s["id"] for s in doc.get("steps") or []]
+    _prune_step_joins(spec_ref, [i for i in ids if i != step["id"]], portia_dir)
+    joins, unread = _step_joins(step, doc, spec_ref, root, portia_dir)
+    if not joins and not unread:
+        return {}
+    kept = _keep_joins(joins, portia_dir)
+    kept["not_kept"] += unread
+    return {"joins": kept}
+
+
+def _step_joins(
+    step: dict, doc: dict, spec_ref: str, root: Path, portia_dir: str
+) -> tuple[list[_JoinToKeep], list[dict]]:
+    """The joins one step makes, with what each side is, and the ones its SQL hides.
+
+    A side is a source the spec declares (by its catalog name), another model,
+    an earlier step of this spec (``<spec>#<step>``), or, in SQL, a part of the
+    query (``None``). The SQL is read by `checks.sql_joins.read`, which names
+    every join it cannot read and why.
+    """
+    declared = doc.get("sources") or {}
+    models = spec.discover_specs(root)
+    found_in = f"{spec_ref}{STEP_REF}{step['id']}"
+    reason = step.get("rationale")
+
+    def side(alias: str) -> str:
+        if alias in declared:
+            ref = declared[alias]
+            return _source_named(ref, portia_dir) or alias
+        if alias in models:
+            return alias
+        return f"{spec_ref}{STEP_REF}{alias}"
+
+    def kept(text: str, left: str | None, right: str | None, lkeys, rkeys) -> _JoinToKeep:
+        return _JoinToKeep(
+            text,
+            left,
+            right,
+            tuple(lkeys),
+            tuple(rkeys),
+            measure.ORIGIN_STEP,
+            reason,
+            found_in=found_in,
+        )
+
+    if step.get("op") == "join":
+        lkeys, rkeys = resolve_keys(step.get("keys"), step.get("left_on"), step.get("right_on"))
+        left, right = side(step["left"]), side(step["right"])
+        return [
+            kept(_join_text(step["left"], step["right"], lkeys, rkeys), left, right, lkeys, rkeys)
+        ], []
+    if step.get("op") != "sql":
+        return [], []
+    inputs = {str(name).lower(): str(name) for name in step.get("inputs") or []}
+    found, unread = sql_joins.read(step.get("sql") or "", list(inputs.values()))
+    joins = []
+    for join in found:
+        sides = []
+        for name in (join.left, join.right):
+            alias = inputs.get(_unquoted(name).lower())
+            sides.append(side(alias) if alias is not None else None)
+        joins.append(
+            kept(
+                join.text,
+                sides[0],
+                sides[1],
+                [_unquoted(k) for k in join.left_on],
+                [_unquoted(k) for k in join.right_on],
+            )
+        )
+    return joins, [{"join": u["join"], "why": u["because"]} for u in unread]
+
+
+def _unquoted(name: str) -> str:
+    """An identifier as `checks.sql_joins` hands it, without the quotes it was written in."""
+    return name[1:-1] if len(name) > 1 and name[0] == name[-1] and name[0] in '"`' else name
+
+
+def _source_named(ref, portia_dir: str) -> str | None:
+    """The catalog's name for the source a spec declares by its path, if it is indexed."""
+    key = str(ref["table"]) if isinstance(ref, dict) else str(ref)
+    for name in catalog.source_names(portia_dir):
+        if str((catalog.marks(name, portia_dir) or {}).get("source")) == key:
+            return name
+    return None
+
+
+def _prune_step_joins(spec_ref: str, keep: list[str], portia_dir: str) -> None:
+    """Drop the step joins of ``spec_ref`` whose step is not in ``keep``, best-effort."""
+    project = knowledge_schema.project_id(_project_root(portia_dir))
+    try:
+        with store.session() as live:
+            store.prune_step_joins(live, project, spec_ref, keep)
+    except store.GraphUnavailable:
+        pass
 
 
 def _sync_graph(root: Path, portia_dir: str, model: str) -> dict:
