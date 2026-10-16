@@ -124,6 +124,44 @@ def test_a_turned_pair_swaps_columns_coverages_and_facts():
     assert back["column_facts"] == pair["other_facts"]
 
 
+# --- query: a join facing the table asked about -----------------------------
+
+
+def _join_row(*, from_here: bool, **measured) -> dict:
+    """A `JOINED` record as `query._JOIN_RETURN` returns it."""
+    return {
+        "measured": {
+            "left_columns": ["site_id", "hour"],
+            "right_columns": ["site_id", "timestamp"],
+            "relationship": "many:1",
+            "left_repeats": 7,
+            "right_repeats": 1,
+            "left_coverage": 1.0,
+            "right_coverage": 0.5,
+            "n_shared_keys": 30,
+            "origin": "step",
+            "asked_because": "weather by site and hour",
+            "found_in": "specs/m.yaml#w",
+            **measured,
+        },
+        "from_here": from_here,
+        "stale": False,
+    }
+
+
+def test_a_join_reads_its_columns_repeats_and_relationship_from_this_side():
+    near = query.join_from_row(_join_row(from_here=True))
+    assert (near["columns"], near["other_columns"]) == (
+        ["site_id", "hour"],
+        ["site_id", "timestamp"],
+    )
+    assert (near["relationship"], near["repeats"], near["other_repeats"]) == ("many:1", 7, 1)
+    far = query.join_from_row(_join_row(from_here=False))
+    assert (far["columns"], far["relationship"]) == (["site_id", "timestamp"], "1:many")
+    assert (far["repeats"], far["coverage"]) == (1, 0.5)
+    assert query.turned_join(near) == {**far, "stale": False}
+
+
 # --- query: gathering neighbours --------------------------------------------
 
 
@@ -131,10 +169,11 @@ def _row(kind: str, name: str, path: str | None = None, **extra) -> dict:
     return {"kind": kind, "name": name, "path": path, **extra}
 
 
-def test_every_link_to_one_table_is_one_neighbour_in_name_order():
+def test_neighbours_a_pipeline_went_through_come_first_then_the_rest_by_name():
+    """By kind of link, never by a number: built from, building or joined first."""
     reads = [
         _row("Model", "mart", link="read_by"),
-        _row("Source", "customers", "data/customers.csv", link="reads"),
+        _row("Source", "zones", "data/zones.csv", link="reads"),
     ]
     grouped = [
         _row("Source", "customers", "data/customers.csv", group_name="sales"),
@@ -144,14 +183,16 @@ def test_every_link_to_one_table_is_one_neighbour_in_name_order():
     pairs = [
         {**_row("Source", "customers", "data/customers.csv"), **_pair_row(from_here=True)},
     ]
-    neighbours = query.gather_neighbours(reads, grouped, pairs)
+    joins = [{**_row("Source", "weather", "data/weather.csv"), **_join_row(from_here=True)}]
+    neighbours = query.gather_neighbours(reads, grouped, pairs, joins)
 
-    assert [n["name"] for n in neighbours] == ["customers", "mart", "returns"]
-    customers = neighbours[0]
-    assert customers["reads"] and not customers["read_by"]
+    assert [n["name"] for n in neighbours] == ["mart", "weather", "zones", "customers", "returns"]
+    mart, weather, zones, customers = neighbours[:4]
+    assert mart["builds"] and not mart["built_from"]
+    assert zones["built_from"]
+    assert weather["joins"][0]["columns"] == ["site_id", "hour"]
     assert customers["groups"] == ["crm", "sales"]
     assert [p["column"] for p in customers["pairs"]] == ["customer_id"]
-    assert neighbours[1]["read_by"] and neighbours[1]["pairs"] == []
 
 
 def test_a_source_and_a_model_of_one_name_stay_two_neighbours():
@@ -175,18 +216,17 @@ D = TableId("d", "Source", "data/d.csv")
 E = TableId("e", "Source", "data/e.csv")
 
 
-def _measured(start: TableId, end: TableId, column: str = "k", other: str = "k") -> Link:
-    pair = {
-        "column": column,
-        "other_column": other,
-        "n_shared_values": 3,
-        "coverage": 0.9,
-        "other_coverage": 0.6,
-        "comparable_types": True,
-        "origin": "measured",
-        "stale": False,
-    }
-    return Link(start, end, pair=pair)
+def _joined(start: TableId, end: TableId, column: str = "k", other: str = "k") -> Link:
+    join = query.join_from_row(
+        _join_row(
+            from_here=True,
+            left_columns=[column],
+            right_columns=[other],
+            left_coverage=0.9,
+            right_coverage=0.6,
+        )
+    )
+    return Link(start, end, join=join)
 
 
 def _names(found: list[query.Route]) -> list[list[str]]:
@@ -195,9 +235,9 @@ def _names(found: list[query.Route]) -> list[list[str]]:
 
 def test_routes_come_fewest_steps_first_then_by_name():
     links = [
-        _measured(A, D),
-        _measured(A, B),
-        _measured(B, D),
+        _joined(A, D),
+        _joined(A, B),
+        _joined(B, D),
         Link(C, A, reads=True),
         Link(C, D, reads=True),
     ]
@@ -207,57 +247,57 @@ def test_routes_come_fewest_steps_first_then_by_name():
 
 
 def test_a_route_never_visits_a_table_twice_and_stops_at_the_step_limit():
-    chain = [_measured(A, B), _measured(B, C), _measured(C, D), _measured(D, E)]
+    chain = [_joined(A, B), _joined(B, C), _joined(C, D), _joined(D, E)]
     assert _names(query.routes(chain, A, D)[0]) == [["a", "b", "c", "d"]]
     assert query.routes(chain, A, E) == ([], 0), "four steps is past ROUTE_HOPS"
     assert _names(query.routes(chain, A, E, max_steps=4)[0]) == [["a", "b", "c", "d", "e"]]
 
 
 def test_the_limit_cuts_the_list_and_the_count_says_how_many_there_were():
-    links = [_measured(A, t) for t in (B, C, D)] + [_measured(t, E) for t in (B, C, D)]
+    links = [_joined(A, t) for t in (B, C, D)] + [_joined(t, E) for t in (B, C, D)]
     found, n = query.routes(links, A, E, limit=2)
     assert _names(found) == [["a", "b", "e"], ["a", "c", "e"]]
     assert n == 3
 
 
-def test_two_tables_linked_several_ways_are_one_step_carrying_all_of_them():
-    links = [_measured(A, B, "z", "z"), _measured(A, B, "id", "a_id"), Link(B, A, reads=False)]
+def test_two_tables_joined_several_ways_are_one_step_carrying_all_of_them():
+    links = [_joined(A, B, "z", "z"), _joined(A, B, "id", "a_id"), Link(B, A, reads=False)]
     (route,), n = query.routes(links, A, B)
     assert n == 1
-    assert [p["column"] for p in route.steps[0].pairs] == ["id", "z"]
+    assert [j["columns"] for j in route.steps[0].joins] == [["id"], ["z"]]
 
 
-def test_a_step_walked_against_the_edge_is_turned_and_says_who_reads_whom():
-    links = [_measured(B, A, "b_col", "a_col"), Link(C, B, reads=True)]
+def test_a_step_walked_against_the_join_is_turned_and_says_which_is_built_from_which():
+    links = [_joined(B, A, "b_col", "a_col"), Link(C, B, reads=True)]
     (route,), _ = query.routes(links, A, C)
     first, second = route.steps
-    assert (first.pairs[0]["column"], first.pairs[0]["other_column"]) == ("a_col", "b_col")
-    assert (first.pairs[0]["coverage"], first.pairs[0]["other_coverage"]) == (0.6, 0.9)
-    # The model `c` reads `b`, so from `b` to `c` the step is read by.
-    assert second.read_by and not second.reads
+    (join,) = first.joins
+    assert (join["columns"], join["other_columns"]) == (["a_col"], ["b_col"])
+    assert (join["coverage"], join["other_coverage"]) == (0.6, 0.9)
+    assert (join["relationship"], join["repeats"]) == ("1:many", 1)
+    # The model `c` is built from `b`, so from `b` to `c` the step builds it.
+    assert second.builds and not second.built_from
 
 
 def test_a_table_has_no_route_to_itself():
-    assert query.routes([_measured(A, B)], A, A) == ([], 0)
+    assert query.routes([_joined(A, B)], A, A) == ([], 0)
 
 
 def test_a_link_row_keys_a_source_by_path_and_a_model_by_name():
     row = {
-        "link": "overlaps",
+        "link": "joined",
         "a_kind": "Source",
         "a_name": "orders",
         "a_path": "data/orders.csv",
         "b_kind": "Model",
         "b_name": "mart",
         "b_path": None,
-        "a_column": "customer_id",
-        "b_column": "id",
-        **{key: None for key in query.LINK_FIELDS},
+        **_join_row(from_here=True),
     }
     link = query.link_from_row(row)
     assert link.start == TableId("orders", "Source", "data/orders.csv")
     assert link.end == TableId("mart", "Model", "mart")
-    assert link.pair is not None and link.pair["other_column"] == "id"
+    assert link.join is not None and link.join["other_columns"] == ["site_id", "timestamp"]
     assert query.link_from_row({**row, "link": "reads"}).reads
 
 
@@ -272,50 +312,65 @@ def _pair(column: str) -> dict:
     return query.pair_from_row({**_pair_row(from_here=True), "column": column})
 
 
-def _neighbour(name: str, n_pairs: int) -> dict:
+def _join(column: str) -> dict:
+    return query.join_from_row(_join_row(from_here=True, left_columns=[column]))
+
+
+def _neighbour(name: str, n_pairs: int, n_joins: int = 0) -> dict:
     return {
         "kind": "Source",
         "name": name,
         "path": f"data/{name}.csv",
-        "reads": False,
-        "read_by": False,
+        "built_from": False,
+        "builds": False,
         "groups": [],
+        "joins": [_join(f"j{i}") for i in range(n_joins)],
         "pairs": [_pair(f"c{i}") for i in range(n_pairs)],
     }
 
 
 def _neighbourhood(neighbours: list[dict], **extra) -> dict:
-    return {
-        "table": _header("hub"),
-        "neighbours": neighbours,
-        "groups": [],
-        "precedents": [],
-        **extra,
-    }
+    return {"table": _header("hub"), "neighbours": neighbours, "groups": [], **extra}
 
 
-def test_the_card_names_the_pair_fields_once_before_the_neighbours():
-    card = graphcards.card(_neighbourhood([_neighbour("n1", 1), _neighbour("n2", 0)]))
-    assert list(card)[:3] == ["table", "pair_fields", "neighbours"]
+def test_the_card_names_the_row_fields_once_before_the_neighbours():
+    card = graphcards.card(_neighbourhood([_neighbour("n1", 1, 1), _neighbour("n2", 0)]))
+    assert list(card)[:4] == ["table", "join_fields", "compared_fields", "neighbours"]
     rows = card["neighbours"]["rows"]
-    assert rows[0][graphcards.NEIGHBOUR_FIELDS.index("pairs")][0][0] == "c0"
-    assert rows[1][graphcards.NEIGHBOUR_FIELDS.index("n_pairs")] == 0
-    assert "more" not in card["neighbours"] and "pairs_more" not in card
+    fields = graphcards.NEIGHBOUR_FIELDS
+    assert rows[0][fields.index("joins")][0][0] == ["j0"]
+    assert rows[0][fields.index("compared")][0][0] == "c0"
+    assert rows[1][fields.index("n_compared")] == 0
+    assert "more" not in card["neighbours"] and "rows_more" not in card
     json.dumps(card)
 
 
-def test_a_card_with_no_measured_pair_carries_no_pair_fields():
+def test_a_card_with_nothing_measured_carries_no_row_fields():
     card = graphcards.card(_neighbourhood([_neighbour("n1", 0)]))
-    assert "pair_fields" not in card and "groups" not in card and "precedents" not in card
+    assert not {"join_fields", "compared_fields", "groups"} & set(card)
 
 
-def test_when_the_pairs_do_not_all_fit_every_neighbour_shows_the_same_number(monkeypatch):
-    """Cut by size, evenly, in column order: never by coverage (§6.1)."""
-    monkeypatch.setattr(graphcards, "CARD_PAIRS", 6)
-    card = graphcards.card(_neighbourhood([_neighbour(f"n{i}", 3) for i in range(4)]))
-    index = graphcards.NEIGHBOUR_FIELDS.index("pairs")
-    assert [len(row[index]) for row in card["neighbours"]["rows"]] == [1, 1, 1, 1]
-    assert "4 of these links" in card["pairs_more"]
+def test_when_the_rows_do_not_all_fit_every_neighbour_shows_the_same_number_joins_first(
+    monkeypatch,
+):
+    """Cut by size, evenly, joins before comparisons: never by coverage (§6.1)."""
+    monkeypatch.setattr(graphcards, "CARD_ROWS", 8)
+    card = graphcards.card(_neighbourhood([_neighbour(f"n{i}", 3, 1) for i in range(4)]))
+    fields = graphcards.NEIGHBOUR_FIELDS
+    rows = card["neighbours"]["rows"]
+    assert [(len(r[fields.index("joins")]), len(r[fields.index("compared")])) for r in rows] == [
+        (1, 1)
+    ] * 4
+    assert "4 of these links" in card["rows_more"]
+
+
+def test_every_neighbour_shown_has_room_for_a_row():
+    """At 50 neighbours against 40 rows, every neighbour showed none (2026-10-15)."""
+    neighbours = [_neighbour(f"n{i:02}", 3) for i in range(60)]
+    card = graphcards.card(_neighbourhood(neighbours))
+    index = graphcards.NEIGHBOUR_FIELDS.index("compared")
+    assert all(len(row[index]) >= 1 for row in card["neighbours"]["rows"])
+    assert card["neighbours"]["n"] == 60 and "more" in card["neighbours"]
 
 
 def test_neighbours_past_the_cap_are_counted_and_the_narrower_question_named(monkeypatch):
@@ -326,43 +381,32 @@ def test_neighbours_past_the_cap_are_counted_and_the_narrower_question_named(mon
     assert 'neighbour="<name>"' in card["neighbours"]["more"]
 
 
-def test_precedents_and_groups_are_lists_cut_like_any_other(monkeypatch):
-    monkeypatch.setattr(graphcards, "PRECEDENTS", 1)
-    precedent = {
-        "column": "customer_id",
-        "against_kind": "Source",
-        "against_table": "customers",
-        "against_column": "customer_id",
-        "by_table": "orders",
-        "n_shared_values": 2,
-        "asked_because": "same key",
-    }
+def test_groups_are_a_list_cut_like_any_other():
     group = {"name": "sales", "context": "what the shop exports", "n_members": 3}
-    card = graphcards.card(
-        _neighbourhood([], groups=[group], precedents=[precedent, {**precedent, "by_table": "x"}])
-    )
+    card = graphcards.card(_neighbourhood([], groups=[group]))
     assert card["groups"]["rows"] == [["sales", "what the shop exports", 3]]
-    assert card["precedents"]["fields"] == list(graphcards.PRECEDENT_FIELDS)
-    assert card["precedents"]["n"] == 2 and "1 more of 2" in card["precedents"]["more"]
 
 
-def test_between_two_tables_each_pair_carries_both_columns_facts(monkeypatch):
+def test_between_two_tables_every_join_and_each_comparison_with_both_columns_facts(monkeypatch):
     monkeypatch.setattr(graphcards, "PAIRS", 1)
     answer = {
         "table": _header("orders"),
         "neighbour": _header("customers"),
-        "reads": False,
-        "read_by": True,
+        "built_from": False,
+        "builds": True,
         "groups": ["sales"],
+        "joins": [_join("customer_id")],
         "pairs": [_pair("a"), _pair("b")],
     }
     card = graphcards.card(answer)
-    assert card["pairs"]["fields"][-2:] == ["column_facts", "other_facts"]
-    assert card["pairs"]["rows"][0][-1] == {"n_distinct": 9, "top": "C1", "top_freq": 3}
-    assert "between `orders` and `customers`" in card["pairs"]["more"]
+    assert card["joins"]["fields"][-2:] == ["found_in", "measured_at"]
+    assert card["joins"]["rows"][0][0] == ["customer_id"]
+    assert card["compared"]["fields"][-2:] == ["column_facts", "other_facts"]
+    assert card["compared"]["rows"][0][-1] == {"n_distinct": 9, "top": "C1", "top_freq": 3}
+    assert "between `orders` and `customers`" in card["compared"]["more"]
 
 
-def test_a_column_card_lists_its_lineage_and_cuts_each_list(monkeypatch):
+def test_a_column_card_lists_its_lineage_its_joins_and_cuts_each_list(monkeypatch):
     monkeypatch.setattr(graphcards, "COLUMN_ROWS", 1)
     walked = {"hops": 1, "kind": "Source", "table": "orders", "path": None, "column": "k"}
     answer = {
@@ -370,51 +414,63 @@ def test_a_column_card_lists_its_lineage_and_cuts_each_list(monkeypatch):
         "upstream": [{**walked, "via": "join", "step": "mart#j"}, {**walked, "hops": 2}],
         "downstream": [],
         "origins": [{"kind": "Source", "table": "orders", "path": "o.csv", "column": "k"}],
+        "joins": [{"table": "weather", "kind": "Source", **_join("k")}],
         "compared_with": [],
-        "precedents": [],
     }
     card = graphcards.card(answer)
     assert card["upstream"]["rows"] == [[1, "orders", "Source", "k", "join", "mart#j"]]
     assert "1 more of 2 columns" in card["upstream"]["more"]
     assert card["origins"]["rows"] == [["orders", "Source", "k", None]]
+    assert card["joins"]["rows"][0][:3] == ["weather", "Source", ["k"]]
     assert card["downstream"] == {
         "n": 0,
         "shown": "none",
         "fields": card["downstream"]["fields"],
         "rows": [],
     }
-    assert "precedents" not in card
 
 
-def _route(n_pairs: int) -> dict:
+def _route(n_joins: int) -> dict:
     return {
         "tables": ["a", "c", "b"],
         "steps": [
-            {"reads": False, "read_by": True, "pairs": []},
-            {"reads": False, "read_by": False, "pairs": [_pair(f"p{i}") for i in range(n_pairs)]},
+            {"built_from": False, "builds": True, "joins": []},
+            {
+                "built_from": False,
+                "builds": False,
+                "joins": [_join(f"j{i}") for i in range(n_joins)],
+            },
         ],
     }
 
 
-def test_a_route_card_says_each_steps_links_and_cuts_its_pairs(monkeypatch):
-    monkeypatch.setattr(graphcards, "STEP_PAIRS", 1)
+def test_a_route_card_says_each_steps_links_and_cuts_its_joins(monkeypatch):
+    monkeypatch.setattr(graphcards, "STEP_JOINS", 1)
     answer = {"table": _header("a"), "to": _header("b"), "routes": [_route(2)], "n_routes": 3}
     card = graphcards.card(answer)
     (row,) = card["routes"]["rows"]
     assert row[:2] == [2, ["a", "c", "b"]]
     first, second = row[2]
-    assert first == {"read_by": True}
-    assert second["n_pairs"] == 2 and len(second["pairs"]) == 1
-    assert card["pair_fields"] == list(graphcards.ROUTE_PAIR_FIELDS)
-    assert "asked_because" not in card["pair_fields"]
+    assert first == {"builds": True}
+    assert second["n_joins"] == 2 and len(second["joins"]) == 1
+    assert card["join_fields"] == list(graphcards.ROUTE_JOIN_FIELDS)
+    assert "asked_because" not in card["join_fields"]
     assert "2 more of the 3 routes" in card["routes"]["more"]
-    assert "pairs_more" in card
+    assert "rows_more" in card
 
 
-def test_no_route_is_an_empty_list_not_a_refusal():
-    answer = {"table": _header("a"), "to": _header("b"), "routes": [], "n_routes": 0}
+def test_no_route_is_an_empty_list_with_what_was_compared_on_either_table():
+    compared = [{"table": "a", "other_table": "x", **_pair("k")}]
+    answer = {
+        "table": _header("a"),
+        "to": _header("b"),
+        "routes": [],
+        "n_routes": 0,
+        "compared": compared,
+    }
     card = graphcards.card(answer)
     assert card["routes"]["n"] == 0 and card["routes"]["shown"] == "none"
+    assert card["compared"]["rows"][0][:4] == ["a", "k", "x", "id"]
 
 
 def test_a_receipt_lists_a_line_a_pair_and_says_how_to_read_the_rest(monkeypatch):

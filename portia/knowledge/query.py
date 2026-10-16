@@ -43,11 +43,13 @@ lineage is every column. The user called it a naive dump, and it was: a
 column that matters to a neighbour is in that neighbour's pairs, and the
 column list is `describe_source`'s.
 
-**It says which pairings this project made that this table has not**
-(:func:`_precedents`). Not a shelf of candidates: three of those were tried
-against the real graph and all three fail, which that function records. What
-this replays is a measurement somebody already took, where the same column name
-elsewhere has been compared to something and this table's has not.
+**Two kinds of record, and the neighbours are ordered by them** (2026-10-15).
+A join (`JOINED`) is a join the agent made; a comparison (`OVERLAPS`) is two
+columns it compared. Routes go through joins and through models built from
+tables, never through a comparison: two hourly tables whose timestamps cover
+each other are compared, and no one joins them on the hour alone. *Precedents*
+(a column of the same name measured elsewhere) were dropped with this: no
+logged answer ever carried one.
 
 **Nothing here ranks** (§6.1). Every list comes back in name order, a route in
 order of how many steps it takes and then by name, which carry no claim; there
@@ -78,6 +80,7 @@ from portia.knowledge.schema import (
     GROUP,
     HAS_COLUMN,
     IN_GROUP,
+    JOINED,
     KEY_PROPERTY,
     LINEAGE_UNREAD,
     LINEAGE_UNREAD_STEP,
@@ -328,6 +331,8 @@ def pair_from_row(row: dict) -> dict:
         "n_shared_values": seen.get("n_shared_values"),
         "coverage": seen.get("left_coverage"),
         "other_coverage": seen.get("right_coverage"),
+        "repeats": seen.get("left_repeats"),
+        "other_repeats": seen.get("right_repeats"),
         "comparable_types": seen.get("comparable_types"),
         ORIGIN: seen.get(ORIGIN) or ORIGIN_MEASURED,
         "asked_because": seen.get("asked_because"),
@@ -346,8 +351,52 @@ def turned(pair: dict) -> dict:
         "other_column": pair["column"],
         "coverage": pair.get("other_coverage"),
         "other_coverage": pair.get("coverage"),
+        "repeats": pair.get("other_repeats"),
+        "other_repeats": pair.get("repeats"),
         "column_facts": pair.get("other_facts", {}),
         "other_facts": pair.get("column_facts", {}),
+    }
+
+
+def join_from_row(row: dict) -> dict:
+    """One join record, turned to face the table asked about.
+
+    ``columns`` are this table's key columns and ``other_columns`` the other's,
+    matched in order; ``repeats`` is the most rows one key has here, 1 when
+    this table is one row per key; the relationship reads from this side. Pure,
+    so it is tested without a database. ``row`` is what :data:`_JOIN_RETURN`
+    returns.
+    """
+    seen = measure.seen_from(row["measured"] or {}, from_start=bool(row["from_here"]))
+    return {
+        "columns": seen.get("left_columns"),
+        "other_columns": seen.get("right_columns"),
+        "relationship": seen.get("relationship"),
+        "repeats": seen.get("left_repeats"),
+        "other_repeats": seen.get("right_repeats"),
+        "coverage": seen.get("left_coverage"),
+        "other_coverage": seen.get("right_coverage"),
+        "n_shared_keys": seen.get("n_shared_keys"),
+        "comparable_types": seen.get("comparable_types"),
+        ORIGIN: seen.get(ORIGIN),
+        "asked_because": seen.get("asked_because"),
+        measure.FOUND_IN: seen.get(measure.FOUND_IN),
+        "measured_at": seen.get("measured_at"),
+        "stale": row["stale"],
+    }
+
+
+def turned_join(join: dict) -> dict:
+    """A join row as the table on its other end sees it."""
+    return {
+        **join,
+        "columns": join["other_columns"],
+        "other_columns": join["columns"],
+        "relationship": measure.TURNED.get(join["relationship"], join["relationship"]),
+        "repeats": join["other_repeats"],
+        "other_repeats": join["repeats"],
+        "coverage": join["other_coverage"],
+        "other_coverage": join["coverage"],
     }
 
 
@@ -379,6 +428,16 @@ _STALE = (
     f"ELSE {_moved('right', 'left')} END AS stale"
 )
 
+#: The same for a join record, which hangs between the two tables themselves.
+_JOIN_STALE = (
+    "CASE WHEN startNode(r) = t "
+    f"THEN {_moved('left', 'right')} "
+    f"ELSE {_moved('right', 'left')} END AS stale"
+)
+
+#: One join record, for :func:`join_from_row`: ``r`` between ``t`` and ``o``.
+_JOIN_RETURN = f"properties(r) AS measured, startNode(r) = t AS from_here, {_JOIN_STALE}"
+
 #: One measured pair, for :func:`pair_from_row`: ``c`` is this table's column,
 #: ``d`` the other's, ``r`` the edge between them and ``o`` the other table.
 _PAIR_RETURN = (
@@ -394,7 +453,7 @@ _OTHER_RETURN = "labels(o)[0] AS kind, o.name AS name, o.path AS path"
 
 
 def _table_answer(session: Any, found: dict, project: str) -> dict:
-    """Every table this one is linked to, with what links them, and its groups."""
+    """Every table this one is linked to: built from, joined, compared. And its groups."""
     node = _match(found)
     args = {"key": found["key"], "project": project}
     reads = _run(
@@ -416,6 +475,11 @@ def _table_answer(session: Any, found: dict, project: str) -> dict:
         f"RETURN {_OTHER_RETURN}, {_PAIR_RETURN}",
         **args,
     )
+    joins = _run(
+        session,
+        f"MATCH {node}-[r:{JOINED}]-(o) WHERE o <> t RETURN {_OTHER_RETURN}, {_JOIN_RETURN}",
+        **args,
+    )
     groups = _run(
         session,
         f"MATCH {node}-[:{IN_GROUP}]->(g:{GROUP}) RETURN g.name AS name, g.context AS context, "
@@ -424,27 +488,28 @@ def _table_answer(session: Any, found: dict, project: str) -> dict:
     )
     return {
         "table": _header(found),
-        "neighbours": gather_neighbours(reads, grouped, pairs),
+        "neighbours": gather_neighbours(reads, grouped, pairs, joins),
         "groups": groups,
-        "precedents": _precedents(session, node, args),
     }
 
 
-def gather_neighbours(reads: list[dict], grouped: list[dict], pairs: list[dict]) -> list[dict]:
-    """One entry per neighbouring table, whatever links them, in name order.
+def gather_neighbours(
+    reads: list[dict], grouped: list[dict], pairs: list[dict], joins: Iterable[dict] = ()
+) -> list[dict]:
+    """One entry per neighbouring table, whatever links them.
 
     **Grouped by neighbour because the neighbour is the relationship.** The
     question the agent is standing in the middle of is *how does this table
-    connect to that one*, and the reads, the groups and the column pairs are
-    the answer to it rather than three lists beside each other. A table is
-    identified as the store identifies it, a source by its path and a model by
-    its name, so a source and a model that share a name stay two neighbours.
+    connect to that one*: built from it, or building it; the joins made between
+    them; the columns compared; the groups shared. A table is identified as the
+    store identifies it, a source by its path and a model by its name, so a
+    source and a model that share a name stay two neighbours.
 
-    ``reads`` rows carry ``link`` (``reads`` or ``read_by``), ``grouped`` rows
-    the ``group_name`` they share, ``pairs`` rows what :func:`pair_from_row`
-    reads. Pure, so the shape is tested without a database. Nothing here is
-    ordered by a number (§6.1): neighbours by name, groups by name, pairs by
-    their two column names.
+    **In order of kind, never of a number** (§6.1, 2026-10-15): first the
+    neighbours this table is built from, builds, or was joined to, which are
+    the ways a pipeline has actually gone, then those only compared or grouped,
+    each part by name. Joins by their columns, pairs by their two column names.
+    Pure, so the shape is tested without a database.
     """
     found: dict[tuple[str, str], dict] = {}
 
@@ -456,84 +521,37 @@ def gather_neighbours(reads: list[dict], grouped: list[dict], pairs: list[dict])
                 "kind": row["kind"],
                 "name": row["name"] or row["path"],
                 "path": row["path"],
-                "reads": False,
-                "read_by": False,
+                "built_from": False,
+                "builds": False,
                 "groups": [],
+                "joins": [],
                 "pairs": [],
             },
         )
 
     for row in reads:
-        entry(row)[row["link"]] = True
+        entry(row)["built_from" if row["link"] == "reads" else "builds"] = True
     for row in grouped:
         groups = entry(row)["groups"]
         if row["group_name"] not in groups:
             groups.append(row["group_name"])
     for row in pairs:
         entry(row)["pairs"].append(pair_from_row(row))
+    for row in joins:
+        entry(row)["joins"].append(join_from_row(row))
     for neighbour in found.values():
         neighbour["groups"].sort()
         neighbour["pairs"].sort(key=lambda p: (p["column"], p["other_column"]))
-    return sorted(found.values(), key=lambda n: (n["name"], n["kind"], n["path"] or ""))
+        neighbour["joins"].sort(key=lambda j: (j["columns"] or [], j["other_columns"] or []))
+    return sorted(
+        found.values(),
+        key=lambda n: (not _travelled(n), n["name"], n["kind"], n["path"] or ""),
+    )
 
 
-def _precedents(session: Any, node: str, args: dict, *, column: bool = False) -> list[dict]:
-    """Pairings this project already committed to that this table has not.
-
-    **Why this shape and not a shelf of candidates.** Three shelves a code
-    prefilter could build were tried against the AQN graph and all three fail,
-    for reasons worth keeping:
-
-    - *by shared column name*: standing on `AQN_READINGS`, **19 of the other
-      24 tables** come back, led by `UPDATED`, a timestamp present in 14 of them.
-    - *by role*: worse. `identifier` on both sides returns every table, and
-      `stations` alone contributes **69 candidate pairs**.
-    - *by name and role together*: the noise clears, and it is **blind to the
-      single most important relationship in the project**. Standing on
-      `AQN_VENDOR_LABELS.READING_ID` it returns 12 tables and not
-      `AQN_READINGS`, because the event catalog calls its key `ID`. That is
-      `France` against `FRA` wearing a different costume, and it is why §5.1
-      puts pair-picking on the agent: no comparison of metadata gets from
-      `READING_ID` to `ID`.
-
-    What *does* get there is a measurement somebody already took.
-    `ALTERNATE_NAMES.READING_ID` was measured against `AQN_READINGS.ID`, with a
-    reason, at coverage 1.0. Three other tables carry `READING_ID` and were never
-    checked — all three unmeasured in the 2026-08-31 indexing run. So this
-    replays a judgment the project has already made and recorded, rather than
-    forming one. It is not the code prefilter §6.5 rejected: that one *decided*
-    which pairs were worth measuring, and this states which pairs exist.
-
-    Only for columns carrying no measurement of their own — a column you have
-    already looked at is not a gap. One row per (column, what it is compared
-    to, who compared it), flat, so a card can cut it like any list.
-    ``column`` narrows it to ``$column``, for the column answer.
-    """
-    anchor = f"MATCH {node}-[:{HAS_COLUMN}]->(c:{COLUMN}" + (" {name: $column})" if column else ")")
-    return _run(session, f"{anchor} {_PRECEDENT_MATCH} {_PRECEDENT_RETURN}", **args)
-
-
-#: Every measurement of a column with the same name elsewhere, from a column of
-#: this table that has none. ``e`` is the namesake, ``f`` what it was compared
-#: to, ``et`` and ``ft`` their tables.
-_PRECEDENT_MATCH = (
-    f"WHERE NOT (c)-[:{OVERLAPS}]-() MATCH (e:{COLUMN})-[r:{OVERLAPS}]-(f:{COLUMN}) "
-    f"WHERE r.{PROJECT} = $project AND e.name = c.name AND e.key <> c.key "
-    f"MATCH (et)-[:{HAS_COLUMN}]->(e) MATCH (ft)-[:{HAS_COLUMN}]->(f)"
-)
-
-#: What the namesake was compared to, and who compared it with what result.
-_PRECEDENT_AGAINST = (
-    "c.name AS column, labels(ft)[0] AS against_kind, ft.name AS against_table, "
-    "f.name AS against_column"
-)
-_PRECEDENT_BY = (
-    "et.name AS by_table, r.n_shared_values AS n_shared_values, r.asked_because AS asked_because"
-)
-_PRECEDENT_RETURN = (
-    f"RETURN {_PRECEDENT_AGAINST}, {_PRECEDENT_BY} "
-    "ORDER BY column, against_table, against_column, by_table"
-)
+def _travelled(neighbour: dict) -> bool:
+    """Whether a pipeline has gone between the two: built from, building, or joined."""
+    return bool(neighbour["built_from"] or neighbour["builds"] or neighbour["joins"])
 
 
 # --- between two tables -----------------------------------------------------
@@ -548,8 +566,8 @@ def _between_answer(session: Any, found: dict, other: dict, project: str) -> dic
     links = _run(
         session,
         f"MATCH {node} MATCH {far} "
-        f"RETURN EXISTS {{ MATCH (t)-[:{READS}]->(o) }} AS reads, "
-        f"EXISTS {{ MATCH (o)-[:{READS}]->(t) }} AS read_by, "
+        f"RETURN EXISTS {{ MATCH (t)-[:{READS}]->(o) }} AS built_from, "
+        f"EXISTS {{ MATCH (o)-[:{READS}]->(t) }} AS builds, "
         f"[(t)-[:{IN_GROUP}]->(g:{GROUP})<-[:{IN_GROUP}]-(o) | g.name] AS groups",
         **args,
     )
@@ -559,13 +577,22 @@ def _between_answer(session: Any, found: dict, other: dict, project: str) -> dic
         f"(d:{COLUMN})<-[:{HAS_COLUMN}]-{far} RETURN {_PAIR_RETURN}",
         **args,
     )
+    joins = _run(
+        session,
+        f"MATCH {node}-[r:{JOINED}]-{far} RETURN {_JOIN_RETURN}",
+        **args,
+    )
     link = links[0] if links else {}
     return {
         "table": _header(found),
         "neighbour": _header(other),
-        "reads": bool(link.get("reads")),
-        "read_by": bool(link.get("read_by")),
+        "built_from": bool(link.get("built_from")),
+        "builds": bool(link.get("builds")),
         "groups": sorted(link.get("groups") or []),
+        "joins": sorted(
+            (join_from_row(row) for row in joins),
+            key=lambda j: (j["columns"] or [], j["other_columns"] or [], j[ORIGIN] or ""),
+        ),
         "pairs": sorted(
             (pair_from_row(row) for row in pairs), key=lambda p: (p["column"], p["other_column"])
         ),
@@ -594,6 +621,11 @@ def _column_answer(session: Any, found: dict, column: str, project: str) -> dict
         session,
         f"{reached}-[r:{OVERLAPS}]-(d:{COLUMN})<-[:{HAS_COLUMN}]-(o) "
         f"RETURN {_OTHER_RETURN}, {_PAIR_RETURN}",
+        **args,
+    )
+    joins = _run(
+        session,
+        f"MATCH {node}-[r:{JOINED}]-(o) WHERE o <> t RETURN {_OTHER_RETURN}, {_JOIN_RETURN}",
         **args,
     )
     return {
@@ -640,7 +672,16 @@ def _column_answer(session: Any, found: dict, column: str, project: str) -> dict
             ),
             key=lambda p: (p["table"], p["kind"], p["other_column"]),
         ),
-        "precedents": _precedents(session, node, args, column=True),
+        # The joins this column is a key of, on this table's side.
+        "joins": sorted(
+            (
+                {"table": row["name"] or row["path"], "kind": row["kind"], **join}
+                for row in joins
+                for join in [join_from_row(row)]
+                if column in (join["columns"] or [])
+            ),
+            key=lambda j: (j["table"], j["kind"], j["other_columns"] or []),
+        ),
     }
 
 
@@ -704,27 +745,27 @@ class TableId:
 
 @dataclass(frozen=True)
 class Link:
-    """One table-to-table link a route may take: a model reading a table, or a
-    measured pair with shared values, facing from ``start`` to ``end``."""
+    """One table-to-table link a route may take: a model built from a table, or a
+    join the agent made, facing from ``start`` to ``end``."""
 
     start: TableId
     end: TableId
     reads: bool = False
-    pair: dict | None = field(default=None, compare=False)
+    join: dict | None = field(default=None, compare=False)
 
 
 @dataclass
 class Step:
     """How one table of a route reaches the next: every link between the two.
 
-    ``reads`` when the first reads the second, ``read_by`` when the second
-    reads the first, and every measured pair with shared values, facing
-    forward, by column name.
+    ``built_from`` when the first is built from the second, ``builds`` when the
+    second is built from the first, and every join made between them, facing
+    forward, by its columns.
     """
 
-    reads: bool = False
-    read_by: bool = False
-    pairs: list[dict] = field(default_factory=list)
+    built_from: bool = False
+    builds: bool = False
+    joins: list[dict] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -745,8 +786,11 @@ def routes(
 
     **Searched in Python, over links one query fetched** (*2026-10-13*). A route
     is a question about tables, and the graph's links between tables are a few
-    hundred at most: a model reading a table, and a measured pair whose columns
-    share values. Fetched once, they are searched here, where a cap on steps
+    hundred at most: a model built from a table, and a join the agent made
+    (2026-10-15). **Never a comparison**: two hourly tables share every hour, so
+    their timestamps cover each other fully, and a route through them offered
+    electricity → weather → metadata, entering weather on the hour and leaving
+    on the site, a key split across two steps. A join is a key someone used. Fetched once, they are searched here, where a cap on steps
     is a loop bound rather than a variable-length match across column nodes
     that the server would have to expand both ways from every measured column.
 
@@ -757,8 +801,8 @@ def routes(
     route takes is a fact about it, and nothing here orders by coverage or
     shared values, which would be deciding which route is better (§6.1).
 
-    A measured zero is not a link. It is a fact about two columns, and it is
-    kept (§4.4); it is not a way from one table to the other.
+    A comparison is not a link, zero or not. It is a fact about two columns,
+    and it is kept (§4.4); it is not a way from one table to the other.
     """
     ways = _ways(links)
     found: list[tuple[TableId, ...]] = []
@@ -794,13 +838,13 @@ def _ways(links: Iterable[Link]) -> dict[TableId, dict[TableId, Step]]:
             continue
         forward, backward = step(link.start, link.end), step(link.end, link.start)
         if link.reads:
-            forward.reads = backward.read_by = True
-        if link.pair is not None:
-            forward.pairs.append(link.pair)
-            backward.pairs.append(turned(link.pair))
+            forward.built_from = backward.builds = True
+        if link.join is not None:
+            forward.joins.append(link.join)
+            backward.joins.append(turned_join(link.join))
     for nexts in ways.values():
         for each in nexts.values():
-            each.pairs.sort(key=lambda p: (p["column"], p["other_column"]))
+            each.joins.sort(key=lambda j: (j["columns"] or [], j["other_columns"] or []))
     return ways
 
 
@@ -810,54 +854,24 @@ _ENDS = (
     "labels(b)[0] AS b_kind, b.name AS b_name, b.path AS b_path"
 )
 
-#: A measured link's two columns: ``c`` on ``a``, ``d`` on ``b``.
-_LINK_COLUMNS = "c.name AS a_column, d.name AS b_column"
-
-#: Whether either end has moved since the link was measured, as `_STALE` asks,
-#: here without a `CASE`: the edge is read in its own direction.
-_LINK_STALE = "r.left_fingerprint <> a.fingerprint OR r.right_fingerprint <> b.fingerprint AS stale"
-
-#: The numbers on a measured link, facing from ``a`` to ``b`` as the edge does.
-_LINK_NUMBERS = (
-    "r.n_shared_values AS n_shared_values, r.left_coverage AS coverage, "
-    "r.right_coverage AS other_coverage, r.comparable_types AS comparable_types, "
-    f"coalesce(r.{ORIGIN}, '{ORIGIN_MEASURED}') AS origin, {_LINK_STALE}"
+#: Joins the agent made, started from the edges and filtered on their project,
+#: so nothing walks out from every table. Read in each edge's own direction,
+#: ``a`` to ``b``.
+_JOIN_LINKS = (
+    f"MATCH (a)-[r:{JOINED}]->(b) WHERE r.{PROJECT} = $project AND a <> b "
+    f"RETURN 'joined' AS link, {_ENDS}, properties(r) AS measured, "
+    "r.left_fingerprint <> a.fingerprint OR r.right_fingerprint <> b.fingerprint AS stale"
 )
 
-#: The same columns, empty, for a model reading a table.
-_NO_NUMBERS = (
-    "null AS a_column, null AS b_column, null AS n_shared_values, null AS coverage, "
-    "null AS other_coverage, null AS comparable_types, null AS origin, null AS stale"
-)
-
-#: Measured pairs whose columns share at least one value, started from the edges
-#: and filtered on their project, so nothing walks out from every table.
-_MEASURED_LINKS = (
-    f"MATCH (c:{COLUMN})-[r:{OVERLAPS}]->(d:{COLUMN}) "
-    f"WHERE r.{PROJECT} = $project AND r.n_shared_values > 0 "
-    f"MATCH (a)-[:{HAS_COLUMN}]->(c) MATCH (b)-[:{HAS_COLUMN}]->(d) WHERE a <> b "
-    f"RETURN 'overlaps' AS link, {_ENDS}, {_LINK_COLUMNS}, {_LINK_NUMBERS}"
-)
-
-#: Models reading tables, the same columns with no numbers.
+#: Models built from tables.
 _READ_LINKS = (
     f"MATCH (a:{MODEL})-[:{READS}]->(b) WHERE a.{PROJECT} = $project "
-    f"RETURN 'reads' AS link, {_ENDS}, {_NO_NUMBERS}"
+    f"RETURN 'reads' AS link, {_ENDS}, null AS measured, null AS stale"
 )
 
 #: **Every table-to-table link in the project, in one statement**, which is all
 #: :func:`routes` searches.
-_LINKS = f"{_MEASURED_LINKS} UNION ALL {_READ_LINKS}"
-
-#: The fields of a measured link that a route's step carries, facing forward.
-LINK_FIELDS = (
-    "n_shared_values",
-    "coverage",
-    "other_coverage",
-    "comparable_types",
-    ORIGIN,
-    "stale",
-)
+_LINKS = f"{_JOIN_LINKS} UNION ALL {_READ_LINKS}"
 
 
 def link_from_row(row: dict) -> Link:
@@ -872,8 +886,7 @@ def link_from_row(row: dict) -> Link:
     )
     if row["link"] == "reads":
         return Link(a, b, reads=True)
-    pair = {"column": row["a_column"], "other_column": row["b_column"]}
-    return Link(a, b, pair={**pair, **{key: row[key] for key in LINK_FIELDS}})
+    return Link(a, b, join=join_from_row({**row, "from_here": True}))
 
 
 def _table_id(found: dict) -> TableId:
@@ -887,14 +900,14 @@ def _routes_answer(session: Any, found: dict, goal: dict, project: str) -> dict:
         raise ValueError(f"a route needs two tables, and {found['name']!r} was named twice")
     links = [link_from_row(row) for row in _run(session, _LINKS, project=project)]
     shown, n = routes(links, start, end)
-    return {
+    answer = {
         "table": _header(found),
         "to": _header(goal),
         "routes": [
             {
                 "tables": [t.name for t in route.tables],
                 "steps": [
-                    {"reads": s.reads, "read_by": s.read_by, "pairs": list(s.pairs)}
+                    {"built_from": s.built_from, "builds": s.builds, "joins": list(s.joins)}
                     for s in route.steps
                 ],
             }
@@ -902,6 +915,31 @@ def _routes_answer(session: Any, found: dict, goal: dict, project: str) -> dict:
         ],
         "n_routes": n,
     }
+    if not n:
+        # No join and no build links them. What was compared on either end is
+        # what there is to go on: facts, in name order, never a suggestion.
+        answer["compared"] = [
+            {"table": table["name"], **pair}
+            for table in (found, goal)
+            for pair in _compared(session, table, project)
+        ]
+    return answer
+
+
+def _compared(session: Any, found: dict, project: str) -> list[dict]:
+    """Every comparison on a table's columns, facing it, with the other table named."""
+    rows = _run(
+        session,
+        f"MATCH {_match(found)}-[:{HAS_COLUMN}]->(c:{COLUMN})-[r:{OVERLAPS}]-"
+        f"(d:{COLUMN})<-[:{HAS_COLUMN}]-(o) WHERE o <> t "
+        f"RETURN {_OTHER_RETURN}, {_PAIR_RETURN}",
+        key=found["key"],
+        project=project,
+    )
+    return sorted(
+        ({"other_table": row["name"] or row["path"], **pair_from_row(row)} for row in rows),
+        key=lambda p: (p["column"], p["other_table"], p["other_column"]),
+    )
 
 
 # --- what measure_overlaps already has --------------------------------------
@@ -985,12 +1023,36 @@ def _title(table: dict) -> str:
 
 
 def _links(entry: dict) -> str:
-    """How a neighbour is linked, in words: reads, read by, the groups shared."""
+    """How a neighbour is linked, in words: built from, building, the groups shared."""
     words = [
-        word for word, on in (("reads it", entry["reads"]), ("read by it", entry["read_by"])) if on
+        word
+        for word, on in (("built from it", entry["built_from"]), ("builds it", entry["builds"]))
+        if on
     ]
     words += [f"group {group}" for group in entry["groups"]]
     return ", ".join(words)
+
+
+def _render_joins(joins: list[dict], *, indent: str) -> list[str]:
+    lines = []
+    for join in joins:
+        lines.append(f"{indent}joined on {_join_keys(join)}  {_join_numbers(join)}")
+        if join.get("asked_because"):
+            lines.append(f'{indent}  "{join["asked_because"]}"')
+    return lines
+
+
+def _join_keys(join: dict) -> str:
+    pairs = zip(join["columns"] or [], join["other_columns"] or [], strict=False)
+    return ", ".join(a if a == b else f"{a} = {b}" for a, b in pairs)
+
+
+def _join_numbers(join: dict) -> str:
+    keys = ("relationship", "repeats", "other_repeats", "coverage", "other_coverage", ORIGIN)
+    parts = [f"{key} {join[key]}" for key in keys if join.get(key) is not None]
+    if join.get("stale"):
+        parts.append("STALE — a table has changed since this was measured")
+    return "  ".join(parts)
 
 
 def _render_table(answer: dict) -> str:
@@ -1000,20 +1062,16 @@ def _render_table(answer: dict) -> str:
     for neighbour in answer["neighbours"]:
         how = _links(neighbour)
         lines.append(f"  {neighbour['kind']} {neighbour['name']}" + (f"  — {how}" if how else ""))
+        lines += _render_joins(neighbour["joins"], indent="    ")
         lines += _render_pairs(neighbour["pairs"], indent="    ")
-    for row in answer["precedents"]:
-        lines.append(
-            f"  {row['column']} has never been measured — elsewhere it is compared to "
-            f"{row['against_table']}.{row['against_column']} by {row['by_table']}: "
-            f"n_shared_values {row['n_shared_values']}"
-        )
     return "\n".join(lines)
 
 
 def _render_between(answer: dict) -> str:
     lines = [_title(answer["table"]), f"  and {_title(answer['neighbour'])}"]
     how = _links(answer)
-    lines.append(f"  linked: {how or '(no reads, no group)'}")
+    lines.append(f"  linked: {how or '(not built from each other, no group)'}")
+    lines += _render_joins(answer["joins"], indent="  ")
     lines += _render_pairs(answer["pairs"], indent="  ", facts=True)
     return "\n".join(lines)
 
@@ -1051,7 +1109,15 @@ def _numbers(pair: dict) -> str:
     A zero is printed as a zero and never as a verdict — `docs/KNOWLEDGE_GRAPH.md`
     §4.4 — which is why the reason the agent asked is printed under it.
     """
-    keys = ("n_shared_values", "coverage", "other_coverage", "comparable_types", ORIGIN)
+    keys = (
+        "n_shared_values",
+        "coverage",
+        "other_coverage",
+        "repeats",
+        "other_repeats",
+        "comparable_types",
+        ORIGIN,
+    )
     parts = [f"{key} {pair[key]}" for key in keys if pair.get(key) is not None]
     if pair.get("stale"):
         parts.append("STALE — a file has changed since this was measured")
@@ -1085,13 +1151,10 @@ def _render_column(answer: dict) -> str:
         # what it is — see the query.
         unread = f"  ({_unread(row)})" if row.get(DERIVATION) else ""
         lines.append(f"  origin: {row['table']}.{row['column']}{unread}")
+    for row in answer["joins"]:
+        lines.append(f"  joined to {row['table']} on {_join_keys(row)}  {_join_numbers(row)}")
     for row in answer["compared_with"]:
         lines.append(f"  compared with {row['table']}.{row['other_column']}: {_numbers(row)}")
-    for row in answer["precedents"]:
-        lines.append(
-            f"  never measured; elsewhere compared to {row['against_table']}."
-            f"{row['against_column']} by {row['by_table']}"
-        )
     return "\n".join(lines)
 
 
@@ -1102,12 +1165,18 @@ def _render_routes(answer: dict) -> str:
     for route in answer["routes"]:
         lines.append(f"  {' → '.join(route['tables'])}")
         for a, b, step in zip(route["tables"], route["tables"][1:], route["steps"], strict=False):
-            how = [w for w, on in (("reads", step["reads"]), ("read by", step["read_by"])) if on]
-            how += [
-                f"{p['column']} = {p['other_column']} ({p['n_shared_values']} shared)"
-                for p in step["pairs"]
+            how = [
+                w
+                for w, on in (("built from", step["built_from"]), ("builds", step["builds"]))
+                if on
             ]
+            how += [f"joined on {_join_keys(j)} ({j['relationship']})" for j in step["joins"]]
             lines.append(f"    {a} → {b}: {'; '.join(how)}")
+    for row in answer.get("compared", []):
+        lines.append(
+            f"  compared: {row['table']}.{row['column']} vs {row['other_table']}."
+            f"{row['other_column']}  {_numbers(row)}"
+        )
     return "\n".join(lines)
 
 

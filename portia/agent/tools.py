@@ -977,7 +977,7 @@ def _await_graph_writes() -> None:
             "column": {"type": "string", "description": "One column of it, for lineage"},
             "neighbour": {
                 "type": "string",
-                "description": "Another table: every measured pair between the two",
+                "description": "Another table: every join and comparison between the two",
             },
             "to": {"type": "string", "description": "Another table: the routes from table to it"},
         },

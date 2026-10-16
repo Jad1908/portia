@@ -324,7 +324,7 @@ def test_recording_a_step_puts_the_new_table_in_the_graph(neo4j_session, project
 
     answer = query.lookup(neo4j_session, "stg_orders", project=pid)
     assert answer["table"]["kind"] == "Model"
-    assert [n["name"] for n in answer["neighbours"] if n["reads"]] == ["orders"]
+    assert [n["name"] for n in answer["neighbours"] if n["built_from"]] == ["orders"]
     # …and the lineage of the table it just built is there too.
     assert query.lookup(neo4j_session, "stg_orders", "country_name", project=pid)["upstream"] == [
         {
@@ -650,7 +650,7 @@ def test_keeping_a_finding_keeps_the_joins_in_its_queries(neo4j_session, project
 def _stale(card: dict) -> list:
     """Each pair's ``stale`` on a neighbourhood card, as the copilot reads it."""
     (row,) = card["neighbours"]["rows"]
-    fields = card["pair_fields"]
+    fields = card["compared_fields"]
     return [pair[fields.index("stale")] for pair in row[-1]]
 
 
