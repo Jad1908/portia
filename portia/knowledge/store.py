@@ -292,7 +292,7 @@ def measured_writes(edges: list[Edge], project: str) -> list[tuple[str, dict]]:
     edge from before `origin` existed counts as ``measured``, as reads say.
     """
     groups: dict[tuple[str, str, str], list[Edge]] = {}
-    for edge in edges:
+    for edge in _last_of_each(edges):
         if edge.kind in STRUCTURAL:
             raise ValueError(f"{edge.kind} is structural — a rebuild owns it, not a measurement")
         groups.setdefault((edge.kind, edge.start.label, edge.end.label), []).append(edge)
@@ -330,6 +330,31 @@ def measured_writes(edges: list[Edge], project: str) -> list[tuple[str, dict]]:
             )
         )
     return writes
+
+
+def _last_of_each(edges: list[Edge]) -> list[Edge]:
+    """One edge per identity, the last given, either way round.
+
+    The replace in :func:`measured_writes` sees what is stored, not a row
+    earlier in its own batch, so two of one identity in one call were both
+    written (2026-10-15: one finding kept the same join twice).
+    """
+
+    def identity(e: Edge) -> tuple:
+        cols = (
+            tuple(e.properties.get("left_columns") or ()),
+            tuple(e.properties.get("right_columns") or ()),
+        )
+        ends = (e.start.key, e.end.key)
+        if ends[0] > ends[1]:
+            ends, cols = ends[::-1], cols[::-1]
+        return (e.kind, e.properties.get(ORIGIN) or ORIGIN_MEASURED, ends, cols)
+
+    kept: dict[tuple, Edge] = {}
+    for edge in edges:
+        kept.pop(identity(edge), None)
+        kept[identity(edge)] = edge
+    return list(kept.values())
 
 
 #: A join record is the same join only on the same key columns, matched side to

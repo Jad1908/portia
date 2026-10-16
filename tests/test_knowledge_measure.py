@@ -766,3 +766,35 @@ def test_every_reason_a_join_is_not_kept_is_explained_to_the_agent():
         sql_joins.NO_PARSER,
     ]
     assert [code for code in codes if f"`{code}`" not in said] == []
+
+
+def test_a_finding_whose_queries_make_one_join_twice_measures_and_keeps_it_once(
+    neo4j_session, project, monkeypatch
+):
+    from portia import runlog
+    from portia.agent import events
+
+    monkeypatch.chdir(project)
+    log = runlog.start(kind=runlog.CHAT, portia_dir=str(project / catalog.DEFAULT_DIR))
+    for i in range(2):
+        log.event(
+            events.Event(
+                events.TOOL_CALL,
+                {
+                    "name": f"{events.TOOL_PREFIX}query_data",
+                    "id": f"toolu_{i}",
+                    "input": {
+                        "question": f"question {i}",
+                        "sql": "SELECT count(*) FROM orders o "
+                        "JOIN customers c ON o.customer_id = c.customer_id",
+                        "inputs": ["orders", "customers"],
+                    },
+                },
+            )
+        )
+        log.event(
+            events.Event(events.TOOL_RESULT, {"id": f"toolu_{i}", "text": "{}", "is_error": False})
+        )
+    kept = handlers.record_finding("q?", "a.", "so.", ["orders"], [1, 2])
+    assert len(kept["joins"]["kept"]) == 1
+    assert len(_joined(neo4j_session)) == 1

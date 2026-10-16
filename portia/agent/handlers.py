@@ -2604,6 +2604,11 @@ class _JoinToKeep:
     report: dict | None = None
 
 
+def _one_join(a: tuple, b: tuple) -> bool:
+    """Whether two ``(left, right, left_on, right_on)`` are the same join, either way round."""
+    return a == b or a == (b[1], b[0], b[3], b[2])
+
+
 def _join_text(left: str, right: str, left_on, right_on) -> str:
     """A join as one short line, for an answer that lists what was kept."""
     pairs = ", ".join(f"{a} = {b}" if a != b else a for a, b in zip(left_on, right_on, strict=True))
@@ -2627,7 +2632,7 @@ def _keep_joins(joins: list[_JoinToKeep], portia_dir: str) -> dict:
             {"join": join.text, "why": why, **({"error": error} if error else {})}
         )
 
-    todo = []
+    todo: list[tuple[_JoinToKeep, str, str]] = []
     for join in joins:
         if not join.left_on:
             miss(join, NO_KEYS)
@@ -2644,6 +2649,11 @@ def _keep_joins(joins: list[_JoinToKeep], portia_dir: str) -> dict:
         left, right = _known_name(left, portia_dir), _known_name(right, portia_dir)
         if left == right:
             miss(join, SAME_TABLE)
+            continue
+        same = (left, right, join.left_on, join.right_on)
+        if any(_one_join(same, (lt, rt, a.left_on, a.right_on)) for a, lt, rt in todo):
+            # Two queries of one finding, or one step, often make the same join:
+            # measured once, kept once (2026-10-15: kept twice in one batch).
             continue
         todo.append((join, left, right))
     if not todo:

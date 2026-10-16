@@ -439,3 +439,18 @@ def test_join_records_are_kept_per_key_and_per_origin(neo4j_session):
         {"start": "orders", "cols": ["region"], "origin": "join_check", "reason": "another key"},
         {"start": "orders", "cols": ["customer_id"], "origin": "step", "reason": "built on it"},
     ]
+
+
+def test_one_batch_with_the_same_join_twice_keeps_it_once(neo4j_session):
+    """Two queries of one finding made the same join and both were written (2026-10-15)."""
+    from portia.knowledge.schema import JOINED
+
+    g = Graph(project=PROJECT_A)
+    g.add_node(SOURCE, "data/orders.csv", name="orders")
+    g.add_node(SOURCE, "data/customers.csv", name="customers")
+    store.write(g, neo4j_session)
+    first = _join(["customer_id"], ["customer_id"], "finding", "one")
+    again = _join(["customer_id"], ["customer_id"], "finding", "two", turned=True)
+    assert store.write_measured([first, again], neo4j_session, PROJECT_A) == 1
+    rows = neo4j_session.run(f"MATCH ()-[r:{JOINED}]->() RETURN r.asked_because AS reason").data()
+    assert rows == [{"reason": "two"}]
