@@ -48,9 +48,16 @@ something, and says against what, by which table, with what result. It is not a 
 nothing is scoring the match. It is a pairing this project already made, replayed where it has not
 been applied. Whether your column is the same thing is still your call.
 
-A column marked `derivation: unknown` is one whose trail stops there: a count, a literal, something
-with no input column beneath it. Read it as *this value was computed here*, and follow the `step`
-pointer into the spec if you need to know how. Do not guess an origin for it.
+Where a column's trail stops, `derivation` says why. `unknown`: portia read the step and found no
+input column beneath the value, a count or a literal, so it was computed here; follow the `step`
+pointer into the spec to see how. `not_traced`: portia could not read the step at all, so the
+column may well be carried unchanged from an input and nobody can say which. The model then says
+why in `lineage_unread`, at the step `lineage_unread_step`: `pivot` (a PIVOT or UNPIVOT, whose
+columns are made from values or from a list of columns), `columns_pattern` (`COLUMNS(...)`, whose
+columns depend on the data), `input_not_indexed`, `input_unread` (a table it reads was not traced
+either), `input_missing`, `not_parsed`, `not_resolved`, `not_a_query`, `star_unknown`,
+`trace_failed`, `unknown_op`, `no_steps` or `no_parser`. Do not guess an origin for either: read
+the step in the spec.
 
 Every list is cut at a fixed size. A cut list ends with `more`, which says how many were left out
 and the narrower question that reaches them.

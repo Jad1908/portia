@@ -444,7 +444,7 @@ def recorded(monkeypatch):
 
     ``attach`` is how many measured edges the write claims; by default all.
     """
-    calls: dict = {"edges": [], "writes": 0, "attach": None}
+    calls: dict = {"edges": [], "writes": 0, "attach": None, "fingerprints": []}
 
     @contextmanager
     def session(**_):
@@ -458,9 +458,13 @@ def recorded(monkeypatch):
         calls["edges"].extend(edges)
         return len(edges) if calls["attach"] is None else calls["attach"]
 
+    def write_fingerprints(fingerprints, live, project):
+        calls["fingerprints"].append(fingerprints)
+
     monkeypatch.setattr(store, "session", session)
     monkeypatch.setattr(store, "write", write)
     monkeypatch.setattr(store, "write_measured", write_measured)
+    monkeypatch.setattr(store, "write_fingerprints", write_fingerprints)
     return calls
 
 
@@ -687,6 +691,20 @@ def test_a_join_check_on_a_built_specs_last_step_is_kept_against_its_model(sales
     assert "chain" in str(edge)
 
 
+def test_recording_a_step_whose_lineage_cannot_be_read_says_so(sales, recorded):
+    """It answered ``graph: updated`` alone, and the copilot took the columns for traced."""
+    step = {
+        "id": "long",
+        "op": "sql",
+        "inputs": ["orders"],
+        "sql": "SELECT * FROM orders UNPIVOT (v FOR field IN (amount))",
+    }
+    card = handlers.record_step("specs/long.yaml", step, portia_dir=sales)
+    assert card["lineage"] == {"unread": "pivot", "step": "long"}
+    traced = handlers.record_step("specs/chain.yaml", dict(_FIRST), portia_dir=sales)
+    assert "lineage" not in traced
+
+
 def test_a_spec_edited_since_its_build_is_not_its_model(sales, recorded):
     handlers.record_step("specs/chain.yaml", dict(_FIRST), portia_dir=sales)
     path = Path(sales).parent / "specs" / "chain.yaml"
@@ -725,6 +743,9 @@ def test_graph_lookup_hands_back_a_card(sales, recorded, monkeypatch):
     card = handlers.graph_lookup("orders", to="customers", portia_dir=sales)
     assert seen == {"table": "orders", "to": "customers"}
     assert card["routes"]["n"] == 0
+    # Every table's fingerprint is set to what it is now before the read.
+    (written,) = recorded["fingerprints"]
+    assert set(written["Source"]) == {"orders", "customers"}
 
 
 # --- a graph read waits for the graph writes of its own message (2026-10-14) ---------------
@@ -764,3 +785,33 @@ def test_a_graph_read_with_no_write_running_does_not_wait(monkeypatch):
     started = time.monotonic()
     asyncio.run(tools.graph_lookup.handler({"table": "a"}))
     assert time.monotonic() - started < tools.GRAPH_WRITE_POLL_S * 5
+
+
+# --- a measurement rewrites the structure only when it must (2026-10-15) -------------------
+
+
+def test_a_measurement_that_attaches_rebuilds_nothing(sales, recorded, monkeypatch):
+    """Every measurement used to rewrite the whole project's structure first."""
+    monkeypatch.setattr(query, "stored_overlaps", lambda live, keys, *, project: {})
+    handlers.measure_overlaps(_pairs(("customer_id", "customer_id")), sales)
+    handlers.join_findings(
+        "orders", "customers", keys=["customer_id"], portia_dir=sales, reason="r"
+    )
+    assert recorded["writes"] == 0
+    assert len(recorded["edges"]) == 2
+
+
+def test_a_measurement_on_a_table_new_to_the_graph_rebuilds_once_and_attaches(
+    sales, recorded, monkeypatch
+):
+    tries: list[int] = []
+
+    def write_measured(edges, live, project):
+        tries.append(len(edges))
+        return 0 if len(tries) == 1 else len(edges)
+
+    monkeypatch.setattr(store, "write_measured", write_measured)
+    monkeypatch.setattr(query, "stored_overlaps", lambda live, keys, *, project: {})
+    answer = handlers.measure_overlaps(_pairs(("customer_id", "customer_id")), sales)
+    assert recorded["writes"] == 1 and tries == [1, 1]
+    assert answer["stored"] is True

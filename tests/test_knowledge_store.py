@@ -136,6 +136,16 @@ class _Recording:
         self.statements.append(statement)
         return [{"written": len(params.get("rows", []))}]
 
+    # A rebuild is one transaction (`store.write`); this one is the session itself.
+    def begin_transaction(self):
+        return self
+
+    def commit(self):
+        self.statements.append("COMMIT")
+
+    def close(self):
+        pass
+
 
 def test_every_write_is_counted_once_it_is_over(graph):
     """What lets the window keep a picture of the graph between renders
@@ -222,7 +232,9 @@ def _measure(session, project: str, left: str, right: str) -> None:
 
 
 def _counts(session) -> dict:
-    rows = session.run(f"MATCH (n) RETURN n.{PROJECT} AS project, count(n) AS n")
+    rows = session.run(
+        f"MATCH (n) WHERE NOT n:{store.LOCK_LABEL} RETURN n.{PROJECT} AS project, count(n) AS n"
+    )
     return {r["project"]: r["n"] for r in rows}
 
 
@@ -277,3 +289,106 @@ def test_forget_unscoped_removes_what_predates_the_property(neo4j_session, graph
 
     assert store.forget_unscoped(session) == 1
     assert _counts(session) == {PROJECT_A: 3}
+
+
+def _pair(left: str, right: str, origin: str, reason: str):
+    from portia.knowledge import measure
+    from portia.knowledge.schema import Ref
+
+    table = Ref(SOURCE, "data/orders.csv")
+    return measure.overlap_edge(
+        measure.Pair(table, left, table, right, reason),
+        {"n_shared_values": 1, "left_coverage": 0.5, "right_coverage": 0.25},
+        origin=origin,
+    )
+
+
+def _overlaps(session) -> list[dict]:
+    rows = session.run(
+        f"MATCH (a)-[r:{OVERLAPS}]->(b) RETURN a.name AS start, r.origin AS origin, "
+        "r.asked_because AS reason ORDER BY origin"
+    )
+    return [dict(r) for r in rows]
+
+
+def test_a_join_check_never_replaces_a_comparison_taken_on_purpose(neo4j_session, graph):
+    """It used to: one `MERGE` per direction, so the join check's numbers, reason and
+    origin overwrote the pair the agent had chosen to compare (2026-10-15)."""
+    store.write(graph, neo4j_session)
+    session = neo4j_session
+    session.run(f"MATCH ()-[r:{OVERLAPS}]->() DELETE r")
+    store.write_measured(
+        [_pair("order_id", "customer_id", "measured", "chosen")], session, PROJECT_A
+    )
+    store.write_measured(
+        [_pair("order_id", "customer_id", "join_check", "joining")], session, PROJECT_A
+    )
+    assert [(e["origin"], e["reason"]) for e in _overlaps(session)] == [
+        ("join_check", "joining"),
+        ("measured", "chosen"),
+    ]
+
+
+def test_the_same_tool_measuring_a_pair_again_replaces_it_either_way_round(neo4j_session, graph):
+    """Measured from its other end, a pair used to become a second edge."""
+    store.write(graph, neo4j_session)
+    session = neo4j_session
+    session.run(f"MATCH ()-[r:{OVERLAPS}]->() DELETE r")
+    store.write_measured(
+        [_pair("order_id", "customer_id", "measured", "first")], session, PROJECT_A
+    )
+    store.write_measured(
+        [_pair("customer_id", "order_id", "measured", "again")], session, PROJECT_A
+    )
+    assert _overlaps(session) == [{"start": "customer_id", "origin": "measured", "reason": "again"}]
+
+
+def test_an_edge_from_before_origin_existed_is_replaced_as_a_comparison(neo4j_session, graph):
+    store.write(graph, neo4j_session)
+    session = neo4j_session
+    session.run(f"MATCH ()-[r:{OVERLAPS}]->() DELETE r")
+    _measure(session, PROJECT_A, "order_id", "customer_id")  # no origin, as old edges have
+    store.write_measured([_pair("order_id", "customer_id", "measured", "now")], session, PROJECT_A)
+    assert _overlaps(session) == [{"start": "order_id", "origin": "measured", "reason": "now"}]
+
+
+def test_a_rebuild_takes_the_projects_lock_first_and_commits_once(graph):
+    session = _Recording()
+    store.write(graph, session)
+    data = session.statements[len(store.constraint_statements()) :]
+    assert data[0].startswith(f"MERGE (l:{store.LOCK_LABEL}")
+    assert data[-1] == "COMMIT" and data.count("COMMIT") == 1
+
+
+def test_two_rebuilds_of_one_project_at_once_leave_its_structure_whole(neo4j_session, graph):
+    """Each statement used to commit on its own, so one rebuild's prune could delete the
+    edges another had just stamped. Behind the lock they take turns."""
+    import threading
+
+    from portia.knowledge.schema import Ref
+
+    wide = Graph(project=PROJECT_A)
+    table = wide.add_node(SOURCE, "data/orders.csv", name="orders")
+    for i in range(300):
+        name = f"c{i}"
+        wide.add_edge(HAS_COLUMN, table, wide.add_node(*_column(name), name=name))
+    assert Ref(SOURCE, "data/orders.csv") == table
+
+    errors: list[BaseException] = []
+
+    def rebuild() -> None:
+        try:
+            with store.session() as live:
+                for _ in range(3):
+                    store.write(wide, live)
+        except BaseException as exc:  # noqa: BLE001 - reported by the assertion below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=rebuild) for _ in range(3)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert errors == []
+    n = neo4j_session.run(f"MATCH ()-[r:{HAS_COLUMN}]->() RETURN count(r) AS n").single()["n"]
+    assert n == 300

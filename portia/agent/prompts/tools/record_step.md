@@ -191,7 +191,8 @@ a table, the user edits the file.
 ## What comes back
 
 A step card. It says where the step was written, the model the spec builds, and whether the catalog
-and the graph took it. Then comes `outcome`, what the produced table turned out to be: n_rows,
+and the graph took it. `lineage` is there only when portia could not read which input columns the
+model's columns came from: `unread` says why and `step` where, as `graph_lookup` describes. Then comes `outcome`, what the produced table turned out to be: n_rows,
 n_cols, its flags, and the grain claim as measured. Its exceptional columns are named under
 `flagged`: all_null (holds no value), newly_all_null (went in with values and came out with none)
 and high_null (at least {high_null} null). Each flag lists the columns that carry it, or under

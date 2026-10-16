@@ -647,10 +647,48 @@ def test_a_column_with_nothing_underneath_it_says_so_instead_of_looking_like_a_f
 
     # The column beside it resolved, and says nothing about derivation at all.
     carried = query.lookup(neo4j_session, "agg_orders", "customer_id", project=pid)
-    assert carried["column"]["derivation"] is None
+    assert carried["column"].get("derivation") is None
     assert carried["origins"] == [
         {"kind": "Source", "table": "orders", "path": "data/orders.csv", "column": "customer_id"}
     ]
+
+
+def test_a_model_whose_sql_could_not_be_read_says_not_traced_and_why(neo4j_session, project, pid):
+    """Never *computed here*: an unreadable unpivot carries its key columns through
+    unchanged, and the copilot was told to read every one of them as computed
+    (2026-10-15). The model says which code stopped it and at which step."""
+    from portia import pipeline
+
+    (project / "specs" / "long_orders.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "sources": {"orders": "data/orders.csv"},
+                "steps": [
+                    {
+                        "id": "unpivot",
+                        "op": "sql",
+                        "inputs": ["orders"],
+                        "sql": "SELECT * FROM orders UNPIVOT (v FOR field IN (amount))",
+                    }
+                ],
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    pipeline.build_project(project)
+    store.write(build_graph(project).graph, neo4j_session)
+
+    answer = query.lookup(neo4j_session, "long_orders", "order_id", project=pid)
+    assert answer["column"]["derivation"] == "not_traced"
+    assert answer["column"]["lineage_unread"] == "pivot"
+    assert answer["column"]["lineage_unread_step"] == "unpivot"
+    assert "lineage not read: pivot at step unpivot" in query.render_text(answer)
+    card = query.lookup(neo4j_session, "long_orders", project=pid)["table"]
+    assert card["lineage_unread"] == "pivot"
+    # A source, or a model read whole, carries neither key.
+    assert "lineage_unread" not in query.lookup(neo4j_session, "orders", project=pid)["table"]
 
 
 def test_a_trail_that_ends_at_an_unreadable_column_still_reports_that_column(

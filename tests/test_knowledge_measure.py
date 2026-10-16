@@ -407,7 +407,7 @@ def test_a_measurement_that_could_not_be_attached_is_not_reported_as_stored(
 
 
 def _no_parser():
-    raise sqllineage.LineageUnreadable("sqlglot is not installed")
+    raise sqllineage.LineageUnreadable(sqllineage.NO_PARSER, "sqlglot is not installed")
 
 
 def test_write_measured_counts_what_the_database_kept(neo4j_session):
@@ -528,3 +528,40 @@ def test_a_join_checks_measurement_is_reused_by_measure_overlaps(
         ]
     )
     assert again["n_from_graph"] == 1
+
+
+def _stale(card: dict) -> list:
+    """Each pair's ``stale`` on a neighbourhood card, as the copilot reads it."""
+    (row,) = card["neighbours"]["rows"]
+    fields = card["pair_fields"]
+    return [pair[fields.index("stale")] for pair in row[-1]]
+
+
+def test_a_file_edited_since_the_rebuild_makes_its_measurements_stale(measured, project):
+    """Not re-indexed and not rebuilt: the measurements on it used to read as current,
+    because a table's fingerprint was the catalog's record and only a rebuild set it."""
+    assert _stale(handlers.graph_lookup("orders")) == [False, False]
+    _add_order(project)
+    assert _stale(handlers.graph_lookup("orders")) == [True, True]
+
+
+def test_measuring_again_after_the_file_changed_measures_rather_than_reuses(measured, project):
+    """`measure_overlaps` answered from the graph against the old fingerprint."""
+    pair = {
+        "left": "orders",
+        "left_column": "customer_id",
+        "right": "customers",
+        "right_column": "customer_id",
+        "reason": "the same key by name",
+    }
+    again = handlers.measure_overlaps([pair])
+    assert again["n_from_graph"] == 1
+    _add_order(project)
+    after = handlers.measure_overlaps([pair])
+    assert after["n_from_graph"] == 0 and after["n_measured"] == 1
+
+
+def _add_order(project: Path) -> None:
+    """One more row, written the way the fixture wrote the others."""
+    with open(project / "data" / "orders.csv", "a", newline="", encoding="utf-8") as f:
+        csv.writer(f).writerow([3, "C3", "Spain"])

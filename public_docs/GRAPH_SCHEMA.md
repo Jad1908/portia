@@ -73,7 +73,7 @@ Identified by **`path`**.
 | `summary` | string | `set_interpretation` — **the agent's prose read** | nobody has read it yet (see below) |
 | `size` | int | `catalog.STALENESS_FACTS` | never indexed |
 | `mtime` | float | `catalog.STALENESS_FACTS` | never indexed |
-| `fingerprint` | string | `"{size}:{mtime}"` — the two above, comparable in one go | never indexed |
+| `fingerprint` | string | `pipeline.table_fingerprints` — `"{size}:{mtime}"` of the file **as it is now**, `"gone"` when it is gone; a warehouse table's catalog facts | never indexed |
 | `_build` | string | portia's bookkeeping; see *Rebuilds* | never |
 
 **`summary` is absent unless a person or the copilot actually wrote one.** `catalog._auto_summary`
@@ -94,7 +94,9 @@ unique across a project.
 |---|---|---|
 | `name` | string | the spec's filename stem |
 | `spec` | string | the spec's path, relative to the project root |
-| `fingerprint` | string | `pipeline.fingerprint(doc)` — the digest of the parts that decide its SQL |
+| `fingerprint` | string | `pipeline.table_fingerprints` — a digest of its spec (`pipeline.fingerprint`) and the fingerprints of every table it reads; absent when one of them cannot tell |
+| `lineage_unread` | string | `knowledge.build` — why its column lineage could not be read, as a code from `build.UNREAD_CODES`; absent when it was read |
+| `lineage_unread_step` | string | `knowledge.build` — the step the lineage stopped at; absent with `lineage_unread`, and when the spec has no steps |
 | `_build` | string | see *Rebuilds* |
 
 **`spec` and `fingerprint` are pointers into the pipeline, and none of the pipeline's vocabulary is
@@ -120,7 +122,7 @@ for example `source:data/orders.csv::customer_id` or `model:mart_orders::note_x`
 | `flags` | list of string | `checks.profiling` | the model has not been built |
 | `min`, `max` | number | `checks.profiling` | the column is not numeric, or the model has not been built |
 | `top`, `top_freq` | value, int | `checks.profiling` | the column is numeric or boolean, or the model has not been built |
-| `derivation` | `"unknown"` | `knowledge.build` — see below | almost always; only a model's column ever carries it |
+| `derivation` | `"unknown"` or `"not_traced"` | `knowledge.build` — see below | almost always; only a model's column ever carries it |
 | `_build` | string | see *Rebuilds* | never |
 
 **The shape facts are split by kind and you never get both halves** (`schema.SHAPE_FACTS`). A
@@ -147,12 +149,15 @@ profiles the table a build or a recorded step produced). Before that, nothing ha
 table portia *would* build, and inventing numbers for it would be the one thing this project
 forbids.
 
-**`derivation: "unknown"` means the trail stops here and portia could not read past it** — a
-`count(*)`, a literal, anything a `sql` step produced with no input column underneath it. It exists
-because *no outgoing `DERIVES_FROM`* already means something else: on a file's column it means *this
-is where the data came from*, and without the marker a computed column has the identical shape. Two
-states only, present or absent — a vocabulary of reasons would fragment the way `Entity`'s names
-would, so the reason lives in the build report instead. To ask for the honest terminal columns:
+**`derivation` says why a model column's trail stops, and it has two values.** `"unknown"`: the
+step was read, and nothing is underneath the value — a `count(*)`, a literal, anything a `sql` step
+produced with no input column underneath it. `"not_traced"`: the step could not be read at all, so
+the column may be carried unchanged from an input and nobody can say which; its model says why in
+`lineage_unread`. The marker exists because *no outgoing `DERIVES_FROM`* already means something
+else: on a file's column it means *this is where the data came from*, and without the marker a
+computed column has the identical shape. A closed pair of values, never a vocabulary of reasons:
+the reason is a code on the model, and the parser's own words stay in the build report. To ask for
+the honest terminal columns:
 
 ```cypher
 MATCH (c:Column {name: 'amount'})-[:DERIVES_FROM*]->(o:Column)
@@ -220,8 +225,11 @@ It needs `sqlglot`, from the `graph` extra. **Without it the step is unresolved*
 model downstream: `Model` node, true `READS` edges, no `Column` nodes. Same when the SQL cannot be
 parsed or cannot be resolved against its inputs — **unless the model has been built from the spec
 as it stands** (2026-10-14): then its columns come from its catalog entry, with their facts and
-`derivation: "unknown"`, so a join or an overlap can attach to them (an `UNPIVOT` staging step
-is the case that found it). Lineage is still reported missing. `python -m portia.cli.knowledge` prints what could
+`derivation: "not_traced"`, so a join or an overlap can attach to them (an `UNPIVOT` staging step
+is the case that found it). Lineage is still reported missing, and the model carries
+`lineage_unread`. A `PIVOT`, an `UNPIVOT` or a `COLUMNS(...)` anywhere in the statement is refused
+before it is traced: sqlglot reads the standard `UNPIVOT` and reports its name column as copied
+from the unpivoted columns' values, which is wrong rather than missing. `python -m portia.cli.knowledge` prints what could
 not be read and why — per model when the whole spec stalled, per column when only one did.
 
 ### Measured — costs a query, and is nobody's to delete
@@ -249,6 +257,10 @@ each side, between two graph tables). Both require the copilot's reason.
 not symmetric: 98% of orders' customer ids may exist in customers while only 40% of customers appear
 in orders, and both are true.
 
+**One edge per pair of columns per `origin`.** Measuring a pair again with the same tool replaces
+that tool's edge between the two columns, whichever way round either was taken; a measurement by the
+other tool stays beside it, so a join check never erases a comparison the copilot chose.
+
 **A measured zero is written, and it does not mean "unrelated".** `France` against `FRA` shares no
 values and the zero is correct; those two columns are the same thing after a mapping. That is why
 `asked_because` is required in code — without the hypothesis attached, the most important pair in a
@@ -273,6 +285,13 @@ RETURN a.name, b.name, r.n_shared_values,
        r.left_fingerprint <> ta.fingerprint OR r.right_fingerprint <> tb.fingerprint AS stale
 ```
 
+**The tables' fingerprints are what they are now.** A source's is its file's size and mtime off a
+stat, not the catalog's record of them, so a file edited and never re-indexed has moved. A model's
+folds its spec with what it reads, so a model rebuilt over a changed file has moved though its spec
+has not. `graph_lookup` sets every table's fingerprint to its current value before it reads
+(`store.fingerprint_writes`), so `stale` is about the files as they are, not as they were at the last
+rebuild.
+
 **Marked, never deleted.** A deleted edge is indistinguishable from one nobody ever measured, which
 is the ambiguity the whole design exists to remove. `graph_lookup` returns `stale` on every overlap
 it reports.
@@ -284,6 +303,11 @@ it reports.
 Every node and every **structural** edge carries `_build`, the id of the write that produced it.
 `store.write` merges the new graph in, then deletes structural edges carrying an older stamp — they
 restate files, and the files no longer say them.
+
+**A rebuild is one transaction, behind its project's lock.** It first sets a property on a
+`PortiaLock` node keyed by the project (`lock`, never `project`, so no read of a project's nodes
+meets it), which holds Neo4j's write lock until the rebuild commits. Two rebuilds of one project
+take turns; before this, one rebuild's prune could delete the edges another had just written.
 
 **`OVERLAPS` is never touched.** It cost a query, no file restates it, and Neo4j is a store rather
 than a cache. A `Column` that still carries one survives even after the catalog stops listing it, so

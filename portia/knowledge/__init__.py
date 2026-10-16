@@ -28,24 +28,50 @@ from pathlib import Path
 from portia.knowledge.build import BuildResult, build_graph
 from portia.knowledge.schema import Edge, Graph, Node
 
-__all__ = ["BuildResult", "Edge", "Graph", "Node", "build_graph", "sync"]
+__all__ = ["BuildResult", "Edge", "Graph", "Node", "build_graph", "refresh_fingerprints", "sync"]
 
 
-def sync(root: str | Path = ".", *, portia_dir: str | Path | None = None) -> BuildResult:
+def sync(
+    root: str | Path = ".",
+    *,
+    portia_dir: str | Path | None = None,
+    result: BuildResult | None = None,
+) -> BuildResult:
     """Read the project and put its structural half in the store, in one call.
 
-    The write moment §5 asks for, in the one shape that keeps the two halves in
-    step: a measurement can only attach to Column nodes that exist, and the
-    structural half is free to recompute, so refreshing it before measuring is
-    cheaper than working out what changed.
+    The write moment §5 asks for: after indexing, after a recorded step, on
+    Refresh. A measurement no longer calls it first; it rebuilds only when a
+    column it measured is not in the graph yet (`handlers._write_attached`),
+    because on a wide project the rewrite is every column of every table.
 
     Raises `store.GraphUnavailable` if the database is down. **Callers on the
     indexing path must catch that and carry on** — an index that fails because a
     container is stopped is exactly the leak §6.6 warns about.
+
+    ``result`` is a build the caller already made, when it needs the build
+    whether or not the write happens (`handlers._sync_graph`).
     """
     from portia.knowledge import store
 
-    result = build_graph(root, portia_dir=portia_dir)
+    result = result or build_graph(root, portia_dir=portia_dir)
     with store.session() as live:
         store.write(result.graph, live)
     return result
+
+
+def refresh_fingerprints(
+    root: str | Path, session: object, *, portia_dir: str | Path | None = None
+) -> None:
+    """Set every table's fingerprint in the store to what it is now, before a read.
+
+    What makes a read's ``stale`` true of the files as they are, not as they
+    were at the last rebuild (`store.fingerprint_writes`). Stat calls, the
+    specs and one write; no column is touched.
+    """
+    from portia import catalog, pipeline
+    from portia.knowledge import store
+    from portia.knowledge.schema import MODEL, SOURCE, project_id
+
+    root = Path(root)
+    now = pipeline.table_fingerprints(root, portia_dir or root / catalog.DEFAULT_DIR)
+    store.write_fingerprints({SOURCE: now.sources, MODEL: now.models}, session, project_id(root))

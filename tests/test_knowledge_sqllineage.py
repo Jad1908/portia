@@ -112,6 +112,41 @@ def test_a_statement_that_is_not_a_select_is_unreadable_rather_than_a_crash():
         column_origins(sql, INPUTS)
 
 
+@pytest.mark.parametrize(
+    "sql",
+    [
+        # The standard form: sqlglot read it and reported the name column as
+        # copied from the unpivoted columns' values, when it holds their names.
+        "SELECT * FROM orders UNPIVOT (v FOR field IN (customer_id, country_name))",
+        # Inside a CTE, so the select list reading from it looks ordinary.
+        "WITH long AS (SELECT * FROM (UNPIVOT orders ON customer_id, country_name "
+        "INTO NAME field VALUE v)) SELECT order_id, field FROM long",
+        "SELECT * FROM orders PIVOT (sum(amount) FOR country_name IN ('FR', 'DE'))",
+    ],
+)
+def test_a_pivot_or_an_unpivot_anywhere_is_refused_rather_than_traced_wrong(sql):
+    """Its output columns are made of values or of a list of columns: no one origin each."""
+    with pytest.raises(LineageUnreadable) as raised:
+        column_origins(sql, INPUTS)
+    assert raised.value.code == "pivot"
+
+
+def test_columns_by_pattern_is_refused_rather_than_reported_as_one_column():
+    """sqlglot reported ``COLUMNS('c.*')`` as one output column named after the pattern."""
+    with pytest.raises(LineageUnreadable) as raised:
+        column_origins("SELECT order_id, COLUMNS('c.*') FROM orders", INPUTS)
+    assert raised.value.code == "columns_pattern"
+
+
+def test_every_refusal_carries_a_code_from_the_closed_list():
+    from portia.knowledge.sqllineage import CODES
+
+    for sql in ("SELECT FROM WHERE", "SELECT nope FROM orders"):
+        with pytest.raises(LineageUnreadable) as raised:
+            column_origins(sql, INPUTS)
+        assert raised.value.code in CODES
+
+
 def test_a_star_over_a_table_the_schema_does_not_hold_is_refused():
     """It expands to a column literally called `*`, which is worse than a refusal."""
     with pytest.raises(LineageUnreadable, match=r"\*"):

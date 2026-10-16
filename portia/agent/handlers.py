@@ -696,9 +696,13 @@ def graph_lookup(
     ]
     if len(asked) > 1:
         raise ValueError(prompts.error("graph_one_question", given=_and(asked)))
-    project = knowledge_schema.project_id(_project_root(portia_dir))
+    root = _project_root(portia_dir)
+    project = knowledge_schema.project_id(root)
     try:
         with store.session() as live:
+            # So a measurement on a file edited since the last rebuild reads
+            # stale, as it is (2026-10-15).
+            knowledge.refresh_fingerprints(root, live, portia_dir=portia_dir)
             answer = query.lookup(live, table, column, neighbour=neighbour, to=to, project=project)
     except store.GraphUnavailable as exc:
         # Reframed rather than re-raised: what the model needs at this moment is
@@ -1966,9 +1970,8 @@ def measure_overlaps(pairs: list[dict], portia_dir: str = catalog.DEFAULT_DIR) -
     and a refusal for size would read as a failure about something that
     happened.
 
-    The structural half of the graph is refreshed before writing, because a
-    measurement can only attach to columns the graph knows about, and
-    refreshing is free.
+    The structural half of the graph is refreshed only when a measurement
+    finds no column to attach to (:func:`_write_attached`).
     """
     con = connect()
     root = _project_root(portia_dir)
@@ -2067,8 +2070,7 @@ def _store_overlaps(graph, edges: list) -> dict:
     """
     try:
         with store.session() as live:
-            store.write(graph, live)
-            written = store.write_measured(edges, live, graph.project)
+            written = _write_attached(graph, edges, live)
     except cancel.Cancelled:
         raise
     except store.GraphUnavailable as exc:
@@ -2086,6 +2088,26 @@ def _store_overlaps(graph, edges: list) -> dict:
             ),
         }
     return {"stored": True}
+
+
+def _write_attached(graph, edges: list, live) -> int:
+    """Write measurements, rebuilding the structure only when one has nowhere to attach.
+
+    **Measured first, rebuilt only on a miss** (2026-10-15). Every measurement
+    and every kept join check used to rewrite the project's whole structure
+    before writing one edge: on a project of 6,167 columns, every column node
+    and every column edge, per call, inside the agent's turn. A measurement
+    attaches to columns the graph already holds unless a table is new since
+    the last rebuild, and the write says how many attached
+    (`store.write_measured`), so a miss is when the rebuild is worth it. The
+    retry rewrites the whole batch, which replaces what the first try wrote
+    (`store.measured_writes`).
+    """
+    written = store.write_measured(edges, live, graph.project)
+    if written < len(edges):
+        store.write(graph, live)
+        written = store.write_measured(edges, live, graph.project)
+    return written
 
 
 @dataclass(frozen=True)
@@ -2511,8 +2533,7 @@ def _keep_join(left: str, right: str, report: dict, reason: str, portia_dir: str
                 left_fingerprint=fingerprints.get(left_ref),
                 right_fingerprint=fingerprints.get(right_ref),
             )
-            store.write(graph, live)
-            written = store.write_measured([edge], live, graph.project)
+            written = _write_attached(graph, [edge], live)
     except cancel.Cancelled:
         raise
     except store.GraphUnavailable as exc:
@@ -2741,7 +2762,7 @@ def record_step(
         "model": path.stem,
         "written_to": written_to,
         "catalog": indexed,
-        "graph": _sync_graph(root, portia_dir),
+        **_sync_graph(root, portia_dir, path.stem),
         "outcome": _outcome_card(result.outcome, result.table, read_at=read_at),
         "drift": result.drift,
         "acknowledged": result.acknowledged,
@@ -2826,7 +2847,7 @@ def _index_model(
     return UPDATED
 
 
-def _sync_graph(root: Path, portia_dir: str) -> str:
+def _sync_graph(root: Path, portia_dir: str, model: str) -> dict:
     """Put the table this spec now builds into the graph — best effort, always.
 
     One of `KNOWLEDGE_GRAPH.md` §5's refresh moments, and the one that was
@@ -2842,12 +2863,28 @@ def _sync_graph(root: Path, portia_dir: str) -> str:
     step is already recorded and the spec is already on disk, and failing the
     write because a container is stopped would undo none of that while losing
     the user their step (`KNOWLEDGE_GRAPH.md` §6.6).
+
+    ``{"graph": <state>}``, and ``lineage`` beside it when the model's lineage
+    could not be read: the code and the step it stopped at
+    (`schema.LINEAGE_UNREAD`), read off the build whether or not the database
+    is up. It used to answer ``updated`` alone, and the copilot assumed
+    columns it then found untraced (2026-10-15).
     """
+    result = knowledge.build_graph(root, portia_dir=portia_dir)
     try:
-        knowledge.sync(root, portia_dir=portia_dir)
+        knowledge.sync(root, portia_dir=portia_dir, result=result)
+        state = UPDATED
     except store.GraphUnavailable as exc:
-        return f"not updated — {exc}"
-    return UPDATED
+        state = f"not updated — {exc}"
+    out: dict[str, Any] = {"graph": state}
+    node = result.graph.node(knowledge_schema.MODEL, model)
+    facts = node.properties if node is not None else {}
+    if facts.get(knowledge_schema.LINEAGE_UNREAD):
+        out["lineage"] = {
+            "unread": facts[knowledge_schema.LINEAGE_UNREAD],
+            "step": facts.get(knowledge_schema.LINEAGE_UNREAD_STEP),
+        }
+    return out
 
 
 # --- the spec cards (2026-10-13, the tool revamp) ----------------------------------

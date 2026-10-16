@@ -111,13 +111,24 @@ VIA_OPS = ("join", "normalize", "sql")
 #: `count(*) AS n`. Without this property the two
 #: are the same shape, and the graph would report a computed column as a source.
 #:
-#: **Two states, never a vocabulary.** It is present or it is absent, which is
-#: what keeps it clear of §4.8's fragmentation risk: a set of names for *why* a
-#: derivation is unknown would diverge per session exactly as Entity's would.
-#: The reason lives in `BuildResult.unresolved`, which is a build report rather
-#: than a store.
+#: **A closed pair of values, never a vocabulary.** ``unknown``: the step was
+#: read, and nothing is underneath the column (a count, a literal). ``not_traced``:
+#: the step could not be read at all, so the column may well be carried from an
+#: input and nobody can say which (2026-10-15: the copilot was told to read
+#: every column of an unreadable unpivot as *computed here*, timestamps
+#: included). Why a step could not be read is on its model, as a code
+#: (:data:`LINEAGE_UNREAD`); the parser's own words stay in
+#: `BuildResult.unresolved`, a build report rather than a store.
 DERIVATION = "derivation"
 DERIVATION_UNKNOWN = "unknown"
+DERIVATION_NOT_TRACED = "not_traced"
+
+#: On a Model whose lineage stops: why, as a code from a closed list
+#: (`build.UNREAD_CODES`), and the step it stopped at. Structural, restated by
+#: every build. The agent reads each code in words in
+#: `prompts/tools/graph_lookup.md`.
+LINEAGE_UNREAD = "lineage_unread"
+LINEAGE_UNREAD_STEP = "lineage_unread_step"
 
 
 #: On a Column: its place in its table, from 1, in the order the table holds its

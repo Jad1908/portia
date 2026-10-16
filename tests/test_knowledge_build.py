@@ -17,14 +17,18 @@ import yaml
 
 from portia import catalog, spec
 from portia.knowledge import build_graph, sqllineage
+from portia.knowledge.build import inputs_of
 from portia.knowledge.schema import (
     COLUMN,
     DERIVATION,
+    DERIVATION_NOT_TRACED,
     DERIVATION_UNKNOWN,
     DERIVES_FROM,
     GROUP,
     HAS_COLUMN,
     IN_GROUP,
+    LINEAGE_UNREAD,
+    LINEAGE_UNREAD_STEP,
     MODEL,
     POSITION,
     READS,
@@ -452,7 +456,7 @@ def test_without_the_parser_a_sql_step_behaves_exactly_as_it_did_before(project,
     """
 
     def missing():
-        raise sqllineage.LineageUnreadable("sqlglot is not installed")
+        raise sqllineage.LineageUnreadable(sqllineage.NO_PARSER, "sqlglot is not installed")
 
     monkeypatch.setattr(sqllineage, "_sqlglot", missing)
     _sql_spec(project, "SELECT customer_id FROM orders")
@@ -520,8 +524,10 @@ def test_a_built_model_the_parser_cannot_read_takes_its_columns_from_the_catalog
     """The table was built and profiled, so its columns are known; their lineage is not.
 
     Each one is a node with its facts, in the built table's order, marked
-    *derivation unknown* with no edge underneath, and the model stays in the
-    report saying so, because what is missing is the lineage and not the table.
+    *not traced* with no edge underneath (never *unknown*, which says the step
+    was read and computed the column), the model says why and at which step, and
+    it stays in the report saying so, because what is missing is the lineage and
+    not the table.
     """
     from portia import pipeline
 
@@ -538,13 +544,21 @@ def test_a_built_model_the_parser_cannot_read_takes_its_columns_from_the_catalog
     for position, name in enumerate(("order_id", "field", "value"), start=1):
         column = result.graph.node(COLUMN, model.column(name).key)
         assert column is not None
-        assert column.properties[DERIVATION] == DERIVATION_UNKNOWN
+        assert column.properties[DERIVATION] == DERIVATION_NOT_TRACED
         assert column.properties[POSITION] == position
+    node = result.graph.node(MODEL, "long_orders")
+    assert node is not None
+    assert node.properties[LINEAGE_UNREAD] == sqllineage.PIVOT
+    assert node.properties[LINEAGE_UNREAD_STEP] == "unpivot"
     field = result.graph.node(COLUMN, model.column("field").key)
     assert field is not None and field.properties["n_distinct"] == 2
     assert _sql_derives(result.graph, "long_orders", "order_id") == {}
-    assert "could not be resolved" in result.unresolved["long_orders"]
+    assert "unpivots" in result.unresolved["long_orders"]
     assert "from the catalog" in result.unresolved["long_orders"]
+    # The pipeline card reads the same reason, and lists none of the columns as
+    # computed: they are not traced, which is a different thing.
+    inputs = inputs_of(result.graph, "long_orders")
+    assert (inputs.unread, inputs.unread_step, inputs.untraced) == ("pivot", "unpivot", ())
 
 
 def test_a_catalog_entry_built_from_another_version_of_the_spec_names_no_columns(project):
@@ -764,3 +778,16 @@ def test_a_spec_over_upper_case_columns_still_gets_its_lineage(tmp_path):
         ("ID", "ID"),
         ("TITLE", "TITLE"),
     }, "reported in the catalog's spelling, not sqlglot's"
+
+
+def test_every_reason_a_lineage_stops_is_explained_to_the_agent():
+    """A code on the model is read by the copilot in `graph_lookup`'s description;
+    a code with no words there is one it can only guess at."""
+    from portia.agent import prompts
+    from portia.knowledge.build import UNREAD_CODES
+    from portia.ui import workflow
+
+    text = prompts.tool("graph_lookup", route_hops=3, routes=10, lineage_hops=3)
+    missing = [code for code in UNREAD_CODES if f"`{code}`" not in text]
+    assert missing == []
+    assert set(workflow._UNREAD_WHY) <= set(UNREAD_CODES)

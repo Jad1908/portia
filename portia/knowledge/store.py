@@ -51,6 +51,7 @@ from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
+from portia.knowledge.measure import ORIGIN, ORIGIN_MEASURED
 from portia.knowledge.schema import (
     KEY_PROPERTY,
     LABELS,
@@ -69,6 +70,11 @@ DEFAULT_USER = "neo4j"
 #: wrote it. Leading underscore so it reads as portia's bookkeeping rather than
 #: as something about the data.
 BUILD_PROPERTY = "_build"
+
+#: One node per project that a rebuild locks before it writes, so two rebuilds
+#: of one project take turns (:func:`write`). Keyed by ``lock`` rather than by
+#: `PROJECT`, so nothing that reads a project's nodes ever meets it.
+LOCK_LABEL = "PortiaLock"
 
 
 def settings() -> dict[str, str]:
@@ -166,13 +172,19 @@ def constraint_statements() -> list[str]:
     no licence the project doesn't already have.
     """
     return [
-        statement
-        for label in LABELS
-        for statement in (
-            _legacy_constraint(label),
-            f"CREATE CONSTRAINT {label.lower()}_project_key IF NOT EXISTS "
-            f"FOR (n:{label}) REQUIRE (n.{PROJECT}, n.{KEY_PROPERTY[label]}) IS UNIQUE",
-        )
+        *(
+            statement
+            for label in LABELS
+            for statement in (
+                _legacy_constraint(label),
+                f"CREATE CONSTRAINT {label.lower()}_project_key IF NOT EXISTS "
+                f"FOR (n:{label}) REQUIRE (n.{PROJECT}, n.{KEY_PROPERTY[label]}) IS UNIQUE",
+            )
+        ),
+        # Without it two first rebuilds could each create a lock node, and
+        # each hold its own (:func:`lock_statement`).
+        f"CREATE CONSTRAINT portia_lock IF NOT EXISTS "
+        f"FOR (n:{LOCK_LABEL}) REQUIRE n.lock IS UNIQUE",
     ]
 
 
@@ -264,6 +276,15 @@ def measured_writes(edges: list[Edge], project: str) -> list[tuple[str, dict]]:
     It carries `PROJECT` like everything else — a measurement is *between two
     columns of one project*, and an unscoped one would be reachable from a
     traversal that started somewhere else.
+
+    **A measurement replaces only the one its own tool took, either way round**
+    (2026-10-15). It used to `MERGE` on the direction alone, so a join check on
+    a pair the agent had compared on purpose replaced the numbers, the reason
+    and the origin, and the same pair measured from its other end became a
+    second edge. Now the edge of the same `origin` between the two columns, in
+    either direction, is deleted and the new one written: a re-measure by the
+    same tool is fresher, and another tool's measurement stays beside it. An
+    edge from before `origin` existed counts as ``measured``, as reads say.
     """
     groups: dict[tuple[str, str, str], list[Edge]] = {}
     for edge in edges:
@@ -278,6 +299,7 @@ def measured_writes(edges: list[Edge], project: str) -> list[tuple[str, dict]]:
             {
                 "start": e.start.key,
                 "end": e.end.key,
+                "origin": e.properties.get(ORIGIN) or ORIGIN_MEASURED,
                 "properties": {**e.properties, PROJECT: project},
             }
             for e in grouped
@@ -287,7 +309,11 @@ def measured_writes(edges: list[Edge], project: str) -> list[tuple[str, dict]]:
                 "UNWIND $rows AS row "
                 f"MATCH (a:{start_label} {{{PROJECT}: $project, {start_key}: row.start}}) "
                 f"MATCH (b:{end_label} {{{PROJECT}: $project, {end_key}: row.end}}) "
-                f"MERGE (a)-[r:{kind}]->(b) SET r = row.properties "
+                f"OPTIONAL MATCH (a)-[old:{kind}]-(b) "
+                f"WHERE coalesce(old.{ORIGIN}, '{ORIGIN_MEASURED}') = row.origin "
+                "WITH a, b, row, collect(old) AS replaced "
+                "FOREACH (o IN replaced | DELETE o) "
+                f"CREATE (a)-[r:{kind}]->(b) SET r = row.properties "
                 # A row whose `MATCH` finds nothing never reaches here, which is
                 # exactly why the caller counts this instead of trusting how
                 # many edges it handed over.
@@ -314,6 +340,55 @@ def write_measured(edges: list[Edge], session: Any, project: str) -> int:
             result = session.run(statement, **params)
             written += sum(record["written"] for record in result)
     return written
+
+
+def fingerprint_writes(
+    fingerprints: dict[str, dict[str, str | None]], project: str
+) -> list[tuple[str, dict]]:
+    """Each table's fingerprint as it is now, set on its node and nothing else.
+
+    ``fingerprints`` is by label, then by the table's **name** (a Source's
+    `name`, a Model's key), as `pipeline.table_fingerprints` answers. A read
+    compares a measurement's recorded fingerprints with its two tables' in
+    Cypher (`query._STALE`), so the tables' have to be current when the
+    question is asked: a file edited since the last rebuild used to leave every
+    measurement on it reading as current (2026-10-15). Cheaper than the
+    rebuild that would also have done it, which rewrites every column.
+    """
+    writes = []
+    for label, by_name in fingerprints.items():
+        rows = [{"name": name, "fingerprint": found} for name, found in by_name.items()]
+        if rows:
+            writes.append(
+                (
+                    f"UNWIND $rows AS row MATCH (n:{label} {{{PROJECT}: $project, name: row.name}}) "
+                    "SET n.fingerprint = row.fingerprint",
+                    {"rows": rows, "project": project},
+                )
+            )
+    return writes
+
+
+def write_fingerprints(
+    fingerprints: dict[str, dict[str, str | None]], session: Any, project: str
+) -> None:
+    """Run :func:`fingerprint_writes`."""
+    with _writing():
+        for statement, params in fingerprint_writes(fingerprints, project):
+            session.run(statement, **params)
+
+
+def lock_statement(project: str) -> tuple[str, dict]:
+    """Take the project's write lock, inside a transaction, until it commits.
+
+    Setting a property on a node takes Neo4j's write lock on it and holds it to
+    the end of the transaction, so a second rebuild of the same project waits
+    here for the first to commit, and then sees what it wrote.
+    """
+    return (
+        f"MERGE (l:{LOCK_LABEL} {{lock: $project}}) SET l.held = timestamp()",
+        {"project": project},
+    )
 
 
 def prune_writes(build: str, project: str) -> list[tuple[str, dict]]:
@@ -358,7 +433,7 @@ def forget_unscoped_writes() -> list[tuple[str, dict]]:
     path that runs on every index.
     """
     return [
-        (f"MATCH (n) WHERE n.{PROJECT} IS NULL DETACH DELETE n", {}),
+        (f"MATCH (n) WHERE n.{PROJECT} IS NULL AND NOT n:{LOCK_LABEL} DETACH DELETE n", {}),
         (f"MATCH ()-[r]->() WHERE r.{PROJECT} IS NULL DELETE r", {}),
     ]
 
@@ -416,16 +491,28 @@ def write(graph: Graph, session: Any, *, build: str | None = None) -> str:
     if not graph.project:
         raise ValueError("a graph must name its project before it can be stored")
     with _writing():
+        # Schema statements cannot share a transaction with data writes.
         for statement in constraint_statements():
             session.run(statement)
         if not graph.nodes:
             return build
-        for statement, params in [
-            *node_writes(graph, build),
-            *edge_writes(graph, build),
-            *prune_writes(build, graph.project),
-        ]:
-            session.run(statement, **params)
+        # **One transaction, behind the project's lock** (2026-10-15). Each
+        # statement used to commit on its own, so two rebuilds of one project
+        # could interleave: A writes, B restamps everything, A's prune deletes
+        # B's edges. The window's Refresh, a recorded step and a measurement
+        # each rebuild, from threads and processes nothing else orders.
+        tx = session.begin_transaction()
+        try:
+            for statement, params in [
+                lock_statement(graph.project),
+                *node_writes(graph, build),
+                *edge_writes(graph, build),
+                *prune_writes(build, graph.project),
+            ]:
+                tx.run(statement, **params)
+            tx.commit()
+        finally:
+            tx.close()
     return build
 
 

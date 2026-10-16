@@ -52,7 +52,7 @@ from typing import Any
 
 import yaml
 
-from portia import catalog, pipeline, spec
+from portia import catalog, pipeline
 from portia.core.io import relative
 from portia.core.present import inline
 
@@ -345,29 +345,20 @@ def fingerprints(
     portia_dir: str | Path = catalog.DEFAULT_DIR,
     sources: dict | None = None,
 ) -> dict:
-    """What each named table looks like now, as the graph already fingerprints it.
+    """What each named table looks like now, as the graph fingerprints it.
 
-    A source is its file's size and mtime (`catalog.STALENESS_FACTS`); a model is
-    its spec's fingerprint (`pipeline.fingerprint`). Computed here rather than
-    read off the graph so a finding never needs Neo4j to be running.
+    `pipeline.table_fingerprints`, the one answer the graph's measurements
+    use too: a source is its file as it is now, a model its spec and what it
+    reads. Computed here rather than read off the graph so a finding never
+    needs Neo4j to be running. A file edited and not re-indexed used to leave
+    its findings unmarked, because a source was its catalog record
+    (2026-10-15).
 
     ``sources`` is the catalog's source entries, for a caller that already holds
-    them. Reading the catalog is the slow part on a wide project — 2.7 s for one
-    of 6,164 columns, all of it YAML — and the window has it in memory.
+    them and must not read the catalog (the window, in a render pass).
     """
-    entries = catalog.load_catalog(portia_dir)["sources"] if sources is None else sources
-    specs = spec.discover_specs(Path(root))
-    out: dict[str, str | None] = {}
-    for table in tables:
-        if table in entries:
-            indexed = entries[table].get("indexed") or {}
-            size, mtime = indexed.get("size"), indexed.get("mtime")
-            out[table] = None if size is None or mtime is None else f"{size}:{mtime}"
-        elif table in specs:
-            out[table] = pipeline.fingerprint(spec.load_spec(Path(root) / specs[table]))
-        else:
-            out[table] = None
-    return out
+    now = pipeline.table_fingerprints(root, portia_dir, sources=sources)
+    return {table: now.get(table) for table in tables}
 
 
 def stale_against(
