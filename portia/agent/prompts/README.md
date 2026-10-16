@@ -14,7 +14,7 @@ go use dbt instead. That sentence was buried in a decorator argument.
 
 | Path | What it is | When the model sees it |
 |---|---|---|
-| `copilot.md` | **L0** — what portia is for, the four moves, what to look at, the artifacts, the rhythm of a build, the modelling decisions (`docs/COPILOT.md`) | every request |
+| `copilot.md` | **L0** — who portia is, what it can see, what a data scientist checks, the map and the record, doing what was asked, how it writes (`docs/COPILOT.md` §4) | every request |
 | `brief/template.md` | **L1** — the project brief's shape; `{project}`, `{groups}`, `{sources}` are filled by `agent/context.py` | every request |
 | `brief/no_context.md` | what L1 says when the project is undescribed | when `project.yaml` is empty |
 | `brief/no_sources.md` | what L1 says when nothing is indexed | when no source is indexed |
@@ -71,7 +71,8 @@ lives here.
 
 ## Writing tool descriptions
 
-Say **when to call it**, not only what it does. That is what the model actually acts on, and
-it's where the disclosure ladder is taught: a description should place its tool on the rungs in
-`copilot.md` ("start here", "expensive — call it when you need the numbers themselves"). A tool
-that doesn't say when it applies gets called at random or not at all.
+One shape for every file: what the tool does, in a sentence; **when to reach for it**, in terms
+of what the user asked; the call, with its required fields; what comes back. A default the model
+would otherwise invent (how a chart is laid out, which side of a join goes left) is stated here,
+once, beside the tool, never in `copilot.md`. A rule has one home: the core, one tool file, or one
+refusal. A tool that doesn't say when it applies gets called at random or not at all.

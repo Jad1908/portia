@@ -72,7 +72,9 @@ def where_the_data_lives(cat: dict | None = None) -> str:
 
     active = backend.active()
     if not active.remote:
-        return prompts.load("backend/local")
+        import duckdb
+
+        return prompts.load("backend/local").format(engine_version=duckdb.__version__)
     scope = list((cat or {}).get("scope") or [])
     return prompts.load(f"backend/{active.kind}").format(
         label=active.label or active.kind,

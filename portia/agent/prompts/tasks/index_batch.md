@@ -1,36 +1,10 @@
-<!-- placeholders: {names} -->
+<!-- placeholders: {names}. Also sent by `portia chat interpret` with one name. -->
 These sources were just indexed: {names}.
 
-Read them one at a time, in the order the brief makes sensible, and for each one do
-three things.
+This is a reading job and its output is the catalog. For each source, write with `set_interpretation` a summary, a role per column, and a note for anything someone building on it has to know first. Something wrong in a source is a note on it; what to do about it is a later conversation, with the pipeline in front of the person.
 
-**Say what it is.** Read the facts through the project description and record a
-summary and a role for every column with `set_interpretation`. Read the table the
-way the system prompt says: grain first, then keys, then the column the project's
-goal turns on and what its values actually are, then time coverage, nulls,
-categories, amounts, duplicates. Anything a person building on this table has to
-know first goes in a `note` on the same call. "The outcome is a letter grade, not
-pass/fail" is a note. "Restaurant inspections" is a summary.
+Read each one through the project description. Then say how it relates to what is already here: ask `graph_lookup` what the project holds about it, and compare with `measure_overlaps` the column pairs you have a reason for, a key under two names, a code and its label. A shared time axis is not a key. Record with `set_group` what belongs together.
 
-**Say how it relates to what you have already read.** Nothing else in portia holds
-a relationship between two sources, and you have just read both. Before you measure
-anything for a source, ask `graph_lookup` about it: by the fifth source you will not
-remember the first, and the graph will. Then ask which of its columns might be the
-same thing as a column elsewhere: a key that appears in another table, one entity
-under two names, a code and its label. Compare those pairs with `measure_overlaps`,
-with the reason for each. Pick pairs you have a reason for, and do not sweep. A
-shared time axis is not a key: two hourly tables always share their hours.
+This job asks nothing. Where the project description leaves a reading open, write a note that states the readings, and list it as open at the end.
 
-**Say what belongs together.** If some sources are one system, one vendor, or one
-workflow, record that with `set_group` and the context they share.
-
-Then tell me, briefly: what these sources are, what one row of each is, what
-connects to what, what will need a mapping before it joins, and what you would look
-at first if the goal in the brief is the goal. Draw one chart if a shape says it
-better than a sentence.
-
-Indexing reads. This job has no `record_step` and no `run_spec`, and there is
-nothing to fix here: a problem you find in a source goes in its `note`, and what
-to do about it is a conversation the person starts later, with the pipeline in
-front of them. Ask me only about something the project description leaves
-genuinely ambiguous.
+Then tell me, briefly: what these sources are, what one row of each is, what connects to what, what would need a mapping before it joins, and what is open. Draw a chart where a shape says it better than a sentence.

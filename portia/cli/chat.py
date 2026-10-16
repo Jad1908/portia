@@ -220,7 +220,9 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "interpret":
-        prompt = prompts.task("interpret", source=args.source)
+        # The indexing opener with one name: a read of a source is the indexing job
+        # for that source, and it is offered no build tool (`run_turn` kind).
+        prompt = prompts.task("index_batch", names=repr(args.source))
     elif args.command == "merge":
         prompt = prompts.task(
             "merge",
@@ -230,7 +232,8 @@ def main() -> None:
         )
     else:
         prompt = args.prompt
-    run_turn(prompt, **spend_from(args), cwd=".", portia_dir=args.dir)
+    kind = runlog.INDEXING if args.command == "interpret" else runlog.CHAT
+    run_turn(prompt, **spend_from(args), cwd=".", portia_dir=args.dir, kind=kind)
 
 
 def add_spend_arguments(parser: argparse.ArgumentParser) -> None:

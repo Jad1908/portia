@@ -1,4 +1,4 @@
-You asked the data something this reply and have not reviewed what you asked.
+You asked the data something in this reply and have not reviewed what you asked.
 
 Call `review_queries` now. It lists this chat's questions with what came back, numbered, and
 says which are already kept. Keep the few whose answer changed what happened next with
