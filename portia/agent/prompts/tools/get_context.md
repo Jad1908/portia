@@ -1,14 +1,4 @@
-<!-- placeholders: {rows}. Filled from agent/handlers.card_vocabulary. -->
-Re-read the project card: its description, its groups, and every source and model with its row
-and column counts.
+<!-- placeholders: {rows} -->
+The project card again: description, groups, every source and model with row and column counts, and `stale` where a table changed since it was indexed.
 
-You ALREADY HAVE this in your system prompt. Call it only to pick up changes made during this
-session: after a source is indexed or interpreted, after a step builds a model, or after a group
-is recorded.
-
-Each table is one row: its name, 'n_rows', 'n_columns', 'read' (someone wrote a summary of it),
-'about' (the first sentence of that summary, or null) and 'stale' (true when it changed since it
-was indexed, null when portia cannot tell). Each list shows up to {rows} tables, by name, and
-'more' says how many were left out. 'match' (a name pattern, such as 'sales_*') and 'group'
-narrow both lists, and then the answer is the lists alone. Every table's facts, notes included,
-are also in portia_tables, through `query_data`.
+It is already in your system prompt. Call it after something changed in this session: a source indexed or interpreted, a step that built a model, a group recorded. `match` (a name pattern, `sales_*`) and `group` narrow the lists; each shows up to {rows} tables. The same facts, notes included, are in `portia_tables` through `query_data`.

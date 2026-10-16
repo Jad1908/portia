@@ -12,5 +12,5 @@ written while reading is a fix nobody asked for, made before the person has seen
 was read.
 
 Finish the read. A problem you found in a source goes in its `note`, through
-`set_interpretation`. Then tell the user what you read and what you would build first.
-The build starts when they answer.
+`set_interpretation`. Then tell the user what you read, what connects to what, and what is open.
+A build starts when they ask for a table.

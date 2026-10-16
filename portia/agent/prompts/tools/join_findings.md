@@ -1,41 +1,7 @@
-Measure what joining two tables on given keys would actually do: key overlap and coverage, the
-relationship (1:1 / 1:many / many:many), fan-out, how many rows each join type would produce and
-drop, and how many of them would hold a null in each carried column — plus example unmatched rows,
-null-key rows, and the keys repeated most on either side.
+What joining two tables on given keys would do: key overlap and coverage each way, the relationship (1:1, 1:many, many:many), fan-out, the rows each join type would produce and drop, the nulls each carried column would hold, with example unmatched rows, null-key rows and the keys that repeat most.
 
-Call this BEFORE deciding anything about a merge. Every merge, not just the first one.
+Use it before recording a join, and when a question is about how two tables match. `left` and `right` name a source, a model, or `<spec path>#<step id>`; `keys` names the columns, or `left_on` and `right_on` when the names differ; `reason` is one sentence on why these keys. Put the table whose rows you are keeping on the left.
 
-'left' and 'right' each name an indexed source, **another model in this project** (just its name),
-or **a table an earlier step produced** — written '<spec path>#<step id>', e.g.
-'specs/training.yaml#reservations_hotels'. A multi-hop merge joins an intermediate result, and an
-intermediate result is not a file, so it has no indexed name. Use these and you can measure hop two
-before committing to it, exactly as you measured hop one. Recording a step and reading what it
-produced afterwards is the expensive way round.
+`report` holds the numbers and `evidence` the example rows. `example_row_columns` says which columns the examples carry, and `left_columns` and `right_columns` choose them. `fan_out` means a left row would come out more than once, so a total over a left column comes out too high; `extra_left_copies` counts those rows. A right side that repeats is what every lookup does. `predicted_nulls` gives, per join type, the rows that would hold a null in each carried column, including the rows a left join keeps with nothing from the other side.
 
-An example row shows its key columns first, then a few more, because a row as wide as the table
-buries the one column that explains why it did not match. 'example_row_columns' says which ones
-you got — do not read the width of an example row as the width of the table. Name 'left_columns'
-or 'right_columns' to choose the rest yourself; the keys are included either way.
-
-'predicted_nulls' gives, per join type, the rows of the result that would hold a null in each
-carried column: the nulls a column already has, repeated as the join repeats its row, plus the rows
-the join keeps with nothing from that column's side ('kept_unmatched'). A left join that drops
-nothing can still leave most of the right side's columns empty, and this is where that shows. It
-covers the columns the example rows carry, keys left out.
-
-'fan_out' means a row of the left table would come out more than once, so a left or inner join
-returns more rows than the left puts in and a total over a left column comes out too high.
-'extra_left_copies' counts those rows. The right table's rows repeating is what every lookup does:
-'relationship' says many:1 and 'extra_right_copies' counts it. Put the table whose rows you are
-keeping on the left.
-
-'reason' is required: one sentence on why these two tables might join on these keys. The key's
-check is kept in the knowledge graph as a join between the two tables, with every key column, the
-relationship, how often a key repeats on each side and both coverages, so the next chat finds it
-with `graph_lookup`. 'graph' in the answer says whether it was kept, and when it was not, 'why':
-`side_is_a_step` (a side is a table an earlier step produced, which no build has made),
-`same_table`, `not_in_graph` (a side is no table the graph holds), `graph_unavailable` or
-`measure_failed`, each with the error. A database that is down never stops the check: the numbers
-are in the answer either way.
-
-The findings are unranked: whether a dropped row matters is your call, not the check's.
+The check is kept in the graph as a join between the two tables, with the reason; `graph` says whether, and `why` when not: `side_is_a_step`, `same_table`, `not_in_graph`, `no_keys`, `graph_unavailable`, `measure_failed`. A database that is down does not stop the check.

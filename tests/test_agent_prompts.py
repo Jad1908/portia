@@ -154,7 +154,6 @@ def test_a_formatted_prompt_holds_no_literal_brace(kind):
 @pytest.mark.parametrize(
     ("name", "fields"),
     [
-        ("interpret", {"source": "customers"}),
         ("merge", {"left": "a", "right": "b", "spec": "specs/a.yaml"}),
         ("index_batch", {"names": "'a', 'b'"}),
         ("reinterpret", {"source": "customers", "note": "the id is a legacy code"}),
@@ -169,7 +168,7 @@ def test_task_templates_fill_their_placeholders(name, fields):
 
 def test_task_templates_are_all_covered_by_the_test_above():
     """A new task prompt must be added to the parametrize list, not silently skipped."""
-    covered = {"interpret", "merge", "index_batch", "reinterpret"}
+    covered = {"merge", "index_batch", "reinterpret"}
     unformatted = {"ask_for_context"}  # plain prose, no placeholders
     assert prompts.names("tasks") == covered | unformatted
 

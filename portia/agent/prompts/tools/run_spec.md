@@ -1,23 +1,3 @@
-Re-execute a spec and report, per step, what it actually did: the op's provenance, drift against
-its 'expect' block, and the post-conditions measured on the table it produced.
+Re-run a spec and report per step: provenance, drift against its `expect`, and the post-conditions measured on the table it produced.
 
-Use it to check your own work, and to re-check earlier steps after you change something upstream —
-a fix applied to one source can break a join that was fine before, and re-running is how you find
-that out rather than assuming.
-
-Two different signals, and they fail independently. Drift says whether your prediction held.
-The 'outcome' block says what came out: row count, columns that are entirely null, and whether
-each input contributed any values at all. A step can have zero drift and still have produced a
-table with an entire source missing from it — a correct prediction about a broken join is still a
-broken join.
-
-If the numbers disagree with what you predicted, say so rather than quietly adjusting the
-expectation.
-
-To see what a spec says without running it — its steps, their ids, its sources, what reads it —
-call `read_spec`. Running re-executes every model behind the spec and costs accordingly; it is the
-way to get today's numbers, not the way to find out what a spec holds.
-
-On a very wide table the report can be longer than one answer carries. Then it comes back shortened,
-saying so first: each long list given as its count, its ends and, for numbers, their spread. Every
-step is still there, and every flag.
+Use it for today's numbers on a spec, and after an upstream change, to see whether a downstream join still holds. `spec_path` is the spec's file path as listed under Pipeline. Recording a step already re-runs its spec, so this is for a spec you did not just record. Drift and `outcome` fail independently: a prediction that held about a join whose columns came out all null is still a broken join. A report too wide for one answer comes back shortened and says so, with every step and every flag still there.

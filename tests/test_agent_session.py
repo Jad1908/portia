@@ -516,7 +516,7 @@ def test_the_prompt_length_the_preflight_uses_is_the_prompt_the_model_is_sent():
     assert chars == len(session.build_system_prompt("nowhere/.portia")) + sum(
         len(d) for d in tools.descriptions().values()
     )
-    assert chars > 40_000  # copilot.md and fifteen descriptions; the number the doc quotes
+    assert chars > 20_000  # copilot.md and the descriptions, after the 2026-10 shortening
 
 
 # --- a job that reads (2026-09-23) --------------------------------------------
