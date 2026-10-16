@@ -23,8 +23,9 @@ It answers one of four questions per call.
   `built_from` it, whether it `builds` it, the `groups` they share, its joins and its comparisons,
   with `n_joins` and `n_compared` saying how many there are and the card showing a few of each.
   Neighbours a pipeline has gone through (built from, building, joined) come first, then those only
-  compared or grouped, each part in name order. The fields of a join row are `join_fields` and of
-  a comparison row `compared_fields`, given once above the list.
+  compared, each part in name order. A table that only shares a group is not a neighbour: `groups`
+  names each group this table is in, with how many members it has. The fields of a join row are
+  `join_fields` and of a comparison row `compared_fields`, given once above the list.
 - **`table` and `neighbour`: everything between two tables.** Every join, with where it was made
   (`found_in`, a step or a finding), and every comparison, with what both columns look like: role,
   how many distinct values, the commonest value or the range.
