@@ -30,7 +30,10 @@ The answer is a receipt: how many pairs, how many came from the graph, how many 
 one row a pair in the order `fields` names. `left_coverage` is the share of the left table's rows
 whose value is found on the right, and `right_coverage` the reverse. `left_distinct` and
 `right_distinct` are how many distinct values each column holds, which is what makes a zero
-readable. Past a fixed number of rows the list is cut, and `more` says how to read the rest.
+readable. `left_repeats` and `right_repeats` are the most times one value appears on that side: 1
+means every value appears once. Two hourly tables share every hour, so their timestamps cover each
+other fully; the repeats are what say one of them holds each hour once per site. A measurement taken
+before 2026-10-15 has none. Past a fixed number of rows the list is cut, and `more` says how to read the rest.
 
 What comes back is unranked, and there is no "best" pair. High coverage one way and low the other
 is normal and means something specific, so read both numbers. `comparable_types: false` means the

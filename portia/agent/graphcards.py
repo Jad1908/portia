@@ -144,6 +144,8 @@ RECEIPT_FIELDS = (
     "comparable_types",
     "left_distinct",
     "right_distinct",
+    "left_repeats",
+    "right_repeats",
     "from",
     "measured_at",
 )

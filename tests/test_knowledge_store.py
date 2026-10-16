@@ -392,3 +392,50 @@ def test_two_rebuilds_of_one_project_at_once_leave_its_structure_whole(neo4j_ses
     assert errors == []
     n = neo4j_session.run(f"MATCH ()-[r:{HAS_COLUMN}]->() RETURN count(r) AS n").single()["n"]
     assert n == 300
+
+
+def _join(left_cols, right_cols, origin, reason, *, turned=False):
+    from portia.knowledge import measure
+    from portia.knowledge.schema import Ref
+
+    a, b = Ref(SOURCE, "data/orders.csv"), Ref(SOURCE, "data/customers.csv")
+    report = {
+        "keys": {"left": left_cols, "right": right_cols},
+        "relationship": "many:1",
+        "key_dtype_match": True,
+        "overlap": {"n_shared_keys": 2, "left_coverage": 1.0, "right_coverage": 0.5},
+        "left": {"max_key_multiplicity": 3},
+        "right": {"max_key_multiplicity": 1},
+    }
+    if turned:
+        a, b = b, a
+    return measure.join_edge(a, b, report, origin=origin, asked_because=reason)
+
+
+def test_join_records_are_kept_per_key_and_per_origin(neo4j_session):
+    """The same tables joined on two keys are two joins; the same join made by a check
+    and by a step is two records; the same join made again the same way, from either
+    end, replaces the one before."""
+    from portia.knowledge.schema import JOINED
+
+    g = Graph(project=PROJECT_A)
+    g.add_node(SOURCE, "data/orders.csv", name="orders")
+    g.add_node(SOURCE, "data/customers.csv", name="customers")
+    store.write(g, neo4j_session)
+
+    def write(*edges):
+        assert store.write_measured(list(edges), neo4j_session, PROJECT_A) == len(edges)
+
+    write(_join(["customer_id"], ["customer_id"], "join_check", "first"))
+    write(_join(["region"], ["region"], "join_check", "another key"))
+    write(_join(["customer_id"], ["customer_id"], "step", "built on it"))
+    write(_join(["customer_id"], ["customer_id"], "join_check", "again", turned=True))
+    rows = neo4j_session.run(
+        f"MATCH (a)-[r:{JOINED}]->(b) RETURN a.name AS start, r.left_columns AS cols, "
+        "r.origin AS origin, r.asked_because AS reason ORDER BY reason"
+    )
+    assert [dict(r) for r in rows] == [
+        {"start": "customers", "cols": ["customer_id"], "origin": "join_check", "reason": "again"},
+        {"start": "orders", "cols": ["region"], "origin": "join_check", "reason": "another key"},
+        {"start": "orders", "cols": ["customer_id"], "origin": "step", "reason": "built on it"},
+    ]

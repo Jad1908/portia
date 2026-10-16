@@ -37,17 +37,25 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from portia.knowledge.schema import OVERLAPS, Edge, Ref
+from portia.knowledge.schema import JOINED, OVERLAPS, Edge, Ref
 
 #: Which measured numbers go on the edge. A subset of what `checks.join
 #: .column_overlap` returns, and deliberately a small one: the per-side row and
 #: distinct counts are re-derivable from the catalog and would be a second copy
-#: to go stale, while these four are the measurement itself.
+#: to go stale, while these are the measurement itself.
+#:
+#: ``left_repeats`` and ``right_repeats`` are the most times one value appears on
+#: that side, 1 when the column is unique (2026-10-15). `column_overlap` always
+#: measured them and the edge threw them away, so a shared hourly timestamp
+#: read exactly like a key: 17,544 shared values, coverage 1.0 both ways, and
+#: nothing to say the weather table holds each hour 19 times.
 MEASURED = (
     "n_shared_values",
     "left_coverage",
     "right_coverage",
     "comparable_types",
+    "left_repeats",
+    "right_repeats",
 )
 
 #: Which tool took a measurement, on the edge as ``origin``. A **closed** set,
@@ -70,9 +78,43 @@ ORIGIN_MEASURED = "measured"
 ORIGIN_JOIN_CHECK = "join_check"
 ORIGINS = (ORIGIN_MEASURED, ORIGIN_JOIN_CHECK)
 
+#: What made a join record (`schema.JOINED`), as its ``origin``: a join check
+#: (`join_findings`), a recorded step that joins, or a kept finding whose
+#: queries join. Each is a join the agent chose to do; none is code choosing.
+ORIGIN_STEP = "step"
+ORIGIN_FINDING = "finding"
+JOIN_ORIGINS = (ORIGIN_JOIN_CHECK, ORIGIN_STEP, ORIGIN_FINDING)
+
+#: What a join record carries, read off a `checks.join.join_report`
+#: (:func:`join_numbers`). The key columns in order, each side's most
+#: repeated key, the relationship, the shared keys and both coverages.
+JOIN_MEASURED = (
+    "left_columns",
+    "right_columns",
+    "relationship",
+    "n_shared_keys",
+    "left_coverage",
+    "right_coverage",
+    "left_repeats",
+    "right_repeats",
+    "comparable_types",
+)
+
+#: Where a join record came from: the ``<spec>#<step>`` that joined, or the
+#: finding file whose query did. Absent for a join check.
+FOUND_IN = "found_in"
+
 #: The properties that name a side, in left/right pairs. Turning an edge round
 #: swaps each pair and nothing else (:func:`seen_from`).
-SIDED = (("left_coverage", "right_coverage"), ("left_fingerprint", "right_fingerprint"))
+SIDED = (
+    ("left_coverage", "right_coverage"),
+    ("left_fingerprint", "right_fingerprint"),
+    ("left_repeats", "right_repeats"),
+    ("left_columns", "right_columns"),
+)
+
+#: A relationship read from its other end.
+TURNED = {"1:many": "many:1", "many:1": "1:many"}
 
 
 @dataclass(frozen=True)
@@ -129,8 +171,61 @@ def overlap_edge(
     )
 
 
+def join_numbers(report: dict) -> dict:
+    """The numbers of :data:`JOIN_MEASURED`, read off a `checks.join.join_report`."""
+    return {
+        "left_columns": list(report["keys"]["left"]),
+        "right_columns": list(report["keys"]["right"]),
+        "relationship": report["relationship"],
+        "n_shared_keys": report["overlap"]["n_shared_keys"],
+        "left_coverage": report["overlap"]["left_coverage"],
+        "right_coverage": report["overlap"]["right_coverage"],
+        "left_repeats": report["left"]["max_key_multiplicity"],
+        "right_repeats": report["right"]["max_key_multiplicity"],
+        "comparable_types": report["key_dtype_match"],
+    }
+
+
+def join_edge(
+    left: Ref,
+    right: Ref,
+    report: dict,
+    *,
+    origin: str,
+    asked_because: str | None,
+    found_in: str | None = None,
+    left_fingerprint: str | None = None,
+    right_fingerprint: str | None = None,
+    when: datetime | None = None,
+) -> Edge:
+    """One `JOINED` edge: a join that was done, what it did, and what it was taken against.
+
+    Directed left to right, as the join was written, which is what says which
+    side's columns, repeats and coverage are which (:func:`seen_from` turns it).
+    ``asked_because`` is the agent's own words for why it joined: a join
+    check's reason, a step's rationale, a finding's question.
+    """
+    if origin not in JOIN_ORIGINS:
+        raise ValueError(f"unknown origin {origin!r} — have: {', '.join(JOIN_ORIGINS)}")
+    stamp = (when or datetime.now()).astimezone().isoformat(timespec="seconds")
+    return Edge(
+        JOINED,
+        left,
+        right,
+        {
+            **join_numbers(report),
+            "asked_because": asked_because,
+            ORIGIN: origin,
+            FOUND_IN: found_in,
+            "measured_at": stamp,
+            "left_fingerprint": left_fingerprint,
+            "right_fingerprint": right_fingerprint,
+        },
+    )
+
+
 def from_join_report(report: dict) -> dict:
-    """The four numbers of :data:`MEASURED`, read off a `checks.join` report.
+    """The numbers of :data:`MEASURED`, read off a `checks.join` report.
 
     **The same measurement, not a lookalike.** `join_report` and
     `column_overlap` share their CTEs, their kind rule and their coverage
@@ -145,6 +240,8 @@ def from_join_report(report: dict) -> dict:
         "left_coverage": overlap["left_coverage"],
         "right_coverage": overlap["right_coverage"],
         "comparable_types": report["key_dtype_match"],
+        "left_repeats": report["left"]["max_key_multiplicity"],
+        "right_repeats": report["right"]["max_key_multiplicity"],
     }
 
 
@@ -160,7 +257,12 @@ def seen_from(properties: dict, *, from_start: bool) -> dict:
     seen = dict(properties)
     if not from_start:
         for left, right in SIDED:
-            seen[left], seen[right] = properties.get(right), properties.get(left)
+            if left in properties or right in properties:
+                seen[left], seen[right] = properties.get(right), properties.get(left)
+        if "relationship" in properties:
+            seen["relationship"] = TURNED.get(
+                properties["relationship"], properties["relationship"]
+            )
     return seen
 
 

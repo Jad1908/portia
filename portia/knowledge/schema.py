@@ -91,6 +91,19 @@ DERIVES_FROM = "DERIVES_FROM"
 #: files must never delete a measurement (§5.2 — Neo4j is a store, not a cache).
 OVERLAPS = "OVERLAPS"
 
+#: Source/Model → Source/Model. A join that was actually done, and what it did:
+#: the key columns on each side (one or several, in order), whether each side
+#: repeats on them, the relationship, and how much of each side matches
+#: (2026-10-15). Kept between **tables**, because a key of two columns is no
+#: pair of single columns. Written when a join check runs, when a step that
+#: joins is recorded, and when a finding that rests on a joining query is kept;
+#: never by code choosing what to join. Measured, so no rebuild touches it.
+JOINED = "JOINED"
+
+#: The measured kinds: what a rebuild must leave alone, and what a measurement
+#: may write.
+MEASURED_KINDS = (OVERLAPS, JOINED)
+
 #: The kinds that are a restatement of files, and therefore the kinds a rebuild
 #: owns. Everything outside this set was measured or asserted and is not
 #: re-derivable from the repo, so `store.write` will not touch it.

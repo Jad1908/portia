@@ -33,6 +33,8 @@ MEASUREMENT = {
     "left_coverage": 0.0,
     "right_coverage": 0.0,
     "comparable_types": True,
+    "left_repeats": 1,
+    "right_repeats": 1,
     # Per-side counts are re-derivable from the catalog and deliberately do not
     # go on the edge — a second copy is a second thing to go stale.
     "left": {"n_rows": 2},
@@ -565,3 +567,44 @@ def _add_order(project: Path) -> None:
     """One more row, written the way the fixture wrote the others."""
     with open(project / "data" / "orders.csv", "a", newline="", encoding="utf-8") as f:
         csv.writer(f).writerow([3, "C3", "Spain"])
+
+
+# --- a join record (2026-10-15) ------------------------------------------------------------
+
+
+REPORT = {
+    "keys": {"left": ["site_id", "timestamp"], "right": ["site_id", "timestamp"]},
+    "relationship": "many:1",
+    "key_dtype_match": True,
+    "overlap": {"n_shared_keys": 17544, "left_coverage": 1.0, "right_coverage": 0.98},
+    "left": {"max_key_multiplicity": 7},
+    "right": {"max_key_multiplicity": 1},
+}
+
+
+def test_a_join_record_carries_its_keys_its_shape_and_who_made_it():
+    from portia.knowledge.schema import JOINED, MODEL, SOURCE, Ref
+
+    edge = measure.join_edge(
+        Ref(MODEL, "stg_readings"),
+        Ref(SOURCE, "data/weather.csv"),
+        REPORT,
+        origin=measure.ORIGIN_STEP,
+        asked_because="weather by site and hour",
+        found_in="specs/mart.yaml#with_weather",
+    )
+    assert edge.kind == JOINED
+    p = edge.properties
+    assert (p["left_columns"], p["right_columns"]) == (["site_id", "timestamp"],) * 2
+    assert (p["relationship"], p["left_repeats"], p["right_repeats"]) == ("many:1", 7, 1)
+    assert (p["origin"], p["found_in"]) == ("step", "specs/mart.yaml#with_weather")
+    with pytest.raises(ValueError, match="origin"):
+        measure.join_edge(edge.start, edge.end, REPORT, origin="measured", asked_because="x")
+
+
+def test_a_join_record_read_from_its_other_end_is_turned_whole():
+    """Columns, repeats, coverage and the relationship all face the table you stand on."""
+    seen = measure.seen_from(measure.join_numbers(REPORT), from_start=False)
+    assert seen["relationship"] == "1:many"
+    assert (seen["left_repeats"], seen["right_repeats"]) == (1, 7)
+    assert (seen["left_coverage"], seen["right_coverage"]) == (0.98, 1.0)

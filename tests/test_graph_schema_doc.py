@@ -20,7 +20,7 @@ from portia.knowledge import measure
 from portia.knowledge.schema import (
     KEY_PROPERTY,
     LABELS,
-    OVERLAPS,
+    MEASURED_KINDS,
     STRUCTURAL,
     VIA_OPS,
 )
@@ -46,7 +46,7 @@ def test_every_label_says_what_identifies_it(text):
 
 
 def test_every_edge_kind_is_documented(text):
-    for kind in (*STRUCTURAL, OVERLAPS):
+    for kind in (*STRUCTURAL, *MEASURED_KINDS):
         assert f"`{kind}`" in text
 
 
@@ -62,6 +62,8 @@ def test_every_property_a_measurement_writes_is_documented(text):
     query, and the one whose numbers mean nothing without their names."""
     written = {
         *measure.MEASURED,
+        *measure.JOIN_MEASURED,
+        measure.FOUND_IN,
         "asked_because",
         "measured_at",
         "left_fingerprint",
