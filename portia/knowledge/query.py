@@ -191,7 +191,8 @@ def _resolve(session: Any, table: str, project: str) -> dict:
         project=project,
     )
     if not rows:
-        raise ValueError(_unknown_table(session, table, project))
+        message = _unknown_table(session, table, project)
+        raise GraphEmpty(message) if message == _EMPTY_GRAPH else ValueError(message)
     found = dict(rows[0])
     found["key"] = found["path"] if found["kind"] == SOURCE else found["name"]
     return found
@@ -221,6 +222,15 @@ def _unknown_table(session: Any, table: str, project: str) -> str:
     near = listing.near_misses(table, known)
     where = f"no table {table!r} in the knowledge graph, which has {len(known)}"
     return f"{where} — closest: {', '.join(near)}" if near else f"{where}, none named like it"
+
+
+class GraphEmpty(ValueError):
+    """The project has nothing in the graph at all, which is not *no such table*.
+
+    Its own type so the agent's tool can say it in the agent's words
+    (`prompts/errors/graph_empty.md`); the message is for a human at a
+    terminal, who can run the command it names and the agent cannot.
+    """
 
 
 _EMPTY_GRAPH = (

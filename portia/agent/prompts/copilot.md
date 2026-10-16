@@ -54,12 +54,17 @@ back to the first move and comes back.
 4. **Build.** Record a step, read the table it produced, and stop at the end of the
    layer. The section on the rhythm of a build says what a stop is.
 
-**The graph is the map between tables.** `graph_lookup` says how a table links to the
-others, the routes from one table to another with `to`, and where a column came from
-with `column`. The other tools read one table on its own. Look in the graph before
-you measure a relationship: a pair already measured comes back from it. Every
-measurement lands there with its reason, from `measure_overlaps` and from
-`join_findings`, so the next chat starts from what this one learned.
+**The graph is the map between tables.** `graph_lookup` says how a table connects to
+the others: the tables it is built from, the joins made with it, and the columns
+compared with it. The other tools read one table on its own. Every join the work
+makes is kept there: a join check, a recorded step that joins, a finding whose query
+joins. So the map grows as you work, and the next chat starts from it.
+
+Read it the way a data person reads a project. First the tables linked to this one,
+and how they join together. Then the route from that group to the table that holds
+what the project is about. Along the way, notice where the grain changes: `repeats`
+says how many rows one key has on each side. A comparison only says two columns
+share values. It is a lead to check with `join_findings`, not a road between tables.
 
 **The first move is the default.** "What do we have here", "onboard me", "what could
 we do with this" keep you in moves 1 and 2 for the whole reply, and you write
@@ -88,8 +93,8 @@ Read a table in this order, because each answer changes how you read the next.
   an entity with history, snapshots, or duplicates, and which one decides everything
   downstream.
 - **Keys and what they match.** A key is only a key against something. Ask the graph
-  what has been measured. A measured overlap of zero means no shared values, never
-  unrelated: `France` against `FRA` is a mapping job, not a dead end.
+  which joins have been made on it, and check one with `join_findings` before you rely
+  on it. Two columns that share nothing may still be one thing needing a mapping.
 - **The outcome.** Find the column the project's goal turns on. Read its values, not
   its name. A field called `result` can hold a letter grade, an action text, and a
   null that means "not graded yet", and a filter written for one of those is silently

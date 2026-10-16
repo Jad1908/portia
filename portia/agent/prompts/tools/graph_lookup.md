@@ -78,4 +78,4 @@ Reach for it when:
 - you have changed a source and want to know which models read it.
 
 The graph is stored in a database that may not be running. If it is unavailable, say so once and
-work from `describe_source` and `query_data` instead. Everything else still works.
+carry on with the other tools: every one of them reads the catalog or the data directly.

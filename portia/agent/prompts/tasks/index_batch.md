@@ -13,18 +13,13 @@ know first goes in a `note` on the same call. "The outcome is a letter grade, no
 pass/fail" is a note. "Restaurant inspections" is a summary.
 
 **Say how it relates to what you have already read.** Nothing else in portia holds
-a relationship between two sources, and you have just read both. For each source
-ask which of its columns might be the same thing as a column elsewhere: a key that
-appears in another table, one entity under two names, a code and its label. Measure
-those pairs with `measure_overlaps` and give the reason for each. Ask `graph_lookup`
-what is already there as you go; by the fifth source you will not remember the
-first, and the graph will.
-
-Two things about the measurements:
-
-- Pick pairs you have a reason for. Do not sweep.
-- A zero is a result. Two columns that share no values are often the same thing
-  needing a mapping first, `France` against `FRA`. That is the work worth finding.
+a relationship between two sources, and you have just read both. Before you measure
+anything for a source, ask `graph_lookup` about it: by the fifth source you will not
+remember the first, and the graph will. Then ask which of its columns might be the
+same thing as a column elsewhere: a key that appears in another table, one entity
+under two names, a code and its label. Compare those pairs with `measure_overlaps`,
+with the reason for each. Pick pairs you have a reason for, and do not sweep. A
+shared time axis is not a key: two hourly tables always share their hours.
 
 **Say what belongs together.** If some sources are one system, one vendor, or one
 workflow, record that with `set_group` and the context they share.
