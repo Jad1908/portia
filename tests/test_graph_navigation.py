@@ -186,8 +186,9 @@ def test_neighbours_a_pipeline_went_through_come_first_then_the_rest_by_name():
     joins = [{**_row("Source", "weather", "data/weather.csv"), **_join_row(from_here=True)}]
     neighbours = query.gather_neighbours(reads, grouped, pairs, joins)
 
-    assert [n["name"] for n in neighbours] == ["mart", "weather", "zones", "customers", "returns"]
-    mart, weather, zones, customers = neighbours[:4]
+    # `returns` only shares a group: not a neighbour (2026-10-15).
+    assert [n["name"] for n in neighbours] == ["mart", "weather", "zones", "customers"]
+    mart, weather, zones, customers = neighbours
     assert mart["builds"] and not mart["built_from"]
     assert zones["built_from"]
     assert weather["joins"][0]["columns"] == ["site_id", "hour"]

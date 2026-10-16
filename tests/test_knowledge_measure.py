@@ -584,28 +584,29 @@ def test_a_step_superseded_by_one_that_no_longer_joins_takes_its_join_with_it(
 def test_a_sql_step_keeps_a_join_between_its_inputs_and_says_why_not_one_inside_it(
     neo4j_session, project, monkeypatch
 ):
+    """A CTE that reads one input and passes the key through stands for that input; a
+    join whose side computes its key does not."""
     monkeypatch.chdir(project)
     step = {
         "id": "joined",
         "op": "sql",
         "inputs": ["orders", "customers"],
-        "sql": "WITH o AS (SELECT * FROM orders) "
-        "SELECT o.order_id, c.country_code FROM o JOIN customers c ON o.customer_id = c.customer_id",
+        "sql": "WITH n AS (SELECT customer_id, count(*) AS orders_n FROM orders GROUP BY 1) "
+        "SELECT c.customer_id, n.orders_n FROM customers c LEFT JOIN n ON c.customer_id = CAST(n.orders_n AS VARCHAR)",
     }
     card = handlers.record_step("specs/inner.yaml", step)
     assert card["joins"]["kept"] == []
     (missed,) = card["joins"]["not_kept"]
     assert missed["why"] == "side_is_a_step"
 
-    step["id"], step["sql"] = (
-        "joined",
-        "SELECT o.order_id, c.country_code FROM orders o "
-        "JOIN customers c ON o.customer_id = c.customer_id",
+    step["sql"] = (
+        "WITH o AS (SELECT * FROM orders) "
+        "SELECT o.order_id, c.country_code FROM o JOIN customers c ON o.customer_id = c.customer_id"
     )
     card = handlers.record_step("specs/direct.yaml", step)
     assert len(card["joins"]["kept"]) == 1
     (record,) = _joined(neo4j_session)
-    assert record["found_in"] == "specs/direct.yaml#joined"
+    assert (record["left"], record["found_in"]) == ("orders", "specs/direct.yaml#joined")
 
 
 def test_keeping_a_finding_keeps_the_joins_in_its_queries(neo4j_session, project, monkeypatch):
@@ -766,3 +767,100 @@ def test_every_reason_a_join_is_not_kept_is_explained_to_the_agent():
         sql_joins.NO_PARSER,
     ]
     assert [code for code in codes if f"`{code}`" not in said] == []
+
+
+def test_a_finding_whose_queries_make_one_join_twice_measures_and_keeps_it_once(
+    neo4j_session, project, monkeypatch
+):
+    from portia import runlog
+    from portia.agent import events
+
+    monkeypatch.chdir(project)
+    log = runlog.start(kind=runlog.CHAT, portia_dir=str(project / catalog.DEFAULT_DIR))
+    for i in range(2):
+        log.event(
+            events.Event(
+                events.TOOL_CALL,
+                {
+                    "name": f"{events.TOOL_PREFIX}query_data",
+                    "id": f"toolu_{i}",
+                    "input": {
+                        "question": f"question {i}",
+                        "sql": "SELECT count(*) FROM orders o "
+                        "JOIN customers c ON o.customer_id = c.customer_id",
+                        "inputs": ["orders", "customers"],
+                    },
+                },
+            )
+        )
+        log.event(
+            events.Event(events.TOOL_RESULT, {"id": f"toolu_{i}", "text": "{}", "is_error": False})
+        )
+    kept = handlers.record_finding("q?", "a.", "so.", ["orders"], [1, 2])
+    assert len(kept["joins"]["kept"]) == 1
+    assert len(_joined(neo4j_session)) == 1
+
+
+# --- a converted key, and a side that passes its table through (2026-10-15) -------------------
+
+
+def _finding_with(project, sql: str, inputs: list[str]) -> dict:
+    from portia import runlog
+    from portia.agent import events
+
+    log = runlog.start(kind=runlog.CHAT, portia_dir=str(project / catalog.DEFAULT_DIR))
+    log.event(
+        events.Event(
+            events.TOOL_CALL,
+            {
+                "name": f"{events.TOOL_PREFIX}query_data",
+                "id": "toolu_0",
+                "input": {"question": "q", "sql": sql, "inputs": inputs},
+            },
+        )
+    )
+    log.event(events.Event(events.TOOL_RESULT, {"id": "toolu_0", "text": "{}", "is_error": False}))
+    return handlers.record_finding("Which orders match?", "All.", "Join them.", ["orders"], [1])
+
+
+def test_a_join_on_a_converted_key_is_kept_under_its_column_with_the_conversion(
+    neo4j_session, project, monkeypatch
+):
+    """Every date join in thirteen sessions was `CAST(x AS DATE) = y`, and none was kept."""
+    monkeypatch.chdir(project)
+    kept = _finding_with(
+        project,
+        "SELECT count(*) FROM orders o JOIN customers c "
+        "ON lower(o.customer_id) = lower(c.customer_id)",
+        ["orders", "customers"],
+    )
+    assert len(kept["joins"]["kept"]) == 1
+    (record,) = _joined(neo4j_session)
+    assert record["left_columns"] == ["customer_id"] and record["n_shared_keys"] == 2
+    converted = neo4j_session.run(
+        "MATCH ()-[r:JOINED]->() RETURN r.left_converted AS l, r.right_converted AS r"
+    ).single()
+    assert converted["l"] == ["LOWER(customer_id)"] and converted["r"] == ["LOWER(customer_id)"]
+    card = handlers.graph_lookup("orders", neighbour="customers")
+    fields = card["joins"]["fields"]
+    assert card["joins"]["rows"][0][fields.index("converted")] == ["LOWER(customer_id)"]
+
+
+def test_a_join_against_a_cte_that_deduplicates_one_table_is_kept_as_that_table(
+    neo4j_session, project, monkeypatch
+):
+    """The careful join: the register deduplicated before joining. It was `side_is_a_step`."""
+    monkeypatch.chdir(project)
+    step = {
+        "id": "with_country",
+        "op": "sql",
+        "inputs": ["orders", "customers"],
+        "sql": "WITH one AS (SELECT DISTINCT customer_id AS cid, country_code FROM customers) "
+        "SELECT o.order_id, one.country_code FROM orders o LEFT JOIN one ON o.customer_id = one.cid",
+        "rationale": "Each order with its customer's country.",
+    }
+    card = handlers.record_step("specs/orders_country.yaml", step)
+    assert len(card["joins"]["kept"]) == 1, card["joins"]
+    (record,) = _joined(neo4j_session)
+    assert (record["left"], record["right"]) == ("orders", "customers")
+    assert record["right_columns"] == ["customer_id"]

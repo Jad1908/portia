@@ -64,6 +64,8 @@ def test_every_property_a_measurement_writes_is_documented(text):
         *measure.MEASURED,
         *measure.JOIN_MEASURED,
         measure.FOUND_IN,
+        "left_converted",
+        "right_converted",
         "asked_because",
         "measured_at",
         "left_fingerprint",

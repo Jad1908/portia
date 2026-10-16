@@ -154,12 +154,23 @@ def test_a_source_can_be_named_by_its_path(filled, pid):
     assert query.lookup(filled, "data/orders.csv", project=pid)["table"]["name"] == "orders"
 
 
-def test_a_group_is_named_once_and_its_members_are_neighbours(filled, pid):
+def test_a_group_is_named_once_and_a_member_is_a_neighbour_only_when_linked(filled, pid):
+    """A meter table listed its 15 group-mates with nothing between them (2026-10-15)."""
     answer = query.lookup(filled, "orders", project=pid)
     assert answer["groups"] == [
         {"name": "sales", "context": "what the shop exports", "n_members": 2}
     ]
-    assert _neighbour(answer, "customers")["groups"] == ["sales"]
+    assert "customers" not in [n["name"] for n in answer["neighbours"]]
+    _measure(
+        filled,
+        pid,
+        "customer_id",
+        "customer_id",
+        "same key",
+        {"n_shared_values": 2, "left_coverage": 1.0, "right_coverage": 0.5},
+    )
+    linked = query.lookup(filled, "orders", project=pid)
+    assert _neighbour(linked, "customers")["groups"] == ["sales"]
 
 
 def test_a_table_answer_does_not_restate_describe_source(filled, pid):

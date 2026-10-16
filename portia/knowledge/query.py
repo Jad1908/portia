@@ -381,6 +381,8 @@ def join_from_row(row: dict) -> dict:
     return {
         "columns": seen.get("left_columns"),
         "other_columns": seen.get("right_columns"),
+        "converted": seen.get("left_converted"),
+        "other_converted": seen.get("right_converted"),
         "relationship": seen.get("relationship"),
         "repeats": seen.get("left_repeats"),
         "other_repeats": seen.get("right_repeats"),
@@ -402,6 +404,8 @@ def turned_join(join: dict) -> dict:
         **join,
         "columns": join["other_columns"],
         "other_columns": join["columns"],
+        "converted": join.get("other_converted"),
+        "other_converted": join.get("converted"),
         "relationship": measure.TURNED.get(join["relationship"], join["relationship"]),
         "repeats": join["other_repeats"],
         "other_repeats": join["repeats"],
@@ -519,7 +523,8 @@ def gather_neighbours(
     neighbours this table is built from, builds, or was joined to, which are
     the ways a pipeline has actually gone, then those only compared or grouped,
     each part by name. Joins by their columns, pairs by their two column names.
-    Pure, so the shape is tested without a database.
+    A table that only shares a group is not a neighbour. Pure, so the shape is
+    tested without a database.
     """
     found: dict[tuple[str, str], dict] = {}
 
@@ -541,14 +546,19 @@ def gather_neighbours(
 
     for row in reads:
         entry(row)["built_from" if row["link"] == "reads" else "builds"] = True
-    for row in grouped:
-        groups = entry(row)["groups"]
-        if row["group_name"] not in groups:
-            groups.append(row["group_name"])
     for row in pairs:
         entry(row)["pairs"].append(pair_from_row(row))
     for row in joins:
         entry(row)["joins"].append(join_from_row(row))
+    # **A group is said once, not as a neighbour per member** (2026-10-15): a
+    # meter table listed its 15 group-mates with nothing between them, the
+    # noise a map exists to remove. The table's own `groups` name each group
+    # with its member count; a neighbour linked some other way says which of
+    # them it shares.
+    for row in grouped:
+        key = (row["kind"], row["path"] if row["kind"] == SOURCE else row["name"])
+        if key in found and row["group_name"] not in found[key]["groups"]:
+            found[key]["groups"].append(row["group_name"])
     for neighbour in found.values():
         neighbour["groups"].sort()
         neighbour["pairs"].sort(key=lambda p: (p["column"], p["other_column"]))

@@ -115,9 +115,11 @@ def test_a_cross_join_is_the_two_counts_multiplied(con):
 @pytest.mark.parametrize(
     ("sql", "because"),
     [
-        ("SELECT * FROM a JOIN (SELECT * FROM b) s ON a.k = s.k", sql_joins.SIDE_NOT_NAMED),
         ("SELECT * FROM a JOIN other ON a.k = other.k", sql_joins.SIDE_NOT_NAMED),
-        ("SELECT * FROM a JOIN b ON lower(a.va) = b.vb", sql_joins.CONDITION_NOT_EQUALITIES),
+        (
+            "SELECT * FROM a JOIN b ON lower(a.va) = b.vb || b.vb",
+            sql_joins.CONDITION_NOT_EQUALITIES,
+        ),
         ("SELECT * FROM a JOIN b ON a.k = b.k AND a.k > 1", sql_joins.CONDITION_NOT_EQUALITIES),
         ("SELECT * FROM a JOIN b ON k = vb", sql_joins.COLUMN_SIDE_UNCLEAR),
         ("SELECT * FROM a NATURAL JOIN b", sql_joins.KIND_NOT_MEASURED),
@@ -165,3 +167,50 @@ def test_an_interrupt_while_counting_is_raised_not_reported(con):
     threading.Thread(target=lambda: (time.sleep(0.2), con.interrupt()), daemon=True).start()
     with pytest.raises(duckdb.InterruptException):
         sql_joins.measure(con, sql, joins)
+
+
+# --- the table under a side, and a converted key (2026-10-15) ---------------------------
+
+
+def test_a_key_that_converts_one_column_is_read_and_counted_on_the_converted_values(con):
+    """A date join is nearly always `CAST(x AS DATE) = y`; it was not read at all."""
+    sql = "SELECT * FROM a JOIN b ON CAST(a.k AS VARCHAR) = CAST(b.k AS VARCHAR)"
+    (join,), unread = sql_joins.read(sql, ("a", "b"))
+    assert unread == []
+    assert (join.left_base, join.left_columns, join.right_columns) == ("a", ("k",), ("k",))
+    assert join.left_converted == ("CAST(k AS TEXT)",)
+    (got,) = sql_joins.measure(con, sql, [join])
+    plain = sql_joins.measure(
+        con,
+        "SELECT * FROM a JOIN b ON a.k = b.k",
+        sql_joins.read("SELECT * FROM a JOIN b ON a.k = b.k", ("a", "b"))[0],
+    )[0]
+    assert got["rows"] == plain["rows"]
+
+
+def test_a_sub_select_that_passes_the_key_through_stands_for_its_table(con):
+    """Deduplicating one side before the join is the careful way to write it, and the
+    join is still between the two tables: it was `side_is_a_step` in the graph."""
+    sql = "WITH one AS (SELECT DISTINCT k AS key FROM b) SELECT * FROM a JOIN one ON a.k = one.key"
+    (join,), unread = sql_joins.read(sql, ("a", "b"))
+    assert (join.left_base, join.right_base) == ("a", "b")
+    assert (join.left_columns, join.right_columns) == (("k",), ("k",))
+    # Counted by name as before: the CTE is put back in front.
+    (got,) = sql_joins.measure(con, sql, [join])
+    assert got["right"] == "one"
+
+    sub = "SELECT * FROM a JOIN (SELECT k FROM b WHERE k > 1) s ON a.k = s.k"
+    (join,), _ = sql_joins.read(sub, ("a", "b"))
+    assert (join.right, join.right_base, join.right_columns) == (None, "b", ("k",))
+    (got,) = sql_joins.measure(con, sub, [join])
+    assert got["because"] == sql_joins.SIDE_NOT_NAMED
+
+
+def test_a_side_that_computes_its_key_or_reads_two_tables_is_no_one_table():
+    for sql in (
+        "WITH s AS (SELECT count(*) AS n FROM b) SELECT * FROM a JOIN s ON a.k = s.n",
+        "WITH s AS (SELECT b.k FROM b JOIN a USING (k)) SELECT * FROM a JOIN s ON a.k = s.k",
+    ):
+        joins, _ = sql_joins.read(sql, ("a", "b"))
+        (join,) = [j for j in joins if j.right == "s"]
+        assert join.right_base is None and join.left_base == "a"

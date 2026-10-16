@@ -31,7 +31,7 @@ copilot reads the numbers beside the user's reason and decides.
 from __future__ import annotations
 
 from collections.abc import Collection
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 #: Why a join was not measured. A closed list of codes, each said in words to the
@@ -61,15 +61,35 @@ _DIALECT = "duckdb"
 
 @dataclass(frozen=True)
 class Join:
-    """One join :func:`read` can measure: its two named sides and the columns it matches on."""
+    """One join :func:`read` found: its two sides and what it matches on.
+
+    ``left``/``right`` name a side as the statement does (a declared input or a
+    CTE), or are ``None`` for a sub-select, which :func:`measure` cannot count
+    by name. ``left_on``/``right_on`` are the keys, SQL ready over that side: a
+    column, or an expression of one column (a cast, a date function), as
+    written.
+
+    **The ``base`` fields are the declared table underneath each side**
+    (2026-10-15), for a caller that keeps the join as a fact about tables
+    (`agent/handlers._keep_joins`): a CTE or a sub-select that reads one table
+    and passes the key through is that table. ``*_base_on`` is the key over the
+    base table's columns, ``*_columns`` the column under each key, and
+    ``*_converted`` the expression where the key is not the bare column (``""``
+    where it is). ``None`` base: the side is no one table.
+    """
 
     text: str
     kind: str
-    left: str
-    right: str
-    #: The key columns as each side spells them, SQL ready (quoted as written).
+    left: str | None
+    right: str | None
     left_on: tuple[str, ...]
     right_on: tuple[str, ...]
+    left_base: str | None = None
+    right_base: str | None = None
+    left_columns: tuple[str, ...] = ()
+    right_columns: tuple[str, ...] = ()
+    left_converted: tuple[str, ...] = ()
+    right_converted: tuple[str, ...] = ()
 
 
 def read(sql: str, names: Collection[str]) -> tuple[list[Join], list[dict[str, str]]]:
@@ -90,15 +110,17 @@ def read(sql: str, names: Collection[str]) -> tuple[list[Join], list[dict[str, s
     except Exception:  # noqa: BLE001 - a statement the parser refuses is reported, not raised
         return [], [{"join": _clip(sql), "because": NOT_PARSED}]
 
-    defined = {cte.alias_or_name.lower() for cte in statement.find_all(exp.CTE)}
-    known = defined | {name.lower() for name in names}
+    ctes = {cte.alias_or_name.lower(): cte.this for cte in statement.find_all(exp.CTE)}
+    inputs = {name.lower() for name in names}
+    known = set(ctes) | inputs
     joins: list[Join] = []
     unread: list[dict[str, str]] = []
     for select in statement.find_all(exp.Select):
-        sides = _sides(select, known, exp)
+        sides = _sides(select, known, ctes, exp)
         for at, join in enumerate(_arg(select, "joins") or [], start=1):
             found = _one_join(join, at, sides, exp)
             if isinstance(found, Join):
+                found = _with_bases(found, sides, at, join, inputs, ctes, exp)
                 if found not in joins:
                     joins.append(found)
             else:
@@ -120,6 +142,10 @@ def measure(con: Any, sql: str, joins: list[Join]) -> list[dict[str, Any]]:
     ctes = _ctes(sql)
     out = []
     for join in joins:
+        if join.left is None or join.right is None:
+            # A sub-select has no name to count it by here.
+            out.append({"join": join.text, "because": SIDE_NOT_NAMED})
+            continue
         try:
             out.append(_counted(con, ctes, join))
         except duckdb.InterruptException:
@@ -146,14 +172,16 @@ def _arg(node: Any, name: str) -> Any:
 
 @dataclass(frozen=True)
 class _Side:
-    """One table in a ``FROM … JOIN …`` chain: what it is called here, and its name if named."""
+    """One table in a ``FROM … JOIN …`` chain: what it is called here, its name if named,
+    and the ``SELECT`` under it when it is a CTE or a sub-select."""
 
     alias: str
     name: str | None
     text: str
+    select: Any = None
 
 
-def _sides(select: Any, known: set[str], exp: Any) -> list[_Side]:
+def _sides(select: Any, known: set[str], ctes: dict, exp: Any) -> list[_Side]:
     """The ``FROM`` table and each joined one, in order, each with its name if it has one."""
     tables = []
     from_ = _arg(select, "from")
@@ -168,11 +196,17 @@ def _sides(select: Any, known: set[str], exp: Any) -> list[_Side]:
             and not table.args.get("catalog")
             and table.name.lower() in known
         )
+        under = None
+        if named:
+            under = ctes.get(table.name.lower())
+        elif isinstance(table, exp.Subquery):
+            under = table.this
         sides.append(
             _Side(
                 alias=str(table.alias_or_name).lower(),
                 name=table.this.sql(dialect=_DIALECT) if named else None,
                 text=table.sql(dialect=_DIALECT),
+                select=under,
             )
         )
     return sides
@@ -186,9 +220,11 @@ def _one_join(join: Any, at: int, sides: list[_Side], exp: Any) -> Join | str:
     if at >= len(sides):
         return SIDE_NOT_NAMED
     right = sides[at]
-    if right.name is None:
+    if right.name is None and right.select is None:
         return SIDE_NOT_NAMED
     if kind == CROSS:
+        if right.name is None:
+            return SIDE_NOT_NAMED
         if at != 1 or sides[0].name is None:
             return SIDE_NOT_NAMED if sides[0].name is None else COLUMN_SIDE_UNCLEAR
         return Join(_clip(_text(sides, at, join)), CROSS, sides[0].name, right.name, (), ())
@@ -199,7 +235,7 @@ def _one_join(join: Any, at: int, sides: list[_Side], exp: Any) -> Join | str:
         if at != 1:
             return COLUMN_SIDE_UNCLEAR
         left = sides[0]
-        if left.name is None:
+        if left.name is None or right.name is None:
             return SIDE_NOT_NAMED
         keys = tuple(column.sql(dialect=_DIALECT) for column in using)
         return Join(_clip(_text(sides, at, join)), kind, left.name, right.name, keys, keys)
@@ -220,10 +256,13 @@ def _on(join: Any, at: int, sides: list[_Side], kind: str, exp: Any) -> Join | s
     for part in parts:
         if not isinstance(part, exp.EQ):
             return CONDITION_NOT_EQUALITIES
-        a, b = part.left, part.right
-        if not (isinstance(a, exp.Column) and isinstance(b, exp.Column)):
+        # A key is a column, or an expression of one column: a cast, a date
+        # function. A date join is written that way far more often than not
+        # (2026-10-15: every one in thirteen sessions).
+        a, b = _key(part.left, exp), _key(part.right, exp)
+        if a is None or b is None:
             return CONDITION_NOT_EQUALITIES
-        qualified = (str(a.table).lower(), str(b.table).lower())
+        qualified = (str(a[0].table).lower(), str(b[0].table).lower())
         if right.alias == qualified[1] and qualified[0] in earlier:
             mine, theirs, other = b, a, earlier[qualified[0]]
         elif right.alias == qualified[0] and qualified[1] in earlier:
@@ -235,15 +274,155 @@ def _on(join: Any, at: int, sides: list[_Side], kind: str, exp: Any) -> Join | s
             # made, which no single name stands for.
             return COLUMN_SIDE_UNCLEAR
         left = other
-        right_on.append(mine.this.sql(dialect=_DIALECT))
-        left_on.append(theirs.this.sql(dialect=_DIALECT))
+        right_on.append(mine[1])
+        left_on.append(theirs[1])
     if left is None:
         return CONDITION_NOT_EQUALITIES
-    if left.name is None or right.name is None:
+    if (left.name is None and left.select is None) or (right.name is None and right.select is None):
         return SIDE_NOT_NAMED
     return Join(
         _clip(_text(sides, at, join)), kind, left.name, right.name, tuple(left_on), tuple(right_on)
     )
+
+
+def _key(node: Any, exp: Any) -> tuple[Any, str] | None:
+    """A join key: ``(the one column under it, the key as SQL over that side)``, or ``None``.
+
+    A bare column, or an expression of exactly one column with no aggregate, no
+    window and no sub-select: ``CAST(w.DATE AS DATE)``, ``lower(c.name)``. The
+    SQL drops the column's table qualifier, so it runs against the side alone.
+    """
+    if isinstance(node, exp.Column):
+        return node, node.this.sql(dialect=_DIALECT)
+    if node.find(exp.AggFunc, exp.Window, exp.Subquery, exp.Select) is not None:
+        return None
+    columns = list(node.find_all(exp.Column))
+    if len(columns) != 1:
+        return None
+    bare = node.copy()
+    for column in bare.find_all(exp.Column):
+        column.set("table", None)
+    return columns[0], bare.sql(dialect=_DIALECT)
+
+
+#: How many CTEs deep :func:`_base` follows a key looking for the table under it.
+BASE_DEPTH = 4
+
+
+def _with_bases(
+    found: Join, sides: list[_Side], at: int, join: Any, inputs: set[str], ctes: dict, exp: Any
+) -> Join:
+    """``found`` with the declared table under each side, where one is (:class:`Join`)."""
+    by_name = {s.name: s for s in sides if s.name is not None}
+    right = sides[at]
+    left = next(
+        (s for s in sides[:at] if s.name is not None and s.name == found.left),
+        None,
+    )
+    if left is None:
+        # A sub-select on the left: the earlier side the condition named.
+        left = next((s for s in sides[:at] if s.name is None and s.select is not None), None)
+    del by_name
+    out = {}
+    for prefix, side, keys in (("left", left, found.left_on), ("right", right, found.right_on)):
+        resolved = _base(side, keys, inputs, ctes, exp) if side is not None else None
+        if resolved is not None:
+            base, columns, converted = resolved
+            out.update(
+                {
+                    f"{prefix}_base": base,
+                    f"{prefix}_columns": columns,
+                    f"{prefix}_converted": converted,
+                }
+            )
+    return replace(found, **out)
+
+
+def _base(side: _Side, keys: tuple[str, ...], inputs: set[str], ctes: dict, exp: Any):
+    """The declared table under one side, its key columns, and each key's conversion.
+
+    ``(table, columns, converted)`` or ``None``. A declared input is itself. A
+    CTE or sub-select is its one table when it reads exactly one, joins nothing,
+    and passes each key through, bare or under a cast; followed a few CTEs deep.
+    A side that filters, deduplicates or aggregates still is that table: the join
+    is between the tables, and how the query trimmed one side is the query's.
+    """
+    parsed = []
+    for key in keys:
+        try:
+            node = _parse_expr(key)
+        except Exception:  # noqa: BLE001 - a key the parser will not re-read is not traced
+            return None
+        found = _key(node, exp)
+        if found is None:
+            return None
+        column, _ = found
+        parsed.append((column.name, "" if isinstance(node, exp.Column) else key))
+    name, select = side.name, side.select
+    for _ in range(BASE_DEPTH):
+        if name is not None and name.lower() in inputs and select is None:
+            return _unquote(name), tuple(c for c, _ in parsed), tuple(k for _, k in parsed)
+        if not isinstance(select, exp.Select) or _arg(select, "joins"):
+            return None
+        from_ = _arg(select, "from")
+        source = from_.this if from_ is not None else None
+        traced = []
+        for column, converted in parsed:
+            step = _through(select, column, converted, exp)
+            if step is None:
+                return None
+            traced.append(step)
+        parsed = traced
+        if isinstance(source, exp.Table) and not source.args.get("db"):
+            name = source.this.sql(dialect=_DIALECT)
+            select = ctes.get(source.name.lower()) if source.name.lower() not in inputs else None
+            if select is None and source.name.lower() not in inputs:
+                return None
+        elif isinstance(source, exp.Subquery):
+            name, select = None, source.this
+        else:
+            return None
+    return None
+
+
+def _through(select: Any, column: str, converted: str, exp: Any) -> tuple[str, str] | None:
+    """``column`` of this ``SELECT``'s output, as a column of its ``FROM``, with its conversion.
+
+    A ``*`` passes every column through. A projection named ``column`` passes a
+    bare column through under another name, or a converted one when the key
+    above it was bare. Two conversions stacked are not traced.
+    """
+    for projection in select.expressions:
+        if isinstance(projection, exp.Star) or (
+            isinstance(projection, exp.Column) and isinstance(projection.this, exp.Star)
+        ):
+            return column, converted
+        if projection.alias_or_name.lower() != column.lower():
+            continue
+        inner = projection.this if isinstance(projection, exp.Alias) else projection
+        found = _key(inner, exp)
+        if found is None:
+            return None
+        under, sql = found
+        if isinstance(inner, exp.Column):
+            if not converted:
+                return under.name, ""
+            node = _parse_expr(converted)
+            for col in node.find_all(exp.Column):
+                col.replace(exp.column(under.name, quoted=True))
+            return under.name, node.sql(dialect=_DIALECT)
+        return (under.name, sql) if not converted else None
+    return None
+
+
+def _parse_expr(text: str) -> Any:
+    import sqlglot
+
+    return sqlglot.parse_one(text, read=_DIALECT)
+
+
+def _unquote(name: str) -> str:
+    return name[1:-1] if len(name) > 1 and name[0] == name[-1] == '"' else name
 
 
 def _kind(join: Any) -> str | None:

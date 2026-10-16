@@ -103,6 +103,8 @@ NEIGHBOUR_FIELDS = (
 JOIN_FIELDS = (
     "columns",
     "other_columns",
+    "converted",
+    "other_converted",
     "relationship",
     "repeats",
     "other_repeats",

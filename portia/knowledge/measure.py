@@ -107,6 +107,7 @@ FOUND_IN = "found_in"
 #: The properties that name a side, in left/right pairs. Turning an edge round
 #: swaps each pair and nothing else (:func:`seen_from`).
 SIDED = (
+    ("left_converted", "right_converted"),
     ("left_coverage", "right_coverage"),
     ("left_fingerprint", "right_fingerprint"),
     ("left_repeats", "right_repeats"),
@@ -194,11 +195,17 @@ def join_edge(
     origin: str,
     asked_because: str | None,
     found_in: str | None = None,
+    left_converted: tuple[str, ...] = (),
+    right_converted: tuple[str, ...] = (),
     left_fingerprint: str | None = None,
     right_fingerprint: str | None = None,
     when: datetime | None = None,
 ) -> Edge:
     """One `JOINED` edge: a join that was done, what it did, and what it was taken against.
+
+    ``left_converted``/``right_converted`` are each key's conversion when a key
+    is an expression of its column (``CAST(DATE AS DATE)``), ``""`` for a bare
+    one; kept only when there is one, beside the columns it converts.
 
     Directed left to right, as the join was written, which is what says which
     side's columns, repeats and coverage are which (:func:`seen_from` turns it).
@@ -220,6 +227,14 @@ def join_edge(
             "measured_at": stamp,
             "left_fingerprint": left_fingerprint,
             "right_fingerprint": right_fingerprint,
+            **(
+                {
+                    "left_converted": list(left_converted) or None,
+                    "right_converted": list(right_converted) or None,
+                }
+                if any(left_converted) or any(right_converted)
+                else {}
+            ),
         },
     )
 
