@@ -117,7 +117,15 @@ def connect(**overrides: str) -> Any:
 
     config = settings() | overrides
     try:
-        driver = GraphDatabase.driver(config["uri"], auth=(config["user"], config["password"]))
+        # No server notifications: a read naming a property no node carries yet
+        # (`lineage_unread` before any lineage failed) logged a warning per
+        # call, fifty in one afternoon's sessions (2026-10-16). Every read here
+        # is a fixed question; none of them is a mistake the server can see.
+        driver = GraphDatabase.driver(
+            config["uri"],
+            auth=(config["user"], config["password"]),
+            notifications_min_severity="OFF",
+        )
         driver.verify_connectivity()
     except Exception as exc:
         raise GraphUnavailable(f"no Neo4j at {config['uri']}: {exc}") from None
