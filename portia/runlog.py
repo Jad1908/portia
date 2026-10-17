@@ -185,7 +185,7 @@ HARNESS = "harness"
 #: the prompts are the least stable thing in the repo and a sha of the code
 #: does not cover the brief, which is built from `.portia/`; :data:`SDK` says
 #: which Agent SDK drove the binary; :data:`SEED` says which data, for a run
-#: on a generated estate, and is absent on every other log rather than a
+#: on a seeded benchmark case, and is absent on every other log rather than a
 #: made-up zero. Model and effort are not here: they ride on each exchange's
 #: `PROMPT` event, because a chat can span several.
 PROMPTS_SHA = "prompts_sha"

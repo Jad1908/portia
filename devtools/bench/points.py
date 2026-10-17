@@ -264,6 +264,7 @@ async def run_point(
     when: datetime | None = None,
 ) -> tuple[Tally, Path]:
     """The one exchange, ``runs`` times on fresh copies; the tally written beside the runs."""
+    runner.refuse_inside_repo(out)
     when = when or datetime.now()
     folder = out / point.name / when.strftime(REPORT_STAMP)
     tally = Tally(point.name, point.predicates)

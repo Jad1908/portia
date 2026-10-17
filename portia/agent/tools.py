@@ -860,7 +860,7 @@ async def _awaited(
 #: `profile_source` take it.
 _MATCH = {
     "type": "string",
-    "description": "A name pattern, * and ? as in a shell, without case: meter_* or *office*",
+    "description": "A name pattern, * and ? as in a shell, without case: *_id or *date*",
 }
 
 #: The four ways `describe_source` and `profile_source` narrow a table's
@@ -1506,7 +1506,7 @@ async def set_group(args: dict[str, Any]) -> dict[str, Any]:
             "roles": {
                 "type": "object",
                 "additionalProperties": {"type": "string"},
-                "description": "Column name, or a pattern such as meter_*, -> role",
+                "description": "Column name, or a pattern such as *_id, -> role",
             },
             "note": {
                 "type": "string",

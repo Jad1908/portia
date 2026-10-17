@@ -61,15 +61,16 @@ which part failed.
 
 ### 5.1 A case
 
-- **The estate:** thirty to forty tables made from one clean base by a handful of *causes*, plus
-  decoys, with the modelling goal stated the way a user would state it.
-- **The threads,** each a fresh session with nothing pasted in: *orientation* ("here is the
-  extract, I need to predict X, what do we have?"), *build* ("build the training table"), and
-  *change*, days later in the story ("add this feature"), where nothing from before is repeated.
+- **The data:** a real public dataset with its map hidden. The files keep their real shape, every
+  name is neutral, and a few problems are planted where real warehouses have them, each with a
+  known way back. The modelling goal is stated the way a user would state it.
+- **The threads,** each a fresh session with nothing pasted in: the first asks what is there and
+  then for the training table; the second, days later in the story, asks for a change and repeats
+  nothing from before.
 - **The simulated user's facts,** the things only a person knows, each with the words a question
   about it cannot avoid, and where it matters two variants of the answer.
-- **The truth:** relevant tables, true join paths, each cause's consequences and their correct
-  handling, and the final table computed from the clean base.
+- **The truth:** the role of every table, every planted change and how to undo it, and the true
+  final table computed straight from the original data.
 
 **The acceptance test for a case:** if plain Claude Code does as well as portia on it, the case is
 too easy and gets reworked.
@@ -78,11 +79,15 @@ too easy and gets reworked.
 
 | portia's claim | Measurement |
 |---|---|
-| Finds what matters in the estate | tables judged relevant against the true list; join paths found against the true paths; cost spent on decoys |
-| Helps you understand the data | the orientation answer against the known estate |
-| Builds the modelling table | grain, row count, target definition, leaky column absent, the user's exclusions applied, each cause handled, against the true table |
-| Remembers across threads | the change thread keeps the build thread's corrections without being told again; tokens, tool calls and tables re-profiled before the first correct step |
-| Cost | tokens with cached share, wall time, tool calls, confirmations; portia's indexing counts toward its total |
+| Finds what matters | the role the first answer gives each table, against the true roles; the tables the final table reads; cost spent on tables that do not matter |
+| Builds the modelling table | grain, row count, the user's exclusions, no feature that is the target in disguise, each planted problem handled, against the true table |
+| Asks what only a person knows | under two variants of an answer, the table ends right under each |
+| Remembers across threads | the later thread keeps every earlier correction without being told again; what it spends there, warm against cold |
+| Cost | tokens with cached share, wall time, tool calls, questions asked, fallbacks; portia's indexing counts toward its total |
+
+Everything is graded by code against the truth. The one place a model reads is the first answer,
+where it fills a fixed form (each table, the role the answer gave it) for code to compare; that
+form is checked against hand-labelled answers before it is trusted.
 
 ### 5.3 Memory, compared fairly
 
@@ -109,7 +114,7 @@ name (`Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep` by default), the brief as 
 
 One table per model and effort. Rows are the claims above, columns are portia and the two baseline
 versions, each cell k of N or a count. Simulator errors in their own column. A limitations
-paragraph. Raw logs, case files, generator and graders published beside it. No composite.
+paragraph. Raw logs, case files, the case builder and the graders published beside it. No composite.
 
 ## 6. The internal agent eval
 
@@ -152,26 +157,24 @@ Read thirty to fifty full sessions by hand, write a free-form note on what went 
 group the notes into failure types, and count them. A check is written only for a failure type
 that recurs and can be stated sharply.
 
-## 7. Breaking data realistically
+## 7. The data: a real base with its map hidden
 
-Public datasets are in every model's training data, and a company's warehouse is not. Real data
-with a known right answer does not exist off the shelf. So the estates start from a clean
-multi-table base whose meaning is known, broken **through causes**, never through sprinkled noise:
+What makes a company's data hard is that nobody hands you the map: which of sixty tables matter,
+where the target is and whether it must be derived, at what grain each table runs, which key links
+what, which of two near-identical columns is the legacy one, where a unit changed. A public dataset
+hands all of that over, and it sits in every model's training data. Real data with a known right
+answer does not exist off the shelf.
 
-> In March, bookings moved to a new system. Booking ids after March carry a prefix. The old table
-> is kept as a legacy copy, and February and March appear in both. The status vocabulary changed.
-> Revenue after March excludes tax.
+So a case starts from a real public dataset and hides its map. Its rows stay real and keep their
+real shape; every name is replaced with a neutral one; and a few problems are planted where real
+warehouses have them, each imitating something that really happens to data and each with a
+recorded way back. The base's own mess is left exactly as it is. Sprinkled noise is not used: it is
+not what makes the work hard.
 
-One cause, four linked problems, each with a known right answer. Errors correlated through a
-shared cause look like real life; independent errors are a generator's fingerprint. Candidate
-causes: a system migration, a second source system for one region, a merger, a backfill, re-keyed
-identifiers, snapshot exports mistaken for events, a spreadsheet maintained by hand, a vendor feed
-that changed format, stale copies left from an old extract, missingness with a reason, a leaky
-column recorded after the outcome, dictionaries missing or split.
-
-Every consequence is labelled with two questions: can the data reveal it, and can the data say how
-to fix it? A case states its mix. If everything is revealed and fixed by the data, it is a cleaning
-test, not a copilot test.
+**Three checks before any run.** Applying the recorded way back to the case must give the true
+table exactly. Every trap must be closable (below). And a model shown the original dataset must
+name it while a model shown the case must not; the original is the positive control, since a probe
+that cannot name the original proves nothing.
 
 **Every trap has to be closable.** A trap the data settles can be graded on the final table. A trap
 only a person can settle is closed either by the scripted user holding the fact or by the case
@@ -185,26 +188,29 @@ the user says the larger is a typo and the true revenue is 74,740. A copilot tha
 pass at most one, and only by luck. "Did it ask" is then measured through the table, without
 judging the question.
 
-Realism tests, after the first cases exist: no dumb rule recovers a trap; a classifier cannot tell
-profiles of broken tables from profiles of real messy ones; a model shown the broken base cannot
-name the public dataset; damage rates drawn from measured real estates.
+A case's dataset, its planted problems and its facts are published only with its results, so that
+no model reads the answers in this repository first.
 
 ## 8. The simulated user
 
 A human touches a session in three ways, and each has a treatment:
 
-- **Answers to questions** come from the case's fact table. Each fact lists *anchors*, the words a
-  question about it cannot avoid; the fact with the most anchors in the question or its options
-  answers, and no anchor anywhere gets a fallback ("your call, tell me what you assumed") that is
-  **counted**, because a high count says the script is too thin. Every routing decision is logged
-  with its reason, so a failed run can be blamed on the simulator or on the copilot.
+- **Answers to questions** come from the case's fact table. After every reply, a small model
+  answers two closed questions: is the copilot waiting for the user, and if so, about which fact,
+  or none? Code then sends that fact's written answer, or a fallback ("your call, tell me what you
+  assumed") that is **counted**, because a high count says the script is too thin. A question asked
+  through a tool, one written into the reply, and a request with no question mark all go the same
+  way. The model only sorts: every answer is the case's own text. Each fact lists *anchors*, the
+  words a question about it cannot avoid, and every sorting decision is logged with its reason, so
+  a failed run can be blamed on the simulator or on the copilot.
 - **Write confirmations** are auto-approved and logged as automatic, so no log claims a person
   decided.
-- **Follow-up messages** are scripted, sent when the previous reply ends.
+- **Follow-up messages** are scripted, sent when the sorter says the reply is not waiting for the
+  user.
 
 The script fixes the human so that any variation across runs comes from the model. The known cost
 is that a scripted user is more cooperative than a real one, so the numbers are a best case, and a
-small study with real data scientists on the same estates is the planned check on that.
+small study with real data scientists on the same cases is the planned check on that.
 
 ## 9. What exists today
 
@@ -225,11 +231,14 @@ python -m devtools.bench point devtools/bench/points/hotel-join.yaml --runs 10
 
 A run leaves a folder with the project as it ended, one log per thread with the pins in its
 header, and a `result.json` naming the case, the model, effort, seed and portia sha, each
-thread's counts and every routing decision. Everything runs on the user's own Claude subscription
-through the Agent SDK's bundled binary.
+thread's counts and every routing decision. Runs land outside the repository
+(`~/.local/share/portia/bench` unless `--out` names another folder, never one inside the
+repository), so nothing around a run holds the notes or a case's answers; a baseline run also lists
+every place its tools touched outside its project. Everything runs on the user's own Claude
+subscription through the Agent SDK's bundled binary.
 
-Not built yet: the damage generator and the first forty-table case, which start from a taxonomy of
-causes written down from real work; the graders over a case's true table; the first run.
+Not built yet: the first case's builder and answer key, the graders over a case's true table, the
+scripted user's sorter, and the first run.
 
 ## 10. References
 

@@ -312,3 +312,18 @@ def test_the_codex_chat_refuses_a_cap_rather_than_dropping_it():
 
     with pytest.raises(ValueError, match="no turn or budget cap"):
         codex.CodexConversation(answer=answer, confirm=confirm, max_turns=5)
+
+
+# --- where a run lands ---------------------------------------------------------------
+
+
+def test_runs_land_outside_the_repository_by_default():
+    assert not runner.DEFAULT_OUT.resolve().is_relative_to(runner.REPO)
+
+
+def test_a_run_folder_inside_the_repository_is_refused_before_anything_is_written(tmp_path):
+    case = cases.load(_write_case(tmp_path))
+    inside = runner.REPO / "devtools" / "out" / "bench-refused"
+    with pytest.raises(ValueError, match="outside the repository"):
+        asyncio.run(runner.run_case(case, model="m", out=inside, client_factory=AskingClient))
+    assert not inside.exists()
