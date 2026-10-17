@@ -177,3 +177,47 @@ def test_a_conversation_opens_the_client_with_the_builders_options_and_its_own_c
     asyncio.run(chat.connect())
     assert opened == ["the-options"]
     assert callable(seen["callback"]) and seen["curator"] is chat.curator
+
+
+# --- where the baseline went -------------------------------------------------------
+
+
+def test_every_place_the_baseline_touched_outside_its_project_is_listed(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    project = home / "runs" / "one" / "project"
+    project.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    memory = baseline.claude_folder(project, home.resolve()) / "memory" / "index.txt"
+    notes = str(home / "repo" / "docs" / "notes.md")
+    calls = [
+        ("Read", {"file_path": str(project / "data" / "a.csv")}),
+        ("Read", {"file_path": "data/a.csv"}),
+        ("Glob", {"pattern": "**/*.csv"}),
+        ("Write", {"file_path": str(memory)}),
+        ("Read", {"file_path": notes}),
+        ("Glob", {"pattern": "../../**/*.yaml"}),
+        ("Bash", {"command": "cat ../../two/result.json | head -5"}),
+        ("Bash", {"command": "/usr/bin/python3 -c 'print(1)'"}),
+        ("Bash", {"command": "ls ~/repo"}),
+        ("AskUserQuestion", {"questions": []}),
+    ]
+    assert baseline.paths_outside(calls, project, home=home) == [
+        {"tool": "Read", "path": notes},
+        {"tool": "Glob", "path": "../../**/*.yaml"},
+        {"tool": "Bash", "path": "../../two/result.json"},
+        {"tool": "Bash", "path": "~/repo"},
+    ]
+
+
+def test_a_baseline_run_says_where_it_went_and_refuses_a_folder_inside_the_repository(tmp_path):
+    AskingClient.instances.clear()
+    case = cases.load(HOTEL)
+    result = asyncio.run(
+        baseline.run_baseline(
+            case, variant="A", model="m", out=tmp_path, client_factory=AskingClient
+        )
+    )
+    assert result.as_dict()["outside"] == 0
+    assert all(t.as_dict()["outside"] == [] for t in result.threads)
+    with pytest.raises(ValueError, match="outside the repository"):
+        asyncio.run(baseline.run_baseline(case, out=runner.REPO / "devtools" / "out" / "x"))

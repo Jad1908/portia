@@ -9,6 +9,10 @@ its header. What it leaves behind is what the graders read: the logs, the
 catalog, the specs, and one ``result.json`` saying what ran, under which pins,
 and how every question was routed.
 
+**A run lands outside the repository** (:func:`refuse_inside_repo`). From inside
+it, a tool under test could read the notes, a case file's facts and a case's
+key, and Claude Code reads the `CLAUDE.md` of every folder above its own.
+
 The runner is an **edge**, in `runlog`'s sense: it tees the stream and the
 engine never learns it is being driven. It drives the Claude harness only;
 the Codex harness has no turn or budget cap, and a run nobody watches is
@@ -41,8 +45,12 @@ ARM_BASELINE = "baseline"
 ARM_BASELINE_DILIGENT = "baseline-diligent"
 ARMS = (ARM_PORTIA, ARM_BASELINE, ARM_BASELINE_DILIGENT)
 
-#: Where runs land when nowhere is given: gitignored, beside the viewer's notes.
-DEFAULT_OUT = Path(__file__).resolve().parents[1] / "out" / "bench"
+#: The repository this bench lives in, which no run may land inside.
+REPO = Path(__file__).resolve().parents[2]
+
+#: Where runs land when nowhere is given: outside the repository, beside
+#: portia's other per-user files (`providers.llamacpp.REGISTRY_DIR`).
+DEFAULT_OUT = Path.home() / ".local" / "share" / "portia" / "bench"
 
 #: The folder a run's data is written into, and recorded as the project's data
 #: folder, so the window and the copilot see the case's files and nothing else.
@@ -72,6 +80,9 @@ class ThreadRun:
     summary: dict[str, Any]
     routing: list[dict[str, Any]] = field(default_factory=list)
     fallbacks: int = 0
+    #: Every place on disk the thread's tools touched outside the project
+    #: (`baseline.paths_outside`); always empty for portia, which has no file tools.
+    outside: list[dict[str, str]] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -82,6 +93,7 @@ class ThreadRun:
             "summary": self.summary,
             "routing": self.routing,
             "fallbacks": self.fallbacks,
+            "outside": self.outside,
         }
 
 
@@ -117,6 +129,7 @@ class Run:
             "finished": self.finished,
             "threads": [t.as_dict() for t in self.threads],
             "fallbacks": sum(t.fallbacks for t in self.threads),
+            "outside": sum(len(t.outside) for t in self.threads),
         }
 
 
@@ -158,6 +171,15 @@ def prepare_project(case: cases.Case, root: Path, *, arm: str = ARM_PORTIA) -> P
     return project
 
 
+def refuse_inside_repo(out: Path) -> None:
+    """Refuse a run folder inside the repository, before anything is written."""
+    if out.resolve().is_relative_to(REPO):
+        raise ValueError(
+            f"runs land outside the repository ({REPO}): from inside it a tool under test "
+            "could read the notes and a case's answers; pass --out a folder elsewhere"
+        )
+
+
 def refuse_unless_claude(provider: str) -> None:
     """The runner drives the Claude harness only, and says so before writing anything."""
     if providers.get(provider).harness != providers.CLAUDE:
@@ -185,6 +207,7 @@ async def run_case(
     it unset and the SDK's client drives the binary.
     """
     refuse_unless_claude(provider)
+    refuse_inside_repo(out)
     scripted = case.with_variant(variant)
     when = when or datetime.now()
     folder = run_dir(out, scripted, variant, ARM_PORTIA, when)

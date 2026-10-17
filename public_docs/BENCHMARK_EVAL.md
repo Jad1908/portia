@@ -231,8 +231,11 @@ python -m devtools.bench point devtools/bench/points/hotel-join.yaml --runs 10
 
 A run leaves a folder with the project as it ended, one log per thread with the pins in its
 header, and a `result.json` naming the case, the model, effort, seed and portia sha, each
-thread's counts and every routing decision. Everything runs on the user's own Claude subscription
-through the Agent SDK's bundled binary.
+thread's counts and every routing decision. Runs land outside the repository
+(`~/.local/share/portia/bench` unless `--out` names another folder, never one inside the
+repository), so nothing around a run holds the notes or a case's answers; a baseline run also lists
+every place its tools touched outside its project. Everything runs on the user's own Claude
+subscription through the Agent SDK's bundled binary.
 
 Not built yet: the first case's builder and answer key, the graders over a case's true table, the
 scripted user's sorter, and the first run.

@@ -19,11 +19,20 @@ The loop, the drain order and the log are portia's `session.Conversation`
 through its `options_builder` seam; only the options are this module's. The
 log lands beside the project rather than inside it, so the baseline cannot
 read its own transcript with `Glob`.
+
+**Nothing stops the baseline from leaving its project**: its file tools take
+any path. So after every thread :func:`paths_outside` lists each place it
+touched outside the project, and ``result.json`` carries the list. A fact
+about the run, never a refusal: the run goes on, and a reader decides what a
+trip outside means.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import os
+import re
+import shlex
+from collections.abc import Callable, Iterable
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Final
@@ -32,7 +41,7 @@ from devtools.bench import case as cases
 from devtools.bench import run as runner
 from devtools.bench.user import ScriptedUser
 from portia import runlog
-from portia.agent import ask, providers, session
+from portia.agent import ask, events, providers, session
 from portia.agent.providers import anthropic as _anthropic
 
 #: The SDK's name for Claude Code's own system prompt.
@@ -47,6 +56,18 @@ READ_TOOLS = frozenset({"Read", "Glob", "Grep"})
 
 #: Where a baseline run's logs go: beside the project, not in it.
 LOGS_DIR = "logs"
+
+#: The arguments of Claude Code's built-in tools that name a place on disk.
+#: `Bash` has none; its command is read for anything that looks like a path.
+PATH_ARGS: Final = {
+    "Read": ("file_path",),
+    "Write": ("file_path",),
+    "Edit": ("file_path",),
+    "NotebookEdit": ("notebook_path",),
+    "Glob": ("path", "pattern"),
+    "Grep": ("path",),
+}
+BASH: Final = "Bash"
 
 
 def build_options(
@@ -116,6 +137,7 @@ async def run_baseline(
     silently ran as shipped would be reported under the wrong name.
     """
     runner.refuse_unless_claude(provider)
+    runner.refuse_inside_repo(out)
     if not case.baseline.tools:
         raise ValueError(f"case {case.name!r} grants the baseline no tools; set `baseline.tools`")
     if diligent and not case.baseline.diligent.strip():
@@ -174,14 +196,16 @@ async def run_baseline(
             options_builder=builder,
         )
         await runner.drive(chat, log, messages)
+        transcript = runlog.read(log.path)
         result = runner.ThreadRun(
             name=thread.name,
             kind=runlog.CHAT,
             log=log.path,
             session_id=chat.session_id,
-            summary=runlog.summary(runlog.read(log.path)),
+            summary=runlog.summary(transcript),
             routing=[r.as_dict() for r in user.routing[before:]],
             fallbacks=sum(1 for r in user.routing[before:] if r.fact is None),
+            outside=paths_outside(tool_calls(transcript), project),
         )
         run.threads.append(result)
         runner.write_result(run, folder)
@@ -202,3 +226,64 @@ def prompts_record(case: cases.Case) -> dict[str, Any]:
         "system": {"preset": PRESET, "setting_sources": list(case.baseline.setting_sources)},
         "tools": {name: "" for name in (*case.baseline.tools, ask.ASK_TOOL)},
     }
+
+
+def tool_calls(transcript: runlog.Transcript) -> list[tuple[str, dict[str, Any]]]:
+    """Each tool call in a log, as its name and its arguments."""
+    return [
+        (str(e.data.get("name") or ""), e.data.get("input") or {})
+        for e in transcript.events
+        if e.kind == events.TOOL_CALL
+    ]
+
+
+def claude_folder(project: Path, home: Path) -> Path:
+    """Claude Code's own folder for ``project``: its memory, which the baseline keeps (§5.4)."""
+    return home / ".claude" / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(project.resolve()))
+
+
+def paths_outside(
+    calls: Iterable[tuple[str, dict[str, Any]]], project: Path, *, home: Path | None = None
+) -> list[dict[str, str]]:
+    """Every place a thread's tools touched outside ``project``, in the order touched.
+
+    A file tool's path counts wherever it points, except Claude Code's own
+    folder for the project, where its memory lives. A `Bash` command counts a
+    word that looks like a path (absolute, ``~``, or with ``..``) only when it
+    lands in the home folder: that is where the repository, other runs and the
+    notes are, and ``/usr/bin/python3`` is not.
+    """
+    home = (home or Path.home()).resolve()
+    project = project.resolve()
+    allowed = (project, claude_folder(project, home))
+    found: list[dict[str, str]] = []
+    for name, args in calls:
+        if name == BASH:
+            places = [w for w in _words(str(args.get("command") or "")) if _looks_like_path(w)]
+        else:
+            places = [str(args[k]) for k in PATH_ARGS.get(name, ()) if args.get(k)]
+        for place in places:
+            path = _resolve(place, project)
+            if any(path.is_relative_to(a) for a in allowed):
+                continue
+            if name == BASH and not path.is_relative_to(home):
+                continue
+            found.append({"tool": name, "path": place})
+    return found
+
+
+def _words(command: str) -> list[str]:
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        words = command.split()
+    return [w.split("=", 1)[-1] for w in words]
+
+
+def _looks_like_path(word: str) -> bool:
+    return word.startswith(("/", "~")) or word == ".." or "../" in word
+
+
+def _resolve(place: str, project: Path) -> Path:
+    path = Path(os.path.expanduser(place))
+    return (path if path.is_absolute() else project / path).resolve()
