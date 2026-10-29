@@ -327,6 +327,90 @@ def test_write_outputs_falls_back_to_the_last_step_id(project: Path) -> None:
     assert [p.name for p in written] == ["orders_with_customers.csv"]
 
 
+def _sql_model(project: Path, name: str, sql: str, *, inputs: list[str]) -> None:
+    """A spec of one `sql` step called ``final``, the id two specs may share."""
+    sources = {"orders": "data/orders.csv"} if "orders" in inputs else {}
+    _spec_file(
+        project,
+        name,
+        {
+            "version": 1,
+            "sources": sources,
+            "steps": [{"id": "final", "op": "sql", "inputs": inputs, "sql": sql}],
+        },
+    )
+
+
+def _csv_rows(path: Path) -> list[dict]:
+    with open(path, newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def test_two_models_with_a_step_of_the_same_id_keep_their_own_rows(project: Path) -> None:
+    """A step id is unique within its spec only, and a build runs every spec on one connection.
+
+    Both specs end in a `sql` step called ``final`` with the same columns. Its
+    result was stored under the step id, so the second build replaced the
+    first's table and *Write outputs* wrote ``first.csv`` from ``second``'s rows,
+    with no error, because nothing about the columns differed (2026-10-29).
+    """
+    _sql_model(
+        project, "first", "SELECT order_id, 'first' AS origin FROM orders", inputs=["orders"]
+    )
+    _sql_model(
+        project,
+        "second",
+        "SELECT order_id * 10 AS order_id, 'second' AS origin FROM orders",
+        inputs=["orders"],
+    )
+
+    built = pipeline.build_project(project)
+    written = pipeline.write_outputs(built, project / "out")
+
+    rows = {path.stem: _csv_rows(path) for path in written}
+    assert {row["origin"] for row in rows["first"]} == {"first"}
+    assert {row["origin"] for row in rows["second"]} == {"second"}
+    assert sorted(int(row["order_id"]) for row in rows["first"]) == [1, 2, 3, 4]
+
+
+def test_a_model_reading_one_with_its_own_step_id_reads_that_model(project: Path) -> None:
+    """The same collision inside one run: ``down`` reads ``up``, and both end in ``final``.
+
+    ``down`` reads ``up`` twice, once in each step. The second read used to
+    find ``down``'s own ``final`` where ``up``'s had been, so the union below
+    came out as ``down`` twice and ``up`` never.
+    """
+    _sql_model(project, "up", "SELECT order_id, 'up' AS origin FROM orders", inputs=["orders"])
+    _spec_file(
+        project,
+        "down",
+        {
+            "version": 1,
+            "steps": [
+                {
+                    "id": "final",
+                    "op": "sql",
+                    "inputs": ["up"],
+                    "sql": "SELECT order_id, 'down' AS origin FROM up",
+                },
+                {
+                    "id": "both",
+                    "op": "sql",
+                    "inputs": ["final", "up"],
+                    "sql": "SELECT * FROM final UNION ALL SELECT * FROM up",
+                },
+            ],
+        },
+    )
+
+    built = {model.name: model for model in pipeline.build_project(project)}
+
+    both = built["down"].results[-1].table
+    assert both.scalar("count(*) FILTER (WHERE origin = 'up')") == 4
+    assert both.scalar("count(*) FILTER (WHERE origin = 'down')") == 4
+    assert built["up"].results[-1].table.scalar("min(origin)") == "up"
+
+
 # --- building one model, and what it is allowed to touch ---------------------
 
 

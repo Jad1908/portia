@@ -231,6 +231,32 @@ def test_a_step_ref_input_answers_to_its_bare_id(sales):
     assert _records(got)[0]["n"] > 0
 
 
+def test_two_models_ending_in_one_step_id_are_two_inputs(sales):
+    """Both models end in a step called ``final``, and the query reads both on one connection.
+
+    The second model's run used to replace the first's stored rows, so the
+    query read ``second`` under both names and answered without an error
+    (2026-10-29, `ops/sql._stored_name`).
+    """
+    for name in ("first", "second"):
+        step = {
+            "id": "final",
+            "op": "sql",
+            "inputs": ["orders"],
+            "sql": f"SELECT order_id, '{name}' AS origin FROM orders",
+            "rationale": "a model whose last step shares its id with another's",
+        }
+        handlers.record_step(f"specs/{name}.yaml", step, portia_dir=sales)
+
+    got = handlers.query_data(
+        sql="SELECT (SELECT min(origin) FROM first) AS a, (SELECT min(origin) FROM second) AS b",
+        inputs=["first", "second"],
+        question="does each model answer for itself?",
+        portia_dir=sales,
+    )
+    assert _records(got) == [{"a": "first", "b": "second"}]
+
+
 def test_two_inputs_reducing_to_one_name_are_refused(sales):
     with pytest.raises(ValueError, match="answer to the name 'orders'"):
         handlers.query_data(

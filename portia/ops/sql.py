@@ -37,6 +37,8 @@ than a warehouse error. `check_sql` runs on both.
 from __future__ import annotations
 
 import contextlib
+import hashlib
+import json
 import re
 from collections.abc import Iterator, Sequence
 from typing import Any
@@ -128,6 +130,14 @@ _COMMENT = re.compile(r"--[^\n]*|/\*.*?\*/", re.DOTALL)
 #: the name in its text and nowhere else (DuckDB 1.5).
 _MISSING_TABLE = re.compile(r"Table with name (.+?) does not exist")
 _WORD = re.compile(r"[a-z_][a-z0-9_]*")
+
+#: What a local step's rows are stored as, on the connection its inputs are read
+#: on: named for what produced them (:func:`_stored_name`), never for the step.
+STORED_TABLE = "__portia_sql_{}"
+
+#: Hex digits of the digest in :data:`STORED_TABLE`. 64 bits, so two different
+#: steps landing on one name in one connection is not a case worth a branch.
+STORED_DIGEST_CHARS = 16
 
 
 class SqlNotAllowed(ValueError):
@@ -513,13 +523,42 @@ def apply_sql(inputs: dict[str, Table], sql: str, *, name: str = "sql") -> OpRes
         "columns": [str(c) for c in out.columns],
         "flags": [],
     }
-    table = _restore_types(Table.from_frame(out, name, con), types)
+    # Stored under a name of its own, handed back under the step's.
+    stored = Table.from_frame(out, _stored_name(inputs, sql), con)
+    table = _restore_types(Table(name=name, query=stored.query, con=con), types)
     # The declared SELECT already reads its inputs by the names the step declared,
     # so it *is* the compiled form — no second rendering, nothing to drift. This is
     # the one op where execution and compilation genuinely diverge (the sandbox
     # materializes; a file does not), and it is also the one where the compiled
     # text is the agent's own words, captured verbatim. `docs/PIPELINE.md` §3.
     return OpResult(table=table, provenance=provenance, compiled=sql.strip())
+
+
+def _stored_name(inputs: dict[str, Table], sql: str) -> str:
+    """The table a local step's rows are kept in, named for what produced them.
+
+    **Never the step's id** *(2026-10-29)*. An id is unique within one spec, and
+    a build runs every spec on one connection, so two specs ending in a step
+    called ``final`` stored their rows under one name. The second replaced the
+    first, every handle on the first read the second's rows, and *Write outputs*
+    wrote one model's CSV from the other's. Where the columns differed DuckDB
+    failed on a column it could not find; where they matched, nothing failed.
+
+    The name is a digest of the query and of each declared input: the name the
+    query reads it by and the query that reads it. Two steps share a table only
+    when they ran the same query over the same inputs, and so computed the same
+    rows. A step run again replaces its own table rather than adding one: a
+    cross-spec reference re-runs its upstream spec (`spec.model_table`), so one
+    step runs many times in a build, and the connection still holds one table
+    per step. A query whose rows change from run to run (``random()``, a
+    ``LIMIT`` with no order) keeps its latest run, as it did under its id.
+    """
+    produced = json.dumps(
+        [sql, {key: table.query for key, table in inputs.items()}], sort_keys=True
+    )
+    return STORED_TABLE.format(
+        hashlib.sha256(produced.encode("utf-8")).hexdigest()[:STORED_DIGEST_CHARS]
+    )
 
 
 @contextlib.contextmanager

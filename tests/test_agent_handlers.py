@@ -768,6 +768,30 @@ def test_join_findings_reads_another_specs_model_by_name(sales):
     assert findings["report"]["left"]["n_rows"] > 0
 
 
+def test_join_findings_on_two_models_ending_in_one_step_id_compares_the_two(sales):
+    """Both models end in ``final`` and share no key; the check reads both on one connection.
+
+    The second model's run used to replace the first's stored rows, so the
+    check compared ``second`` with itself and found every key shared
+    (2026-10-29, `ops/sql._stored_name`).
+    """
+    for name, factor in (("first", 1), ("second", 1000)):
+        step = {
+            "id": "final",
+            "op": "sql",
+            "inputs": ["orders"],
+            "sql": f"SELECT order_id * {factor} AS order_id FROM orders",
+            "rationale": "a model whose last step shares its id with another's",
+        }
+        handlers.record_step(f"specs/{name}.yaml", step, portia_dir=sales)
+
+    findings = handlers.join_findings(
+        "first", "second", keys=["order_id"], portia_dir=sales, reason="do they share orders"
+    )
+
+    assert findings["report"]["overlap"]["n_shared_keys"] == 0
+
+
 def test_profile_source_measures_a_table_an_earlier_step_produced(sales):
     """ "Did my normalize actually change the column?" needs the table, not the file."""
     handlers.record_step(
