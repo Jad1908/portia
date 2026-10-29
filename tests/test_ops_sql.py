@@ -135,6 +135,47 @@ def test_the_declared_keys_match_a_real_run(events, table):
     )
 
 
+def test_two_steps_with_one_id_on_one_connection_keep_their_own_rows(events, table):
+    """A step id names the result; it does not name where the rows are stored.
+
+    Two specs may each have a step called ``final``, and a build runs both on
+    one connection. Stored under the id, the second replaced the first, and
+    every handle on the first read the second's rows (2026-10-29).
+    """
+    city_events = table(events, "city_events")
+    paris = apply_sql(
+        {"city_events": city_events},
+        "SELECT * FROM city_events WHERE city_name = 'paris'",
+        name="final",
+    )
+    amsterdam = apply_sql(
+        {"city_events": city_events},
+        "SELECT * FROM city_events WHERE city_name = 'amsterdam'",
+        name="final",
+    )
+
+    assert paris.table.name == amsterdam.table.name == "final"
+    assert paris.table.count() == 1
+    assert amsterdam.table.count() == 2
+
+
+def test_the_same_step_run_again_reuses_its_table(events, table, con):
+    """A cross-spec reference re-runs its upstream spec, so one step can run many times in a build.
+
+    Each run stores its rows under the same name, which replaces rather than
+    accumulates: a connection holds one table per distinct step, as it did
+    when the name was the step id.
+    """
+    city_events = table(events, "city_events")
+    before = len(con.execute("SHOW TABLES").fetchall())
+
+    first = apply_sql({"city_events": city_events}, AGGREGATE, name="per_city_date")
+    again = apply_sql({"city_events": city_events}, AGGREGATE, name="per_city_date")
+
+    assert first.table.query == again.table.query
+    assert len(con.execute("SHOW TABLES").fetchall()) == before + 1
+
+
 def test_a_table_that_was_not_declared_is_not_visible(events, bookings, table):
     """An undeclared read is an error, not a silent dependency.
 
